@@ -3,11 +3,13 @@ module github.com/francoisnyc/work-kernel
 go 1.26.0
 
 require (
+	connectrpc.com/connect v1.21.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.13.0
 	github.com/pressly/goose/v3 v3.30.0
 	github.com/testcontainers/testcontainers-go v0.45.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.45.0
+	google.golang.org/protobuf v1.36.12
 )
 
 require (
