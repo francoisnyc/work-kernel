@@ -1,0 +1,14 @@
+# Go
+/bin/
+*.test
+*.out
+coverage.*
+# Generated code (regenerate with make gen)
+/gen/
+# Env and local
+.env
+.env.*
+!.env.example
+.DS_Store
+.idea/
+.vscode/
