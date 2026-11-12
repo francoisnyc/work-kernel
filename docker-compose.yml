@@ -1,0 +1,25 @@
+# Local development stack: Postgres and the Temporal dev server.
+# The Temporal dev server keeps its state in memory; it is not for production.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: kernel
+      POSTGRES_PASSWORD: kernel
+      POSTGRES_DB: kernel
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kernel -d kernel"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  temporal:
+    # The image's entrypoint is the `temporal` CLI, so this runs
+    # `temporal server start-dev`.
+    image: temporalio/temporal:latest
+    command: ["server", "start-dev", "--ip", "0.0.0.0"]
+    ports:
+      - "7233:7233" # gRPC
+      - "8233:8233" # Web UI
