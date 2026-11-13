@@ -11,6 +11,17 @@ type Principal struct {
 	OnBehalfOf string // empty when the actor acts for itself
 }
 
+// Attribution says what caused a write, beyond who made it. Every value is an
+// opaque ID; empty means "not set" and is stored as null. See "Agents" in
+// docs/design.md.
+type Attribution struct {
+	AgentSession    string // set when an agent acts
+	OriginatingHook string // the hook, connector or timer that caused the write
+	CausationID     string // the event that caused this write, as "item:seq"
+	CorrelationID   string // groups a whole chain of writes
+	Hop             int    // depth in the chain; 0 for a write a person made
+}
+
 // Item is the current state of one unit of work.
 type Item struct {
 	ID          uuid.UUID

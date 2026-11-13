@@ -17,12 +17,20 @@ type UpdateRequest struct {
 	Principal      item.Principal
 	ItemID         uuid.UUID
 	Fields         map[string]any // keyed by stable field ID
+	// ExpectedItemSeq is an optional if-match: when set, the write happens only
+	// if the Item is still at this item_seq, and fails with ErrStale otherwise.
+	// Zero means "no check" (an Item's first item_seq is 1).
+	ExpectedItemSeq int64
+	Attribution     item.Attribution // optional; what caused this write
 }
 
 // Update applies a field patch to an Item and records an "update" event.
 func (k *Kernel) Update(ctx context.Context, req UpdateRequest) (WriteResult, error) {
 	if req.IdempotencyKey == "" || req.Principal.Actor == "" || len(req.Fields) == 0 {
 		return WriteResult{}, fmt.Errorf("%w: idempotency key, actor and at least one field are required", ErrInvalid)
+	}
+	if err := checkOptions(req.ExpectedItemSeq, req.Attribution); err != nil {
+		return WriteResult{}, err
 	}
 	hash, err := requestHash("update", req)
 	if err != nil {
@@ -33,6 +41,9 @@ func (k *Kernel) Update(ctx context.Context, req UpdateRequest) (WriteResult, er
 		// Validation needs the Item's Type, so it runs after the row is locked.
 		it, err := lockItem(ctx, tx, req.ItemID)
 		if err != nil {
+			return WriteResult{}, err
+		}
+		if err := checkExpectedSeq(it, req.ExpectedItemSeq); err != nil {
 			return WriteResult{}, err
 		}
 		ty, err := loadType(ctx, tx, it.TypeID, it.TypeVersion)
@@ -57,6 +68,6 @@ func (k *Kernel) Update(ctx context.Context, req UpdateRequest) (WriteResult, er
 		if len(cleared) > 0 {
 			payload["cleared_field_ids"] = sortedKeys(cleared)
 		}
-		return appendEvent(ctx, tx, req.ItemID, itemSeq, req.Principal, "update", payload, set)
+		return appendEvent(ctx, tx, req.ItemID, itemSeq, req.Principal, req.Attribution, "update", payload, set)
 	})
 }

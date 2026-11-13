@@ -31,6 +31,10 @@ var (
 	// it: an unknown or mistyped field, or an illegal transition. The error
 	// text carries the reason.
 	ErrRejected = errors.New("kernel: rejected")
+	// ErrStale means the request named an expected item_seq and the Item has
+	// moved since. Unlike ErrRejected, the write may well be fine: the caller
+	// should re-read the Item and try again.
+	ErrStale = errors.New("kernel: stale")
 	// ErrIdempotencyKeyReuse means the key was already used with a different request.
 	ErrIdempotencyKeyReuse = errors.New("kernel: idempotency key reused with a different request")
 )
@@ -48,6 +52,7 @@ type CreateRequest struct {
 	State          string         // optional; if set it must be the Type's initial state
 	Fields         map[string]any // keyed by stable field ID
 	ContainerID    *uuid.UUID
+	Attribution    item.Attribution // optional; what caused this write
 }
 
 // WriteResult is returned by every write.
@@ -74,6 +79,9 @@ func (k *Kernel) Create(ctx context.Context, req CreateRequest) (WriteResult, er
 		// %w wraps ErrInvalid, so callers can still match it with errors.Is,
 		// like an exception with a cause.
 		return WriteResult{}, fmt.Errorf("%w: idempotency key, actor and type are required", ErrInvalid)
+	}
+	if err := checkAttribution(req.Attribution); err != nil {
+		return WriteResult{}, err
 	}
 	hash, err := requestHash("create", req)
 	if err != nil {
@@ -126,7 +134,7 @@ func (k *Kernel) Create(ctx context.Context, req CreateRequest) (WriteResult, er
 		if req.ContainerID != nil {
 			payload["container_id"] = req.ContainerID
 		}
-		return appendEvent(ctx, tx, id, itemSeq, req.Principal, "create", payload, fields)
+		return appendEvent(ctx, tx, id, itemSeq, req.Principal, req.Attribution, "create", payload, fields)
 	})
 }
 

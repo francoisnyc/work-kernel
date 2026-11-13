@@ -20,6 +20,9 @@ type TransitionRequest struct {
 	ItemID         uuid.UUID
 	ToState        string
 	Fields         map[string]any // optional; keyed by stable field ID
+	// ExpectedItemSeq is the same optional if-match as on UpdateRequest.
+	ExpectedItemSeq int64
+	Attribution     item.Attribution // optional; what caused this write
 }
 
 // Transition moves an Item to another state if its Type allows it, and
@@ -29,6 +32,9 @@ type TransitionRequest struct {
 func (k *Kernel) Transition(ctx context.Context, req TransitionRequest) (WriteResult, error) {
 	if req.IdempotencyKey == "" || req.Principal.Actor == "" || req.ToState == "" {
 		return WriteResult{}, fmt.Errorf("%w: idempotency key, actor and target state are required", ErrInvalid)
+	}
+	if err := checkOptions(req.ExpectedItemSeq, req.Attribution); err != nil {
+		return WriteResult{}, err
 	}
 	hash, err := requestHash("transition", req)
 	if err != nil {
@@ -40,6 +46,9 @@ func (k *Kernel) Transition(ctx context.Context, req TransitionRequest) (WriteRe
 		// under the row lock: no other write can slip in between check and write.
 		it, err := lockItem(ctx, tx, req.ItemID)
 		if err != nil {
+			return WriteResult{}, err
+		}
+		if err := checkExpectedSeq(it, req.ExpectedItemSeq); err != nil {
 			return WriteResult{}, err
 		}
 		ty, err := loadType(ctx, tx, it.TypeID, it.TypeVersion)
@@ -78,6 +87,6 @@ func (k *Kernel) Transition(ctx context.Context, req TransitionRequest) (WriteRe
 				payload["cleared_field_ids"] = sortedKeys(cleared)
 			}
 		}
-		return appendEvent(ctx, tx, req.ItemID, itemSeq, req.Principal, "transition", payload, set)
+		return appendEvent(ctx, tx, req.ItemID, itemSeq, req.Principal, req.Attribution, "transition", payload, set)
 	})
 }

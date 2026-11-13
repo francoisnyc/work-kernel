@@ -13,20 +13,19 @@ import (
 
 	"github.com/francoisnyc/work-kernel/internal/item"
 	"github.com/francoisnyc/work-kernel/internal/kernel"
-	"github.com/francoisnyc/work-kernel/internal/lifecycle"
 )
 
-// assertStale checks that err is a rejection with code "stale".
+// assertStale checks that err is ErrStale and not ErrRejected. The two mean
+// different things to a caller: ErrRejected says the rules refuse the write,
+// so retrying is pointless (HTTP 422); ErrStale says someone changed the Item
+// first, so re-read and retry (HTTP 409).
 func assertStale(t *testing.T, err error) {
 	t.Helper()
-	if !errors.Is(err, kernel.ErrRejected) {
-		t.Fatalf("error = %v, want ErrRejected", err)
+	if !errors.Is(err, kernel.ErrStale) {
+		t.Fatalf("error = %v, want ErrStale", err)
 	}
-	// errors.As finds an error of a given type in the chain and copies it out,
-	// like catching a wrapped exception by class and reading its fields.
-	var rej *lifecycle.Rejection
-	if !errors.As(err, &rej) || rej.Code != lifecycle.Stale {
-		t.Fatalf("error = %v, want a rejection with code %q", err, lifecycle.Stale)
+	if errors.Is(err, kernel.ErrRejected) {
+		t.Fatalf("error %v matches ErrRejected too; stale must be its own error", err)
 	}
 }
 
@@ -57,8 +56,8 @@ func TestExpectedItemSeq_Match_IsAccepted(t *testing.T) {
 	}
 }
 
-// A Transition based on an old item_seq is rejected as stale and writes
-// nothing, even though the move itself is legal.
+// A Transition based on an old item_seq fails as stale and writes nothing,
+// even though the move itself is legal.
 func TestTransition_ExpectedItemSeq_Mismatch_IsStale(t *testing.T) {
 	k := kernel.New(pool)
 	id := createTicket(t, k, map[string]any{"f_assignee": "user-bob"}) // item_seq 1
@@ -131,7 +130,7 @@ func TestExpectedItemSeq_Negative_IsInvalid(t *testing.T) {
 }
 
 // The lost-update case the check exists for: eight writers all read item_seq 1
-// and write on that basis. Exactly one wins; the rest are told they are stale.
+// and write on that basis. Exactly one wins; the rest get ErrStale.
 func TestUpdate_ExpectedItemSeq_Concurrent_OneWins(t *testing.T) {
 	k := kernel.New(pool)
 	id := createTicket(t, k, nil)
@@ -209,14 +208,14 @@ func TestExpectedItemSeq_StaleDoesNotConsumeTheKey(t *testing.T) {
 
 // --- attribution ---
 
-// attribution reads the attribution columns of one event. Null reads as "".
+// attribution reads the five attribution columns of one event. Null reads as "".
 func attribution(t *testing.T, id uuid.UUID, itemSeq int64) (actor string, a item.Attribution) {
 	t.Helper()
 	err := pool.QueryRow(testCtx(t),
-		`select actor, coalesce(originating_hook, ''), coalesce(causation_id, ''),
-		        coalesce(correlation_id, ''), hop
+		`select actor, coalesce(agent_session, ''), coalesce(originating_hook, ''),
+		        coalesce(causation_id, ''), coalesce(correlation_id, ''), hop
 		 from item_events where item_id = $1 and item_seq = $2`, id, itemSeq,
-	).Scan(&actor, &a.OriginatingHook, &a.CausationID, &a.CorrelationID, &a.Hop)
+	).Scan(&actor, &a.AgentSession, &a.OriginatingHook, &a.CausationID, &a.CorrelationID, &a.Hop)
 	if err != nil {
 		t.Fatalf("read attribution of event %d: %v", itemSeq, err)
 	}
@@ -242,6 +241,7 @@ func TestWrite_AttributionIsStoredOnTheEvent(t *testing.T) {
 	}
 
 	want := item.Attribution{
+		AgentSession:    "session-42",
 		OriginatingHook: "timer:ticket@v1:open",
 		CausationID:     id.String() + ":1",
 		CorrelationID:   "corr-1",
