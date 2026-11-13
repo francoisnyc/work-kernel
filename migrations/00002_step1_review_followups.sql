@@ -34,6 +34,10 @@ create table item_event_values (
 );
 
 -- Idempotency keys are scoped by (namespace_id, actor, key).
+-- The backfill takes each key's actor from the event its stored result points
+-- to. It assumes every stored result names an existing event, which holds for
+-- Step 1 data: Create was the only write and stored both in one transaction.
+-- A row that breaks the assumption makes "set not null" fail, loudly.
 alter table idempotency
     add column namespace_id text not null default 'default',
     add column actor        text;

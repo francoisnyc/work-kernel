@@ -12,6 +12,13 @@ Ideas noted during the spike, not built yet.
   Hash a stable, versioned form instead.
 - Erasure deletes `item_event_values` rows but the current values also live in
   `items.fields`. A real erasure must clear both.
+- An `Update` that sets a field to its current value still bumps `item_seq` and
+  writes an event and an outbox row. Suppress no-op updates: it is one of the
+  echo-suppression layers the connector design relies on. (PR #5 review)
+- Cache parsed Types in the process, keyed by `(id, version)`; versions are
+  immutable, so it is safe. Wait for Step 5's numbers. (PR #5 review)
+- When guards need more than `is set` / `==` / `!=`, switch to `cel-go` rather
+  than growing the spike's parser. (PR #5 review)
 
 ## 2026-11-12 — Step 1 (finished)
 
@@ -70,3 +77,8 @@ error match both `ErrRejected` and `*lifecycle.Rejection`. The cloud session nee
 
 **Next session:** Step 3, Phase A — outbox relay, lazy workflow with Update-With-Start,
 one durable timer. Use the planning phase from `docs/step-prompts.md` (tricky step).
+Fold two follow-ups from the PR #5 review into that Phase A:
+- An optional `Fields` patch on `TransitionRequest`: apply it, then check the guards,
+  under one lock, as one event (values in `item_event_values`, `from`/`to` in the payload).
+- A Type without a lifecycle gets one implicit state (rule added by PR #4);
+  `typedef` refuses a Type with no states today.
