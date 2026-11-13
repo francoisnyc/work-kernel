@@ -28,6 +28,16 @@ Five write operations: **create, update, transition, link, archive**. Each is
 validated (schema, lifecycle, policy), then either accepted and recorded, or
 rejected with a reason.
 
+## Kernel rules for size
+
+- **Pay for what you use.** An Item that keeps every default (no lifecycle,
+  no links, inherited policy) costs one row and one event, and gets no outbox
+  row when nothing listens. A Type without a lifecycle has one implicit state.
+- **Membership test.** Something joins the kernel only if all three reference
+  apps need it and it must behave the same way everywhere (searched,
+  permissioned or audited uniformly). Assignee, SLA, approvals and comments
+  stay in Types or user space.
+
 ## Type
 
 A Type is versioned YAML data that **names code but never contains it**.
@@ -181,7 +191,7 @@ passes, however long that takes.
 | 2 | First, the schema follow-ups from the Step 1 review (scoped idempotency keys, `namespace_id`, attribution columns, `item_event_values`, commit counter, indexes). Then load a Type from YAML; `Update` and `Transition` via the pure transition function; guards | Illegal transitions rejected with a reason; legal ones recorded; events carry attribution columns and values live in `item_event_values` |
 | 3 | Outbox relay with per-Item ordering; interpreter workflow started lazily with Update-With-Start; one durable timer | Killing the worker mid-timer still fires it; duplicates and gaps handled |
 | 4 | Scopes and `VisibleScopes`; Postgres full-text search with `min_seq`; one narrowed Item | A second user never sees the narrowed Item, even right after a change |
-| 5 | Type v2 while v1 Items run; measure actions, history bytes, write latency; write up | Both versions complete; numbers recorded in `docs/journal.md` |
+| 5 | Type v2 while v1 Items run; measure actions, history bytes, write latency; burst test: 10,000 messages into one channel (a Type with no lifecycle); write up | Both versions complete; burst numbers show rows and latency per message, and no outbox rows when nothing listens; all numbers recorded in `docs/journal.md` |
 
 **Follow-up spike, Steps 6–7 (after Step 5):** holds and connectors. The
 plan is in the "Work kernel: Spike plan" doc. In short: Temporal activities
