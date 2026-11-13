@@ -8,7 +8,6 @@ package workflow_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -22,47 +21,30 @@ import (
 	"go.temporal.io/sdk/testsuite"
 	sdk "go.temporal.io/sdk/workflow"
 
-	"github.com/francoisnyc/work-kernel/internal/typedef"
 	wf "github.com/francoisnyc/work-kernel/internal/workflow"
 )
-
-// Two states have a timer, so a test can move from one timer to another.
-const timedDoc = `
-id: doc
-version: 1
-initial_state: draft
-states:
-  - {id: draft, category: backlog}
-  - {id: review, category: active, timer: {after: 4h, to: draft}}
-  - {id: escalated, category: active, timer: {after: 1h, to: draft}}
-  - {id: published, category: done}
-transitions:
-  - {from: draft, to: review}
-  - {from: review, to: draft}
-  - {from: review, to: escalated}
-  - {from: review, to: published}
-  - {from: escalated, to: draft}
-`
 
 const itemID = "0193a1b2-0000-7000-8000-000000000001"
 
 // t0 is when every test's workflow starts.
 var t0 = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
+// docTimers is the timer table of the tests' Type: states draft, review,
+// escalated and published, of which two have a timer, so a test can move from
+// one timer to another. The workflow never sees the Type itself, only this.
+func docTimers() map[string]wf.TimerSpec {
+	return map[string]wf.TimerSpec{
+		"review":    {After: 4 * time.Hour, To: "draft"},
+		"escalated": {After: time.Hour, To: "draft"},
+	}
+}
+
 // snapshot returns what LoadItem would report for a doc that entered `state`
 // with event enteredSeq at enteredAt, and is now at itemSeq.
 func snapshot(t *testing.T, state string, itemSeq, enteredSeq int64, enteredAt time.Time) wf.Snapshot {
 	t.Helper()
-	ty, err := typedef.Parse([]byte(timedDoc))
-	if err != nil {
-		t.Fatalf("parse Type: %v", err)
-	}
-	def, err := json.Marshal(ty)
-	if err != nil {
-		t.Fatalf("encode Type: %v", err)
-	}
 	return wf.Snapshot{
-		TypeID: "doc", TypeVersion: 1, TypeDefinition: def,
+		TypeID: "doc", TypeVersion: 1, Timers: docTimers(),
 		State: state, LastAppliedSeq: itemSeq,
 		EnteredSeq: enteredSeq, EnteredAt: enteredAt,
 		CorrelationID: "corr-1", Hop: 2,
@@ -120,9 +102,10 @@ func newHarness(t *testing.T, loaded wf.Snapshot) *harness {
 
 // outcome is how one delivered event ended.
 type outcome struct {
-	done    bool
-	applied bool
-	err     error
+	rejected error // refused by the validator: never ran, never entered history
+	done     bool  // the handler ran to its end
+	applied  bool
+	err      error
 }
 
 // deliver sends one event to the workflow `after` the start, as the relay
@@ -136,7 +119,7 @@ func (h *harness) deliver(after time.Duration, ev wf.Event) *outcome {
 		// itself, and these tests are about the workflow's own guard.
 		id := fmt.Sprintf("%s:%d@%s", itemID, ev.Seq, after)
 		h.env.UpdateWorkflow(wf.UpdateApply, id, &testsuite.TestUpdateCallback{
-			OnReject: func(err error) { h.t.Errorf("event %d was rejected before running: %v", ev.Seq, err) },
+			OnReject: func(err error) { out.rejected = err },
 			OnComplete: func(res any, err error) {
 				out.done, out.err = true, err
 				if r, ok := res.(wf.ApplyResult); ok {
@@ -174,9 +157,9 @@ func (h *harness) runToCompletion() {
 
 func (h *harness) wantApplied(name string, out *outcome, want bool) {
 	h.t.Helper()
-	if !out.done || out.err != nil || out.applied != want {
-		h.t.Errorf("%s: done %v, applied %v, error %v; want applied %v without error",
-			name, out.done, out.applied, out.err, want)
+	if out.rejected != nil || !out.done || out.err != nil || out.applied != want {
+		h.t.Errorf("%s: rejected %v, done %v, applied %v, error %v; want it accepted, applied %v, without error",
+			name, out.rejected, out.done, out.applied, out.err, want)
 	}
 }
 
@@ -206,6 +189,7 @@ func TestItemWorkflow_TimerFires_OnceWithTheRightRequest(t *testing.T) {
 			FromState: "review", ToState: "draft",
 			ExpectedItemSeq: 5, EnteredSeq: 5,
 			CorrelationID: "corr-1", Hop: 3, // one deeper than the event that armed it
+			IdempotencyKey: "timer:" + itemID + ":5:5", // item : entered seq : expected seq
 		},
 	}}
 	if !reflect.DeepEqual(h.fires, want) {
@@ -249,7 +233,9 @@ func TestItemWorkflow_LeavingTheState_CancelsTheTimerAndCompletes(t *testing.T) 
 // state's, counted from the event that entered it.
 func TestItemWorkflow_MovingToAnotherTimedState_RearmsTheTimer(t *testing.T) {
 	h := newHarness(t, snapshot(t, "review", 5, 5, t0))
-	h.deliver(time.Hour, transitionEvent(6, "review", "escalated")) // 1h timer starts at +1h
+	enter := transitionEvent(6, "review", "escalated") // its 1h timer starts at +1h
+	enter.CorrelationID, enter.Hop = "corr-2", 4
+	h.deliver(time.Hour, enter)
 	h.deliver(2*time.Hour+time.Minute, transitionEvent(7, "escalated", "draft"))
 	h.runToCompletion()
 
@@ -260,6 +246,11 @@ func TestItemWorkflow_MovingToAnotherTimedState_RearmsTheTimer(t *testing.T) {
 	if !got.At.Equal(t0.Add(2*time.Hour)) || got.In.FromState != "escalated" || got.In.ToState != "draft" ||
 		got.In.EnteredSeq != 6 || got.In.ExpectedItemSeq != 6 {
 		t.Errorf("FireTimer call = %+v, want escalated -> draft at +2h, entered and expected seq 6", got)
+	}
+	// Attribution follows the event that entered the state.
+	if got.In.CorrelationID != "corr-2" || got.In.Hop != 5 {
+		t.Errorf("correlation %q, hop %d; want corr-2 and 5 (the entering event's hop + 1)",
+			got.In.CorrelationID, got.In.Hop)
 	}
 }
 
@@ -294,9 +285,35 @@ func TestItemWorkflow_KernelRejectsTheTimer_WorkflowCarriesOn(t *testing.T) {
 	h.wantApplied("later transition", later, true)
 }
 
+// Anything else that goes wrong in the activity (the kernel is down, a
+// timeout) is retried with backoff, with no limit on attempts: a timer must
+// not be lost to an outage. Every attempt is the same request, same key.
+func TestItemWorkflow_TimerActivityFails_IsRetriedUntilItWorks(t *testing.T) {
+	h := newHarness(t, snapshot(t, "review", 5, 5, t0))
+	for range 5 {
+		h.fireErrs = append(h.fireErrs, errors.New("kernel is down"))
+	}
+	h.deliver(4*time.Hour+10*time.Minute, transitionEvent(6, "review", "draft"))
+	h.runToCompletion()
+
+	if len(h.fires) != 6 {
+		t.Fatalf("FireTimer calls = %d, want 6 (five failures, then success)", len(h.fires))
+	}
+	for i, f := range h.fires {
+		if f.In != h.fires[0].In {
+			t.Errorf("attempt %d sent %+v, want the same request as the first", i+1, f.In)
+		}
+	}
+	if !h.fires[5].At.After(h.fires[0].At) {
+		t.Errorf("attempts at %v and %v: no backoff between retries", h.fires[0].At, h.fires[5].At)
+	}
+}
+
 // Stale means the workflow is behind: an event has not reached it yet. If
 // that event turns out to be a field update, the Item is still in the state,
-// so the timer fires again with the new item_seq.
+// so the timer fires again with the new item_seq. The second request differs
+// from the first, so it needs its own idempotency key: the kernel refuses a
+// key reused with a different request.
 func TestItemWorkflow_StaleThenAFieldUpdate_FiresAgain(t *testing.T) {
 	h := newHarness(t, snapshot(t, "review", 5, 5, t0))
 	h.fireErrs = []error{stale()}
@@ -310,6 +327,10 @@ func TestItemWorkflow_StaleThenAFieldUpdate_FiresAgain(t *testing.T) {
 	if h.fires[0].In.ExpectedItemSeq != 5 || h.fires[1].In.ExpectedItemSeq != 6 {
 		t.Errorf("expected seqs = %d then %d, want 5 then 6",
 			h.fires[0].In.ExpectedItemSeq, h.fires[1].In.ExpectedItemSeq)
+	}
+	k1, k2 := h.fires[0].In.IdempotencyKey, h.fires[1].In.IdempotencyKey
+	if k1 != "timer:"+itemID+":5:5" || k2 != "timer:"+itemID+":5:6" {
+		t.Errorf("idempotency keys = %q then %q; want ...:5:5 then ...:5:6", k1, k2)
 	}
 	if !h.fires[1].At.Equal(t0.Add(4*time.Hour + 10*time.Minute)) {
 		t.Errorf("second FireTimer at %v, want as soon as the update arrived", h.fires[1].At)
@@ -348,17 +369,20 @@ func TestItemWorkflow_Duplicate_IsAcceptedAndIgnored(t *testing.T) {
 	}
 }
 
-// An event that skips a number fails, so the relay retries from the lowest
-// undelivered one. Nothing is applied out of order.
-func TestItemWorkflow_Gap_FailsUntilTheMissingEventArrives(t *testing.T) {
+// An event that skips a number is refused by the update's validator, so the
+// relay retries from the lowest undelivered one. A validator's refusal is
+// never written to the workflow's history, so retries do not grow it.
+// Nothing is applied out of order.
+func TestItemWorkflow_Gap_IsRejectedUntilTheMissingEventArrives(t *testing.T) {
 	h := newHarness(t, snapshot(t, "review", 5, 5, t0))
 	early := h.deliver(time.Hour, transitionEvent(7, "review", "published")) // 6 is missing
 	six := h.deliver(2*time.Hour, updateEvent(6))
 	seven := h.deliver(3*time.Hour, transitionEvent(7, "review", "published"))
 	h.runToCompletion()
 
-	if !early.done || early.err == nil {
-		t.Errorf("event 7 before 6: done %v, error %v; want it to fail", early.done, early.err)
+	if early.rejected == nil || early.done {
+		t.Errorf("event 7 before 6: rejected %v, handler ran %v; want the validator to refuse it",
+			early.rejected, early.done)
 	}
 	h.wantApplied("event 6", six, true)
 	h.wantApplied("event 7, redelivered", seven, true)
@@ -410,7 +434,8 @@ func TestItemWorkflow_StartsAfterTheItemMovedOn_CompletesAtOnce(t *testing.T) {
 // --- continue-as-new ---
 
 // When the server suggests it, the run hands over to a new one and passes on
-// what it knows: lastAppliedSeq, the state, and when that state was entered.
+// what it knows: lastAppliedSeq, the state, when that state was entered, and
+// the timer table, so the new run needs neither Postgres nor the Type.
 func TestItemWorkflow_ContinueAsNew_CarriesItsState(t *testing.T) {
 	loaded := snapshot(t, "review", 5, 5, t0)
 	h := newHarness(t, loaded)
@@ -438,7 +463,7 @@ func TestItemWorkflow_ContinueAsNew_CarriesItsState(t *testing.T) {
 	got := *in.Carried
 	if got.State != want.State || got.LastAppliedSeq != 6 || got.EnteredSeq != 5 ||
 		!got.EnteredAt.Equal(want.EnteredAt) || got.CorrelationID != "corr-1" || got.Hop != 2 ||
-		got.TypeID != "doc" || got.TypeVersion != 1 {
+		got.TypeID != "doc" || got.TypeVersion != 1 || !reflect.DeepEqual(got.Timers, docTimers()) {
 		t.Errorf("carried snapshot = %+v\nwant %+v", got, want)
 	}
 	if len(h.fires) != 0 {
