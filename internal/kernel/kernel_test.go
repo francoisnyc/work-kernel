@@ -73,6 +73,12 @@ func runTests(m *testing.M) int {
 	}
 	defer pool.Close()
 
+	// Step 2: Create validates against a Type, so the ticket Type must exist.
+	if err := registerTicketType(ctx); err != nil {
+		log.Printf("register ticket type: %v", err)
+		return 1
+	}
+
 	return m.Run()
 }
 

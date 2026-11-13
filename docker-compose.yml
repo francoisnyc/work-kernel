@@ -18,7 +18,7 @@ services:
   temporal:
     # The image's entrypoint is the `temporal` CLI, so this runs
     # `temporal server start-dev`.
-    image: temporalio/temporal:latest
+    image: temporalio/temporal:1.10.0 # CLI 1.10.0, Server 1.32.2
     command: ["server", "start-dev", "--ip", "0.0.0.0"]
     ports:
       - "7233:7233" # gRPC
