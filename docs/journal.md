@@ -95,3 +95,48 @@ Fold two follow-ups from the PR #5 review into that Phase A:
   under one lock, as one event (values in `item_event_values`, `from`/`to` in the payload).
 - A Type without a lifecycle gets one implicit state (rule added by PR #4);
   `typedef` refuses a Type with no states today.
+
+## 2026-11-13 — Step 3 (finished)
+
+**Built:** two PR #5 follow-ups (`Fields` patch on `Transition`; implicit state `default`
+in a new category `none`), then Step 3: `expected_item_seq` + `ErrStale`, attribution on
+write requests, state timers, `lifecycle.TimerFor` / `NeedsWorkflow`, the Item workflow,
+the relay with its Temporal adapter, `cmd/worker`, `cmd/relay`. Both "done when" cases
+pass on a real dev server (worker restarted before, and after, the timer was due).
+
+**Decisions:** every new run loads state from Postgres and ignores events at or below the
+loaded `item_seq`; the workflow gets a timer table, never the Type; gaps are refused by
+the update validator; the relay marks a row only when the update *completed*; the timer
+counts from the entering event's `created_at`; timer key = `timer:<item>:<entered>:<expected>`.
+
+**Surprises:** the pinned server answers `NotFound` for an Update to a completed workflow
+as well as a missing one, so "nothing listening" is one check. A validator cannot wait, so
+before the load it must let updates through and the handler judges them. `reflect.DeepEqual`
+on `time.Time` fails for equal instants. Temporal's test environment skips time and made
+14 of the workflow tests run in milliseconds.
+
+**Numbers:** the end-to-end tests take ~28 s (real 2 s timers); the rest of the suite ~10 s.
+
+**Open questions and risks:**
+- `design.md` still says the relay marks on "accepted", that a new run after a *closed*
+  workflow reloads (now every run does), and lists no `expected_item_seq`. Update it?
+- Event shapes sent to workflows hold no field values but do not pass through
+  `policy.Project`; the rule says "no exceptions". Decide in Step 4.
+- `LoadItem` and unexpected kernel errors retry forever, per the retry policy; a deleted
+  Item would retry without end. Nothing registers `types/*.yaml` at startup yet.
+
+**Next session:** Step 4, Phase A — scopes, `VisibleScopes`, full-text search with `min_seq`.
+
+### Go checkpoint (design.md asks for this after Step 3)
+
+- **Language vs design:** roughly 10% language, 90% design. These are estimates from the
+  session, not measurements. Nearly all the back-and-forth was about Temporal semantics
+  and the write path (stale vs rejected, where gaps are refused, what a run may know).
+- **What was hard in Go:** little. `DeepEqual` on times cost one test round; two packages
+  both named `workflow` need an import alias; a method cannot be passed to the test
+  environment as a mock without `testify`, so activities are registered by name. Errors
+  as values fit this design well: `ErrStale` vs `ErrRejected` is one `errors.Is` each.
+- **Recommendation:** continue in Go. The Temporal Go SDK covered everything needed
+  (Update-With-Start, validators, a time-skipping test environment), and nothing in
+  Steps 1–3 was fought for because of the language. Caveat: this judges the code I wrote;
+  how readable it is to you, coming from Java, is the half only you can assess.
