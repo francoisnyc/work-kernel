@@ -21,6 +21,8 @@ import (
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
+
+	"github.com/francoisnyc/work-kernel/internal/testdb"
 )
 
 const temporalImage = "temporalio/temporal:1.10.0" // keep in step with docker-compose.yml
@@ -67,6 +69,19 @@ func runTests(m *testing.M) int {
 		time.Sleep(time.Second)
 	}
 	defer tc.Close()
+
+	// The end-to-end tests (e2e_test.go) also need Postgres and the kernel.
+	var stopDB func()
+	pool, stopDB, err = testdb.Start(ctx)
+	if err != nil {
+		log.Print(err)
+		return 1
+	}
+	defer stopDB()
+	if err := registerJobType(ctx); err != nil {
+		log.Printf("register job type: %v", err)
+		return 1
+	}
 
 	return m.Run()
 }
