@@ -19,6 +19,9 @@ Ideas noted during the spike, not built yet.
   immutable, so it is safe. Wait for Step 5's numbers. (PR #5 review)
 - When guards need more than `is set` / `==` / `!=`, switch to `cel-go` rather
   than growing the spike's parser. (PR #5 review)
+- A Type with no behavior at all (no state needs a workflow) should write no
+  outbox rows in the first place, kernel side. Needed for Step 5's burst test;
+  until then the relay marks such rows delivered. (Step 3 Phase A)
 
 ## 2026-11-12 — Step 1 (finished)
 
