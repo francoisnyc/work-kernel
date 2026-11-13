@@ -1,0 +1,114 @@
+syntax = "proto3";
+
+// First cut of the kernel API, from docs/design.md.
+// Step 1 implements Create and Get as Go functions only; no server yet.
+// Requests for later steps hold only what the design already states.
+package kernel.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/francoisnyc/work-kernel/gen/kernel/v1;kernelv1";
+
+service ItemService {
+  rpc Create(CreateRequest) returns (CreateResponse);
+  rpc Update(UpdateRequest) returns (UpdateResponse);
+  rpc Transition(TransitionRequest) returns (TransitionResponse);
+  rpc Link(LinkRequest) returns (LinkResponse);
+  rpc Archive(ArchiveRequest) returns (ArchiveResponse);
+  rpc Get(GetRequest) returns (GetResponse);
+  // Search waits until min_seq is visible before answering.
+  rpc Search(SearchRequest) returns (SearchResponse);
+}
+
+// Who is acting. Opaque IDs only.
+message Principal {
+  string actor = 1;
+  string on_behalf_of = 2; // empty when the actor acts for itself
+}
+
+message WriteResult {
+  string item_id = 1;
+  int64 commit_seq = 2;
+  int64 item_seq = 3;
+}
+
+message Item {
+  string id = 1;
+  string type_id = 2;
+  int32 type_version = 3;
+  string container_id = 4;
+  string scope_id = 5;
+  string state = 6;
+  google.protobuf.Struct fields = 7; // keyed by stable field ID
+  int64 item_seq = 8;
+}
+
+message CreateRequest {
+  string idempotency_key = 1;
+  Principal principal = 2;
+  string type_id = 3;
+  int32 type_version = 4;
+  string state = 5; // initial state; chosen by the Type from Step 2 on
+  google.protobuf.Struct fields = 6;
+  string container_id = 7;
+}
+message CreateResponse {
+  WriteResult result = 1;
+}
+
+message UpdateRequest {
+  string idempotency_key = 1;
+  Principal principal = 2;
+  string item_id = 3;
+  google.protobuf.Struct fields = 4;
+}
+message UpdateResponse {
+  WriteResult result = 1;
+}
+
+message TransitionRequest {
+  string idempotency_key = 1;
+  Principal principal = 2;
+  string item_id = 3;
+  string to_state = 4;
+}
+message TransitionResponse {
+  WriteResult result = 1;
+}
+
+message LinkRequest {
+  string idempotency_key = 1;
+  Principal principal = 2;
+  string item_id = 3;
+  string target_item_id = 4;
+  string link_type = 5;
+}
+message LinkResponse {
+  WriteResult result = 1;
+}
+
+message ArchiveRequest {
+  string idempotency_key = 1;
+  Principal principal = 2;
+  string item_id = 3;
+}
+message ArchiveResponse {
+  WriteResult result = 1;
+}
+
+message GetRequest {
+  Principal principal = 1;
+  string item_id = 2;
+}
+message GetResponse {
+  Item item = 1;
+}
+
+message SearchRequest {
+  Principal principal = 1;
+  string query = 2;
+  int64 min_seq = 3;
+}
+message SearchResponse {
+  repeated Item items = 1;
+}
