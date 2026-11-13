@@ -394,3 +394,22 @@ func TestGet_UnknownID_ReturnsNotFound(t *testing.T) {
 		t.Fatalf("Get error = %v, want ErrNotFound", err)
 	}
 }
+
+// Get reads only the caller's namespace, as the write path already does.
+// There is one namespace in the spike, so the test moves a row by hand.
+func TestGet_ItemInAnotherNamespace_ReturnsNotFound(t *testing.T) {
+	ctx := testCtx(t)
+	k := kernel.New(pool)
+	res, err := k.Create(ctx, newRequest())
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `update items set namespace_id = 'other' where id = $1`, res.ItemID); err != nil {
+		t.Fatalf("move item to another namespace: %v", err)
+	}
+
+	_, err = k.Get(ctx, alice, res.ItemID)
+	if !errors.Is(err, kernel.ErrNotFound) {
+		t.Fatalf("Get error = %v, want ErrNotFound", err)
+	}
+}

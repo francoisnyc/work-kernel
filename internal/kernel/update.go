@@ -3,7 +3,6 @@ package kernel
 import (
 	"context"
 	"fmt"
-	"maps"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -44,22 +43,7 @@ func (k *Kernel) Update(ctx context.Context, req UpdateRequest) (WriteResult, er
 			return WriteResult{}, fmt.Errorf("%w: %v", ErrRejected, err)
 		}
 
-		// Split the patch into values to set and fields to clear.
-		merged := maps.Clone(it.Fields)
-		if merged == nil {
-			merged = map[string]any{}
-		}
-		set := map[string]any{}
-		cleared := map[string]any{}
-		for id, v := range req.Fields {
-			if v == nil {
-				delete(merged, id)
-				cleared[id] = nil
-			} else {
-				merged[id] = v
-				set[id] = v
-			}
-		}
+		merged, set, cleared := applyPatch(it.Fields, req.Fields)
 
 		itemSeq := it.ItemSeq + 1
 		_, err = tx.Exec(ctx,

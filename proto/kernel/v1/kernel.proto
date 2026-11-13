@@ -71,6 +71,9 @@ message TransitionRequest {
   Principal principal = 2;
   string item_id = 3;
   string to_state = 4;
+  // Optional patch, applied before the guards are checked; recorded with the
+  // transition as one event. Same meaning as UpdateRequest.fields.
+  google.protobuf.Struct fields = 5;
 }
 message TransitionResponse {
   WriteResult result = 1;

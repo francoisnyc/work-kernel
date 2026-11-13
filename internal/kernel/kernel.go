@@ -149,7 +149,7 @@ func (k *Kernel) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item.
 	it := item.Item{ID: id}
 	err := k.pool.QueryRow(ctx,
 		`select type_id, type_version, container_id, scope_id, state, fields, item_seq
-		 from items where id = $1`, id,
+		 from items where id = $1 and namespace_id = $2`, id, defaultNamespace,
 	).Scan(&it.TypeID, &it.TypeVersion, &it.ContainerID, &it.ScopeID, &it.State, &it.Fields, &it.ItemSeq)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return item.Item{}, ErrNotFound

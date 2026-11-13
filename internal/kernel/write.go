@@ -158,6 +158,29 @@ func appendEvent(ctx context.Context, tx pgx.Tx, id uuid.UUID, itemSeq int64, p 
 	return WriteResult{ItemID: id, CommitSeq: commitSeq, ItemSeq: itemSeq}, nil
 }
 
+// applyPatch applies a field patch to an Item's current fields without
+// modifying either map. It returns the fields after the patch, the values the
+// patch set, and the fields it cleared (a nil value in the patch clears).
+// Go functions can return several values; there is no need for a result class.
+func applyPatch(current, patch map[string]any) (merged, set, cleared map[string]any) {
+	merged = maps.Clone(current)
+	if merged == nil {
+		merged = map[string]any{}
+	}
+	set = map[string]any{}
+	cleared = map[string]any{}
+	for id, v := range patch {
+		if v == nil {
+			delete(merged, id)
+			cleared[id] = nil
+		} else {
+			merged[id] = v
+			set[id] = v
+		}
+	}
+	return merged, set, cleared
+}
+
 // sortedKeys returns the map's keys in order. Go maps iterate in random
 // order, so anything stored or compared must be sorted first. The result is
 // never nil, so it encodes as [] rather than null.
