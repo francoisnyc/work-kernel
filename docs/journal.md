@@ -6,7 +6,12 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
--
+- `idempotency` rows never expire. Add a retention period and a cleanup job.
+- The idempotency request hash is built from the Go request struct, so adding a
+  field changes the hash of stored keys and an old retry is rejected as a reuse.
+  Hash a stable, versioned form instead.
+- Erasure deletes `item_event_values` rows but the current values also live in
+  `items.fields`. A real erasure must clear both.
 
 ## 2026-11-12 — Step 1 (finished)
 
