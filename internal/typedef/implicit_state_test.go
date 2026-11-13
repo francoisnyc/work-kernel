@@ -28,8 +28,8 @@ func TestParse_TypeWithoutStates_GetsOneImplicitState(t *testing.T) {
 		t.Fatalf("states = %+v, want exactly one implicit state", ty.States)
 	}
 	s := ty.States[0]
-	if s.ID != "default" || s.Category != "active" {
-		t.Errorf("implicit state = %+v, want id default, category active", s)
+	if s.ID != "default" || s.Category != "none" {
+		t.Errorf("implicit state = %+v, want id default, category none", s)
 	}
 	if ty.InitialState != "default" {
 		t.Errorf("initial_state = %q, want default", ty.InitialState)

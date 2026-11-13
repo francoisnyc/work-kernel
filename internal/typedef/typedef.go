@@ -28,8 +28,17 @@ const (
 	Enum   FieldType = "enum"
 )
 
-// categories are the fixed state categories from the design.
-var categories = []string{"triage", "backlog", "todo", "active", "waiting", "done", "canceled"}
+// categories are the fixed state categories from the design. "none" means
+// "not work": views of work leave it out, so a chat message never shows up as
+// active or done work.
+var categories = []string{"triage", "backlog", "todo", "active", "waiting", "done", "canceled", "none"}
+
+// A Type that declares no states has no lifecycle. It gets this one implicit
+// state, so every Item still has a state and nothing else needs a special case.
+const (
+	ImplicitState         = "default"
+	ImplicitStateCategory = "none"
+)
 
 // The struct tags (the text in backquotes) tell the YAML and JSON libraries
 // which key maps to which field, like Jackson annotations.
@@ -129,7 +138,8 @@ func (t *Type) Transition(from, to string) (Transition, bool) {
 	return Transition{}, false
 }
 
-// check validates the definition and parses every guard.
+// check validates the definition, parses every guard, and gives a Type
+// without states its one implicit state.
 func (t *Type) check() error {
 	if t.ID == "" {
 		return errors.New("typedef: id is required")
@@ -166,7 +176,15 @@ func (t *Type) check() error {
 	}
 
 	if len(t.States) == 0 {
-		return fail("at least one state is required")
+		// No lifecycle: naming an initial state or a transition is a mistake.
+		if t.InitialState != "" {
+			return fail("initial_state %q is set but the Type declares no states", t.InitialState)
+		}
+		if len(t.Transitions) > 0 {
+			return fail("transitions are declared but the Type declares no states")
+		}
+		t.States = []State{{ID: ImplicitState, Category: ImplicitStateCategory}}
+		t.InitialState = ImplicitState
 	}
 	seen = map[string]bool{}
 	for _, s := range t.States {

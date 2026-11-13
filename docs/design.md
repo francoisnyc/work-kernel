@@ -43,7 +43,9 @@ rejected with a reason.
 A Type is versioned YAML data that **names code but never contains it**.
 
 - Fields: stable ID, type, options, defaults, invariants as expressions.
-- States: each has a category — `triage, backlog, todo, active, waiting, done, canceled`.
+- States: each has a category — `triage, backlog, todo, active, waiting, done, canceled, none`.
+  `none` means "not work": work views leave it out. A Type that declares no
+  states gets one implicit state, `default`, with category `none`.
 - Transitions: from/to, guard expression, required fields, who may act, action references.
 - Timers/SLAs: separate objects with start/pause/resume/stop conditions (later).
 - Approvals: a waiting step completed by a token (later).
