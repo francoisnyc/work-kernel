@@ -77,12 +77,10 @@ transitions:
 
 // --- the fake Temporal ---
 
-// call is one delivery the relay attempted.
-type call struct {
-	ItemID string
-	Event  wf.Event
-	Start  bool // true: Update-With-Start; false: plain Update
-}
+// call is one delivery the relay attempted. It is the relay's own Delivery:
+// the Item, the update ID, the event's shape, and whether to use
+// Update-With-Start (Start true) or a plain Update.
+type call = relay.Delivery
 
 // fakeWorkflows records every delivery and answers with whatever `answer`
 // says (nil if it is not set). It satisfies relay.Workflows; Go interfaces
@@ -93,10 +91,9 @@ type fakeWorkflows struct {
 	answer func(c call) error
 }
 
-func (f *fakeWorkflows) Deliver(ctx context.Context, itemID string, ev wf.Event, start bool) error {
+func (f *fakeWorkflows) Deliver(ctx context.Context, c relay.Delivery) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	c := call{ItemID: itemID, Event: ev, Start: start}
 	f.calls = append(f.calls, c)
 	if f.answer == nil {
 		return nil
@@ -258,11 +255,11 @@ func TestRelay_DeliversInOrder_AndTheTypeDecidesWhatStartsAWorkflow(t *testing.T
 		t.Fatalf("deliveries = %+v, want three", got)
 	}
 	want := []call{
-		{ItemID: id.String(), Start: false,
+		{ItemID: id.String(), UpdateID: id.String() + ":1", Start: false,
 			Event: wf.Event{Seq: 1, Op: "create", To: "open", CorrelationID: "corr-1"}},
-		{ItemID: id.String(), Start: false,
+		{ItemID: id.String(), UpdateID: id.String() + ":2", Start: false,
 			Event: wf.Event{Seq: 2, Op: "update"}},
-		{ItemID: id.String(), Start: true,
+		{ItemID: id.String(), UpdateID: id.String() + ":3", Start: true,
 			Event: wf.Event{Seq: 3, Op: "transition", From: "open", To: "in_progress", CorrelationID: "corr-2", Hop: 1}},
 	}
 	for i := range want {
@@ -377,6 +374,75 @@ func TestRelay_FailingItem_KeepsOrder_BacksOff_AndDoesNotBlockOthers(t *testing.
 	}
 	if left := pending(t, stuck); len(left) != 0 {
 		t.Errorf("stuck item: undelivered = %v, want none", left)
+	}
+}
+
+// Deliver succeeds only when the update has completed, not merely been
+// accepted. The workflow can accept an update and then fail it in the handler
+// (a gap seen before its load finished). If the relay took "accepted" as
+// done, that event would never be retried. So a failed update is a failed
+// delivery like any other: the row stays pending and is sent again.
+func TestRelay_UpdateAcceptedThenFailed_StaysPendingAndIsRetried(t *testing.T) {
+	r, fake, clock := newRelay(t)
+	id := ticketInProgress(t, kernel.New(pool))
+	failed := false
+	fake.answer = func(c call) error {
+		if c.ItemID == id.String() && c.Event.Seq == 3 && !failed {
+			failed = true
+			return errors.New("update accepted, then failed: gap")
+		}
+		return nil
+	}
+
+	runOnce(t, r)
+	if left := pending(t, id); !reflect.DeepEqual(left, []int64{3}) {
+		t.Fatalf("undelivered after the failed update = %v, want 3", left)
+	}
+
+	clock.advance(2 * time.Second)
+	runOnce(t, r)
+	if got := fake.seqs(id); !reflect.DeepEqual(got, []int64{1, 2, 3, 3}) {
+		t.Errorf("deliveries = %v, want 1, 2, 3 and 3 again", got)
+	}
+	if left := pending(t, id); len(left) != 0 {
+		t.Errorf("undelivered after the retry = %v, want none", left)
+	}
+}
+
+// The relay can die between a delivery and marking it. The row is then still
+// pending, so the next pass sends it again, under the same update ID
+// "item:seq". That is what lets Temporal, and failing that the workflow's
+// lastAppliedSeq, recognize it as a duplicate.
+func TestRelay_CrashBeforeMarkingDelivered_RedeliversWithTheSameUpdateID(t *testing.T) {
+	r, fake, clock := newRelay(t)
+	id := ticketInProgress(t, kernel.New(pool))
+
+	// Simulate the crash: the first delivery goes through, and at that very
+	// moment the pass's context is canceled, so its "mark delivered" fails.
+	ctx, crash := context.WithCancel(testCtx(t))
+	fake.answer = func(c call) error {
+		crash()
+		return nil
+	}
+	_ = r.RunOnce(ctx) // how the interrupted pass reports is not the point here
+	if left := pending(t, id); !reflect.DeepEqual(left, []int64{1, 2, 3}) {
+		t.Fatalf("undelivered after the crash = %v, want 1, 2, 3", left)
+	}
+
+	fake.answer = nil
+	clock.advance(time.Minute) // well past any backoff
+	runOnce(t, r)
+
+	var ids []string
+	for _, c := range fake.callsFor(id) {
+		ids = append(ids, c.UpdateID)
+	}
+	want := []string{id.String() + ":1", id.String() + ":1", id.String() + ":2", id.String() + ":3"}
+	if !reflect.DeepEqual(ids, want) {
+		t.Errorf("update IDs = %v\nwant %v", ids, want)
+	}
+	if left := pending(t, id); len(left) != 0 {
+		t.Errorf("undelivered after the second pass = %v, want none", left)
 	}
 }
 
