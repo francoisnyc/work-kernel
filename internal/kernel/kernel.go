@@ -32,6 +32,10 @@ var (
 	ErrIdempotencyKeyReuse = errors.New("kernel: idempotency key reused with a different request")
 )
 
+// defaultNamespace is the only namespace in the spike. The column exists so
+// multi-tenancy can arrive later without a schema change.
+const defaultNamespace = "default"
+
 // CreateRequest asks for a new Item.
 type CreateRequest struct {
 	IdempotencyKey string
@@ -82,15 +86,17 @@ func (k *Kernel) Create(ctx context.Context, req CreateRequest) (WriteResult, er
 	err = pgx.BeginFunc(ctx, k.pool, func(tx pgx.Tx) error {
 		// Claim the key first. If another transaction holds the same key, this
 		// statement waits for it to finish, then sees its row and inserts nothing.
+		// Keys are scoped by namespace and actor, so two clients never collide.
 		tag, err := tx.Exec(ctx,
-			`insert into idempotency (key, request_hash, result) values ($1, $2, '{}')
-			 on conflict (key) do nothing`,
-			req.IdempotencyKey, hash)
+			`insert into idempotency (namespace_id, actor, key, request_hash, result)
+			 values ($1, $2, $3, $4, '{}')
+			 on conflict (namespace_id, actor, key) do nothing`,
+			defaultNamespace, req.Principal.Actor, req.IdempotencyKey, hash)
 		if err != nil {
 			return fmt.Errorf("claim idempotency key: %w", err)
 		}
 		if tag.RowsAffected() == 0 {
-			res, err = storedResult(ctx, tx, req.IdempotencyKey, hash)
+			res, err = storedResult(ctx, tx, req.Principal.Actor, req.IdempotencyKey, hash)
 			return err
 		}
 
@@ -102,22 +108,28 @@ func (k *Kernel) Create(ctx context.Context, req CreateRequest) (WriteResult, er
 		// separate SELECT ... FOR UPDATE is needed for create.
 		const itemSeq = 1
 		_, err = tx.Exec(ctx,
-			`insert into items (id, type_id, type_version, container_id, state, fields, item_seq)
-			 values ($1, $2, $3, $4, $5, $6, $7)`,
-			id, req.TypeID, req.TypeVersion, req.ContainerID, req.State, fields, itemSeq)
+			`insert into items (id, namespace_id, type_id, type_version, container_id, state, fields, item_seq)
+			 values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			id, defaultNamespace, req.TypeID, req.TypeVersion, req.ContainerID, req.State, fields, itemSeq)
 		if err != nil {
 			return fmt.Errorf("insert item: %w", err)
 		}
 
-		var commitSeq int64
-		err = tx.QueryRow(ctx,
-			`insert into item_events (item_id, item_seq, actor, on_behalf_of, op, payload)
-			 values ($1, $2, $3, nullif($4, ''), 'create', $5)
-			 returning commit_seq`,
-			id, itemSeq, req.Principal.Actor, req.Principal.OnBehalfOf, createPayload(req, fields),
-		).Scan(&commitSeq)
+		commitSeq, err := nextCommitSeq(ctx, tx)
+		if err != nil {
+			return err
+		}
+		// The attribution columns (agent_session, causation_id, ...) keep their
+		// defaults until agents and hooks exist to fill them.
+		_, err = tx.Exec(ctx,
+			`insert into item_events (item_id, item_seq, commit_seq, actor, on_behalf_of, op, payload)
+			 values ($1, $2, $3, $4, nullif($5, ''), 'create', $6)`,
+			id, itemSeq, commitSeq, req.Principal.Actor, req.Principal.OnBehalfOf, createPayload(req, fields))
 		if err != nil {
 			return fmt.Errorf("insert event: %w", err)
+		}
+		if err := insertEventValues(ctx, tx, id, itemSeq, fields); err != nil {
+			return err
 		}
 
 		_, err = tx.Exec(ctx, `insert into outbox (item_id, item_seq) values ($1, $2)`, id, itemSeq)
@@ -126,7 +138,9 @@ func (k *Kernel) Create(ctx context.Context, req CreateRequest) (WriteResult, er
 		}
 
 		res = WriteResult{ItemID: id, CommitSeq: commitSeq, ItemSeq: itemSeq}
-		_, err = tx.Exec(ctx, `update idempotency set result = $2 where key = $1`, req.IdempotencyKey, res)
+		_, err = tx.Exec(ctx,
+			`update idempotency set result = $4 where namespace_id = $1 and actor = $2 and key = $3`,
+			defaultNamespace, req.Principal.Actor, req.IdempotencyKey, res)
 		if err != nil {
 			return fmt.Errorf("store idempotency result: %w", err)
 		}
@@ -138,15 +152,46 @@ func (k *Kernel) Create(ctx context.Context, req CreateRequest) (WriteResult, er
 	return res, nil
 }
 
-// storedResult returns the result recorded for an idempotency key, or
+// nextCommitSeq takes the next commit_seq from the single counter row. The
+// update locks that row until the transaction ends, so writes commit one at a
+// time and commit_seq values become visible in order.
+func nextCommitSeq(ctx context.Context, tx pgx.Tx) (int64, error) {
+	var seq int64
+	err := tx.QueryRow(ctx,
+		`update commit_counter set last_seq = last_seq + 1 returning last_seq`).Scan(&seq)
+	if err != nil {
+		return 0, fmt.Errorf("take commit_seq: %w", err)
+	}
+	return seq, nil
+}
+
+// insertEventValues stores the field values an event set, beside the event
+// rather than in it, so they can be erased without touching the log. An event
+// that sets no field gets no row.
+func insertEventValues(ctx context.Context, tx pgx.Tx, id uuid.UUID, itemSeq int64, values map[string]any) error {
+	if len(values) == 0 {
+		return nil
+	}
+	_, err := tx.Exec(ctx,
+		`insert into item_event_values (item_id, item_seq, field_values) values ($1, $2, $3)`,
+		id, itemSeq, values)
+	if err != nil {
+		return fmt.Errorf("insert event values: %w", err)
+	}
+	return nil
+}
+
+// storedResult returns the result recorded for an actor's idempotency key, or
 // ErrIdempotencyKeyReuse if the key was used with a different request.
-func storedResult(ctx context.Context, tx pgx.Tx, key, hash string) (WriteResult, error) {
+func storedResult(ctx context.Context, tx pgx.Tx, actor, key, hash string) (WriteResult, error) {
 	var (
 		storedHash string
 		res        WriteResult
 	)
 	err := tx.QueryRow(ctx,
-		`select request_hash, result from idempotency where key = $1`, key,
+		`select request_hash, result from idempotency
+		 where namespace_id = $1 and actor = $2 and key = $3`,
+		defaultNamespace, actor, key,
 	).Scan(&storedHash, &res)
 	if err != nil {
 		return WriteResult{}, fmt.Errorf("read idempotency record: %w", err)
