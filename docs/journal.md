@@ -40,3 +40,33 @@ the generated code in `gen/` (git-ignored) imports it.
 
 **Next session:** Step 2, Phase A — Type from YAML, `Update`, `Transition`, the pure
 transition function in `internal/lifecycle`.
+
+## 2026-11-13 — Step 2 (finished)
+
+**Built:** migration `00002` with the Step 1 review follow-ups (scoped idempotency keys,
+`namespace_id`, attribution columns, `item_event_values`, `commit_counter`, two indexes);
+`internal/typedef` (Type from YAML, guard parsing, field checks); `lifecycle.Transition`
+(pure); `kernel.RegisterType`, `Update`, `Transition`; the `types/ticket.v1.yaml` fixture.
+60 test cases pass under `-race`, including both parts of the "done when".
+
+**Decisions:** Types are stored in the `types` table and read on every write (no cache);
+a version is immutable. `ErrInvalid` = malformed request or unknown Type; `ErrRejected` =
+the Type refuses it. A rejection rolls back, so it does not consume the key. Lifecycle
+validation runs inside the transaction, under the row lock (the design's diagram shows it
+before `BEGIN`). `int` fields refuse values beyond ±(2^53−1) instead of rounding. Guards:
+`f is set`, `f == lit`, `f != lit`, joined by `&&`. `allowed` is parsed, not enforced.
+
+**Surprises:** one `write` helper now carries the idempotency protocol for all three
+operations, so `Link` and `Archive` should be short. `fmt.Errorf` with two `%w` lets one
+error match both `ErrRejected` and `*lifecycle.Rejection`. The cloud session needs
+`dockerd` started by hand before testcontainers work.
+
+**Open questions and risks:**
+- `design.md` still shows validation before `BEGIN` and RPCs returning `WriteResult`
+  directly (the proto wraps it in `CreateResponse` etc.). Update the doc?
+- Every write reads and re-parses the Type from Postgres. Measure in Step 5.
+- The commit counter serializes all writes (by design for the spike).
+- `cmd/kernel` is still a placeholder; nothing loads `types/*.yaml` at startup yet.
+
+**Next session:** Step 3, Phase A — outbox relay, lazy workflow with Update-With-Start,
+one durable timer. Use the planning phase from `docs/step-prompts.md` (tricky step).
