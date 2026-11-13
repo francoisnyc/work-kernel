@@ -47,7 +47,7 @@ transition function in `internal/lifecycle`.
 `namespace_id`, attribution columns, `item_event_values`, `commit_counter`, two indexes);
 `internal/typedef` (Type from YAML, guard parsing, field checks); `lifecycle.Transition`
 (pure); `kernel.RegisterType`, `Update`, `Transition`; the `types/ticket.v1.yaml` fixture.
-60 test cases pass under `-race`, including both parts of the "done when".
+93 tests and subtests pass under `-race`, including both parts of the "done when".
 
 **Decisions:** Types are stored in the `types` table and read on every write (no cache);
 a version is immutable. `ErrInvalid` = malformed request or unknown Type; `ErrRejected` =
