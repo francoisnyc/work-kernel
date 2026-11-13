@@ -22,6 +22,10 @@ Ideas noted during the spike, not built yet.
 - A Type with no behavior at all (no state needs a workflow) should write no
   outbox rows in the first place, kernel side. Needed for Step 5's burst test;
   until then the relay marks such rows delivered. (Step 3 Phase A)
+- The relay polls every ~200 ms. Use `LISTEN/NOTIFY` to wake it instead of
+  waiting for the next poll. (Step 3 Phase A)
+- The relay is a single instance. To run several, claim an Item's pending rows
+  with `FOR UPDATE SKIP LOCKED`. (Step 3 Phase A)
 
 ## 2026-11-12 — Step 1 (finished)
 

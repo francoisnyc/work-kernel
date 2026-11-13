@@ -1,73 +1,87 @@
 # Step 3 plan — relay, lazy workflow, one durable timer
 
-Status: draft for review. No Step 3 code or tests exist yet.
+Status: for review, after the Phase A answers. No Step 3 code or tests exist yet.
 
 ## Approach
 
-- **Type.** A state may carry `timeout: {after: 48h, to: open}`. One function,
-  `typedef.Type.HasBehavior(stateID)`, answers "does this state need a workflow?".
-  Today it means "has a timeout"; holds, approvals and link reactions extend it later.
-- **Relay** (`internal/relay`, run by `cmd/relay`). Single instance, polls every
-  200 ms. For each Item with undelivered rows it takes the lowest `item_seq`, reads
-  the event's shape, and sends `{seq, op, from, to}` — never field values.
-  - The event enters a state with behavior → Update-With-Start (workflow ID = item
-    ID, `USE_EXISTING`, update ID `item:seq`). The start input carries the Type id
-    and version and `lastAppliedSeq = seq - 1`; an existing run ignores the input.
-  - Otherwise → plain Update.
-  - Accepted → mark delivered, go on to the Item's next row.
+- **Type.** A state may carry `timer: {after: 4h, to: <state>}`. Load-time check:
+  `to` must be a declared transition from that state. `ticket.v1.yaml` is edited in
+  place (`in_progress`: `{after: 48h, to: open}`), with a comment that this is a
+  spike stand-in for standalone SLA objects.
+- **Two pure functions in `internal/lifecycle`.** `TimerFor(type, state)` returns
+  the state's timer, if any. `NeedsWorkflow(type, enteredState)` is the one rule
+  for "does this event enter a state with behavior?" — today "has a timer".
+- **Kernel additions.**
+  - Optional `expected_item_seq` on `Transition` and `Update` (Go and proto);
+    a mismatch is `ErrRejected` with code `stale`.
+  - Write requests can carry `originating_hook`, `causation_id`, `correlation_id`
+    and `hop` (Go only for now), stored in the existing columns.
+- **Relay** (`internal/relay`, `cmd/relay`). Single instance, polls every 200 ms.
+  Per Item it takes the lowest undelivered `item_seq` and sends the event's shape
+  `{seq, op, from, to, at}` — never field values.
+  - `NeedsWorkflow` true → Update-With-Start (workflow ID = item ID,
+    `USE_EXISTING`, update ID `item:seq`); otherwise plain Update.
+  - Update completed → mark delivered, take the Item's next row.
   - Plain Update answered "not found" or "already completed" → nothing listens:
     mark delivered, log at debug level.
-  - Anything else (gap rejection, timeout, server down) → leave the row, stop this
-    Item for this pass, carry on with the other Items.
-- **Workflow** (`internal/workflow`, run by a new `cmd/worker`). Holds
-  `lastAppliedSeq`, the current state and the Type (loaded once by an activity;
-  a Type version is immutable and holds no personal data).
-  - Update validator: `seq <= last` → accept and ignore; `seq > last + 1` → reject;
-    `seq == last + 1` → apply: record the state, cancel any timer, arm the new
-    state's timeout if it has one.
-  - Timer fires → activity calls `kernel.Transition` as actor `system:timer`, key
-    `timer:<item>:<seq that armed it>`, `causation_id` = that event, with an
-    internal "only if `item_seq` is still N" precondition. A kernel rejection is a
-    non-retryable activity error. The resulting event returns through the relay
-    like any other.
-  - In a state without behavior, with no update in flight → the workflow completes.
-  - Continue-as-new when the SDK suggests it, carrying `lastAppliedSeq`, the state
-    and the timer's deadline.
+  - Any other failure → leave the row; that Item backs off, the others carry on.
+- **Workflow** (`internal/workflow`, `cmd/worker`).
+  - Every new run first runs an activity that loads the Item's state, `item_seq`,
+    Type, and the seq and time of the event that entered the current state. It
+    sets `lastAppliedSeq = item_seq` and arms the timer from that loaded state.
+  - Update handler waits for the load, then: `seq <= last` → ignore;
+    `seq > last + 1` → fail the update (the relay retries); `seq == last + 1` →
+    apply. A state change cancels the timer and arms the new state's, if any.
+  - Timer deadline = time the state was entered + `after`; already past → fire now.
+  - Timer fires → activity calls `kernel.Transition` with `expected_item_seq =
+    lastAppliedSeq`, actor `system:timer`, `originating_hook
+    timer:<type>@v<version>:<state>`, `causation_id` = the `item:seq` that entered
+    the state, `correlation_id` inherited from that event, key `timer:<item>:<seq>`.
+    A kernel rejection is a non-retryable activity error, logged.
+  - In a state with no behavior the run waits for `AllHandlersFinished`, then
+    completes. Continue-as-new carries `lastAppliedSeq`, state and deadline.
 
 ## Edge cases and their tests
 
 | # | Case | Test |
 | --- | --- | --- |
-| 1 | Same seq delivered twice | `testsuite`: accepted, state unchanged, timer not re-armed |
-| 2 | Gap (`last + 2`) | `testsuite`: rejected; then `last + 1`, `last + 2` both apply |
-| 3 | Timeout elapses | `testsuite` (skipped time): activity called once, with the expected key and seq |
-| 4 | Item leaves the state first | `testsuite`: timer canceled, activity never called, workflow completes |
-| 5 | Stale timer (Item moved on, relay lagging) | kernel test of the seq precondition; `testsuite`: rejection does not fail the workflow |
-| 6 | Continue-as-new | `testsuite`: `lastAppliedSeq` and deadline carried over |
-| 7 | Per-Item order; one stuck Item | relay + Postgres + fake Temporal client: 1, 2, 3 in order; a failure on Item A's 2 leaves 2 and 3 pending while Item B drains |
-| 8 | Type decides start vs plain Update | unit test of `HasBehavior`; relay test with the fake |
-| 9 | New run after a finished one | real server: workflow finishes, a later event re-enters a timer state, a new run starts and applies it |
-| 10 | Nothing listening | relay with the fake, and real server: "not found" and "completed" both mark delivered |
-| 11 | **Done when**: worker stopped mid-timer | real server (dev-server container), 2 s timeout: stop the worker, restart it, the Item transitions |
-| 12 | Relay dies after accept, before marking | redelivery is case 1 |
+| 1 | Same seq delivered twice | `testsuite`: ignored, timer not re-armed |
+| 2 | Gap (`last + 2`) | `testsuite`: fails; then `last + 1`, `last + 2` both apply |
+| 3 | Timer elapses | `testsuite` (skipped time): activity called once, with the expected key, seq and attribution |
+| 4 | Item leaves the state first | `testsuite`: timer canceled, activity never called, run completes |
+| 5 | Stale timer | kernel tests of `expected_item_seq` on `Transition` and `Update`; `testsuite`: a rejection does not fail the run |
+| 6 | Field update not yet delivered when the timer fires | `testsuite`: `stale` keeps the timer due; it fires again once the update is applied |
+| 7 | Run starts while the relay lags (`item_seq > N`) | `testsuite` with a mocked load: right timer armed, updates at or below the watermark ignored |
+| 8 | Continue-as-new | `testsuite`: `lastAppliedSeq` and deadline carried over |
+| 9 | Per-Item order; one stuck Item | relay + Postgres + fake Temporal client: 1, 2, 3 in order; Item A stuck on 2 while Item B drains |
+| 10 | Type decides start vs plain Update | unit tests of `TimerFor`, `NeedsWorkflow`, the load-time timer check; relay test with the fake |
+| 11 | Nothing listening | fake and real server: "not found" and "completed" both mark delivered |
+| 12 | New run after a finished one | real server: the run finishes, a later event re-enters a timer state, a new run applies it |
+| 13 | Update arrives while the run is closing | real server: applied, or lands on a new run; never lost |
+| 14 | **Done when**: worker stopped mid-timer | real server, 2 s timer: (a) restart before it is due; (b) restart after it was due — both transition the Item |
+| 15 | Pinned-server behavior | real server: Update-With-Start works; errors for Update to a missing and to a completed workflow; Update-With-Start after completion starts a new run |
 
-## Assumed where you did not choose
+Real-server tests use a Temporal dev-server container and an in-process worker.
 
-- `ticket.v1.yaml` gains the timeout in place (v2 stays free for Step 5). Tests use
-  their own Type with a 2 s timeout.
-- Case 11 stops and restarts the worker in-process, not a process kill.
-- New dependency: `go.temporal.io/sdk`. The Temporal container uses the existing
-  testcontainers module.
+## Commit order (each tests-first)
+
+1. `expected_item_seq` and the attribution fields on write requests.
+2. Timer syntax, `TimerFor`, `NeedsWorkflow`, ticket fixture.
+3. Add `go.temporal.io/sdk`; pinned-server tests (case 15).
+4. Workflow (cases 1–8). 5. Relay (9–11). 6. Activities, `cmd/worker`,
+   `cmd/relay`, real-server tests (11–14).
 
 ## Unsure
 
-- Which errors the pinned server returns for an Update to a missing workflow and to
-  a completed one, and that Update-With-Start starts a new run after completion.
-  I will probe both against the dev server before writing the relay tests.
-- A workflow that completes while an update is in flight. I expect the relay's
-  retry to land in case 9 or 10; needs a real-server check.
-- The timer runs from when the workflow applies the event, not from the event's
-  `created_at`, so relay lag lengthens the timeout. Acceptable for the spike?
-- The design says the workflow "calls the same pure transition function". With no
-  field values in Temporal it cannot evaluate guards, so the plan lets the kernel
-  decide when the timer fires. Is that deviation acceptable?
+- **Gap as a failed update, not a validator rejection.** The handler must wait for
+  the load, and validators cannot wait. So the relay waits for the update to
+  complete, not just to be accepted. OK?
+- **Timer counted from the event's `created_at`**, not from when the workflow sees
+  it, so relay lag and restarts do not lengthen it. This is why the shape carries
+  `at`. OK?
+- **Where code `stale` lives.** The check is kernel logic and covers `Update`, but
+  the only coded rejection today is `lifecycle.Rejection`. I propose reusing that
+  type with a new code, so callers read one error type.
+- **`hop` for a timer write**: the arming event's hop + 1?
+- **Case 13** depends on how the server treats an update racing a completion;
+  case 15 will tell me before I write it.
