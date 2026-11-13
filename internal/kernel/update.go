@@ -1,0 +1,78 @@
+package kernel
+
+import (
+	"context"
+	"fmt"
+	"maps"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+
+	"github.com/francoisnyc/work-kernel/internal/item"
+)
+
+// UpdateRequest changes field values on an Item. Fields is a patch: a value
+// sets the field, nil clears it, and fields not mentioned are left alone.
+type UpdateRequest struct {
+	IdempotencyKey string
+	Principal      item.Principal
+	ItemID         uuid.UUID
+	Fields         map[string]any // keyed by stable field ID
+}
+
+// Update applies a field patch to an Item and records an "update" event.
+func (k *Kernel) Update(ctx context.Context, req UpdateRequest) (WriteResult, error) {
+	if req.IdempotencyKey == "" || req.Principal.Actor == "" || len(req.Fields) == 0 {
+		return WriteResult{}, fmt.Errorf("%w: idempotency key, actor and at least one field are required", ErrInvalid)
+	}
+	hash, err := requestHash("update", req)
+	if err != nil {
+		return WriteResult{}, err
+	}
+
+	return k.write(ctx, req.Principal, req.IdempotencyKey, hash, func(tx pgx.Tx) (WriteResult, error) {
+		// Validation needs the Item's Type, so it runs after the row is locked.
+		it, err := lockItem(ctx, tx, req.ItemID)
+		if err != nil {
+			return WriteResult{}, err
+		}
+		ty, err := loadType(ctx, tx, it.TypeID, it.TypeVersion)
+		if err != nil {
+			return WriteResult{}, err
+		}
+		if err := ty.CheckFields(req.Fields, true); err != nil {
+			return WriteResult{}, fmt.Errorf("%w: %v", ErrRejected, err)
+		}
+
+		// Split the patch into values to set and fields to clear.
+		merged := maps.Clone(it.Fields)
+		if merged == nil {
+			merged = map[string]any{}
+		}
+		set := map[string]any{}
+		cleared := map[string]any{}
+		for id, v := range req.Fields {
+			if v == nil {
+				delete(merged, id)
+				cleared[id] = nil
+			} else {
+				merged[id] = v
+				set[id] = v
+			}
+		}
+
+		itemSeq := it.ItemSeq + 1
+		_, err = tx.Exec(ctx,
+			`update items set fields = $2, item_seq = $3, updated_at = now() where id = $1`,
+			req.ItemID, merged, itemSeq)
+		if err != nil {
+			return WriteResult{}, fmt.Errorf("update item: %w", err)
+		}
+
+		payload := map[string]any{"field_ids": sortedKeys(set)}
+		if len(cleared) > 0 {
+			payload["cleared_field_ids"] = sortedKeys(cleared)
+		}
+		return appendEvent(ctx, tx, req.ItemID, itemSeq, req.Principal, "update", payload, set)
+	})
+}
