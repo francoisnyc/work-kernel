@@ -1,5 +1,11 @@
 # Step 3 plan — relay, lazy workflow, one durable timer
 
+> **Superseded in part.** Review decisions in PR #6 changed some of this plan:
+> the Type is not passed to the workflow (it gets a timer table), the timer's
+> idempotency key is `timer:<item>:<entered seq>:<expected seq>`, and stale is
+> its own error, `ErrStale`, not a rejection code. The plan is kept as written;
+> see the Step 3 entry in `docs/journal.md` and `docs/design.md` for what was built.
+
 Status: for review, after the Phase A answers. No Step 3 code or tests exist yet.
 
 ## Approach

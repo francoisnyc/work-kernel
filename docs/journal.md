@@ -28,6 +28,10 @@ Ideas noted during the spike, not built yet.
   Go-only request field. (Step 3)
 - The ticket's one timer (48h in `in_progress`, back to `open`) is a stand-in.
   The real first-response SLA comes later, with standalone SLA objects. (Step 3)
+- The relay delivers one Item at a time. Deliver to several Items in parallel,
+  with a bound, keeping each Item's own order. (PR #6 review)
+- Every event costs one Temporal call, even when nothing listens, until the
+  kernel-side outbox skip above exists (Step 5). (PR #6 review)
 - The relay polls every ~200 ms. Use `LISTEN/NOTIFY` to wake it instead of
   waiting for the next poll. (Step 3 Phase A)
 - The relay is a single instance. To run several, claim an Item's pending rows
@@ -124,6 +128,10 @@ on `time.Time` fails for equal instants. Temporal's test environment skips time 
   `policy.Project`; the rule says "no exceptions". Decide in Step 4.
 - `LoadItem` and unexpected kernel errors retry forever, per the retry policy; a deleted
   Item would retry without end. Nothing registers `types/*.yaml` at startup yet.
+
+**After the PR #6 review:** `design.md` now matches what was built and states the policy
+boundary (event shapes to our own Temporal are not a principal). A missing Item is final
+for both activities: the load completes the workflow, the timer's write is not retried.
 
 **Next session:** Step 4, Phase A — scopes, `VisibleScopes`, full-text search with `min_seq`.
 

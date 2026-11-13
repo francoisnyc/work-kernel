@@ -48,6 +48,10 @@ A Type is versioned YAML data that **names code but never contains it**.
   states gets one implicit state, `default`, with category `none`.
 - Transitions: from/to, guard expression, required fields, who may act, action references.
 - Timers/SLAs: separate objects with start/pause/resume/stop conditions (later).
+  Spike stand-in: a state may carry one timer,
+  `{id: in_progress, category: active, timer: {after: 48h, to: open}}`. `to` must
+  be a transition the Type declares from that state, so a timer can never make a
+  move a person couldn't. The timer counts from the event that entered the state.
 - Approvals: a waiting step completed by a token (later).
 - Items stay on the Type version they were created with. Versioning rule:
   **pin the lifecycle, evolve the schema, float the policy.**
@@ -82,6 +86,10 @@ client → kernel service (Go, stateless)
   current state and fields, which are only reliable under the row lock.
 - A rejected write rolls back, so it leaves no event and does not use up its
   key: the client can fix the Item and retry with the same key.
+- `Update` and `Transition` take an optional `expected_item_seq` (an if-match,
+  checked under the row lock; zero means no check). Two different refusals:
+  - `ErrRejected` — the rules say no; retrying is pointless (HTTP 422).
+  - `ErrStale` — someone changed the Item first; re-read and retry (HTTP 409).
 - `commit_seq` lets later reads/searches wait until the write is visible. For
   the spike it comes from a single locked counter row, so numbers become visible
   in commit order (a `bigserial` does not guarantee that). This serializes writes;
@@ -101,17 +109,33 @@ client → kernel service (Go, stateless)
 
 - Most Items never get a workflow. A workflow starts **lazily** when an Item
   enters a state that needs timers or waits.
-- **Relay** (`cmd/relay`): reads undelivered outbox rows, delivers each Item's
-  events **in item_seq order**, one at a time, using **Update-With-Start**
-  (workflow ID = item ID, conflict policy USE_EXISTING, update ID = `item:seq`).
-  Marks the row delivered once the update is accepted.
-- **Workflow** (`internal/workflow`): keeps `lastAppliedSeq`. Duplicate → accept
-  and ignore. Gap → reject so the relay retries from the lowest undelivered seq.
-  Carries `lastAppliedSeq` across continue-as-new. If the workflow had closed, a
-  new run reloads state from Postgres.
-- The workflow is a thin scheduler of timers and waits. It calls the same pure
-  transition function as the kernel; timer-driven transitions go back through the
-  kernel's write path (as an activity), so history stays in one place.
+- **Relay** (`cmd/relay`, single instance): reads undelivered outbox rows and
+  delivers each Item's events **in item_seq order**, one at a time, with update
+  ID = `item:seq` (a redelivery reuses it). It sends the event's shape only,
+  never field values.
+  - The Type decides how: one function, `lifecycle.NeedsWorkflow`, answers "does
+    this event enter a state with behavior?" (a timer today). Yes →
+    **Update-With-Start** (workflow ID = item ID, conflict policy USE_EXISTING).
+    No → a plain Update, which reaches a workflow only if one already runs.
+  - It marks the row delivered once the update has **completed**, not when it is
+    accepted: an accepted update can still fail.
+  - **Nothing listening**: a plain Update answered `NotFound`. The server gives
+    that answer both for a workflow that never existed and for one that has
+    completed. Either way the row is marked delivered.
+  - Each delivery is bounded at 10 s. A failing Item backs off; the others carry on.
+- **Workflow** (`internal/workflow`, run by `cmd/worker`): keeps
+  `lastAppliedSeq`. Every new run first loads the Item's state, `item_seq` and
+  a small timer table from Postgres, sets `lastAppliedSeq = item_seq`, and never
+  sees the Type itself. Duplicate (at or below `lastAppliedSeq`) → accept and
+  ignore. Gap → refused by the update's validator, so the relay retries from the
+  lowest undelivered seq and the refusal is not written to history. Continue-as-new
+  carries the loaded state. A run completes when the Item's state has no behavior.
+- The workflow is a thin scheduler of timers and waits. It uses pure functions
+  from `internal/lifecycle` (`TimerFor`); guards stay in the kernel. Timer-driven
+  transitions go back through the kernel's write path (as an activity) with
+  `expected_item_seq`, so history stays in one place and a stale timer cannot
+  make a wrong move. Stale, rejected and "Item not found" are final; any other
+  failure retries with backoff, without limit.
 
 ## Policy
 
@@ -125,6 +149,10 @@ client → kernel service (Go, stateless)
 - API in `internal/policy`: `Authorize(principal, action, item)`,
   `VisibleScopes(principal)`, `Project(principal, item) → item with hidden fields redacted`.
 - Policy data lives in Postgres; evaluation is in Go. No external authz service.
+- **Boundary.** `Project` applies to every path that reaches a principal: people,
+  agents, connectors, webhooks, search results. Internal infrastructure that
+  only receives event shapes without field values (relay → our Temporal) is not
+  a principal, so those payloads do not pass through `Project`.
 
 ## Agents (later in the spike)
 
@@ -139,7 +167,14 @@ client → kernel service (Go, stateless)
   - `correlation_id`: groups a whole chain
   - `hop`: depth in the chain
 
-  Build the columns in Step 2; callers fill them as they appear.
+  Build the columns in Step 2; callers fill them as they appear. Since Step 3,
+  write requests carry them (`agent_session`, `originating_hook`, `causation_id`,
+  `correlation_id`, `hop`) as a Go-only field, not yet in the API.
+
+  A timer's write is recorded as: `actor` = `system:timer`, `originating_hook` =
+  `timer:<type>@v<version>:<state>`, `causation_id` = the `item:seq` of the event
+  that entered the state, `correlation_id` inherited from that event, `hop` = that
+  event's hop + 1. Its idempotency key is `timer:<item>:<entered seq>:<expected seq>`.
 
 ## Schema (first cut)
 
@@ -189,6 +224,8 @@ message WriteResult { string item_id = 1; int64 commit_seq = 2; int64 item_seq =
 // Each RPC has its own response message, so it can grow without breaking
 // clients. The five write responses each wrap a WriteResult.
 // Every write request carries idempotency_key and principal (actor, on_behalf_of).
+// UpdateRequest and TransitionRequest take an optional expected_item_seq;
+// TransitionRequest also takes an optional fields patch.
 ```
 
 ## Spike build order
