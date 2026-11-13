@@ -51,15 +51,32 @@ client → kernel service (Go, stateless)
            BEGIN
              lock Item row (SELECT … FOR UPDATE)
              write Item row (item_seq + 1)
-             insert item_events (item_id, item_seq, commit_seq, actor, on_behalf_of, op, payload)
+             take next commit_seq (commit_counter row, locked)
+             insert item_events (item_id, item_seq, commit_seq, attribution…, op, payload)
+             insert item_event_values (field values for this event)
              insert outbox (item_id, item_seq)
-             store idempotency key → result
+             store idempotency (namespace, actor, key) → result
            COMMIT
          → returns { item_id, commit_seq, item_seq }
 ```
 
-- Same idempotency key again → return the stored result, write nothing.
-- `commit_seq` lets later reads/searches wait until the write is visible.
+- Same idempotency key again → return the stored result, write nothing. Keys
+  are scoped by `(namespace_id, actor, key)`, so two clients never collide.
+  A key reused with a different request → `ErrIdempotencyKeyReuse`.
+- `commit_seq` lets later reads/searches wait until the write is visible. For
+  the spike it comes from a single locked counter row, so numbers become visible
+  in commit order (a `bigserial` does not guarantee that). This serializes writes;
+  revisit after the spike (snapshot-xmin watermark).
+
+### Events and personal data
+
+- `item_events.payload` holds the operation's shape (type, state, field IDs,
+  links), never field values.
+- Field values for each event go in `item_event_values`, keyed by
+  `(item_id, item_seq)`. History, audit and replay read both tables.
+- To erase personal data, delete or redact rows in `item_event_values`; the event
+  log itself stays append-only and intact. Per-subject encryption
+  (crypto-shredding) can replace this later without changing the event shape.
 
 ## Durable behavior (Temporal)
 
@@ -94,7 +111,16 @@ client → kernel service (Go, stateless)
 
 - An agent is its own principal with a human sponsor.
 - Acting for a user: rights = user's rights ∩ agent's grant.
-- Every event records `actor` and `on_behalf_of`.
+- Every event records attribution:
+  - `actor`: whose permissions were checked (user, agent, or `hook:<id>@<version>`)
+  - `on_behalf_of`: the human at the root, if different
+  - `agent_session`: set when an agent acts
+  - `originating_hook`: set when a hook or connector caused the write
+  - `causation_id`: the event that caused this write
+  - `correlation_id`: groups a whole chain
+  - `hop`: depth in the chain
+
+  Build the columns in Step 2; callers fill them as they appear.
 
 ## Schema (first cut)
 
@@ -104,16 +130,28 @@ create table scopes       (id uuid primary key, parent_id uuid references scopes
 create table scope_readers(scope_id uuid references scopes, principal text, primary key (scope_id, principal));
 create table grants       (scope_id uuid references scopes, principal text, granted_by text,
                            created_at timestamptz not null default now(), primary key (scope_id, principal));
-create table items        (id uuid primary key, type_id text not null, type_version int not null,
+create table items        (id uuid primary key, namespace_id text not null default 'default',
+                           type_id text not null, type_version int not null,
                            container_id uuid references items, scope_id uuid references scopes,
                            state text not null, fields jsonb not null default '{}',
                            item_seq bigint not null default 0, updated_at timestamptz not null default now());
-create table item_events  (item_id uuid references items, item_seq bigint, commit_seq bigserial,
-                           actor text not null, on_behalf_of text, op text not null, payload jsonb,
+create table item_events  (item_id uuid references items, item_seq bigint, commit_seq bigint not null unique,
+                           actor text not null, on_behalf_of text, agent_session text,
+                           originating_hook text, causation_id text, correlation_id text,
+                           hop int not null default 0, op text not null, payload jsonb,
                            created_at timestamptz not null default now(), primary key (item_id, item_seq));
+create table item_event_values (item_id uuid, item_seq bigint, field_values jsonb not null,
+                           primary key (item_id, item_seq),
+                           foreign key (item_id, item_seq) references item_events);
+create table commit_counter (id boolean primary key default true check (id), last_seq bigint not null);
 create table outbox       (item_id uuid, item_seq bigint, delivered_at timestamptz,
                            primary key (item_id, item_seq));
-create table idempotency  (key text primary key, result jsonb not null, created_at timestamptz not null default now());
+create index outbox_pending on outbox (item_id, item_seq) where delivered_at is null;
+create index items_container on items (container_id);
+create table idempotency  (namespace_id text not null default 'default', actor text not null, key text not null,
+                           request_hash text not null, result jsonb not null,
+                           created_at timestamptz not null default now(),
+                           primary key (namespace_id, actor, key));
 ```
 
 ## API contract (first cut)
@@ -140,15 +178,23 @@ passes, however long that takes.
 | Step | Build | Done when |
 | --- | --- | --- |
 | 1 | Schema, `Create` and `Get`, idempotency keys | Same idempotency key twice → same item_id and commit_seq; exactly one event and one outbox row |
-| 2 | Load a Type from YAML; `Update` and `Transition` via the pure transition function; guards | Illegal transitions rejected with a reason; legal ones recorded |
+| 2 | First, the schema follow-ups from the Step 1 review (scoped idempotency keys, `namespace_id`, attribution columns, `item_event_values`, commit counter, indexes). Then load a Type from YAML; `Update` and `Transition` via the pure transition function; guards | Illegal transitions rejected with a reason; legal ones recorded; events carry attribution columns and values live in `item_event_values` |
 | 3 | Outbox relay with per-Item ordering; interpreter workflow started lazily with Update-With-Start; one durable timer | Killing the worker mid-timer still fires it; duplicates and gaps handled |
 | 4 | Scopes and `VisibleScopes`; Postgres full-text search with `min_seq`; one narrowed Item | A second user never sees the narrowed Item, even right after a change |
 | 5 | Type v2 while v1 Items run; measure actions, history bytes, write latency; write up | Both versions complete; numbers recorded in `docs/journal.md` |
+
+**Follow-up spike, Steps 6–7 (after Step 5):** holds and connectors. The
+plan is in the "Work kernel: Spike plan" doc. In short: Temporal activities
+run `on_enter`, `on_exit` and `on_complete` hooks and write their results back
+through the normal write path. A blocking check holds a transition until it
+allows, denies or corrects it. Write APIs take a bounded `wait`. The kernel
+makes no synchronous outside calls.
 
 **Go checkpoint, after Step 3:** if most time went into fighting the language
 rather than the design, stop and decide whether to rerun in Java.
 
 ## Out of scope for the spike
 
-Real UI, email intake, business-hours calendars, multi-tenancy, a dedicated
-search engine, SLA objects beyond one timer, approvals (stretch only).
+Real UI, email intake, business-hours calendars, multi-tenancy (the
+`namespace_id` column exists, with one default namespace), a dedicated search
+engine, SLA objects beyond one timer, approvals (stretch only).
