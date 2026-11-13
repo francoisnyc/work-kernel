@@ -47,15 +47,18 @@ or similar later.
 
 ```
 client → kernel service (Go, stateless)
-           validate schema + lifecycle + policy
+           check the request is well formed
            BEGIN
+             claim idempotency key (namespace, actor, key)
+               already used → return the stored result, write nothing
              lock Item row (SELECT … FOR UPDATE)
+             validate schema + lifecycle + policy against the locked row
              write Item row (item_seq + 1)
              take next commit_seq (commit_counter row, locked)
              insert item_events (item_id, item_seq, commit_seq, attribution…, op, payload)
              insert item_event_values (field values for this event)
              insert outbox (item_id, item_seq)
-             store idempotency (namespace, actor, key) → result
+             store the result under the idempotency key
            COMMIT
          → returns { item_id, commit_seq, item_seq }
 ```
@@ -63,6 +66,10 @@ client → kernel service (Go, stateless)
 - Same idempotency key again → return the stored result, write nothing. Keys
   are scoped by `(namespace_id, actor, key)`, so two clients never collide.
   A key reused with a different request → `ErrIdempotencyKeyReuse`.
+- Validation runs inside the transaction because it depends on the Item's
+  current state and fields, which are only reliable under the row lock.
+- A rejected write rolls back, so it leaves no event and does not use up its
+  key: the client can fix the Item and retry with the same key.
 - `commit_seq` lets later reads/searches wait until the write is visible. For
   the spike it comes from a single locked counter row, so numbers become visible
   in commit order (a `bigserial` does not guarantee that). This serializes writes;
@@ -158,15 +165,17 @@ create table idempotency  (namespace_id text not null default 'default', actor t
 
 ```protobuf
 service ItemService {
-  rpc Create(CreateRequest) returns (WriteResult);
-  rpc Update(UpdateRequest) returns (WriteResult);
-  rpc Transition(TransitionRequest) returns (WriteResult);
-  rpc Link(LinkRequest) returns (WriteResult);
-  rpc Archive(ArchiveRequest) returns (WriteResult);
-  rpc Get(GetRequest) returns (Item);
-  rpc Search(SearchRequest) returns (SearchResult); // accepts min_seq
+  rpc Create(CreateRequest) returns (CreateResponse);
+  rpc Update(UpdateRequest) returns (UpdateResponse);
+  rpc Transition(TransitionRequest) returns (TransitionResponse);
+  rpc Link(LinkRequest) returns (LinkResponse);
+  rpc Archive(ArchiveRequest) returns (ArchiveResponse);
+  rpc Get(GetRequest) returns (GetResponse);
+  rpc Search(SearchRequest) returns (SearchResponse); // accepts min_seq
 }
 message WriteResult { string item_id = 1; int64 commit_seq = 2; int64 item_seq = 3; }
+// Each RPC has its own response message, so it can grow without breaking
+// clients. The five write responses each wrap a WriteResult.
 // Every write request carries idempotency_key and principal (actor, on_behalf_of).
 ```
 
