@@ -1,0 +1,34 @@
+# The spike's one throwaway Type. A Type names code but never contains it.
+id: ticket
+version: 1
+initial_state: open
+
+fields:
+  - {id: f_title,      type: string}
+  - {id: f_priority,   type: int}
+  - {id: f_reporter,   type: string}
+  - {id: f_assignee,   type: string}
+  - {id: f_urgent,     type: bool}
+  - {id: f_resolution, type: enum, options: [fixed, wontfix, duplicate]}
+
+states:
+  - {id: open,        category: todo}
+  - {id: in_progress, category: active}
+  - {id: resolved,    category: done}
+  - {id: canceled,    category: canceled}
+
+transitions:
+  - from: open
+    to: in_progress
+    guard: f_assignee is set
+    allowed: [role:agent] # who may act; parsed now, enforced with policy in Step 4
+  - from: in_progress
+    to: open
+  - from: in_progress
+    to: resolved
+    required: [f_resolution]
+  - from: resolved
+    to: open
+    guard: f_resolution != "wontfix"
+  - from: open
+    to: canceled
