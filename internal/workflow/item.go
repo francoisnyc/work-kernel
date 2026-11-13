@@ -112,6 +112,13 @@ var activityOptions = workflow.ActivityOptions{
 // a timer). It runs as one logical thread; update handlers run interleaved
 // with it but never in parallel, so the shared variables need no locks.
 func ItemWorkflow(ctx workflow.Context, in Input) error {
+	return runItem(ctx, in, 0)
+}
+
+// runItem is ItemWorkflow with one knob for tests: closeDelay makes the run
+// pause between deciding to complete and returning, so a test can send an
+// event into that window. Production passes zero.
+func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 	ctx = workflow.WithActivityOptions(ctx, activityOptions)
 	log := workflow.GetLogger(ctx)
 
@@ -187,6 +194,16 @@ func ItemWorkflow(ctx workflow.Context, in Input) error {
 			// handled puts the Item back into a state with behavior.
 			if err := workflow.Await(ctx, handlersDone); err != nil {
 				return err
+			}
+			if closeDelay > 0 {
+				// workflow.Sleep is a durable timer, not a blocked thread;
+				// updates are still handled while it runs.
+				if err := workflow.Sleep(ctx, closeDelay); err != nil {
+					return err
+				}
+				if err := workflow.Await(ctx, handlersDone); err != nil {
+					return err
+				}
 			}
 			if _, hasTimer = s.Timers[s.State]; hasTimer {
 				continue

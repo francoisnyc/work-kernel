@@ -68,21 +68,27 @@ var alice = item.Principal{Actor: "user-alice"}
 
 // stack is one test's kernel, relay and worker, on a task queue of its own.
 type stack struct {
-	t         *testing.T
-	k         *kernel.Kernel
-	queue     string
-	worker    worker.Worker
-	stopRelay func()
+	t          *testing.T
+	k          *kernel.Kernel
+	queue      string
+	closeDelay time.Duration // see wf.WorkerOptions.CloseDelay; zero except in one test
+	worker     worker.Worker
+	stopRelay  func()
 }
 
 // newStack starts a worker and a relay. The tests share one outbox, so each
 // starts by marking whatever earlier tests left behind as delivered.
 func newStack(t *testing.T) *stack {
 	t.Helper()
+	return newStackWithCloseDelay(t, 0)
+}
+
+func newStackWithCloseDelay(t *testing.T, closeDelay time.Duration) *stack {
+	t.Helper()
 	if _, err := pool.Exec(serverCtx(t), `update outbox set delivered_at = now() where delivered_at is null`); err != nil {
 		t.Fatalf("clear outbox: %v", err)
 	}
-	s := &stack{t: t, k: kernel.New(pool), queue: "items-" + uuid.NewString()}
+	s := &stack{t: t, k: kernel.New(pool), queue: "items-" + uuid.NewString(), closeDelay: closeDelay}
 	s.startWorker()
 	s.startRelay()
 	t.Cleanup(func() {
@@ -94,7 +100,7 @@ func newStack(t *testing.T) *stack {
 
 func (s *stack) startWorker() {
 	s.t.Helper()
-	s.worker = wf.NewWorker(tc, s.queue, s.k)
+	s.worker = wf.NewWorker(tc, s.queue, s.k, wf.WorkerOptions{CloseDelay: s.closeDelay})
 	if err := s.worker.Start(); err != nil {
 		s.t.Fatalf("start worker: %v", err)
 	}
@@ -170,7 +176,13 @@ func (s *stack) state(id uuid.UUID) (state string, itemSeq int64) {
 	return it.State, it.ItemSeq
 }
 
-// eventually polls cond until it holds or the time is up.
+// These tests never sleep for a fixed time and then hope: a slow CI runner
+// would make that flaky. They wait with one of two helpers.
+
+const pollEvery = 100 * time.Millisecond
+
+// eventually polls cond until it holds, and fails the test if it does not
+// within the deadline. It returns as soon as cond holds.
 func eventually(t *testing.T, within time.Duration, what string, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(within)
@@ -178,8 +190,51 @@ func eventually(t *testing.T, within time.Duration, what string, cond func() boo
 		if time.Now().After(deadline) {
 			t.Fatalf("not within %v: %s", within, what)
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(pollEvery)
 	}
+}
+
+// staysFor polls cond for the whole duration and fails the test the moment
+// it stops holding. It is for negative checks: "nothing moves while ...".
+func staysFor(t *testing.T, d time.Duration, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(d)
+	for {
+		if !cond() {
+			t.Fatalf("did not stay true for %v: %s", d, what)
+		}
+		if time.Now().After(deadline) {
+			return
+		}
+		time.Sleep(pollEvery)
+	}
+}
+
+func (s *stack) isAt(id uuid.UUID, state string, itemSeq int64) func() bool {
+	return func() bool {
+		got, seq := s.state(id)
+		return got == state && seq == itemSeq
+	}
+}
+
+// activityFailures returns the error type of every failed FireTimer attempt
+// in the history of the Item's latest run, and whether all were non-retryable.
+func activityFailures(t *testing.T, id uuid.UUID) (types []string, allFinal bool) {
+	t.Helper()
+	allFinal = true
+	iter := tc.GetWorkflowHistory(serverCtx(t), id.String(), "", false, enumspb.HISTORY_EVENT_FILTER_TYPE_ALL_EVENT)
+	for iter.HasNext() {
+		ev, err := iter.Next()
+		if err != nil {
+			t.Fatalf("read history: %v", err)
+		}
+		if failed := ev.GetActivityTaskFailedEventAttributes(); failed != nil {
+			info := failed.GetFailure().GetApplicationFailureInfo()
+			types = append(types, info.GetType())
+			allFinal = allFinal && info.GetNonRetryable()
+		}
+	}
+	return types, allFinal
 }
 
 func (s *stack) waitState(id uuid.UUID, want string, within time.Duration) {
@@ -284,7 +339,6 @@ func TestE2E_WorkerStoppedMidTimer_RestartedBeforeItIsDue(t *testing.T) {
 	armed := time.Now()
 
 	s.stopWorker()
-	time.Sleep(500 * time.Millisecond)
 	s.startWorker()
 
 	s.waitState(id, "queued", 20*time.Second)
@@ -309,10 +363,8 @@ func TestE2E_WorkerStoppedMidTimer_RestartedAfterItWasDue(t *testing.T) {
 	s.waitRunning(id)
 
 	s.stopWorker()
-	time.Sleep(3 * time.Second) // the 2s timer comes due with no worker
-	if got, _ := s.state(id); got != "running" {
-		t.Fatalf("state = %q with the worker down, want running: who moved it?", got)
-	}
+	// The 2s timer comes due during these 3s, and with no worker nothing moves.
+	staysFor(t, 3*time.Second, "the job stays running while the worker is down", s.isAt(id, "running", 2))
 	s.startWorker()
 
 	s.waitState(id, "queued", 30*time.Second)
@@ -382,34 +434,33 @@ func TestE2E_ReenteringATimerState_StartsANewRun(t *testing.T) {
 	assertTimerWrote(t, id, 5, "running", 4)
 }
 
-// An event can reach the workflow just as it is finishing. Here the Item
-// leaves the timer state and re-enters it back to back, so the second event
-// arrives while the run is closing. Whether it is applied by that run or
-// starts a new one, it must not be lost: the timer it arms has to fire.
+// An event can reach the workflow just as it is finishing. To hit that
+// window every time, this test's worker makes the workflow pause for a while
+// between deciding to complete and returning (CloseDelay). The Item leaves
+// the timer state, and re-enters it inside that pause. The event must not be
+// lost: the closing run takes it and carries on, and the timer it arms fires.
 func TestE2E_EventWhileTheRunIsClosing_IsNotLost(t *testing.T) {
-	s := newStack(t)
-	const jobs = 5 // several, to give the race a chance to show
-	ids := make([]uuid.UUID, jobs)
-	for i := range ids {
-		ids[i] = s.createJob(nil) // 1
-		s.move(ids[i], "running") // 2
-	}
-	for _, id := range ids {
-		s.waitRunning(id)
-	}
-	for _, id := range ids {
-		s.move(id, "queued")  // 3: the run starts closing
-		s.move(id, "running") // 4: arrives right behind it
-	}
+	s := newStackWithCloseDelay(t, 5*time.Second)
+	id := s.createJob(nil) // 1
+	s.move(id, "running")  // 2
+	run := s.waitRunning(id)
+	s.waitDelivered(id)
 
-	for _, id := range ids {
-		s.waitState(id, "queued", 30*time.Second)
-		if _, seq := s.state(id); seq != 5 {
-			t.Errorf("item %s: item_seq = %d, want 5", id, seq)
-			continue
-		}
-		assertTimerWrote(t, id, 5, "running", 4)
+	s.move(id, "queued")  // 3: nothing left to wait for; the run starts closing
+	s.waitDelivered(id)   // the workflow has applied 3, so it is inside the pause now
+	s.move(id, "running") // 4: arrives while the run is closing
+
+	s.waitDelivered(id)
+	status, sameRun, _, _ := runStatus(t, id)
+	if status != enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING || sameRun != run {
+		t.Fatalf("workflow = %v, run %s; want run %s still running: the event should have reached the closing run",
+			status, sameRun, run)
 	}
+	s.waitState(id, "queued", 20*time.Second)
+	if _, seq := s.state(id); seq != 5 {
+		t.Fatalf("item_seq = %d, want 5", seq)
+	}
+	assertTimerWrote(t, id, 5, "running", 4)
 }
 
 // --- stale, with the real kernel ---
@@ -427,10 +478,15 @@ func TestE2E_StaleTimer_FiresAgainOnceTheWorkflowHasCaughtUp(t *testing.T) {
 
 	s.stopRelay()
 	s.setNote(id, "the workflow does not know this yet") // 3, undelivered
-	time.Sleep(3 * time.Second)                          // the timer fires and is told it is stale
-	if got, seq := s.state(id); got != "running" || seq != 3 {
-		t.Fatalf("with the relay down: state %q at item_seq %d, want running at 3", got, seq)
+	eventually(t, 20*time.Second, "the timer fired and was told it is stale", func() bool {
+		types, _ := activityFailures(t, id)
+		return len(types) > 0
+	})
+	if types, final := activityFailures(t, id); len(types) != 1 || types[0] != wf.ErrTypeStale || !final {
+		t.Fatalf("failed FireTimer attempts = %v (non-retryable %v), want one non-retryable %q", types, final, wf.ErrTypeStale)
 	}
+	// Stale wrote nothing, and without the missing event the workflow waits.
+	staysFor(t, 2*time.Second, "the job stays running at item_seq 3 while the relay is down", s.isAt(id, "running", 3))
 
 	s.startRelay()
 	s.waitState(id, "queued", 20*time.Second)
@@ -463,31 +519,17 @@ func TestE2E_KernelRejectsTheTimersMove_NoRetry(t *testing.T) {
 	s.move(id, "review")   // 2: 2s timer to published
 	s.waitRunning(id)
 
-	time.Sleep(5 * time.Second) // the timer fires; room for retries, if there were any
-	if got, seq := s.state(id); got != "review" || seq != 2 {
-		t.Errorf("state %q at item_seq %d, want review at 2: a rejected move writes nothing", got, seq)
-	}
+	eventually(t, 20*time.Second, "the timer fired and the kernel refused its move", func() bool {
+		types, _ := activityFailures(t, id)
+		return len(types) > 0
+	})
+	// Give retries time to show up, if there were any; nothing may change.
+	staysFor(t, 3*time.Second, "one final rejection, the job still in review at item_seq 2", func() bool {
+		types, final := activityFailures(t, id)
+		return len(types) == 1 && types[0] == wf.ErrTypeRejected && final && s.isAt(id, "review", 2)()
+	})
 	if status, _, _, _ := runStatus(t, id); status != enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING {
 		t.Errorf("workflow status = %v, want running", status)
-	}
-
-	// Count the attempts in the workflow's history.
-	attempts := 0
-	iter := tc.GetWorkflowHistory(serverCtx(t), id.String(), "", false, enumspb.HISTORY_EVENT_FILTER_TYPE_ALL_EVENT)
-	for iter.HasNext() {
-		ev, err := iter.Next()
-		if err != nil {
-			t.Fatalf("read history: %v", err)
-		}
-		if failed := ev.GetActivityTaskFailedEventAttributes(); failed != nil {
-			attempts++
-			if n := failed.GetFailure().GetApplicationFailureInfo(); n == nil || n.GetType() != wf.ErrTypeRejected || !n.GetNonRetryable() {
-				t.Errorf("activity failure = %v, want a non-retryable %q", failed.GetFailure(), wf.ErrTypeRejected)
-			}
-		}
-	}
-	if attempts != 1 {
-		t.Errorf("failed FireTimer activities in history = %d, want exactly 1", attempts)
 	}
 }
 

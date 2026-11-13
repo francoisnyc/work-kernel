@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/francoisnyc/work-kernel/internal/item"
 	"github.com/francoisnyc/work-kernel/internal/policy"
+	"github.com/francoisnyc/work-kernel/internal/typedef"
 )
 
 // Go reports failures as returned values, not exceptions. These "sentinel"
@@ -166,4 +168,53 @@ func (k *Kernel) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item.
 		return item.Item{}, fmt.Errorf("read item: %w", err)
 	}
 	return policy.Project(p, it), nil
+}
+
+// StateEntry says which state an Item is in and which event put it there.
+// It is what a workflow needs to pick up an Item mid-history. It holds state
+// names and opaque IDs only: no field values, so there is nothing for
+// policy.Project to redact.
+type StateEntry struct {
+	TypeID      string
+	TypeVersion int
+	State       string
+	ItemSeq     int64 // the Item's current item_seq
+
+	EnteredSeq    int64     // the event that entered State
+	EnteredAt     time.Time // when that event was written
+	CorrelationID string    // of that event; empty if not set
+	Hop           int       // of that event
+}
+
+// StateEntry reads an Item's state and the event that entered it, in one
+// statement, so the two always agree.
+func (k *Kernel) StateEntry(ctx context.Context, id uuid.UUID) (StateEntry, error) {
+	var se StateEntry
+	// Only create and transition events enter a state.
+	err := k.pool.QueryRow(ctx,
+		`select i.type_id, i.type_version, i.state, i.item_seq,
+		        e.item_seq, e.created_at, coalesce(e.correlation_id, ''), e.hop
+		 from items i
+		 join lateral (
+		     select item_seq, created_at, correlation_id, hop
+		     from item_events
+		     where item_id = i.id and op in ('create', 'transition')
+		     order by item_seq desc
+		     limit 1
+		 ) e on true
+		 where i.id = $1 and i.namespace_id = $2`, id, defaultNamespace,
+	).Scan(&se.TypeID, &se.TypeVersion, &se.State, &se.ItemSeq,
+		&se.EnteredSeq, &se.EnteredAt, &se.CorrelationID, &se.Hop)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return StateEntry{}, ErrNotFound
+	}
+	if err != nil {
+		return StateEntry{}, fmt.Errorf("read state entry: %w", err)
+	}
+	return se, nil
+}
+
+// Type returns a registered Type version.
+func (k *Kernel) Type(ctx context.Context, id string, version int) (*typedef.Type, error) {
+	return loadType(ctx, k.pool, id, version)
 }
