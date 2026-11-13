@@ -13,7 +13,9 @@ fields:
 
 states:
   - {id: open,        category: todo}
-  - {id: in_progress, category: active}
+  # Work left in_progress for 48 hours goes back to open. This timer is a
+  # spike stand-in: real SLAs become standalone objects later.
+  - {id: in_progress, category: active, timer: {after: 48h, to: open}}
   - {id: resolved,    category: done}
   - {id: canceled,    category: canceled}
 

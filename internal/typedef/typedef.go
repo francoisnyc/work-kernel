@@ -13,6 +13,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -54,6 +55,19 @@ type Field struct {
 type State struct {
 	ID       string `yaml:"id" json:"id"`
 	Category string `yaml:"category" json:"category"`
+	// Timer is nil for a state without one. A pointer field plays the role of
+	// an Optional here; omitempty leaves it out of the stored JSON when nil.
+	Timer *Timer `yaml:"timer" json:"timer,omitempty"`
+}
+
+// Timer moves an Item out of a state it has stayed in for too long. It is a
+// spike stand-in: real SLAs become standalone objects later.
+type Timer struct {
+	After string `yaml:"after" json:"after"` // as written, e.g. "4h" or "90s"
+	To    string `yaml:"to" json:"to"`       // the state to move to
+
+	// Duration is After in parsed form, filled when the Type is loaded.
+	Duration time.Duration `yaml:"-" json:"-"`
 }
 
 // Transition is one allowed move between two states.
@@ -227,6 +241,34 @@ func (t *Type) check() error {
 			return fail("transition %s: guard %q: %v", name, tr.Guard, err)
 		}
 		tr.Conditions = conds
+	}
+
+	// Timers come last: each must name a transition checked above.
+	for i := range t.States {
+		s := &t.States[i]
+		if s.Timer == nil {
+			continue
+		}
+		if s.Timer.After == "" {
+			return fail("state %s: timer needs `after`, such as 4h", s.ID)
+		}
+		d, err := time.ParseDuration(s.Timer.After)
+		if err != nil {
+			return fail("state %s: timer `after`: %v", s.ID, err)
+		}
+		if d <= 0 {
+			return fail("state %s: timer `after` must be more than zero", s.ID)
+		}
+		if s.Timer.To == "" {
+			return fail("state %s: timer needs `to`, the state to move to", s.ID)
+		}
+		// A timer may only make a move the Type already allows from this
+		// state, so it can never do what a person could not.
+		if _, ok := t.Transition(s.ID, s.Timer.To); !ok {
+			return fail("state %s: timer moves to %q, but there is no transition %s -> %s",
+				s.ID, s.Timer.To, s.ID, s.Timer.To)
+		}
+		s.Timer.Duration = d
 	}
 	return nil
 }
