@@ -36,6 +36,10 @@ func (a *Activities) LoadItem(ctx context.Context, itemID string) (Snapshot, err
 		return Snapshot{}, fmt.Errorf("item id %q: %w", itemID, err)
 	}
 	se, err := a.Kernel.StateEntry(ctx, id)
+	if errors.Is(err, kernel.ErrNotFound) {
+		// Retrying cannot bring the Item back; tell the workflow instead.
+		return Snapshot{}, temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeNotFound, err)
+	}
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -60,8 +64,8 @@ func (a *Activities) LoadItem(ctx context.Context, itemID string) (Snapshot, err
 // FireTimer makes a timer's move through the kernel's normal write path, so
 // guards, history and the outbox all apply as for a person's transition.
 //
-// The kernel's two kinds of "no" are final and returned as non-retryable
-// errors, which the workflow tells apart by type. Anything else (the
+// The kernel's final answers (stale, rejected, not found) are returned as
+// non-retryable errors, which the workflow tells apart by type. Anything else (the
 // database is away, a timeout) is returned as is, and Temporal retries it.
 func (a *Activities) FireTimer(ctx context.Context, in FireTimerInput) error {
 	id, err := uuid.Parse(in.ItemID)
@@ -82,6 +86,8 @@ func (a *Activities) FireTimer(ctx context.Context, in FireTimerInput) error {
 		},
 	})
 	switch {
+	case errors.Is(err, kernel.ErrNotFound):
+		return temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeNotFound, err)
 	case errors.Is(err, kernel.ErrStale):
 		return temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeStale, err)
 	case errors.Is(err, kernel.ErrRejected):

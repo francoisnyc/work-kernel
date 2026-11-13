@@ -18,9 +18,11 @@ const (
 	ActivityLoadItem  = "LoadItem"  // reads a Snapshot from Postgres
 	ActivityFireTimer = "FireTimer" // asks the kernel to make a timer's move
 
-	// Error types by which FireTimer reports the kernel's two kinds of "no".
+	// Error types by which the activities report the kernel's final answers.
+	// All three are non-retryable.
 	ErrTypeStale    = "Stale"    // the Item moved on; the workflow is behind
 	ErrTypeRejected = "Rejected" // the Type's rules refuse the move
+	ErrTypeNotFound = "NotFound" // the Item does not exist (any more)
 )
 
 // TimerSpec is one state's timer, reduced to what the workflow needs.
@@ -124,7 +126,8 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 
 	var (
 		s       Snapshot
-		ready   bool // s is loaded
+		ready   bool // s is loaded, or the Item turned out to be gone
+		gone    bool // the Item no longer exists
 		changes int  // counts applied events; the main loop waits on it
 		entries int  // counts state entries among them
 	)
@@ -134,8 +137,8 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 		if err := workflow.Await(ctx, func() bool { return ready }); err != nil {
 			return ApplyResult{}, err
 		}
-		if ev.Seq <= s.LastAppliedSeq {
-			return ApplyResult{}, nil // duplicate, or older than what was loaded
+		if gone || ev.Seq <= s.LastAppliedSeq {
+			return ApplyResult{}, nil // no Item, a duplicate, or older than what was loaded
 		}
 		if ev.Seq > s.LastAppliedSeq+1 {
 			// Only reachable for an update accepted before the load finished;
@@ -157,7 +160,7 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 	// written to history, so a relay retrying a gap does not grow it. It may
 	// not wait, so before the load it lets everything through to the handler.
 	validate := func(ctx workflow.Context, ev Event) error {
-		if ready && ev.Seq > s.LastAppliedSeq+1 {
+		if ready && !gone && ev.Seq > s.LastAppliedSeq+1 {
 			return gapError(ev.Seq, s.LastAppliedSeq)
 		}
 		return nil
@@ -171,7 +174,15 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 	if in.Carried != nil {
 		s = *in.Carried
 	} else if err := workflow.ExecuteActivity(ctx, ActivityLoadItem, in.ItemID).Get(ctx, &s); err != nil {
-		return err
+		var appErr *temporal.ApplicationError
+		if !errors.As(err, &appErr) || appErr.Type() != ErrTypeNotFound {
+			return err
+		}
+		// The Item is gone: there is nothing to follow. s stays empty, so
+		// it has no timers and the loop below completes the run. A waiting
+		// update is answered as "not applied", so the relay marks it delivered.
+		log.Info("the item no longer exists; nothing to wait for", "item", in.ItemID)
+		gone = true
 	}
 	ready = true
 
@@ -257,7 +268,8 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 				return err
 			}
 			continue
-		case errors.As(err, &appErr) && appErr.Type() == ErrTypeRejected:
+		case errors.As(err, &appErr) && (appErr.Type() == ErrTypeRejected || appErr.Type() == ErrTypeNotFound):
+			// Final either way: the rules say no, or the Item is gone.
 			log.Info("the kernel refused a timer's move",
 				"item", in.ItemID, "from", req.FromState, "to", req.ToState, "reason", appErr.Message())
 		default:

@@ -72,6 +72,7 @@ type harness struct {
 	// make sure an update is accepted while the load is still running.
 	loadGate chan struct{}
 	loadDone bool
+	loadErr  error // if set, LoadItem fails with it
 }
 
 func newHarness(t *testing.T, loaded wf.Snapshot) *harness {
@@ -92,6 +93,9 @@ func newHarness(t *testing.T, loaded wf.Snapshot) *harness {
 		defer h.mu.Unlock()
 		h.loads++
 		h.loadDone = true
+		if h.loadErr != nil {
+			return wf.Snapshot{}, h.loadErr
+		}
 		if id != itemID {
 			return wf.Snapshot{}, fmt.Errorf("LoadItem called for %q", id)
 		}
@@ -183,6 +187,10 @@ func (h *harness) wantApplied(name string, out *outcome, want bool) {
 
 func stale() error {
 	return temporal.NewNonRetryableApplicationError("item moved on", wf.ErrTypeStale, nil)
+}
+
+func notFound() error {
+	return temporal.NewNonRetryableApplicationError("item not found", wf.ErrTypeNotFound, nil)
 }
 
 func rejected() error {
@@ -370,6 +378,43 @@ func TestItemWorkflow_StaleThenAStateChange_DoesNotFireAgain(t *testing.T) {
 	if len(h.fires) != 1 {
 		t.Errorf("FireTimer calls = %d, want 1", len(h.fires))
 	}
+}
+
+// --- the Item is gone ---
+
+// The Item no longer exists when the run starts. There is nothing to follow,
+// so the load is not retried and the workflow completes. The event that
+// started the run is answered, not applied, so the relay can move on.
+func TestItemWorkflow_ItemGoneAtLoad_Completes(t *testing.T) {
+	h := newHarness(t, wf.Snapshot{})
+	h.loadErr = notFound()
+	trigger := h.deliver(0, transitionEvent(2, "draft", "review"))
+	h.runToCompletion()
+
+	h.wantApplied("the event that started the run", trigger, false)
+	if h.loads != 1 {
+		t.Errorf("LoadItem calls = %d, want 1: not found is not retried", h.loads)
+	}
+	if len(h.fires) != 0 {
+		t.Errorf("FireTimer calls = %+v, want none", h.fires)
+	}
+	if now := h.env.Now(); !now.Equal(t0) {
+		t.Errorf("workflow ended at %v, want at the start", now)
+	}
+}
+
+// The Item disappears while its timer runs. The timer's write finds nothing;
+// like a rejection, that is final: no retry, and the workflow does not fail.
+func TestItemWorkflow_ItemGoneWhenTheTimerFires_IsNotRetried(t *testing.T) {
+	h := newHarness(t, snapshot(t, "review", 5, 5, t0))
+	h.fireErrs = []error{notFound()}
+	later := h.deliver(9*time.Hour, transitionEvent(6, "review", "published"))
+	h.runToCompletion()
+
+	if len(h.fires) != 1 {
+		t.Errorf("FireTimer calls = %d, want 1: not found is not retried", len(h.fires))
+	}
+	h.wantApplied("later transition", later, true)
 }
 
 // --- duplicates and gaps ---
