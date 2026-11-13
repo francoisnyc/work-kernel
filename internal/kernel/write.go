@@ -113,6 +113,31 @@ func lockItem(ctx context.Context, tx pgx.Tx, id uuid.UUID) (lockedItem, error) 
 	return it, nil
 }
 
+// checkAttribution refuses malformed attribution before any work is done.
+func checkAttribution(a item.Attribution) error {
+	if a.Hop < 0 {
+		return fmt.Errorf("%w: hop cannot be negative", ErrInvalid)
+	}
+	return nil
+}
+
+// checkOptions validates the optional parts shared by Update and Transition.
+func checkOptions(expectedItemSeq int64, a item.Attribution) error {
+	if expectedItemSeq < 0 {
+		return fmt.Errorf("%w: expected item_seq cannot be negative", ErrInvalid)
+	}
+	return checkAttribution(a)
+}
+
+// checkExpectedSeq is the if-match. It runs under the row lock, so the
+// item_seq it compares cannot change before the write. Zero means "no check".
+func checkExpectedSeq(it lockedItem, expected int64) error {
+	if expected != 0 && expected != it.ItemSeq {
+		return fmt.Errorf("%w: expected item_seq %d, but the Item is at %d", ErrStale, expected, it.ItemSeq)
+	}
+	return nil
+}
+
 // appendEvent records one accepted operation: it takes the next commit_seq,
 // then inserts the event, the values the event set, and the outbox row. The
 // caller has already written the Item row at itemSeq.
@@ -120,7 +145,7 @@ func lockItem(ctx context.Context, tx pgx.Tx, id uuid.UUID) (lockedItem, error) 
 // payload holds the operation's shape (states, field IDs) and never a field
 // value; values go to item_event_values so they can be erased later.
 func appendEvent(ctx context.Context, tx pgx.Tx, id uuid.UUID, itemSeq int64, p item.Principal,
-	op string, payload map[string]any, values map[string]any) (WriteResult, error) {
+	a item.Attribution, op string, payload map[string]any, values map[string]any) (WriteResult, error) {
 
 	// The update locks the single counter row until the transaction ends, so
 	// writes commit one at a time and commit_seq values become visible in order.
@@ -131,12 +156,17 @@ func appendEvent(ctx context.Context, tx pgx.Tx, id uuid.UUID, itemSeq int64, p 
 		return WriteResult{}, fmt.Errorf("take commit_seq: %w", err)
 	}
 
-	// The attribution columns (agent_session, causation_id, ...) keep their
-	// defaults until agents and hooks exist to fill them.
+	// nullif stores an empty Go string as null: "not set".
 	_, err = tx.Exec(ctx,
-		`insert into item_events (item_id, item_seq, commit_seq, actor, on_behalf_of, op, payload)
-		 values ($1, $2, $3, $4, nullif($5, ''), $6, $7)`,
-		id, itemSeq, commitSeq, p.Actor, p.OnBehalfOf, op, payload)
+		`insert into item_events (item_id, item_seq, commit_seq, actor, on_behalf_of,
+		                          agent_session, originating_hook, causation_id, correlation_id, hop,
+		                          op, payload)
+		 values ($1, $2, $3, $4, nullif($5, ''),
+		         nullif($6, ''), nullif($7, ''), nullif($8, ''), nullif($9, ''), $10,
+		         $11, $12)`,
+		id, itemSeq, commitSeq, p.Actor, p.OnBehalfOf,
+		a.AgentSession, a.OriginatingHook, a.CausationID, a.CorrelationID, a.Hop,
+		op, payload)
 	if err != nil {
 		return WriteResult{}, fmt.Errorf("insert event: %w", err)
 	}
@@ -156,6 +186,29 @@ func appendEvent(ctx context.Context, tx pgx.Tx, id uuid.UUID, itemSeq int64, p 
 		return WriteResult{}, fmt.Errorf("insert outbox: %w", err)
 	}
 	return WriteResult{ItemID: id, CommitSeq: commitSeq, ItemSeq: itemSeq}, nil
+}
+
+// applyPatch applies a field patch to an Item's current fields without
+// modifying either map. It returns the fields after the patch, the values the
+// patch set, and the fields it cleared (a nil value in the patch clears).
+// Go functions can return several values; there is no need for a result class.
+func applyPatch(current, patch map[string]any) (merged, set, cleared map[string]any) {
+	merged = maps.Clone(current)
+	if merged == nil {
+		merged = map[string]any{}
+	}
+	set = map[string]any{}
+	cleared = map[string]any{}
+	for id, v := range patch {
+		if v == nil {
+			delete(merged, id)
+			cleared[id] = nil
+		} else {
+			merged[id] = v
+			set[id] = v
+		}
+	}
+	return merged, set, cleared
 }
 
 // sortedKeys returns the map's keys in order. Go maps iterate in random

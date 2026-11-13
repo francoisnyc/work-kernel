@@ -13,6 +13,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -28,8 +29,17 @@ const (
 	Enum   FieldType = "enum"
 )
 
-// categories are the fixed state categories from the design.
-var categories = []string{"triage", "backlog", "todo", "active", "waiting", "done", "canceled"}
+// categories are the fixed state categories from the design. "none" means
+// "not work": views of work leave it out, so a chat message never shows up as
+// active or done work.
+var categories = []string{"triage", "backlog", "todo", "active", "waiting", "done", "canceled", "none"}
+
+// A Type that declares no states has no lifecycle. It gets this one implicit
+// state, so every Item still has a state and nothing else needs a special case.
+const (
+	ImplicitState         = "default"
+	ImplicitStateCategory = "none"
+)
 
 // The struct tags (the text in backquotes) tell the YAML and JSON libraries
 // which key maps to which field, like Jackson annotations.
@@ -45,6 +55,19 @@ type Field struct {
 type State struct {
 	ID       string `yaml:"id" json:"id"`
 	Category string `yaml:"category" json:"category"`
+	// Timer is nil for a state without one. A pointer field plays the role of
+	// an Optional here; omitempty leaves it out of the stored JSON when nil.
+	Timer *Timer `yaml:"timer" json:"timer,omitempty"`
+}
+
+// Timer moves an Item out of a state it has stayed in for too long. It is a
+// spike stand-in: real SLAs become standalone objects later.
+type Timer struct {
+	After string `yaml:"after" json:"after"` // as written, e.g. "4h" or "90s"
+	To    string `yaml:"to" json:"to"`       // the state to move to
+
+	// Duration is After in parsed form, filled when the Type is loaded.
+	Duration time.Duration `yaml:"-" json:"-"`
 }
 
 // Transition is one allowed move between two states.
@@ -129,7 +152,8 @@ func (t *Type) Transition(from, to string) (Transition, bool) {
 	return Transition{}, false
 }
 
-// check validates the definition and parses every guard.
+// check validates the definition, parses every guard, and gives a Type
+// without states its one implicit state.
 func (t *Type) check() error {
 	if t.ID == "" {
 		return errors.New("typedef: id is required")
@@ -166,7 +190,15 @@ func (t *Type) check() error {
 	}
 
 	if len(t.States) == 0 {
-		return fail("at least one state is required")
+		// No lifecycle: naming an initial state or a transition is a mistake.
+		if t.InitialState != "" {
+			return fail("initial_state %q is set but the Type declares no states", t.InitialState)
+		}
+		if len(t.Transitions) > 0 {
+			return fail("transitions are declared but the Type declares no states")
+		}
+		t.States = []State{{ID: ImplicitState, Category: ImplicitStateCategory}}
+		t.InitialState = ImplicitState
 	}
 	seen = map[string]bool{}
 	for _, s := range t.States {
@@ -209,6 +241,34 @@ func (t *Type) check() error {
 			return fail("transition %s: guard %q: %v", name, tr.Guard, err)
 		}
 		tr.Conditions = conds
+	}
+
+	// Timers come last: each must name a transition checked above.
+	for i := range t.States {
+		s := &t.States[i]
+		if s.Timer == nil {
+			continue
+		}
+		if s.Timer.After == "" {
+			return fail("state %s: timer needs `after`, such as 4h", s.ID)
+		}
+		d, err := time.ParseDuration(s.Timer.After)
+		if err != nil {
+			return fail("state %s: timer `after`: %v", s.ID, err)
+		}
+		if d <= 0 {
+			return fail("state %s: timer `after` must be more than zero", s.ID)
+		}
+		if s.Timer.To == "" {
+			return fail("state %s: timer needs `to`, the state to move to", s.ID)
+		}
+		// A timer may only make a move the Type already allows from this
+		// state, so it can never do what a person could not.
+		if _, ok := t.Transition(s.ID, s.Timer.To); !ok {
+			return fail("state %s: timer moves to %q, but there is no transition %s -> %s",
+				s.ID, s.Timer.To, s.ID, s.Timer.To)
+		}
+		s.Timer.Duration = d
 	}
 	return nil
 }

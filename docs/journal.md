@@ -19,6 +19,23 @@ Ideas noted during the spike, not built yet.
   immutable, so it is safe. Wait for Step 5's numbers. (PR #5 review)
 - When guards need more than `is set` / `==` / `!=`, switch to `cel-go` rather
   than growing the spike's parser. (PR #5 review)
+- A Type with no behavior at all (no state needs a workflow) should write no
+  outbox rows in the first place, kernel side. Needed for Step 5's burst test;
+  until then the relay marks such rows delivered. (Step 3 Phase A)
+- When attribution is exposed in the API, only trusted internal principals may
+  set `originating_hook`, `causation_id` and `hop`. A public caller may pass
+  `correlation_id` (a trace) only, and only as a claim. Today attribution is a
+  Go-only request field. (Step 3)
+- The ticket's one timer (48h in `in_progress`, back to `open`) is a stand-in.
+  The real first-response SLA comes later, with standalone SLA objects. (Step 3)
+- The relay delivers one Item at a time. Deliver to several Items in parallel,
+  with a bound, keeping each Item's own order. (PR #6 review)
+- Every event costs one Temporal call, even when nothing listens, until the
+  kernel-side outbox skip above exists (Step 5). (PR #6 review)
+- The relay polls every ~200 ms. Use `LISTEN/NOTIFY` to wake it instead of
+  waiting for the next poll. (Step 3 Phase A)
+- The relay is a single instance. To run several, claim an Item's pending rows
+  with `FOR UPDATE SKIP LOCKED`. (Step 3 Phase A)
 
 ## 2026-11-12 — Step 1 (finished)
 
@@ -82,3 +99,52 @@ Fold two follow-ups from the PR #5 review into that Phase A:
   under one lock, as one event (values in `item_event_values`, `from`/`to` in the payload).
 - A Type without a lifecycle gets one implicit state (rule added by PR #4);
   `typedef` refuses a Type with no states today.
+
+## 2026-11-13 — Step 3 (finished)
+
+**Built:** two PR #5 follow-ups (`Fields` patch on `Transition`; implicit state `default`
+in a new category `none`), then Step 3: `expected_item_seq` + `ErrStale`, attribution on
+write requests, state timers, `lifecycle.TimerFor` / `NeedsWorkflow`, the Item workflow,
+the relay with its Temporal adapter, `cmd/worker`, `cmd/relay`. Both "done when" cases
+pass on a real dev server (worker restarted before, and after, the timer was due).
+
+**Decisions:** every new run loads state from Postgres and ignores events at or below the
+loaded `item_seq`; the workflow gets a timer table, never the Type; gaps are refused by
+the update validator; the relay marks a row only when the update *completed*; the timer
+counts from the entering event's `created_at`; timer key = `timer:<item>:<entered>:<expected>`.
+
+**Surprises:** the pinned server answers `NotFound` for an Update to a completed workflow
+as well as a missing one, so "nothing listening" is one check. A validator cannot wait, so
+before the load it must let updates through and the handler judges them. `reflect.DeepEqual`
+on `time.Time` fails for equal instants. Temporal's test environment skips time and made
+14 of the workflow tests run in milliseconds.
+
+**Numbers:** the end-to-end tests take ~28 s (real 2 s timers); the rest of the suite ~10 s.
+
+**Open questions and risks:**
+- `design.md` still says the relay marks on "accepted", that a new run after a *closed*
+  workflow reloads (now every run does), and lists no `expected_item_seq`. Update it?
+- Event shapes sent to workflows hold no field values but do not pass through
+  `policy.Project`; the rule says "no exceptions". Decide in Step 4.
+- `LoadItem` and unexpected kernel errors retry forever, per the retry policy; a deleted
+  Item would retry without end. Nothing registers `types/*.yaml` at startup yet.
+
+**After the PR #6 review:** `design.md` now matches what was built and states the policy
+boundary (event shapes to our own Temporal are not a principal). A missing Item is final
+for both activities: the load completes the workflow, the timer's write is not retried.
+
+**Next session:** Step 4, Phase A — scopes, `VisibleScopes`, full-text search with `min_seq`.
+
+### Go checkpoint (design.md asks for this after Step 3)
+
+- **Language vs design:** roughly 10% language, 90% design. These are estimates from the
+  session, not measurements. Nearly all the back-and-forth was about Temporal semantics
+  and the write path (stale vs rejected, where gaps are refused, what a run may know).
+- **What was hard in Go:** little. `DeepEqual` on times cost one test round; two packages
+  both named `workflow` need an import alias; a method cannot be passed to the test
+  environment as a mock without `testify`, so activities are registered by name. Errors
+  as values fit this design well: `ErrStale` vs `ErrRejected` is one `errors.Is` each.
+- **Recommendation:** continue in Go. The Temporal Go SDK covered everything needed
+  (Update-With-Start, validators, a time-skipping test environment), and nothing in
+  Steps 1–3 was fought for because of the language. Caveat: this judges the code I wrote;
+  how readable it is to you, coming from Java, is the half only you can assess.

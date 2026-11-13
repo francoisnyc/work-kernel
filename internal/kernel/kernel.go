@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/francoisnyc/work-kernel/internal/item"
 	"github.com/francoisnyc/work-kernel/internal/policy"
+	"github.com/francoisnyc/work-kernel/internal/typedef"
 )
 
 // Go reports failures as returned values, not exceptions. These "sentinel"
@@ -31,6 +33,10 @@ var (
 	// it: an unknown or mistyped field, or an illegal transition. The error
 	// text carries the reason.
 	ErrRejected = errors.New("kernel: rejected")
+	// ErrStale means the request named an expected item_seq and the Item has
+	// moved since. Unlike ErrRejected, the write may well be fine: the caller
+	// should re-read the Item and try again.
+	ErrStale = errors.New("kernel: stale")
 	// ErrIdempotencyKeyReuse means the key was already used with a different request.
 	ErrIdempotencyKeyReuse = errors.New("kernel: idempotency key reused with a different request")
 )
@@ -48,6 +54,7 @@ type CreateRequest struct {
 	State          string         // optional; if set it must be the Type's initial state
 	Fields         map[string]any // keyed by stable field ID
 	ContainerID    *uuid.UUID
+	Attribution    item.Attribution // optional; what caused this write
 }
 
 // WriteResult is returned by every write.
@@ -74,6 +81,9 @@ func (k *Kernel) Create(ctx context.Context, req CreateRequest) (WriteResult, er
 		// %w wraps ErrInvalid, so callers can still match it with errors.Is,
 		// like an exception with a cause.
 		return WriteResult{}, fmt.Errorf("%w: idempotency key, actor and type are required", ErrInvalid)
+	}
+	if err := checkAttribution(req.Attribution); err != nil {
+		return WriteResult{}, err
 	}
 	hash, err := requestHash("create", req)
 	if err != nil {
@@ -126,7 +136,7 @@ func (k *Kernel) Create(ctx context.Context, req CreateRequest) (WriteResult, er
 		if req.ContainerID != nil {
 			payload["container_id"] = req.ContainerID
 		}
-		return appendEvent(ctx, tx, id, itemSeq, req.Principal, "create", payload, fields)
+		return appendEvent(ctx, tx, id, itemSeq, req.Principal, req.Attribution, "create", payload, fields)
 	})
 }
 
@@ -149,7 +159,7 @@ func (k *Kernel) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item.
 	it := item.Item{ID: id}
 	err := k.pool.QueryRow(ctx,
 		`select type_id, type_version, container_id, scope_id, state, fields, item_seq
-		 from items where id = $1`, id,
+		 from items where id = $1 and namespace_id = $2`, id, defaultNamespace,
 	).Scan(&it.TypeID, &it.TypeVersion, &it.ContainerID, &it.ScopeID, &it.State, &it.Fields, &it.ItemSeq)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return item.Item{}, ErrNotFound
@@ -158,4 +168,53 @@ func (k *Kernel) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item.
 		return item.Item{}, fmt.Errorf("read item: %w", err)
 	}
 	return policy.Project(p, it), nil
+}
+
+// StateEntry says which state an Item is in and which event put it there.
+// It is what a workflow needs to pick up an Item mid-history. It holds state
+// names and opaque IDs only: no field values, so there is nothing for
+// policy.Project to redact.
+type StateEntry struct {
+	TypeID      string
+	TypeVersion int
+	State       string
+	ItemSeq     int64 // the Item's current item_seq
+
+	EnteredSeq    int64     // the event that entered State
+	EnteredAt     time.Time // when that event was written
+	CorrelationID string    // of that event; empty if not set
+	Hop           int       // of that event
+}
+
+// StateEntry reads an Item's state and the event that entered it, in one
+// statement, so the two always agree.
+func (k *Kernel) StateEntry(ctx context.Context, id uuid.UUID) (StateEntry, error) {
+	var se StateEntry
+	// Only create and transition events enter a state.
+	err := k.pool.QueryRow(ctx,
+		`select i.type_id, i.type_version, i.state, i.item_seq,
+		        e.item_seq, e.created_at, coalesce(e.correlation_id, ''), e.hop
+		 from items i
+		 join lateral (
+		     select item_seq, created_at, correlation_id, hop
+		     from item_events
+		     where item_id = i.id and op in ('create', 'transition')
+		     order by item_seq desc
+		     limit 1
+		 ) e on true
+		 where i.id = $1 and i.namespace_id = $2`, id, defaultNamespace,
+	).Scan(&se.TypeID, &se.TypeVersion, &se.State, &se.ItemSeq,
+		&se.EnteredSeq, &se.EnteredAt, &se.CorrelationID, &se.Hop)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return StateEntry{}, ErrNotFound
+	}
+	if err != nil {
+		return StateEntry{}, fmt.Errorf("read state entry: %w", err)
+	}
+	return se, nil
+}
+
+// Type returns a registered Type version.
+func (k *Kernel) Type(ctx context.Context, id string, version int) (*typedef.Type, error) {
+	return loadType(ctx, k.pool, id, version)
 }
