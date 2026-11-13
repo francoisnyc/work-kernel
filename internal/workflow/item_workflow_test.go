@@ -67,6 +67,11 @@ type harness struct {
 	loads    int
 	fires    []fired
 	fireErrs []error // returned by successive FireTimer calls; nil when used up
+
+	// loadGate, if set, holds LoadItem back until it is closed, so a test can
+	// make sure an update is accepted while the load is still running.
+	loadGate chan struct{}
+	loadDone bool
 }
 
 func newHarness(t *testing.T, loaded wf.Snapshot) *harness {
@@ -77,9 +82,16 @@ func newHarness(t *testing.T, loaded wf.Snapshot) *harness {
 	h.env.RegisterWorkflowWithOptions(wf.ItemWorkflow, sdk.RegisterOptions{Name: wf.Name})
 
 	h.env.RegisterActivityWithOptions(func(ctx context.Context, id string) (wf.Snapshot, error) {
+		if h.loadGate != nil {
+			select {
+			case <-h.loadGate:
+			case <-time.After(5 * time.Second): // real time; the test then fails on its own checks
+			}
+		}
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		h.loads++
+		h.loadDone = true
 		if id != itemID {
 			return wf.Snapshot{}, fmt.Errorf("LoadItem called for %q", id)
 		}
@@ -102,10 +114,11 @@ func newHarness(t *testing.T, loaded wf.Snapshot) *harness {
 
 // outcome is how one delivered event ended.
 type outcome struct {
-	rejected error // refused by the validator: never ran, never entered history
-	done     bool  // the handler ran to its end
-	applied  bool
-	err      error
+	acceptedBeforeLoad bool  // the validator let it in while LoadItem was still running
+	rejected           error // refused by the validator: never ran, never entered history
+	done               bool  // the handler ran to its end
+	applied            bool
+	err                error
 }
 
 // deliver sends one event to the workflow `after` the start, as the relay
@@ -119,6 +132,11 @@ func (h *harness) deliver(after time.Duration, ev wf.Event) *outcome {
 		// itself, and these tests are about the workflow's own guard.
 		id := fmt.Sprintf("%s:%d@%s", itemID, ev.Seq, after)
 		h.env.UpdateWorkflow(wf.UpdateApply, id, &testsuite.TestUpdateCallback{
+			OnAccept: func() {
+				h.mu.Lock()
+				out.acceptedBeforeLoad = !h.loadDone
+				h.mu.Unlock()
+			},
 			OnReject: func(err error) { out.rejected = err },
 			OnComplete: func(res any, err error) {
 				out.done, out.err = true, err
@@ -182,18 +200,23 @@ func TestItemWorkflow_TimerFires_OnceWithTheRightRequest(t *testing.T) {
 	back := h.deliver(3*time.Hour+time.Minute, transitionEvent(6, "review", "draft")) // the timer's own write
 	h.runToCompletion()
 
-	want := []fired{{
-		At: t0.Add(3 * time.Hour),
-		In: wf.FireTimerInput{
-			ItemID: itemID, TypeID: "doc", TypeVersion: 1,
-			FromState: "review", ToState: "draft",
-			ExpectedItemSeq: 5, EnteredSeq: 5,
-			CorrelationID: "corr-1", Hop: 3, // one deeper than the event that armed it
-			IdempotencyKey: "timer:" + itemID + ":5:5", // item : entered seq : expected seq
-		},
-	}}
-	if !reflect.DeepEqual(h.fires, want) {
-		t.Errorf("FireTimer calls = %+v\nwant %+v", h.fires, want)
+	want := wf.FireTimerInput{
+		ItemID: itemID, TypeID: "doc", TypeVersion: 1,
+		FromState: "review", ToState: "draft",
+		ExpectedItemSeq: 5, EnteredSeq: 5,
+		CorrelationID: "corr-1", Hop: 3, // one deeper than the event that armed it
+		IdempotencyKey: "timer:" + itemID + ":5:5", // item : entered seq : expected seq
+	}
+	if len(h.fires) != 1 {
+		t.Fatalf("FireTimer calls = %+v, want exactly one", h.fires)
+	}
+	// Times are compared with Equal: two time.Time values for the same
+	// instant can differ in how they store the zone, which DeepEqual sees.
+	if at := h.fires[0].At; !at.Equal(t0.Add(3 * time.Hour)) {
+		t.Errorf("FireTimer called at %v, want %v", at, t0.Add(3*time.Hour))
+	}
+	if !reflect.DeepEqual(h.fires[0].In, want) {
+		t.Errorf("FireTimer request = %+v\nwant %+v", h.fires[0].In, want)
 	}
 	h.wantApplied("the timer's transition", back, true)
 	if h.loads != 1 {
@@ -412,6 +435,35 @@ func TestItemWorkflow_StartsWhileTheRelayLags_UsesTheLoadedState(t *testing.T) {
 	got := h.fires[0]
 	if !got.At.Equal(t0.Add(3*time.Hour)) || got.In.EnteredSeq != 8 || got.In.ExpectedItemSeq != 9 {
 		t.Errorf("FireTimer call = %+v, want +3h, entered seq 8, expected seq 9", got)
+	}
+}
+
+// Updates that arrive before the load has finished are let in by the
+// validator (it has nothing to compare with yet), but the handler waits for
+// the load. So each is judged against the loaded item_seq, never against an
+// empty state: at or below it is ignored, the next one is applied, and one
+// further ahead fails, to be retried by the relay.
+func TestItemWorkflow_UpdatesBeforeTheLoadFinishes_WaitForIt(t *testing.T) {
+	h := newHarness(t, snapshot(t, "review", 5, 5, t0))
+	h.loadGate = make(chan struct{})
+	old := h.deliver(0, updateEvent(5))
+	next := h.deliver(0, updateEvent(6))
+	ahead := h.deliver(0, updateEvent(9))
+	// Let the load finish only once all three have been accepted.
+	h.env.RegisterDelayedCallback(func() { close(h.loadGate) }, time.Millisecond)
+	h.deliver(time.Hour, transitionEvent(7, "review", "published"))
+	h.runToCompletion()
+
+	for name, out := range map[string]*outcome{"event 5": old, "event 6": next, "event 9": ahead} {
+		if !out.acceptedBeforeLoad {
+			t.Errorf("%s was not accepted while the load was running; the test did not exercise the early path", name)
+		}
+	}
+	h.wantApplied("event 5, at the loaded item_seq", old, false)
+	h.wantApplied("event 6, the next one", next, true)
+	if ahead.rejected != nil || !ahead.done || ahead.err == nil {
+		t.Errorf("event 9: rejected %v, done %v, error %v; want it accepted, then failed as a gap",
+			ahead.rejected, ahead.done, ahead.err)
 	}
 }
 
