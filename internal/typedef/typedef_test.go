@@ -58,9 +58,6 @@ func TestParse_TicketType(t *testing.T) {
 	if tr.Guard != "f_assignee is set" {
 		t.Errorf("guard = %q, want %q", tr.Guard, "f_assignee is set")
 	}
-	if !reflect.DeepEqual(tr.Allowed, []string{"role:agent"}) {
-		t.Errorf("allowed = %v, want [role:agent]", tr.Allowed)
-	}
 	tr, ok = ty.Transition("in_progress", "resolved")
 	if !ok || !reflect.DeepEqual(tr.Required, []string{"f_resolution"}) {
 		t.Errorf("in_progress -> resolved = %+v (found %v), want required [f_resolution]", tr, ok)

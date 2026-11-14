@@ -16,9 +16,9 @@ const (
 	Name              = "item"      // the workflow type; the workflow ID is the Item's ID
 	UpdateApply       = "apply"     // the update that delivers one event
 	ActivityLoadItem  = "LoadItem"  // reads a Snapshot from Postgres
-	ActivityFireTimer = "FireTimer" // asks the kernel to make a timer's move
+	ActivityFireTimer = "FireTimer" // asks the item service to make a timer's move
 
-	// Error types by which the activities report the kernel's final answers.
+	// Error types by which the activities report the item service's final answers.
 	// All three are non-retryable.
 	ErrTypeStale    = "Stale"    // the Item moved on; the workflow is behind
 	ErrTypeRejected = "Rejected" // the Type's rules refuse the move
@@ -51,7 +51,7 @@ type Snapshot struct {
 	Hop           int       // of that event
 
 	// TimerDone is true once the current state's timer has been dealt with
-	// (its move was written, or the kernel refused it). It is reset whenever
+	// (its move was written, or the item service refused it). It is reset whenever
 	// the Item enters a state.
 	TimerDone bool
 }
@@ -79,7 +79,7 @@ type ApplyResult struct {
 	Applied bool // false for a duplicate
 }
 
-// FireTimerInput is the request the FireTimer activity turns into a kernel
+// FireTimerInput is the request the FireTimer activity turns into an item service
 // Transition.
 type FireTimerInput struct {
 	ItemID          string
@@ -92,7 +92,7 @@ type FireTimerInput struct {
 	CorrelationID   string
 	Hop             int
 	// IdempotencyKey names this exact request. It includes ExpectedItemSeq
-	// because the kernel refuses a key that comes back with a different request.
+	// because the item service refuses a key that comes back with a different request.
 	IdempotencyKey string
 }
 
@@ -261,7 +261,7 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 		case err == nil:
 			// The move is written; its event will arrive like any other.
 		case errors.As(err, &appErr) && appErr.Type() == ErrTypeStale:
-			// The kernel is ahead of us: an event is still on its way. Wait
+			// The item service is ahead of us: an event is still on its way. Wait
 			// for it, then look again. If the Item is still in this state
 			// the deadline has passed, so the timer fires again at once.
 			if err := workflow.Await(ctx, changed); err != nil {
@@ -270,7 +270,7 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 			continue
 		case errors.As(err, &appErr) && (appErr.Type() == ErrTypeRejected || appErr.Type() == ErrTypeNotFound):
 			// Final either way: the rules say no, or the Item is gone.
-			log.Info("the kernel refused a timer's move",
+			log.Info("the item service refused a timer's move",
 				"item", in.ItemID, "from", req.FromState, "to", req.ToState, "reason", appErr.Message())
 		default:
 			return err // only a canceled workflow gets here; other failures retry forever

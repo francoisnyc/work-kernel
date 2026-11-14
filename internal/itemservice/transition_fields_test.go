@@ -1,7 +1,7 @@
 // Tests for the PR #5 follow-up: Transition takes an optional Fields patch.
 // The patch is applied and the guards are checked under one row lock, and the
 // whole thing is recorded as one "transition" event.
-package kernel_test
+package itemservice_test
 
 import (
 	"encoding/json"
@@ -13,7 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/francoisnyc/work-kernel/internal/kernel"
+	"github.com/francoisnyc/work-kernel/internal/itemservice"
 )
 
 // transitionEvent is the part of a "transition" event these tests look at.
@@ -59,11 +59,11 @@ func readTransitionEvent(t *testing.T, id uuid.UUID, itemSeq int) transitionEven
 
 // The patch can supply what the guard needs: one call, one event, one outbox row.
 func TestTransition_WithFields_PatchSatisfiesTheGuard(t *testing.T) {
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createTicket(t, k, map[string]any{"f_title": "Printer on fire"})
 
 	// Without the patch this move is rejected: the guard is "f_assignee is set".
-	res, err := k.Transition(testCtx(t), kernel.TransitionRequest{
+	res, err := k.Transition(testCtx(t), itemservice.TransitionRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: id, ToState: "in_progress",
 		Fields: map[string]any{"f_assignee": "user-bob"},
 	})
@@ -102,11 +102,11 @@ func TestTransition_WithFields_PatchSatisfiesTheGuard(t *testing.T) {
 
 // "required" fields may also arrive in the patch.
 func TestTransition_WithFields_PatchSuppliesARequiredField(t *testing.T) {
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createTicket(t, k, map[string]any{"f_assignee": "user-bob"})
 	transition(t, k, id, "in_progress")
 
-	res, err := k.Transition(testCtx(t), kernel.TransitionRequest{
+	res, err := k.Transition(testCtx(t), itemservice.TransitionRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: id, ToState: "resolved",
 		Fields: map[string]any{"f_resolution": "fixed"},
 	})
@@ -122,10 +122,10 @@ func TestTransition_WithFields_PatchSuppliesARequiredField(t *testing.T) {
 
 // A patch can set and clear in one go; the event names both, like an update.
 func TestTransition_WithFields_SetsAndClears(t *testing.T) {
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createTicket(t, k, map[string]any{"f_assignee": "user-bob", "f_priority": float64(2)})
 
-	_, err := k.Transition(testCtx(t), kernel.TransitionRequest{
+	_, err := k.Transition(testCtx(t), itemservice.TransitionRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: id, ToState: "in_progress",
 		Fields: map[string]any{"f_urgent": true, "f_priority": nil},
 	})
@@ -175,13 +175,13 @@ func TestTransition_WithFields_Rejected_WritesNothing(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			k := kernel.New(pool)
+			k := itemservice.New(pool)
 			id := createTicket(t, k, c.fields)
 
-			_, err := k.Transition(testCtx(t), kernel.TransitionRequest{
+			_, err := k.Transition(testCtx(t), itemservice.TransitionRequest{
 				IdempotencyKey: newKey(), Principal: alice, ItemID: id, ToState: c.to, Fields: c.patch,
 			})
-			if !errors.Is(err, kernel.ErrRejected) {
+			if !errors.Is(err, itemservice.ErrRejected) {
 				t.Fatalf("Transition error = %v, want ErrRejected", err)
 			}
 			if !strings.Contains(err.Error(), c.wantInReason) {
@@ -200,9 +200,9 @@ func TestTransition_WithFields_Rejected_WritesNothing(t *testing.T) {
 // the same key with another patch is a different request.
 func TestTransition_WithFields_Idempotency(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createTicket(t, k, nil)
-	req := kernel.TransitionRequest{
+	req := itemservice.TransitionRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: id, ToState: "in_progress",
 		Fields: map[string]any{"f_assignee": "user-bob"},
 	}
@@ -221,7 +221,7 @@ func TestTransition_WithFields_Idempotency(t *testing.T) {
 
 	other := req
 	other.Fields = map[string]any{"f_assignee": "user-carol"}
-	if _, err := k.Transition(ctx, other); !errors.Is(err, kernel.ErrIdempotencyKeyReuse) {
+	if _, err := k.Transition(ctx, other); !errors.Is(err, itemservice.ErrIdempotencyKeyReuse) {
 		t.Fatalf("same key, other patch: error = %v, want ErrIdempotencyKeyReuse", err)
 	}
 	if got := get(t, k, id).Fields["f_assignee"]; got != "user-bob" {
@@ -233,7 +233,7 @@ func TestTransition_WithFields_Idempotency(t *testing.T) {
 // Patch and guard check share one lock: of eight racing callers exactly one
 // wins, its patch is the one stored, and the losers leave no trace.
 func TestTransition_WithFields_Concurrent_OneWins(t *testing.T) {
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createTicket(t, k, nil)
 
 	const callers = 8
@@ -246,7 +246,7 @@ func TestTransition_WithFields_Concurrent_OneWins(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, errs[i] = k.Transition(testCtx(t), kernel.TransitionRequest{
+			_, errs[i] = k.Transition(testCtx(t), itemservice.TransitionRequest{
 				IdempotencyKey: newKey(), Principal: alice, ItemID: id, ToState: "in_progress",
 				Fields: map[string]any{"f_assignee": assignees[i]},
 			})
@@ -261,7 +261,7 @@ func TestTransition_WithFields_Concurrent_OneWins(t *testing.T) {
 			winner = i
 		case err == nil:
 			t.Errorf("callers %d and %d both succeeded", winner, i)
-		case !errors.Is(err, kernel.ErrRejected):
+		case !errors.Is(err, itemservice.ErrRejected):
 			t.Errorf("caller %d: error = %v, want ErrRejected", i, err)
 		}
 	}

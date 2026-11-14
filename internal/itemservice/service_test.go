@@ -2,7 +2,7 @@
 //
 // The package name ends in _test, so these tests see only the exported API of
 // kernel, like a Java test living in a different package.
-package kernel_test
+package itemservice_test
 
 import (
 	"context"
@@ -25,7 +25,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
 	"github.com/francoisnyc/work-kernel/internal/item"
-	"github.com/francoisnyc/work-kernel/internal/kernel"
+	"github.com/francoisnyc/work-kernel/internal/itemservice"
 	"github.com/francoisnyc/work-kernel/migrations"
 )
 
@@ -108,8 +108,8 @@ func testCtx(t *testing.T) context.Context {
 var alice = item.Principal{Actor: "user-alice"}
 
 // newRequest returns a valid request with a fresh idempotency key.
-func newRequest() kernel.CreateRequest {
-	return kernel.CreateRequest{
+func newRequest() itemservice.CreateRequest {
+	return itemservice.CreateRequest{
 		IdempotencyKey: "key-" + uuid.NewString(),
 		Principal:      alice,
 		TypeID:         "ticket",
@@ -151,7 +151,7 @@ func assertOneWrite(t *testing.T, itemID uuid.UUID, key string) {
 
 func TestCreate_WritesItemEventAndOutbox(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	req := newRequest()
 	req.Principal = item.Principal{Actor: "agent-7", OnBehalfOf: "user-alice"}
 
@@ -204,7 +204,7 @@ func TestCreate_WritesItemEventAndOutbox(t *testing.T) {
 // This is the step's "done when".
 func TestCreate_SameKeyTwice_ReturnsSameResultAndWritesOnce(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	req := newRequest()
 
 	first, err := k.Create(ctx, req)
@@ -224,7 +224,7 @@ func TestCreate_SameKeyTwice_ReturnsSameResultAndWritesOnce(t *testing.T) {
 
 func TestCreate_SameKeyDifferentRequest_IsRejected(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	req := newRequest()
 
 	first, err := k.Create(ctx, req)
@@ -235,7 +235,7 @@ func TestCreate_SameKeyDifferentRequest_IsRejected(t *testing.T) {
 	changed := req
 	changed.Fields = map[string]any{"f_title": "Something else"}
 	_, err = k.Create(ctx, changed)
-	if !errors.Is(err, kernel.ErrIdempotencyKeyReuse) {
+	if !errors.Is(err, itemservice.ErrIdempotencyKeyReuse) {
 		t.Fatalf("second Create error = %v, want ErrIdempotencyKeyReuse", err)
 	}
 
@@ -245,11 +245,11 @@ func TestCreate_SameKeyDifferentRequest_IsRejected(t *testing.T) {
 
 func TestCreate_ConcurrentSameKey_WritesOnce(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	req := newRequest()
 
 	const callers = 8
-	results := make([]kernel.WriteResult, callers)
+	results := make([]itemservice.WriteResult, callers)
 	errs := make([]error, callers)
 
 	// Goroutines are lightweight threads; WaitGroup plays the role of a
@@ -277,7 +277,7 @@ func TestCreate_ConcurrentSameKey_WritesOnce(t *testing.T) {
 
 func TestCreate_DifferentKeys_CreateDifferentItems(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 
 	first, err := k.Create(ctx, newRequest())
 	if err != nil {
@@ -301,13 +301,13 @@ func TestCreate_DifferentKeys_CreateDifferentItems(t *testing.T) {
 
 func TestCreate_WithoutIdempotencyKey_IsRejected(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	req := newRequest()
 	req.IdempotencyKey = ""
 	req.TypeID = "type-" + uuid.NewString() // unique, so we can check nothing was written
 
 	_, err := k.Create(ctx, req)
-	if !errors.Is(err, kernel.ErrInvalid) {
+	if !errors.Is(err, itemservice.ErrInvalid) {
 		t.Fatalf("Create error = %v, want ErrInvalid", err)
 	}
 	if n := count(t, `select count(*) from items where type_id = $1`, req.TypeID); n != 0 {
@@ -319,7 +319,7 @@ func TestCreate_WithoutIdempotencyKey_IsRejected(t *testing.T) {
 // free text, so the create event records which fields were set, not their values.
 func TestCreate_EventPayloadHasFieldIDsButNoValues(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	req := newRequest()
 	req.Fields = map[string]any{
 		"f_title":    "Call Jane Doe about her refund",
@@ -360,7 +360,7 @@ func TestCreate_EventPayloadHasFieldIDsButNoValues(t *testing.T) {
 
 func TestGet_ReturnsCreatedItem(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	req := newRequest()
 
 	res, err := k.Create(ctx, req)
@@ -380,6 +380,12 @@ func TestGet_ReturnsCreatedItem(t *testing.T) {
 		Fields:      map[string]any{"f_title": "Printer on fire", "f_priority": float64(2)},
 		ItemSeq:     1,
 	}
+	// Since Step 4 every Item has a scope. Which one is checked by
+	// TestCreate_PlainItem_IsInTheRootScope; here it only has to be set.
+	if got.ScopeID == nil {
+		t.Error("Get: ScopeID is nil, want the Item's scope")
+	}
+	got.ScopeID = nil
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Get = %+v\nwant  %+v", got, want)
 	}
@@ -387,10 +393,10 @@ func TestGet_ReturnsCreatedItem(t *testing.T) {
 
 func TestGet_UnknownID_ReturnsNotFound(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 
 	_, err := k.Get(ctx, alice, uuid.New())
-	if !errors.Is(err, kernel.ErrNotFound) {
+	if !errors.Is(err, itemservice.ErrNotFound) {
 		t.Fatalf("Get error = %v, want ErrNotFound", err)
 	}
 }
@@ -399,7 +405,7 @@ func TestGet_UnknownID_ReturnsNotFound(t *testing.T) {
 // There is one namespace in the spike, so the test moves a row by hand.
 func TestGet_ItemInAnotherNamespace_ReturnsNotFound(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	res, err := k.Create(ctx, newRequest())
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -409,7 +415,7 @@ func TestGet_ItemInAnotherNamespace_ReturnsNotFound(t *testing.T) {
 	}
 
 	_, err = k.Get(ctx, alice, res.ItemID)
-	if !errors.Is(err, kernel.ErrNotFound) {
+	if !errors.Is(err, itemservice.ErrNotFound) {
 		t.Fatalf("Get error = %v, want ErrNotFound", err)
 	}
 }

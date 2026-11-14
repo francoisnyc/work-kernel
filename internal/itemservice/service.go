@@ -1,6 +1,6 @@
-// Package kernel holds the write operations (create, update, transition, link,
+// Package itemservice holds the write operations (create, update, transition, link,
 // archive) and reads. Every change to an Item goes through this package.
-package kernel
+package itemservice
 
 import (
 	"context"
@@ -26,19 +26,28 @@ import (
 var (
 	// ErrInvalid means the request is malformed (for example, no idempotency
 	// key) or names a Type that is not registered.
-	ErrInvalid = errors.New("kernel: invalid request")
-	// ErrNotFound means no Item has the given ID.
-	ErrNotFound = errors.New("kernel: item not found")
+	ErrInvalid = errors.New("itemservice: invalid request")
+	// ErrNotFound means no Item has the given ID, or the principal may not
+	// see it. The two cases are deliberately indistinguishable.
+	ErrNotFound = errors.New("itemservice: item not found")
 	// ErrRejected means the request is well formed but the Item's Type refuses
 	// it: an unknown or mistyped field, or an illegal transition. The error
 	// text carries the reason.
-	ErrRejected = errors.New("kernel: rejected")
+	ErrRejected = errors.New("itemservice: rejected")
 	// ErrStale means the request named an expected item_seq and the Item has
 	// moved since. Unlike ErrRejected, the write may well be fine: the caller
 	// should re-read the Item and try again.
-	ErrStale = errors.New("kernel: stale")
+	ErrStale = errors.New("itemservice: stale")
+	// ErrForbidden means the principal can see the Item and the move is legal,
+	// but the transition's `allowed` list does not include them. It is never
+	// returned for an Item the principal cannot see: that is ErrNotFound, so
+	// the Item's existence does not leak.
+	ErrForbidden = errors.New("itemservice: forbidden")
+	// ErrNotCaughtUp means a read asked for a min_seq that was not reached
+	// within its wait. Nothing is wrong: the caller may simply try again.
+	ErrNotCaughtUp = errors.New("itemservice: not caught up")
 	// ErrIdempotencyKeyReuse means the key was already used with a different request.
-	ErrIdempotencyKeyReuse = errors.New("kernel: idempotency key reused with a different request")
+	ErrIdempotencyKeyReuse = errors.New("itemservice: idempotency key reused with a different request")
 )
 
 // defaultNamespace is the only namespace in the spike. The column exists so
@@ -55,6 +64,16 @@ type CreateRequest struct {
 	Fields         map[string]any // keyed by stable field ID
 	ContainerID    *uuid.UUID
 	Attribution    item.Attribution // optional; what caused this write
+	// Narrow is optional. Without it the Item is in its container's scope
+	// (the namespace's root scope when it has no container). With it the
+	// Item gets a scope node of its own, readable only by the readers named,
+	// and only by those of them who can read the container.
+	Narrow *Narrow
+}
+
+// Narrow names the readers of a narrowed Item, as opaque principal IDs.
+type Narrow struct {
+	Readers []string
 }
 
 // WriteResult is returned by every write.
@@ -64,19 +83,19 @@ type WriteResult struct {
 	ItemSeq   int64     `json:"item_seq"`
 }
 
-// Kernel is stateless; all state lives in Postgres.
-type Kernel struct {
+// Service is stateless; all state lives in Postgres.
+type Service struct {
 	pool *pgxpool.Pool
 }
 
-// New returns a Kernel that uses the given connection pool.
-func New(pool *pgxpool.Pool) *Kernel {
-	return &Kernel{pool: pool}
+// New returns a Service that uses the given connection pool.
+func New(pool *pgxpool.Pool) *Service {
+	return &Service{pool: pool}
 }
 
 // Create writes a new Item, its first event and an outbox row in one
 // transaction. The same idempotency key returns the stored result.
-func (k *Kernel) Create(ctx context.Context, req CreateRequest) (WriteResult, error) {
+func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, error) {
 	if req.IdempotencyKey == "" || req.Principal.Actor == "" || req.TypeID == "" {
 		// %w wraps ErrInvalid, so callers can still match it with errors.Is,
 		// like an exception with a cause.
@@ -84,6 +103,13 @@ func (k *Kernel) Create(ctx context.Context, req CreateRequest) (WriteResult, er
 	}
 	if err := checkAttribution(req.Attribution); err != nil {
 		return WriteResult{}, err
+	}
+	var readers []string
+	if req.Narrow != nil {
+		var err error
+		if readers, err = checkReaders(req.Narrow.Readers, req.Principal); err != nil {
+			return WriteResult{}, err
+		}
 	}
 	hash, err := requestHash("create", req)
 	if err != nil {
@@ -114,13 +140,28 @@ func (k *Kernel) Create(ctx context.Context, req CreateRequest) (WriteResult, er
 		if err != nil {
 			return WriteResult{}, fmt.Errorf("new item id: %w", err)
 		}
+		// The Item starts in its container's scope, or in a narrower one of
+		// its own. A container the principal cannot see does not exist for them.
+		scopeID, err := parentScope(ctx, tx, req.ContainerID, true)
+		if err != nil {
+			return WriteResult{}, err
+		}
+		if err := checkVisible(ctx, tx, req.Principal, scopeID); err != nil {
+			return WriteResult{}, err
+		}
+		if req.Narrow != nil {
+			if scopeID, err = insertScope(ctx, tx, scopeID, readers); err != nil {
+				return WriteResult{}, err
+			}
+		}
+
 		// A row inserted in this transaction is locked until commit, so no
 		// separate SELECT ... FOR UPDATE is needed for create.
 		const itemSeq = 1
 		_, err = tx.Exec(ctx,
-			`insert into items (id, namespace_id, type_id, type_version, container_id, state, fields, item_seq)
-			 values ($1, $2, $3, $4, $5, $6, $7, $8)`,
-			id, defaultNamespace, ty.ID, ty.Version, req.ContainerID, ty.InitialState, fields, itemSeq)
+			`insert into items (id, namespace_id, type_id, type_version, container_id, scope_id, state, fields, item_seq)
+			 values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+			id, defaultNamespace, ty.ID, ty.Version, req.ContainerID, scopeID, ty.InitialState, fields, itemSeq)
 		if err != nil {
 			return WriteResult{}, fmt.Errorf("insert item: %w", err)
 		}
@@ -135,6 +176,9 @@ func (k *Kernel) Create(ctx context.Context, req CreateRequest) (WriteResult, er
 		}
 		if req.ContainerID != nil {
 			payload["container_id"] = req.ContainerID
+		}
+		if req.Narrow != nil {
+			payload["readers"] = readers // opaque IDs, sorted
 		}
 		return appendEvent(ctx, tx, id, itemSeq, req.Principal, req.Attribution, "create", payload, fields)
 	})
@@ -154,10 +198,17 @@ func requestHash(op string, req any) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-// Get returns the Item as the principal may see it.
-func (k *Kernel) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item.Item, error) {
+// Get returns the Item as the principal may see it. An Item they may not see
+// is ErrNotFound, exactly like one that does not exist.
+func (k *Service) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item.Item, error) {
+	// Nothing is cached: the scopes are read on every request, so a change
+	// of readers takes effect on the very next read.
+	visible, err := policy.VisibleScopes(ctx, k.pool, defaultNamespace, p)
+	if err != nil {
+		return item.Item{}, err
+	}
 	it := item.Item{ID: id}
-	err := k.pool.QueryRow(ctx,
+	err = k.pool.QueryRow(ctx,
 		`select type_id, type_version, container_id, scope_id, state, fields, item_seq
 		 from items where id = $1 and namespace_id = $2`, id, defaultNamespace,
 	).Scan(&it.TypeID, &it.TypeVersion, &it.ContainerID, &it.ScopeID, &it.State, &it.Fields, &it.ItemSeq)
@@ -167,7 +218,11 @@ func (k *Kernel) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item.
 	if err != nil {
 		return item.Item{}, fmt.Errorf("read item: %w", err)
 	}
-	return policy.Project(p, it), nil
+	it, ok := policy.Project(p, visible, it)
+	if !ok {
+		return item.Item{}, ErrNotFound
+	}
+	return it, nil
 }
 
 // StateEntry says which state an Item is in and which event put it there.
@@ -188,7 +243,7 @@ type StateEntry struct {
 
 // StateEntry reads an Item's state and the event that entered it, in one
 // statement, so the two always agree.
-func (k *Kernel) StateEntry(ctx context.Context, id uuid.UUID) (StateEntry, error) {
+func (k *Service) StateEntry(ctx context.Context, id uuid.UUID) (StateEntry, error) {
 	var se StateEntry
 	// Only create and transition events enter a state.
 	err := k.pool.QueryRow(ctx,
@@ -215,6 +270,6 @@ func (k *Kernel) StateEntry(ctx context.Context, id uuid.UUID) (StateEntry, erro
 }
 
 // Type returns a registered Type version.
-func (k *Kernel) Type(ctx context.Context, id string, version int) (*typedef.Type, error) {
+func (k *Service) Type(ctx context.Context, id string, version int) (*typedef.Type, error) {
 	return loadType(ctx, k.pool, id, version)
 }

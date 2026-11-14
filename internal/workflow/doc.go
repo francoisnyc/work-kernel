@@ -1,6 +1,6 @@
 // Package workflow holds the Temporal side of an Item: a thin scheduler of
 // timers and waits. It decides nothing about the lifecycle; when a timer
-// fires it asks the kernel to make the move, through the normal write path.
+// fires it asks the item service to make the move, through the normal write path.
 //
 // The package has two kinds of code, with very different rules:
 //

@@ -1,4 +1,4 @@
-// Package item holds the plain data types shared by the kernel and policy
+// Package item holds the plain data types shared by the item service and policy
 // packages. It has no behavior and imports neither of them, which keeps the
 // import graph free of cycles (Go rejects circular imports at compile time).
 package item

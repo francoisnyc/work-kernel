@@ -36,6 +36,25 @@ Ideas noted during the spike, not built yet.
   waiting for the next poll. (Step 3 Phase A)
 - The relay is a single instance. To run several, claim an Item's pending rows
   with `FOR UPDATE SKIP LOCKED`. (Step 3 Phase A)
+- Grants on scope nodes (audited) are the admin path, including recovering an
+  Item nobody can see. Until then a policy change may not hide an Item from the
+  one making it. (Step 4)
+- The timer's exemption from visibility trusts the request's `Actor`. When the
+  API is exposed, only internal callers may act as `system:*`. (Step 4)
+- `VisibleScopes` returns every scope a principal can read, and each narrowed
+  Item has its own. Fine for a spike; at scale, check one scope's ancestors or
+  join in SQL. (Step 4)
+- Search indexes every string value in `fields`, enum values included, with the
+  `simple` configuration (no stemming). Choose per-field indexing and a language
+  later. Erasure must also cover `items.search`, which follows `items.fields`. (Step 4)
+- Narrowing a container rewrites every descendant's `scope_id` in one
+  transaction: O(descendants). Proposed fix: give every container its own scope
+  node at creation (`narrows = false`, inheriting), so narrowing flips that
+  node's flag and readers in place and no descendant row changes.
+  `VisibleScopes` then has to treat non-narrowing nodes as inheriting their
+  parent. (Step 4)
+- `Get` reads the visible scopes and then the Item in two statements. One
+  statement would close the tiny window between them. (Step 4)
 
 ## 2026-11-12 — Step 1 (finished)
 
@@ -148,3 +167,31 @@ for both activities: the load completes the workflow, the timer's write is not r
   (Update-With-Start, validators, a time-skipping test environment), and nothing in
   Steps 1–3 was fought for because of the language. Caveat: this judges the code I wrote;
   how readable it is to you, coming from Java, is the half only you can assess.
+
+## 2026-11-14 — Step 4 (finished)
+
+**Built:** the rename to `itemservice` (PR #8). Then Step 4: migration 00003 (root scope,
+`scope_id` NOT NULL, `principal_roles`, generated `search` column, indexes);
+`policy.VisibleScopes`, `Roles`, pure `Project` and `AuthorizeTransition`; `Create.Narrow`
+and the `Update` policy patch; `ErrNotFound` for hidden Items on reads and writes;
+`ErrForbidden` for `allowed`; the on-behalf-of intersection; `Search` with `min_seq` and
+`ErrNotCaughtUp`; the typedef load checks for `allowed` and timers.
+
+**Decisions:** `ticket.v1` dropped `allowed`, a test Type carries it; lifecycle is asked
+before policy; a policy change may not hide the Item from its author; the timer skips
+visibility but not `allowed`; narrowing a container re-points the children that inherit.
+
+**Surprises:** `scopes` needed a `namespace_id` to have one root per namespace. Copying the
+container's `scope_id` onto a child means narrowing the container later must move the
+children; that was not in the plan and has its own test. `jsonb_to_tsvector` made the
+search column one line, but it indexes enum values too.
+
+**Numbers:** 43 new tests. `itemservice` tests ~9 s, of which 2 s is the default-wait test.
+
+**Open questions and risks:**
+- `TestGet_ReturnsCreatedItem` (Step 1) expected `ScopeID` nil. With approval it now
+  asserts the scope is set; the root-scope test checks which one.
+- PR #8 carries the rename and Step 4 together. PR #7 (the "Names" section) was still
+  open; once it merges, its last sentence about `cmd/kernel` is out of date.
+
+**Next session:** Step 5, Phase A.

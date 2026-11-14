@@ -14,7 +14,7 @@ import (
 	"go.temporal.io/sdk/workflow"
 
 	"github.com/francoisnyc/work-kernel/internal/item"
-	"github.com/francoisnyc/work-kernel/internal/kernel"
+	"github.com/francoisnyc/work-kernel/internal/itemservice"
 	"github.com/francoisnyc/work-kernel/internal/lifecycle"
 )
 
@@ -24,7 +24,7 @@ const timerActor = "system:timer"
 // Activities is the I/O side of the workflow: ordinary Go, run by the worker,
 // retried by Temporal when it fails. Its methods are the activities.
 type Activities struct {
-	Kernel *kernel.Kernel
+	Items *itemservice.Service
 }
 
 // LoadItem reads what a new run needs to know about its Item: where it is,
@@ -35,15 +35,15 @@ func (a *Activities) LoadItem(ctx context.Context, itemID string) (Snapshot, err
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("item id %q: %w", itemID, err)
 	}
-	se, err := a.Kernel.StateEntry(ctx, id)
-	if errors.Is(err, kernel.ErrNotFound) {
+	se, err := a.Items.StateEntry(ctx, id)
+	if errors.Is(err, itemservice.ErrNotFound) {
 		// Retrying cannot bring the Item back; tell the workflow instead.
 		return Snapshot{}, temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeNotFound, err)
 	}
 	if err != nil {
 		return Snapshot{}, err
 	}
-	ty, err := a.Kernel.Type(ctx, se.TypeID, se.TypeVersion)
+	ty, err := a.Items.Type(ctx, se.TypeID, se.TypeVersion)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -61,10 +61,10 @@ func (a *Activities) LoadItem(ctx context.Context, itemID string) (Snapshot, err
 	}, nil
 }
 
-// FireTimer makes a timer's move through the kernel's normal write path, so
+// FireTimer makes a timer's move through the item service's normal write path, so
 // guards, history and the outbox all apply as for a person's transition.
 //
-// The kernel's final answers (stale, rejected, not found) are returned as
+// The item service's final answers (stale, rejected, not found) are returned as
 // non-retryable errors, which the workflow tells apart by type. Anything else (the
 // database is away, a timeout) is returned as is, and Temporal retries it.
 func (a *Activities) FireTimer(ctx context.Context, in FireTimerInput) error {
@@ -72,7 +72,7 @@ func (a *Activities) FireTimer(ctx context.Context, in FireTimerInput) error {
 	if err != nil {
 		return fmt.Errorf("item id %q: %w", in.ItemID, err)
 	}
-	_, err = a.Kernel.Transition(ctx, kernel.TransitionRequest{
+	_, err = a.Items.Transition(ctx, itemservice.TransitionRequest{
 		IdempotencyKey:  in.IdempotencyKey,
 		Principal:       item.Principal{Actor: timerActor},
 		ItemID:          id,
@@ -86,12 +86,12 @@ func (a *Activities) FireTimer(ctx context.Context, in FireTimerInput) error {
 		},
 	})
 	switch {
-	case errors.Is(err, kernel.ErrNotFound):
+	case errors.Is(err, itemservice.ErrNotFound):
 		return temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeNotFound, err)
-	case errors.Is(err, kernel.ErrStale):
+	case errors.Is(err, itemservice.ErrStale):
 		return temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeStale, err)
-	case errors.Is(err, kernel.ErrRejected):
-		activity.GetLogger(ctx).Info("the kernel refused a timer's move",
+	case errors.Is(err, itemservice.ErrRejected):
+		activity.GetLogger(ctx).Info("the item service refused a timer's move",
 			"item", in.ItemID, "from", in.FromState, "to", in.ToState, "reason", err.Error())
 		return temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeRejected, err)
 	}
@@ -109,7 +109,7 @@ type WorkerOptions struct {
 
 // NewWorker returns a worker, not yet started, that runs Item workflows and
 // their activities from the given task queue.
-func NewWorker(c client.Client, taskQueue string, k *kernel.Kernel, opts WorkerOptions) worker.Worker {
+func NewWorker(c client.Client, taskQueue string, k *itemservice.Service, opts WorkerOptions) worker.Worker {
 	w := worker.New(c, taskQueue, worker.Options{})
 	run := ItemWorkflow
 	if opts.CloseDelay > 0 {
@@ -118,7 +118,7 @@ func NewWorker(c client.Client, taskQueue string, k *kernel.Kernel, opts WorkerO
 	w.RegisterWorkflowWithOptions(run, workflow.RegisterOptions{Name: Name})
 
 	// Registered by name, because the workflow calls them by name.
-	a := &Activities{Kernel: k}
+	a := &Activities{Items: k}
 	w.RegisterActivityWithOptions(a.LoadItem, activity.RegisterOptions{Name: ActivityLoadItem})
 	w.RegisterActivityWithOptions(a.FireTimer, activity.RegisterOptions{Name: ActivityFireTimer})
 	return w

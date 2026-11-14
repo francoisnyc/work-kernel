@@ -12,7 +12,7 @@ import (
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 
-	"github.com/francoisnyc/work-kernel/internal/kernel"
+	"github.com/francoisnyc/work-kernel/internal/itemservice"
 	"github.com/francoisnyc/work-kernel/internal/workflow"
 )
 
@@ -39,7 +39,7 @@ func run() error {
 	}
 	defer c.Close()
 
-	w := workflow.NewWorker(c, env("TASK_QUEUE", "items"), kernel.New(pool), workflow.WorkerOptions{})
+	w := workflow.NewWorker(c, env("TASK_QUEUE", "items"), itemservice.New(pool), workflow.WorkerOptions{})
 	// Run blocks until SIGINT or SIGTERM, then stops the worker cleanly.
 	return w.Run(worker.InterruptCh())
 }

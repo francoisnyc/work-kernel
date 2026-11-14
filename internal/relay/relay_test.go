@@ -18,7 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/francoisnyc/work-kernel/internal/item"
-	"github.com/francoisnyc/work-kernel/internal/kernel"
+	"github.com/francoisnyc/work-kernel/internal/itemservice"
 	"github.com/francoisnyc/work-kernel/internal/relay"
 	"github.com/francoisnyc/work-kernel/internal/testdb"
 	"github.com/francoisnyc/work-kernel/internal/typedef"
@@ -54,7 +54,7 @@ func runTests(m *testing.M) int {
 	for _, def := range []string{string(ticket), watchType, "id: message\nversion: 1\n"} {
 		ty, err := typedef.Parse([]byte(def))
 		if err == nil {
-			err = kernel.New(pool).RegisterType(ctx, ty)
+			err = itemservice.New(pool).RegisterType(ctx, ty)
 		}
 		if err != nil {
 			log.Printf("register type: %v", err)
@@ -173,24 +173,24 @@ func newRelay(t *testing.T) (*relay.Relay, *fakeWorkflows, *fakeClock) {
 
 // ticketInProgress creates a ticket and walks it to in_progress:
 // item_seq 1 create, 2 update, 3 transition.
-func ticketInProgress(t *testing.T, k *kernel.Kernel) uuid.UUID {
+func ticketInProgress(t *testing.T, k *itemservice.Service) uuid.UUID {
 	t.Helper()
 	ctx := testCtx(t)
-	res, err := k.Create(ctx, kernel.CreateRequest{
+	res, err := k.Create(ctx, itemservice.CreateRequest{
 		IdempotencyKey: newKey(), Principal: alice, TypeID: "ticket", TypeVersion: 1,
 		Attribution: item.Attribution{CorrelationID: "corr-1"},
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	_, err = k.Update(ctx, kernel.UpdateRequest{
+	_, err = k.Update(ctx, itemservice.UpdateRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: res.ItemID,
 		Fields: map[string]any{"f_assignee": "user-bob"},
 	})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	_, err = k.Transition(ctx, kernel.TransitionRequest{
+	_, err = k.Transition(ctx, itemservice.TransitionRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: res.ItemID, ToState: "in_progress",
 		Attribution: item.Attribution{CorrelationID: "corr-2", Hop: 1},
 	})
@@ -246,7 +246,7 @@ func eventTime(t *testing.T, id uuid.UUID, seq int64) time.Time {
 // starts a workflow: here only event 3, which enters a state with a timer.
 func TestRelay_DeliversInOrder_AndTheTypeDecidesWhatStartsAWorkflow(t *testing.T) {
 	r, fake, _ := newRelay(t)
-	id := ticketInProgress(t, kernel.New(pool))
+	id := ticketInProgress(t, itemservice.New(pool))
 
 	runOnce(t, r)
 
@@ -280,7 +280,7 @@ func TestRelay_DeliversInOrder_AndTheTypeDecidesWhatStartsAWorkflow(t *testing.T
 // A create can start a workflow too, when the initial state has a timer.
 func TestRelay_CreateIntoATimerState_StartsAWorkflow(t *testing.T) {
 	r, fake, _ := newRelay(t)
-	res, err := kernel.New(pool).Create(testCtx(t), kernel.CreateRequest{
+	res, err := itemservice.New(pool).Create(testCtx(t), itemservice.CreateRequest{
 		IdempotencyKey: newKey(), Principal: alice, TypeID: "watch", TypeVersion: 1,
 	})
 	if err != nil {
@@ -306,9 +306,9 @@ func TestRelay_NothingListening_MarksDelivered(t *testing.T) {
 		}
 		return nil
 	}
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	ticket := ticketInProgress(t, k)
-	message, err := k.Create(testCtx(t), kernel.CreateRequest{
+	message, err := k.Create(testCtx(t), itemservice.CreateRequest{
 		IdempotencyKey: newKey(), Principal: alice, TypeID: "message", TypeVersion: 1,
 	})
 	if err != nil {
@@ -337,7 +337,7 @@ func TestRelay_NothingListening_MarksDelivered(t *testing.T) {
 // undelivered event.
 func TestRelay_FailingItem_KeepsOrder_BacksOff_AndDoesNotBlockOthers(t *testing.T) {
 	r, fake, clock := newRelay(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	stuck := ticketInProgress(t, k)
 	fine := ticketInProgress(t, k)
 	down := true
@@ -384,7 +384,7 @@ func TestRelay_FailingItem_KeepsOrder_BacksOff_AndDoesNotBlockOthers(t *testing.
 // delivery like any other: the row stays pending and is sent again.
 func TestRelay_UpdateAcceptedThenFailed_StaysPendingAndIsRetried(t *testing.T) {
 	r, fake, clock := newRelay(t)
-	id := ticketInProgress(t, kernel.New(pool))
+	id := ticketInProgress(t, itemservice.New(pool))
 	failed := false
 	fake.answer = func(c call) error {
 		if c.ItemID == id.String() && c.Event.Seq == 3 && !failed {
@@ -415,7 +415,7 @@ func TestRelay_UpdateAcceptedThenFailed_StaysPendingAndIsRetried(t *testing.T) {
 // lastAppliedSeq, recognize it as a duplicate.
 func TestRelay_CrashBeforeMarkingDelivered_RedeliversWithTheSameUpdateID(t *testing.T) {
 	r, fake, clock := newRelay(t)
-	id := ticketInProgress(t, kernel.New(pool))
+	id := ticketInProgress(t, itemservice.New(pool))
 
 	// Simulate the crash: the first delivery goes through, and at that very
 	// moment the pass's context is canceled, so its "mark delivered" fails.
@@ -449,7 +449,7 @@ func TestRelay_CrashBeforeMarkingDelivered_RedeliversWithTheSameUpdateID(t *test
 // An Item that keeps failing waits longer each time, up to a limit.
 func TestRelay_RepeatedFailures_BackOffLonger(t *testing.T) {
 	r, fake, clock := newRelay(t)
-	id := ticketInProgress(t, kernel.New(pool))
+	id := ticketInProgress(t, itemservice.New(pool))
 	fake.answer = func(c call) error { return errors.New("temporal is unreachable") }
 
 	runOnce(t, r) // attempt 1 fails; backoff 1s
@@ -470,7 +470,7 @@ func TestRelay_RepeatedFailures_BackOffLonger(t *testing.T) {
 // With nothing pending, a pass does nothing.
 func TestRelay_NothingPending_DeliversNothing(t *testing.T) {
 	r, fake, _ := newRelay(t)
-	id := ticketInProgress(t, kernel.New(pool))
+	id := ticketInProgress(t, itemservice.New(pool))
 	runOnce(t, r)
 	runOnce(t, r)
 
@@ -491,7 +491,7 @@ func TestRelay_Run_PollsUntilCanceled(t *testing.T) {
 	done := make(chan error, 1) // a channel: a typed pipe between goroutines
 	go func() { done <- r.Run(ctx) }()
 
-	id := ticketInProgress(t, kernel.New(pool))
+	id := ticketInProgress(t, itemservice.New(pool))
 	deadline := time.Now().Add(10 * time.Second)
 	for len(pending(t, id)) > 0 {
 		if time.Now().After(deadline) {

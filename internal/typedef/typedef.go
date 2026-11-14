@@ -41,6 +41,16 @@ const (
 	ImplicitStateCategory = "none"
 )
 
+// TimerPrincipal is the principal a timer's move is made as. A timer gets no
+// silent exemption from `allowed`: the Type must name it (see check).
+const TimerPrincipal = "system:timer"
+
+// The two kinds of entry in a transition's `allowed` list.
+const (
+	AllowedRolePrefix      = "role:"
+	AllowedPrincipalPrefix = "principal:"
+)
+
 // The struct tags (the text in backquotes) tell the YAML and JSON libraries
 // which key maps to which field, like Jackson annotations.
 
@@ -76,7 +86,10 @@ type Transition struct {
 	To       string   `yaml:"to" json:"to"`
 	Guard    string   `yaml:"guard" json:"guard,omitempty"`       // expression; see ParseGuard
 	Required []string `yaml:"required" json:"required,omitempty"` // field IDs that must be set
-	Allowed  []string `yaml:"allowed" json:"allowed,omitempty"`   // who may act; not enforced until Step 4
+	// Allowed says who may make the move: entries are "role:<name>" or
+	// "principal:<id>". Empty means anyone who can see the Item. The list is
+	// only checked for shape here; package policy decides.
+	Allowed []string `yaml:"allowed" json:"allowed,omitempty"`
 
 	// Conditions is Guard in parsed form, filled when the Type is loaded.
 	// The "-" tag keeps it out of YAML and JSON.
@@ -109,7 +122,7 @@ func Parse(data []byte) (*Type, error) {
 }
 
 // FromJSON reads a Type from the JSON form produced by json.Marshal, which
-// is how the kernel stores it in Postgres.
+// is how the item service stores it in Postgres.
 func FromJSON(data []byte) (*Type, error) {
 	var t Type
 	if err := json.Unmarshal(data, &t); err != nil {
@@ -236,6 +249,19 @@ func (t *Type) check() error {
 				return fail("transition %s: required field %q is not declared", name, id)
 			}
 		}
+		for _, entry := range tr.Allowed {
+			// CutPrefix returns the rest of the string and whether the prefix was there.
+			who, ok := strings.CutPrefix(entry, AllowedRolePrefix)
+			if !ok {
+				who, ok = strings.CutPrefix(entry, AllowedPrincipalPrefix)
+			}
+			if !ok {
+				return fail("transition %s: allowed entry %q must be role:<name> or principal:<id>", name, entry)
+			}
+			if who == "" {
+				return fail("transition %s: allowed entry %q names nothing", name, entry)
+			}
+		}
 		conds, err := ParseGuard(t, tr.Guard)
 		if err != nil {
 			return fail("transition %s: guard %q: %v", name, tr.Guard, err)
@@ -267,6 +293,15 @@ func (t *Type) check() error {
 		if _, ok := t.Transition(s.ID, s.Timer.To); !ok {
 			return fail("state %s: timer moves to %q, but there is no transition %s -> %s",
 				s.ID, s.Timer.To, s.ID, s.Timer.To)
+		}
+		// The timer acts as TimerPrincipal and is subject to `allowed` like
+		// anyone else. A list that leaves it out would make the timer fire
+		// and be forbidden every time, so the Type is refused instead.
+		tr, _ := t.Transition(s.ID, s.Timer.To)
+		timer := AllowedPrincipalPrefix + TimerPrincipal
+		if len(tr.Allowed) > 0 && !slices.Contains(tr.Allowed, timer) {
+			return fail("state %s: its timer uses transition %s -> %s, whose `allowed` list must include %s",
+				s.ID, s.ID, s.Timer.To, timer)
 		}
 		s.Timer.Duration = d
 	}
