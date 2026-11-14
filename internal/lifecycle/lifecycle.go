@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 
+	"cel.dev/cel-go/common/types"
+
 	"github.com/francoisnyc/work-kernel/internal/typedef"
 )
 
@@ -62,12 +64,10 @@ func Transition(t *typedef.Type, current string, fields map[string]any, to strin
 		}
 	}
 
-	for _, c := range tr.Conditions {
-		if !holds(c, fields[c.Field]) {
-			return Result{}, &Rejection{
-				Code:   GuardFailed,
-				Reason: fmt.Sprintf("transition from %q to %q: guard not satisfied: %s", current, to, c),
-			}
+	if !guardHolds(t, tr, fields) {
+		return Result{}, &Rejection{
+			Code:   GuardFailed,
+			Reason: fmt.Sprintf("transition from %q to %q: guard not satisfied: %s", current, to, tr.Guard),
 		}
 	}
 
@@ -75,25 +75,36 @@ func Transition(t *typedef.Type, current string, fields map[string]any, to strin
 	return Result{State: state.ID, Category: state.Category}, nil
 }
 
-// holds evaluates one guard condition against a field's value (nil if unset).
-func holds(c typedef.Condition, value any) bool {
-	switch c.Op {
-	case typedef.OpIsSet:
-		return value != nil
-	case typedef.OpEq:
-		return value != nil && equal(c.Value, value)
-	case typedef.OpNotEq:
-		return value == nil || !equal(c.Value, value)
+// guardHolds evaluates the transition's CEL guard against the fields. Every
+// field of the Type is a variable: unset is null, and ints read back from
+// JSON (float64) are passed as ints, as the schema says. A guard that cannot
+// be evaluated (an unset field in a comparison, say) does not hold.
+//
+// The reason given for a failed guard is the guard's own text, never the
+// values it saw: those may be personal data.
+func guardHolds(t *typedef.Type, tr typedef.Transition, fields map[string]any) bool {
+	if tr.Program == nil {
+		return true // no guard
 	}
-	return false
-}
-
-// equal compares a guard literal with a field value. Integers need care:
-// the literal is an int64 but a value read back from JSON is a float64.
-func equal(literal, value any) bool {
-	if want, ok := literal.(int64); ok {
-		got, ok := typedef.AsInt(value)
-		return ok && got == want
+	vars := make(map[string]any, len(t.Fields))
+	for _, f := range t.Fields {
+		v := fields[f.ID]
+		switch {
+		case v == nil:
+			vars[f.ID] = types.NullValue
+		case f.Type == typedef.Int:
+			if n, ok := typedef.AsInt(v); ok {
+				v = n
+			}
+			vars[f.ID] = v
+		default:
+			vars[f.ID] = v
+		}
 	}
-	return literal == value
+	out, _, err := tr.Program.Eval(vars)
+	if err != nil {
+		return false
+	}
+	ok, isBool := out.Value().(bool)
+	return isBool && ok
 }
