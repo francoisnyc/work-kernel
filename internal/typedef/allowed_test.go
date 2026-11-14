@@ -24,7 +24,7 @@ states:
 transitions:
   - {from: open,        to: in_progress, allowed: ['role:support']}
   - {from: in_progress, to: open,        allowed: ['role:support', 'principal:system:timer']}
-  - {from: in_progress, to: done,        allowed: ['principal:user-owner']}
+  - {from: in_progress, to: done,        allowed: ['principal:user:owner']}
 `
 
 // Entries are role:<name> or principal:<id>, kept as written. They survive
@@ -37,7 +37,7 @@ func TestParse_Allowed(t *testing.T) {
 	want := map[string][]string{
 		"open -> in_progress": {"role:support"},
 		"in_progress -> open": {"role:support", "principal:system:timer"},
-		"in_progress -> done": {"principal:user-owner"},
+		"in_progress -> done": {"principal:user:owner"},
 	}
 	check := func(ty *typedef.Type) {
 		t.Helper()
@@ -64,7 +64,7 @@ func TestParse_Allowed(t *testing.T) {
 // An entry that is neither role:<name> nor principal:<id> is refused at load
 // time, so a typo cannot silently lock everyone out (or let everyone in).
 func TestParse_RejectsBrokenAllowedEntries(t *testing.T) {
-	const good = "allowed: ['principal:user-owner']"
+	const good = "allowed: ['principal:user:owner']"
 	cases := []struct {
 		name, allowed string
 		wantInError   string
@@ -73,6 +73,9 @@ func TestParse_RejectsBrokenAllowedEntries(t *testing.T) {
 		{"an unknown kind", "allowed: ['group:support']", "group:support"},
 		{"a role with no name", "allowed: ['role:']", "role:"},
 		{"a principal with no ID", "allowed: ['principal:']", "principal:"},
+		// Step A: principal entries are typed IDs (user:, agent:, system:).
+		{"an untyped principal", "allowed: ['principal:owner']", "principal:owner"},
+		{"a principal of unknown type", "allowed: ['principal:robot:7']", "principal:robot:7"},
 		{"an empty entry", "allowed: ['']", "allowed"},
 	}
 	for _, c := range cases {

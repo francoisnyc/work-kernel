@@ -77,6 +77,25 @@ Ideas noted during the spike, not built yet.
   and runs on every read and write. With 1,000 narrowed scopes in the namespace,
   even a principal who sees one scope pays for the walk. Fix: check one Item's
   scope ancestors upward instead, or keep a principal → scopes table. (Step 5)
+- A post-commit sequencer: one background process that reads events whose
+  transaction ID is below the snapshot xmin, orders them, and stamps a gap-free
+  log position. Watch and external indexes need "nothing before this point is
+  missing", which `commit_seq` cannot give once it comes from a plain sequence.
+  (Step A)
+- A metric for the age of the xmin watermark: a long transaction holds it back
+  for the whole database and every `min_seq` wait times out. (Step A)
+- Groups as readers: `scope_access` would hold group IDs and the check becomes
+  "the principal or one of their groups", keeping the table O(scopes × reader
+  entries) instead of O(scopes × people). Nothing to build yet. (Step A)
+- Search cost after Step A: match-first is O(matches). A word in ~10,000
+  Items costs ~14 ms, where the old flattened shape took ~1 ms (and ~11 ms for
+  a rare word). Options: cap the match step, pick the shape from the estimated
+  match count, or move search to its own index (which `min_seq` already
+  allows). (Step A)
+- After Step A the write ceiling on the 4-vCPU bench box is neither a lock nor
+  the WAL flush (`synchronous_commit=off` changed nothing): most likely CPU
+  shared by Go, Postgres and the containers. Measure on separate machines
+  before tuning anything. (Step A)
 
 ## 2026-11-12 — Step 1 (finished)
 
@@ -366,3 +385,168 @@ reach no workflow, cost a Temporal round-trip each, and are not actions.
 
 **Next session:** the follow-up spike (Steps 6–7: holds and connectors), starting with
 `HasListeners` and the Temporal cost limits above.
+
+## 2026-11-14 — Step A, hardening (part 1)
+
+**Built:** `commit_seq` from a sequence and `xid8` on every event (migration 00004),
+replacing the commit counter; `min_seq` waits until the write's transaction ID is below
+the snapshot xmin; a 5 s statement timeout on writes and a 60 s
+`idle_in_transaction_session_timeout`. `scopes.item_id` (unique), `scopes.open` and
+`scope_access` (migration 00005): a container gets its node with its first child,
+narrowing flips a node in place, and `Get`, writes and `Search` share one indexed rule
+(`policy.VisibleCondition`). Search matches first, then filters and sorts. `cmd/bench
+-explain`, lock-wait sampling and a `synchronous_commit=off` diagnostic in the bench.
+
+**Surprises:**
+- Two deadlocks came out of the concurrent policy test, both from Postgres row-lock
+  rules rather than from the design. Strengthening a lock the transaction already held
+  queues behind a waiter: so lock the subtree before touching the node. A second UPDATE
+  of a row the transaction already changed re-checks its foreign keys, taking a share
+  lock on the parent scope another change holds: so write each scope row once.
+- A child created while another child was making the container's node saw the container
+  "disappear": after waiting for a row lock, Postgres re-checks the query against the
+  new row version, and a join can miss a row committed after the statement began. Lock
+  the row in a statement of its own, then read.
+- `synchronous_commit=off` gained nothing, so the new ceiling is not the disk flush.
+- Match-first search is not a free win; see the plans below.
+
+**Changed tests (approved):** the two counter tests became watermark tests; the
+`lastCommitSeq` helper reads the sequence; the burst test sends one message before
+counting (and so counts 201 messages in the channel, a consequence noted in the
+implementation commit). Open: `TestMinSeq_WaitsForAWriteStillCommitting` races under
+`-race` (its goroutine is not waited for); a fix is proposed, not applied.
+
+### Numbers: Step 5 → Step A
+
+Same bench, same 4-vCPU container type, but this run's CPU is 2.30 GHz against Step 5's
+2.10 GHz: compare ratios within a run more than absolute numbers across runs.
+
+| | Step 5 | Step A |
+| --- | --- | --- |
+| Create p50, 1 writer, cache on | 2.31 ms | 2.03 ms |
+| Create, 16 writers (writes/s, ×1 writer) | 630 (1.5×) | 1,300 (2.8×) |
+| Update, 16 writers | 746 (1.7×) | 1,328 (2.7×) |
+| Transition, 16 writers | 966 (2.0×) | 1,463 (2.6×) |
+| Lock waits during 16-writer runs | not measured | 0 samples in every run |
+| Burst, 1 writer (msgs/s) | 370 | 418 |
+| Burst, 16 writers, 1 channel | 807 | 1,451 (3.5×) |
+| Burst, 16 writers, 16 channels | 874 | 1,444 |
+| Rows per message, outbox rows, new scopes | 4, 0, 0 | 4, 0, 0 |
+| Get, principal reading 1,000 narrowed scopes | 3.75 ms (34.5 in run 1) | 0.17 ms |
+| Get, principal reading none | 2.32 ms | 0.16 ms |
+| Create by a principal reading none, 1,000 narrowed scopes exist | 5.05 ms | 2.15 ms |
+| Search ("rare" word, 1,001 matches), light / heavy | 16.7 / 38.9 ms | 3.8 / 4.6 ms |
+| Search, common word (~10,000 matches) | not measured | 14.4 ms (flattened: 0.85 ms) |
+| Temporal per ticket: runs, events, bytes, actions | 2, 42, 6,194, 9 | 2, 42, 6,196, 9 |
+
+`synchronous_commit` (ticket Create, cache on): on 562 / 1,478 writes/s (1 / 16 writers),
+off 514 / 1,444. No difference: the flush is not the limit.
+
+**Done when:** no write waits on a shared row lock (0 lock-wait samples) ✓; 16 writers
+reach 2.5–2.8× one writer (3.5× for messages) ✓; `min_seq` and the relay lose and
+reorder nothing (watermark tests, relay tests unchanged) ✓; a principal who reads no
+narrowed scope pays nothing for 1,000 of them (Create 2.15 ms against 2.03) ✓. CI green
+waits on the test fix above.
+
+### Plan shapes (EXPLAIN ANALYZE, before / after ANALYZE)
+
+- **Get, principal reading 1,000 scopes.** Before Step A: a recursive walk over every
+  scope; 3.5 ms with no statistics, 109 ms after ANALYZE (sequential scan, nested loop,
+  500,500 rows discarded). After: three index lookups (items pkey, scopes pkey,
+  scope_access pkey): 0.14 / 0.05 ms.
+- **Search, light principal, 1,001 matches.** Before: walk `items` newest-first and
+  discard non-matches (31,016 discarded, 11 ms). After: the match step (bitmap scan,
+  then a sequential scan once analyzed: 3% of rows match), then the visibility test per
+  match: 8.0 / 4.8 ms.
+- **Search, common word, ~10,000 matches.** Match-first: 22 / 14 ms, growing with
+  matches. Flattened: 11 ms before ANALYZE, 0.17 ms after (newest-first finds 50 matches
+  in 152 rows). The flattened shape is fast when matches are recent and slow when they
+  are old; match-first is O(matches) either way. Kept match-first for predictability;
+  see Later.
+- **OR vs UNION ALL.** The OR plan filters scopes first (17 rows) after ANALYZE and
+  costs a scopes-pkey lookup per match before; UNION ALL was slower (28.6 ms against
+  22 ms). Kept the OR.
+
+**Next session:** apply the approved race fix (if approved), get CI green, mark #10
+ready. Then option B (Steps 6–7).
+
+### Narrowing cost (`go run ./cmd/bench -narrowing`, 2026-11-14)
+
+A container with N descendant scope nodes (N children, each with a child of its own),
+narrowed to R readers, then narrowed again to a different R readers:
+
+| N nodes | R readers | scope_access rows written | ms | Reader change: rows | ms |
+| --- | --- | --- | --- | --- | --- |
+| 100 | 1 | 101 | 10 | 101 | 8 |
+| 100 | 50 | 5,050 | 62 | 5,050 | 64 |
+| 1,000 | 1 | 1,001 | 48 | 1,001 | 47 |
+| 1,000 | 10 | 10,010 | 743 | 10,010 | 801 |
+| 1,000 | 50 | 50,050 | 784 | 50,050 | 784 |
+
+Rows written are (N + 1) × R, for the first narrowing and for every reader change: every
+inheriting node below holds its own copy of the effective readers. At N = 1,000 and
+R = 50 that is 50,050 rows and ~0.8 s, with the whole subtree locked. Too large: a
+pointer design is proposed before going further.
+
+## 2026-11-14 — Step A, part 2: pointer, typed principals, property test (finished)
+
+**Built:** migration 00006: `scopes.policy_scope_id` points to the nearest narrowing
+scope (null = open), only narrowing scopes keep `scope_access` rows, `scopes.open` goes.
+Typed principal IDs from callers (`user:`, `agent:`, `system:`; `group:` reserved): the
+actor, `on_behalf_of` (a user), readers and Type `principal:` entries are checked, and
+untyped IDs are `ErrInvalid`. A property test: 3 fixed seeds × 30 random steps (creates,
+narrowings, reader changes, inherits, 4 concurrent changes) against a naive evaluator.
+The race in `TestMinSeq_WaitsForAWriteStillCommitting` is fixed (approved).
+
+**Surprises:** the property test found three concurrency bugs the hand-written tests
+missed, all fixed:
+- a foreign key on the new pointer took a share lock on an ancestor's row, which a
+  concurrent change to that ancestor held; the pointer is derived, so it has no FK;
+- the subtree was listed before it was locked, so a scope added in between kept a stale
+  pointer; the list is now repeated after locking until it holds still;
+- inherit that removes a node updated the Item row twice, and the second update
+  re-checked `container_id`, share-locking the container's Item row against a concurrent
+  change to the container; the row is now updated once and the node removed afterwards.
+
+All three share a cause: Postgres row-lock rules (FK checks, re-checks on a second
+update) take locks bottom-up, against the top-down order the design relies on.
+
+**Numbers.** Narrowing a container (`bench -narrowing`), before → after the pointer:
+
+| N nodes | R | Rows written | ms (narrow) | ms (reader change) |
+| --- | --- | --- | --- | --- |
+| 100 | 50 | 5,050 → 50 | 62 → 9 | 64 → 8 |
+| 1,000 | 10 | 10,010 → 10 | 743 → 41 | 801 → 34 |
+| 1,000 | 50 | 50,050 → 50 | 784 → 50 | 784 → 40 |
+
+The remaining ~40 ms is locking the 1,000-scope subtree and moving pointers.
+
+Full bench on the pointer design (same machine type as part 1):
+
+| | Part 1 | Part 2 |
+| --- | --- | --- |
+| Create / Update / Transition, 16 writers, cache on (writes/s) | 1,300 / 1,328 / 1,463 | 1,464 / 1,283 / 1,490 |
+| ×1 writer | 2.8 / 2.7 / 2.6 | 2.6 / 2.2 / 2.5 |
+| Lock waits, every 16-writer run | 0 | 0 |
+| Burst, 1 writer / 16 writers 1 channel / 16 channels (msgs/s) | 418 / 1,451 / 1,444 | 429 / 1,142 / 1,173 |
+| Rows per message, outbox rows | 4, 0 | 4, 0 |
+| Get, light / heavy principal | 0.16 / 0.17 ms | 0.20 / 0.25 ms |
+| Create by light principal, 1,000 narrowed scopes exist | 2.15 ms | 2.26 ms |
+| Search 1,001 matches, light / heavy | 3.8 / 4.6 ms | 4.2 / 4.9 ms |
+| Search, common word / flattened | 14.4 / 0.85 ms | 16.1 / 0.97 ms |
+| Temporal per ticket | 9 actions, 6,196 bytes | 9 actions, 6,209 bytes |
+
+`synchronous_commit`: on 462 / 1,345 writes/s (1 / 16 writers), off 560 / 1,690. Part 1
+showed no difference; this run shows ~25%. Run-to-run noise on this shared 4-vCPU box is
+about ±20% (the 16-writer burst read 1,451 then 1,142 on equivalent code), so neither run
+settles where the ceiling is; Later already says to measure on separate machines.
+
+Property test: 1.9 s locally under `-race`; the `itemservice` package takes 28 s in CI.
+
+**Done when (Step A, all parts):** no shared lock waits ✓; 16 writers ≥ 2× one ✓ (2.2–2.6×);
+`min_seq` and the relay lose and reorder nothing ✓; a principal pays nothing for others'
+narrowed scopes ✓; narrowing cost O(R + scopes below), not O(N × R) ✓; stored visibility
+equals a naive evaluator under random and concurrent edits ✓; CI green ✓.
+
+**Next session:** Step A2 (one `visible()` check for every output path, moves as policy
+changes, agent write rules), then option B (Steps 6–7).

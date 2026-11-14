@@ -35,11 +35,11 @@ states:
 transitions:
   - {from: open,        to: in_progress, allowed: ['role:support']}
   - {from: in_progress, to: open,        allowed: ['role:support', 'principal:system:timer']}
-  - {from: in_progress, to: done,        allowed: ['principal:user-owner']}
+  - {from: in_progress, to: done,        allowed: ['principal:user:owner']}
 `
 
 var (
-	owner       = item.Principal{Actor: "user-owner"} // named by the Type itself
+	owner       = item.Principal{Actor: "user:owner"} // named by the Type itself
 	systemTimer = item.Principal{Actor: "system:timer"}
 )
 
@@ -250,7 +250,7 @@ func TestTransition_TimerMovesANarrowedItem(t *testing.T) {
 func TestOnBehalfOf_BothMustSeeAndBothMustBeAllowed(t *testing.T) {
 	k := itemservice.New(pool)
 	uma := person("uma")
-	agent := item.Principal{Actor: "agent-" + uuid.NewString()[:8]}
+	agent := item.Principal{Actor: "agent:" + uuid.NewString()[:8]}
 	both := item.Principal{Actor: agent.Actor, OnBehalfOf: uma.Actor}
 
 	t.Run("visibility", func(t *testing.T) {

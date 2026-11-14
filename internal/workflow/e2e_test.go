@@ -62,7 +62,7 @@ func registerJobType(ctx context.Context) error {
 	return itemservice.New(pool).RegisterType(ctx, ty)
 }
 
-var alice = item.Principal{Actor: "user-alice"}
+var alice = item.Principal{Actor: "user:alice"}
 
 // --- the stack under test ---
 

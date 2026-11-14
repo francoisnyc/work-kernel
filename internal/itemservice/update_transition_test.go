@@ -215,7 +215,7 @@ func TestUpdate_MergesFieldsAndRecordsTheEvent(t *testing.T) {
 	// Set one field, change one, clear one (nil), leave nothing else touched.
 	res, err := k.Update(ctx, itemservice.UpdateRequest{
 		IdempotencyKey: newKey(),
-		Principal:      item.Principal{Actor: "agent-7", OnBehalfOf: "user-alice"},
+		Principal:      item.Principal{Actor: "agent:7", OnBehalfOf: "user:alice"},
 		ItemID:         id,
 		Fields:         map[string]any{"f_assignee": "user-bob", "f_priority": 3, "f_title": nil},
 	})
@@ -250,7 +250,7 @@ func TestUpdate_MergesFieldsAndRecordsTheEvent(t *testing.T) {
 	if commitSeq != res.CommitSeq || op != "update" || hop != 0 {
 		t.Errorf("event = (commit_seq %d, op %q, hop %d), want (%d, update, 0)", commitSeq, op, hop, res.CommitSeq)
 	}
-	if actor != "agent-7" || onBehalfOf == nil || *onBehalfOf != "user-alice" {
+	if actor != "agent:7" || onBehalfOf == nil || *onBehalfOf != "user:alice" {
 		t.Errorf("event actor = %q, on_behalf_of = %v", actor, onBehalfOf)
 	}
 	var payload struct {
@@ -445,7 +445,7 @@ func TestTransition_Legal_IsRecorded(t *testing.T) {
 
 	res, err := k.Transition(ctx, itemservice.TransitionRequest{
 		IdempotencyKey: newKey(),
-		Principal:      item.Principal{Actor: "agent-7", OnBehalfOf: "user-alice"},
+		Principal:      item.Principal{Actor: "agent:7", OnBehalfOf: "user:alice"},
 		ItemID:         id,
 		ToState:        "in_progress",
 	})
@@ -484,7 +484,7 @@ func TestTransition_Legal_IsRecorded(t *testing.T) {
 	if commitSeq != res.CommitSeq || op != "transition" {
 		t.Errorf("event = (commit_seq %d, op %q), want (%d, transition)", commitSeq, op, res.CommitSeq)
 	}
-	if actor != "agent-7" || onBehalfOf == nil || *onBehalfOf != "user-alice" {
+	if actor != "agent:7" || onBehalfOf == nil || *onBehalfOf != "user:alice" {
 		t.Errorf("event actor = %q, on_behalf_of = %v", actor, onBehalfOf)
 	}
 	if agentSession != nil || originatingHook != nil || causationID != nil || correlationID != nil || hop != 0 {

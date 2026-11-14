@@ -24,20 +24,20 @@ func TestAuthorizeTransition(t *testing.T) {
 		allowed   []string
 		want      bool
 	}{
-		{"no list: anyone", "user-a", nil, nil, true},
-		{"empty list: anyone", "user-a", nil, []string{}, true},
-		{"holds the role", "user-a", []string{"support"}, []string{"role:support"}, true},
-		{"holds one of several roles listed", "user-a", []string{"lead"}, []string{"role:support", "role:lead"}, true},
-		{"holds another role", "user-a", []string{"sales"}, []string{"role:support"}, false},
-		{"holds no role", "user-a", nil, []string{"role:support"}, false},
-		{"named as a principal", "user-a", nil, []string{"principal:user-a"}, true},
-		{"another principal is named", "user-a", nil, []string{"principal:user-b"}, false},
-		{"role or principal: the principal matches", "user-a", nil, []string{"role:support", "principal:user-a"}, true},
+		{"no list: anyone", "user:a", nil, nil, true},
+		{"empty list: anyone", "user:a", nil, []string{}, true},
+		{"holds the role", "user:a", []string{"support"}, []string{"role:support"}, true},
+		{"holds one of several roles listed", "user:a", []string{"lead"}, []string{"role:support", "role:lead"}, true},
+		{"holds another role", "user:a", []string{"sales"}, []string{"role:support"}, false},
+		{"holds no role", "user:a", nil, []string{"role:support"}, false},
+		{"named as a principal", "user:a", nil, []string{"principal:user:a"}, true},
+		{"another principal is named", "user:a", nil, []string{"principal:user:b"}, false},
+		{"role or principal: the principal matches", "user:a", nil, []string{"role:support", "principal:user:a"}, true},
 		{"a principal ID with a colon", "system:timer", nil, []string{"principal:system:timer"}, true},
 		// A role and a principal are different things, whatever they are called.
 		{"a role named like the principal", "support", nil, []string{"role:support"}, false},
-		{"a principal named like the role", "user-a", []string{"user-a"}, []string{"principal:user-b"}, false},
-		{"the role name is not a prefix match", "user-a", []string{"sup"}, []string{"role:support"}, false},
+		{"a principal named like the role", "user:a", []string{"user:a"}, []string{"principal:user:b"}, false},
+		{"the role name is not a prefix match", "user:a", []string{"sup"}, []string{"role:support"}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -53,7 +53,7 @@ func TestAuthorizeTransition(t *testing.T) {
 // Project is all-or-nothing in Step 4: an Item in a scope the principal can
 // see comes back unchanged; any other Item does not come back at all.
 func TestProject(t *testing.T) {
-	p := item.Principal{Actor: "user-a"}
+	p := item.Principal{Actor: "user:a"}
 	seen, other := uuid.New(), uuid.New()
 	it := item.Item{
 		ID: uuid.New(), TypeID: "ticket", TypeVersion: 1, ScopeID: &seen,

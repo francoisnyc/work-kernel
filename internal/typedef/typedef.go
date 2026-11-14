@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/francoisnyc/work-kernel/internal/item"
 )
 
 // FieldType is the kind of value a field holds. A named string type gives
@@ -260,6 +262,11 @@ func (t *Type) check() error {
 			}
 			if who == "" {
 				return fail("transition %s: allowed entry %q names nothing", name, entry)
+			}
+			// A principal entry names a typed principal ID that may act.
+			if strings.HasPrefix(entry, AllowedPrincipalPrefix) &&
+				!item.IsKind(who, item.KindUser, item.KindAgent, item.KindSystem) {
+				return fail("transition %s: allowed entry %q must name user:<id>, agent:<id> or system:<id>", name, entry)
 			}
 		}
 		conds, err := ParseGuard(t, tr.Guard)
