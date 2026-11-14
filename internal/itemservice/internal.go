@@ -66,6 +66,7 @@ type kernelCause struct {
 	causeSeq    int64
 	typeID      string
 	typeVersion int
+	hookID      string // the hook acting; empty for the timer
 }
 
 // checkKernel checks a kernel write before any work is done. Everything here
@@ -93,7 +94,7 @@ func checkKernel(p item.Principal, itemID uuid.UUID, a item.Attribution) (*kerne
 		if !ok || t != hookType || h != hookID {
 			return invalid("originating_hook %q must be hook:%s@v<version>:%s", a.OriginatingHook, hookType, hookID)
 		}
-		kc.typeID, kc.typeVersion = t, v
+		kc.typeID, kc.typeVersion, kc.hookID = t, v, h
 	} else {
 		// timer:<type>@v<version>:<state>, the state the timer was armed in.
 		t, v, _, ok := parseOrigin("timer", a.OriginatingHook)
