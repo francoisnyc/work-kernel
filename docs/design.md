@@ -122,7 +122,9 @@ client → item service (Go, stateless)
   that wrote it. A transaction ID below `pg_snapshot_xmin(pg_current_snapshot())`
   belongs to a transaction that has finished; no later commit can carry it. So a
   read with `min_seq = S` looks up the event S's transaction ID and waits until
-  the reader's watermark has passed it. Then the write S is visible, together with
+  the reader's watermark has passed it. An S whose event cannot be found yet
+  (still committing, or rolled back) is never treated as reached: the read keeps
+  waiting up to its bound, then returns `ErrNotCaughtUp`. Then the write S is visible, together with
   everything written by older transactions. It does **not** promise every event
   with a lower `commit_seq`: a younger transaction may have taken a lower number
   and still be running. That is enough for read-your-writes, which is what
@@ -207,6 +209,9 @@ client → item service (Go, stateless)
 - **Grants** widen explicitly (e.g. share one ticket with a customer). A grant
   attaches to a scope node. Effective readers = (parent readers narrowed by this
   node) + grants.
+- **When a scope node appears.** An Item gets its own node when it is narrowed,
+  or when it gets its first child (in that child's `Create`). A message that never
+  has children costs no node.
 - **Who can see what is kept, not computed per request.** `scopes.open` is true
   for a scope with no narrowing ancestor: everyone in the namespace reads it.
   For every other scope, `scope_access(scope_id, principal)` lists its effective
@@ -220,6 +225,13 @@ client → item service (Go, stateless)
 - **Search** filters with the same test, joined in SQL.
 - Walking up from a scope is what a policy change does to recompute
   `scope_access` for the subtree it affects: O(scopes below the change).
+- **Concurrent policy changes.** A recompute first locks the affected scope rows
+  top-down, ancestor before descendant, and only then rewrites `scope_access`.
+  Two changes in the same subtree therefore run one after the other, in the same
+  lock order, and cannot leave the table wrong or deadlock.
+- **Groups (later).** Readers may become groups. `scope_access` then holds group
+  IDs, and the check becomes "the principal, or one of the principal's groups", so
+  the table stays O(scopes × reader entries), not O(scopes × people).
 - API in `internal/policy`:
   - `Project(principal, visible, item)` — pure. All-or-nothing per Item for the
     spike; redacting single fields comes later.
@@ -241,6 +253,10 @@ client → item service (Go, stateless)
   row, so it cannot fall behind a write.
 - The visibility filter (see Policy) is applied in SQL before the limit, never
   after fetching.
+- The visibility test is "the scope is open, or the principal is in
+  `scope_access`". If the `OR` spoils the plan, it becomes two branches joined
+  with `UNION ALL` (open scopes; the principal's scopes), checked with `EXPLAIN`
+  on fresh and analyzed databases.
 - The text match runs first and the sort and limit after it, in a subquery the
   planner cannot flatten. Otherwise Postgres walks Items newest-first and
   discards non-matches, which grows with the size of the scope (Step A, `EXPLAIN`).

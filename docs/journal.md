@@ -84,6 +84,9 @@ Ideas noted during the spike, not built yet.
   (Step A)
 - A metric for the age of the xmin watermark: a long transaction holds it back
   for the whole database and every `min_seq` wait times out. (Step A)
+- Groups as readers: `scope_access` would hold group IDs and the check becomes
+  "the principal or one of their groups", keeping the table O(scopes × reader
+  entries) instead of O(scopes × people). Nothing to build yet. (Step A)
 
 ## 2026-11-12 — Step 1 (finished)
 
