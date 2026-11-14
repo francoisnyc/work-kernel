@@ -303,6 +303,39 @@ func TestInternal_RequiresACauseOnTheSameItem(t *testing.T) {
 	assertNothingWritten(t, ticket, 1)
 }
 
+// The timer's originating_hook is parsed like a hook's:
+// timer:<type>@v<version>:<state>, on the Item's own Type and version.
+func TestInternal_TimerOriginMustMatchTheItem(t *testing.T) {
+	k := itemservice.New(pool)
+	id := createIntake(t, k, alice, nil)
+	cause := func(origin string) item.Attribution {
+		return item.Attribution{OriginatingHook: origin, CausationID: fmt.Sprintf("%s:1", id), Hop: 1}
+	}
+	for _, origin := range []string{
+		"timer:",                 // nothing after the prefix
+		"timer:intake:triage",    // no version
+		"timer:intake@v1:",       // no state
+		"timer:intake@vx:triage", // not a version
+		"timer:ticket@v1:triage", // another Type
+		"timer:intake@v2:triage", // another version
+	} {
+		_, err := k.Internal().Transition(testCtx(t), itemservice.TransitionRequest{
+			IdempotencyKey: newKey(), Principal: timer, ItemID: id, ToState: "parked", Attribution: cause(origin),
+		})
+		assertInvalid(t, "timer with originating_hook "+origin, err)
+	}
+	assertNothingWrittenNoOutbox(t, id, 1)
+
+	res, err := k.Internal().Transition(testCtx(t), itemservice.TransitionRequest{
+		IdempotencyKey: newKey(), Principal: timer, ItemID: id, ToState: "parked",
+		Attribution: cause("timer:intake@v1:triage"),
+	})
+	if err != nil {
+		t.Fatalf("timer with a matching originating_hook: %v", err)
+	}
+	assertKernelEvent(t, id, res.ItemSeq, timer.Actor, alice.Actor, cause("timer:intake@v1:triage"))
+}
+
 // The internal door writes fields and moves state. It does not change who
 // may read an Item or where it lives: those stay with people.
 func TestInternal_UpdateIsFieldsOnly(t *testing.T) {

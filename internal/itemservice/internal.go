@@ -61,11 +61,11 @@ func (in *Internal) Transition(ctx context.Context, req TransitionRequest) (Writ
 }
 
 // kernelCause is what a kernel write's attribution says, once checked: the
-// event that caused it, and for a hook the Type version it ran for.
+// event that caused it, and the Type version the timer or hook ran for.
 type kernelCause struct {
 	causeSeq    int64
-	hookType    string // empty for the timer
-	hookVersion int
+	typeID      string
+	typeVersion int
 }
 
 // checkKernel checks a kernel write before any work is done. Everything here
@@ -89,13 +89,19 @@ func checkKernel(p item.Principal, itemID uuid.UUID, a item.Attribution) (*kerne
 	kc := &kernelCause{}
 	if isHook {
 		// hook:<type>@v<version>:<hook-id>, naming the hook that is acting.
-		t, v, h, ok := parseHookOrigin(a.OriginatingHook)
+		t, v, h, ok := parseOrigin(item.KindHook, a.OriginatingHook)
 		if !ok || t != hookType || h != hookID {
 			return invalid("originating_hook %q must be hook:%s@v<version>:%s", a.OriginatingHook, hookType, hookID)
 		}
-		kc.hookType, kc.hookVersion = hookType, v
-	} else if !strings.HasPrefix(a.OriginatingHook, "timer:") {
-		return invalid("the timer's originating_hook must be timer:<type>@v<version>:<state>, not %q", a.OriginatingHook)
+		kc.typeID, kc.typeVersion = t, v
+	} else {
+		// timer:<type>@v<version>:<state>, the state the timer was armed in.
+		t, v, _, ok := parseOrigin("timer", a.OriginatingHook)
+		if !ok {
+			return invalid("the timer's originating_hook must be timer:<type>@v<version>:<state>, not %q",
+				a.OriginatingHook)
+		}
+		kc.typeID, kc.typeVersion = t, v
 	}
 
 	// causation_id is "<item>:<seq>", and the item is this one: a kernel
@@ -123,14 +129,15 @@ func checkKernel(p item.Principal, itemID uuid.UUID, a item.Attribution) (*kerne
 	return kc, nil
 }
 
-// parseHookOrigin splits "hook:<type>@v<version>:<hook-id>".
-func parseHookOrigin(o string) (typeID string, version int, hookID string, ok bool) {
-	rest, found := strings.CutPrefix(o, item.KindHook+":")
+// parseOrigin splits an originating_hook, "<kind>:<type>@v<version>:<name>",
+// where kind is "hook" (name: the hook ID) or "timer" (name: the state).
+func parseOrigin(kind, o string) (typeID string, version int, name string, ok bool) {
+	rest, found := strings.CutPrefix(o, kind+":")
 	if !found {
 		return "", 0, "", false
 	}
-	head, hookID, found := strings.Cut(rest, ":")
-	if !found || hookID == "" {
+	head, name, found := strings.Cut(rest, ":")
+	if !found || name == "" {
 		return "", 0, "", false
 	}
 	typeID, v, found := strings.Cut(head, "@v")
@@ -141,15 +148,15 @@ func parseHookOrigin(o string) (typeID string, version int, hookID string, ok bo
 	if err != nil || version < 1 {
 		return "", 0, "", false
 	}
-	return typeID, version, hookID, true
+	return typeID, version, name, true
 }
 
 // admit is the door's check under the Item's row lock. It returns the
 // principal the event is recorded as.
 //
 // The public door checks that the principal can see the Item. The internal
-// door skips visibility; instead it checks that a hook runs for this Item's
-// Type and version, and that the cause exists. It records as on_behalf_of the
+// door skips visibility; instead it checks that the timer or hook ran for
+// this Item's Type and version, and that the cause exists. It records as on_behalf_of the
 // human at the root of the cause: the cause's on_behalf_of, else its actor if
 // that is a user, else nobody. That is attribution only, never checked: a
 // hook must not fail because that human has since lost access.
@@ -158,9 +165,9 @@ func admit(ctx context.Context, tx pgx.Tx, p item.Principal, id uuid.UUID, it lo
 	if kc == nil {
 		return p, checkVisible(ctx, tx, p, it.ScopeID)
 	}
-	if kc.hookType != "" && (kc.hookType != it.TypeID || kc.hookVersion != it.TypeVersion) {
-		return item.Principal{}, fmt.Errorf("%w: kernel write: hook of %s v%d on an Item of %s v%d",
-			ErrInvalid, kc.hookType, kc.hookVersion, it.TypeID, it.TypeVersion)
+	if kc.typeID != it.TypeID || kc.typeVersion != it.TypeVersion {
+		return item.Principal{}, fmt.Errorf("%w: kernel write: %s ran for %s v%d, on an Item of %s v%d",
+			ErrInvalid, p.Actor, kc.typeID, kc.typeVersion, it.TypeID, it.TypeVersion)
 	}
 	var actor, onBehalfOf string
 	err := tx.QueryRow(ctx,
