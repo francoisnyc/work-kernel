@@ -50,9 +50,17 @@ type querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-// loadType reads a registered Type. Postgres is the only store, which keeps
-// the item service stateless; a cache can come later if Step 5's numbers ask for it.
-func loadType(ctx context.Context, q querier, id string, version int) (*typedef.Type, error) {
+// loadType returns a registered Type, from the cache when it is enabled.
+func (k *Service) loadType(ctx context.Context, q querier, id string, version int) (*typedef.Type, error) {
+	read := func() (*typedef.Type, error) { return readType(ctx, q, id, version) }
+	if k.types == nil {
+		return read()
+	}
+	return k.types.Load(id, version, read)
+}
+
+// readType reads a registered Type from Postgres and parses it.
+func readType(ctx context.Context, q querier, id string, version int) (*typedef.Type, error) {
 	var def []byte
 	err := q.QueryRow(ctx,
 		`select definition from types where id = $1 and version = $2`, id, version).Scan(&def)

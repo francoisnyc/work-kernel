@@ -83,18 +83,38 @@ type WriteResult struct {
 	ItemSeq   int64     `json:"item_seq"`
 }
 
-// Service is stateless; all state lives in Postgres.
+// Service keeps all Item state in Postgres. The only thing it holds in
+// memory is parsed Types, which never change once registered.
 type Service struct {
-	pool *pgxpool.Pool
+	pool  *pgxpool.Pool
+	types *typedef.Cache // nil when Options.CacheTypes is false
 }
 
-// New returns a Service that uses the given connection pool.
+// Options tune a Service.
+type Options struct {
+	// CacheTypes keeps each parsed Type version in memory after its first
+	// read. New turns it on: in Step 5 the cache cut single-writer write
+	// latency by 19-30% (docs/journal.md).
+	CacheTypes bool
+}
+
+// New returns a Service that uses the given connection pool, with the Type
+// cache on.
 func New(pool *pgxpool.Pool) *Service {
-	return &Service{pool: pool}
+	return NewWithOptions(pool, Options{CacheTypes: true})
 }
 
-// Create writes a new Item, its first event and an outbox row in one
-// transaction. The same idempotency key returns the stored result.
+// NewWithOptions returns a Service with the given options.
+func NewWithOptions(pool *pgxpool.Pool, opts Options) *Service {
+	k := &Service{pool: pool}
+	if opts.CacheTypes {
+		k.types = &typedef.Cache{}
+	}
+	return k
+}
+
+// Create writes a new Item, its first event and, if its Type has listeners,
+// an outbox row, in one transaction. The same idempotency key returns the stored result.
 func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, error) {
 	if req.IdempotencyKey == "" || req.Principal.Actor == "" || req.TypeID == "" {
 		// %w wraps ErrInvalid, so callers can still match it with errors.Is,
@@ -118,7 +138,7 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 
 	// A Type version never changes once registered, so it can be read
 	// outside the write transaction.
-	ty, err := loadType(ctx, k.pool, req.TypeID, req.TypeVersion)
+	ty, err := k.loadType(ctx, k.pool, req.TypeID, req.TypeVersion)
 	if err != nil {
 		return WriteResult{}, err
 	}
@@ -180,7 +200,7 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 		if req.Narrow != nil {
 			payload["readers"] = readers // opaque IDs, sorted
 		}
-		return appendEvent(ctx, tx, id, itemSeq, req.Principal, req.Attribution, "create", payload, fields)
+		return appendEvent(ctx, tx, ty, id, itemSeq, req.Principal, req.Attribution, "create", payload, fields)
 	})
 }
 
@@ -271,5 +291,5 @@ func (k *Service) StateEntry(ctx context.Context, id uuid.UUID) (StateEntry, err
 
 // Type returns a registered Type version.
 func (k *Service) Type(ctx context.Context, id string, version int) (*typedef.Type, error) {
-	return loadType(ctx, k.pool, id, version)
+	return k.loadType(ctx, k.pool, id, version)
 }

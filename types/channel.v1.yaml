@@ -1,0 +1,5 @@
+# A chat channel: a container for messages. No lifecycle, so no listeners.
+id: channel
+version: 1
+fields:
+  - {id: f_name, type: string}

@@ -62,6 +62,7 @@ type Options struct {
 // Relay is a single-instance relay: run one at a time (see "Later" in the
 // journal for what several would need).
 type Relay struct {
+	types     typedef.Cache // versions never change, so this never goes stale
 	pool      *pgxpool.Pool
 	workflows Workflows
 	opts      Options
@@ -235,7 +236,9 @@ func (r *Relay) delivery(ctx context.Context, id uuid.UUID, ev pendingEvent) (De
 		entered = shape.State
 	}
 
-	ty, err := r.loadType(ctx, ev.TypeID, ev.TypeVersion)
+	ty, err := r.types.Load(ev.TypeID, ev.TypeVersion, func() (*typedef.Type, error) {
+		return r.loadType(ctx, ev.TypeID, ev.TypeVersion)
+	})
 	if err != nil {
 		return Delivery{}, err
 	}

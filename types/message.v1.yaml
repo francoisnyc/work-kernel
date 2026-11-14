@@ -1,0 +1,6 @@
+# A chat message. No lifecycle: it lives in the implicit state `default`
+# and costs one row and one event, with no outbox row.
+id: message
+version: 1
+fields:
+  - {id: f_body, type: string}

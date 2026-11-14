@@ -1,5 +1,5 @@
 // Package testdb starts a throwaway Postgres with the real migrations applied.
-// It is for tests only; internal/itemservice's tests predate it and have their own copy.
+// It is for tests and cmd/bench; internal/itemservice's tests predate it and have their own copy.
 package testdb
 
 import (

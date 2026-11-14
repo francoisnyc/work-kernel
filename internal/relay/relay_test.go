@@ -320,9 +320,10 @@ func TestRelay_NothingListening_MarksDelivered(t *testing.T) {
 	if got := fake.seqs(ticket); !reflect.DeepEqual(got, []int64{1, 2, 3}) {
 		t.Errorf("ticket deliveries = %v, want 1, 2, 3", got)
 	}
-	// A Type without a lifecycle never starts a workflow.
-	if got := fake.callsFor(message.ItemID); len(got) != 1 || got[0].Start {
-		t.Errorf("message deliveries = %+v, want one plain update", got)
+	// A Type without listeners writes no outbox row (Step 5), so the relay
+	// never sees the message at all.
+	if got := fake.callsFor(message.ItemID); len(got) != 0 {
+		t.Errorf("message deliveries = %+v, want none", got)
 	}
 	for _, id := range []uuid.UUID{ticket, message.ItemID} {
 		if left := pending(t, id); len(left) != 0 {

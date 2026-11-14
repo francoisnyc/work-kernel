@@ -1,0 +1,42 @@
+# Version 2 of the spike's ticket. Items stay on the version they were
+# created with, so v1 tickets keep running v1's lifecycle beside these.
+# Changes from v1: a `waiting` state with its own timer back to in_progress,
+# and a shorter in_progress timer (24h instead of 48h).
+id: ticket
+version: 2
+initial_state: open
+
+fields:
+  - {id: f_title,      type: string}
+  - {id: f_priority,   type: int}
+  - {id: f_reporter,   type: string}
+  - {id: f_assignee,   type: string}
+  - {id: f_urgent,     type: bool}
+  - {id: f_resolution, type: enum, options: [fixed, wontfix, duplicate]}
+
+states:
+  - {id: open,        category: todo}
+  - {id: in_progress, category: active,  timer: {after: 24h, to: open}}
+  # Waiting on the customer: after 72 hours the ticket is picked up again.
+  - {id: waiting,     category: waiting, timer: {after: 72h, to: in_progress}}
+  - {id: resolved,    category: done}
+  - {id: canceled,    category: canceled}
+
+transitions:
+  - from: open
+    to: in_progress
+    guard: f_assignee is set
+  - from: in_progress
+    to: open
+  - from: in_progress
+    to: waiting
+  - from: waiting
+    to: in_progress
+  - from: in_progress
+    to: resolved
+    required: [f_resolution]
+  - from: resolved
+    to: open
+    guard: f_resolution != "wontfix"
+  - from: open
+    to: canceled

@@ -79,7 +79,7 @@ func TestTransition_TypeWithoutStates_IsRejected(t *testing.T) {
 			if !strings.Contains(err.Error(), to) {
 				t.Errorf("error %q does not mention %q", err, to)
 			}
-			assertNothingWritten(t, id, 1)
+			assertNothingWrittenNoOutbox(t, id, 1) // a message has no listeners (Step 5)
 		})
 	}
 }

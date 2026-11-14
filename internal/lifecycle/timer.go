@@ -24,3 +24,24 @@ func NeedsWorkflow(t *typedef.Type, state string) bool {
 	_, hasTimer := TimerFor(t, state)
 	return hasTimer
 }
+
+// HasListeners reports whether anything listens to the events of Items of
+// Type t. When nothing does, the item service writes no outbox row for them:
+// an Item that keeps every default costs its row and its event, nothing more.
+// It is decided per Type version, not per event: once some state has
+// behavior, a workflow may be running, and it must hear every event.
+//
+// Today the only listener is the workflow, so this is "some state has a
+// timer". Hooks, link reactions and subscriptions will widen it. Whatever
+// they need must be added here, or their events are silently never sent.
+//
+// Two readers do not need the outbox and are not counted: Watch reads
+// item_events directly, and search is a column of the Item's own row.
+func HasListeners(t *typedef.Type) bool {
+	for _, s := range t.States {
+		if NeedsWorkflow(t, s.ID) {
+			return true
+		}
+	}
+	return false
+}
