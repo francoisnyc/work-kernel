@@ -146,11 +146,38 @@ func lockItem(ctx context.Context, tx pgx.Tx, id uuid.UUID) (lockedItem, error) 
 }
 
 // checkPrincipal refuses a principal that is not typed: the actor must be
-// user:, agent: or system:, and on_behalf_of, when set, a user:.
+// user:, agent:, system: or hook:, and on_behalf_of, when set, a user:.
+// Which door each kind may use is checkPublic's and checkKernel's job.
 func checkPrincipal(p item.Principal) error {
 	if !p.Valid() {
-		return fmt.Errorf("%w: principals are typed IDs (user:<id>, agent:<id>, system:<id>), "+
+		return fmt.Errorf("%w: principals are typed IDs (user:<id>, agent:<id>, system:<id>, hook:<type>:<id>), "+
 			"and on_behalf_of must be a user", ErrInvalid)
+	}
+	return nil
+}
+
+// checkPublic is the public door's check: people and agents only. The
+// kernel's own actors (system:, hook:) and the attribution only the kernel
+// may set (originating_hook, causation_id, hop) are ErrInvalid here; they go
+// through Internal(). correlation_id stays open to callers, as a claim.
+func checkPublic(p item.Principal, a item.Attribution) error {
+	if err := checkPublicPrincipal(p); err != nil {
+		return err
+	}
+	if a.OriginatingHook != "" || a.CausationID != "" || a.Hop != 0 {
+		return fmt.Errorf("%w: originating_hook, causation_id and hop are set by the kernel only", ErrInvalid)
+	}
+	return nil
+}
+
+// checkPublicPrincipal refuses an untyped principal, and the kernel's own
+// actors, on every public operation, reads included.
+func checkPublicPrincipal(p item.Principal) error {
+	if err := checkPrincipal(p); err != nil {
+		return err
+	}
+	if item.IsKind(p.Actor, item.KindSystem, item.KindHook) {
+		return fmt.Errorf("%w: %s is a kernel actor; it does not use the public door", ErrInvalid, p.Actor)
 	}
 	return nil
 }

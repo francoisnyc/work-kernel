@@ -62,7 +62,8 @@ func (a *Activities) LoadItem(ctx context.Context, itemID string) (Snapshot, err
 }
 
 // FireTimer makes a timer's move through the item service's normal write path, so
-// guards, history and the outbox all apply as for a person's transition.
+// guards, history and the outbox all apply as for a person's transition. It
+// uses the internal door: only the kernel may act as system:timer.
 //
 // The item service's final answers (stale, rejected, not found) are returned as
 // non-retryable errors, which the workflow tells apart by type. Anything else (the
@@ -72,7 +73,7 @@ func (a *Activities) FireTimer(ctx context.Context, in FireTimerInput) error {
 	if err != nil {
 		return fmt.Errorf("item id %q: %w", in.ItemID, err)
 	}
-	_, err = a.Items.Transition(ctx, itemservice.TransitionRequest{
+	_, err = a.Items.Internal().Transition(ctx, itemservice.TransitionRequest{
 		IdempotencyKey:  in.IdempotencyKey,
 		Principal:       item.Principal{Actor: timerActor},
 		ItemID:          id,

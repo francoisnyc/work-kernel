@@ -134,7 +134,7 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 		// like an exception with a cause.
 		return WriteResult{}, fmt.Errorf("%w: idempotency key, actor and type are required", ErrInvalid)
 	}
-	if err := checkPrincipal(req.Principal); err != nil {
+	if err := checkPublic(req.Principal, req.Attribution); err != nil {
 		return WriteResult{}, err
 	}
 	if err := checkAttribution(req.Attribution); err != nil {
@@ -257,7 +257,7 @@ func requestHash(op string, req any) (string, error) {
 // Get returns the Item as the principal may see it. An Item they may not see
 // is ErrNotFound, exactly like one that does not exist.
 func (k *Service) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item.Item, error) {
-	if err := checkPrincipal(p); err != nil {
+	if err := checkPublicPrincipal(p); err != nil {
 		return item.Item{}, err
 	}
 	if err := checkSession(ctx, k.pool, p); err != nil {
