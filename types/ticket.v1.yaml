@@ -23,7 +23,6 @@ transitions:
   - from: open
     to: in_progress
     guard: f_assignee is set
-    allowed: [role:agent] # who may act; parsed now, enforced with policy in Step 4
   - from: in_progress
     to: open
   - from: in_progress
