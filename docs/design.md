@@ -47,6 +47,11 @@ A Type is versioned YAML data that **names code but never contains it**.
   `none` means "not work": work views leave it out. A Type that declares no
   states gets one implicit state, `default`, with category `none`.
 - Transitions: from/to, guard expression, required fields, who may act, action references.
+  - Who may act is the transition's `allowed` list. An entry is `role:<name>`
+    or `principal:<id>`. Absent or empty means anyone who can see the Item.
+  - A timer acts as `system:timer` and gets no silent exemption: if the
+    transition it uses has an `allowed` list, the list must include
+    `principal:system:timer`, or the Type is refused at load.
 - Timers/SLAs: separate objects with start/pause/resume/stop conditions (later).
   Spike stand-in: a state may carry one timer,
   `{id: in_progress, category: active, timer: {after: 48h, to: open}}`. `to` must
@@ -68,6 +73,7 @@ client → kernel service (Go, stateless)
              claim idempotency key (namespace, actor, key)
                already used → return the stored result, write nothing
              lock Item row (SELECT … FOR UPDATE)
+             check the principal can see the Item (else: not found)
              validate schema + lifecycle + policy against the locked row
              write Item row (item_seq + 1)
              take next commit_seq (commit_counter row, locked)
@@ -87,8 +93,14 @@ client → kernel service (Go, stateless)
 - A rejected write rolls back, so it leaves no event and does not use up its
   key: the client can fix the Item and retry with the same key.
 - `Update` and `Transition` take an optional `expected_item_seq` (an if-match,
-  checked under the row lock; zero means no check). Two different refusals:
+  checked under the row lock; zero means no check). The refusals are distinct:
+  - `ErrNotFound` — no such Item, or the principal may not see it (HTTP 404).
+    The two cases look the same on purpose, on reads and on writes, so an
+    Item's existence never leaks. It is checked before everything else.
   - `ErrRejected` — the rules say no; retrying is pointless (HTTP 422).
+  - `ErrForbidden` — the move is legal and the principal can see the Item, but
+    the transition's `allowed` list does not include them (HTTP 403). The
+    lifecycle is asked first, so an illegal move is always `ErrRejected`.
   - `ErrStale` — someone changed the Item first; re-read and retry (HTTP 409).
 - `commit_seq` lets later reads/searches wait until the write is visible. For
   the spike it comes from a single locked counter row, so numbers become visible
@@ -141,18 +153,54 @@ client → kernel service (Go, stateless)
 
 - **Scopes**: a scope node per container that narrows access. An Item's read
   access comes from its nearest ancestor scope that narrows it. Each Item stores
-  one `scope_id`.
+  one `scope_id`, never null.
+- **Root scope**: each namespace has one root scope (no parent, `narrows = false`)
+  that every principal in the namespace reads. An Item that is not narrowed, in
+  no container, is in it. There is no "null means everyone".
 - A child can **narrow** its container's access but never widen it by inheritance.
+- **Narrowing is a change to the Item's policy part**, made through the existing
+  operations. `Create` takes an optional `Narrow{readers}`, which gives the Item
+  a scope node under its container's scope. `Update` takes an optional policy
+  patch: new `readers`, or `inherit` to drop the Item's own node. Both write an
+  event and bump `item_seq`; the payload holds reader IDs only.
+  - A change that would hide the Item from the principal making it (or from
+    `on_behalf_of`) is `ErrInvalid`. Recovery by an admin comes later, with grants.
+  - Narrowing a container moves the Items that inherit from it under its new
+    node, and `inherit` moves them back. Their `scope_id` changes; they get no
+    event, since nothing about them changed.
+- **Roles** live in `principal_roles(namespace_id, principal, role)`: the
+  server's own record, read on every write that needs it, never claimed by a caller.
+- **On behalf of**: when an agent acts for a user, both must see the Item and
+  both must pass `allowed`.
 - **Grants** widen explicitly (e.g. share one ticket with a customer). A grant
   attaches to a scope node. Effective readers = (parent readers narrowed by this
   node) + grants.
-- API in `internal/policy`: `Authorize(principal, action, item)`,
-  `VisibleScopes(principal)`, `Project(principal, item) → item with hidden fields redacted`.
+- API in `internal/policy`:
+  - `VisibleScopes(principal)` — loaded once per request, never cached, so a
+    narrowed Item or a removed reader is hidden on the very next read.
+  - `Project(principal, visible, item)` — pure. All-or-nothing per Item for the
+    spike; redacting single fields comes later.
+  - `AuthorizeTransition(principal, roles, transition)` — pure. "Is the move
+    legal" stays in `lifecycle.Transition`; "may this principal make it" is
+    asked here, afterwards.
+  - A general `Authorize(principal, action, item)` comes later.
 - Policy data lives in Postgres; evaluation is in Go. No external authz service.
 - **Boundary.** `Project` applies to every path that reaches a principal: people,
   agents, connectors, webhooks, search results. Internal infrastructure that
   only receives event shapes without field values (relay → our Temporal) is not
-  a principal, so those payloads do not pass through `Project`.
+  a principal, so those payloads do not pass through `Project`. For the same
+  reason a timer's write is not subject to visibility; it is subject to `allowed`.
+
+## Search
+
+- `Search` matches the string values in an Item's fields, using Postgres
+  full-text search on a generated `tsvector` column. The column is part of the
+  row, so it cannot fall behind a write.
+- The filter is `scope_id = ANY(visible scopes)`, applied in SQL before the
+  limit, never after fetching.
+- `min_seq`: Search waits until `commit_seq` has reached it, up to a bound
+  (default 2 s), then returns the retryable `ErrNotCaughtUp`. On one Postgres
+  the wait ends at once; the contract is there for when search has its own index.
 
 ## Agents (later in the spike)
 
@@ -180,15 +228,24 @@ client → kernel service (Go, stateless)
 
 ```sql
 create table types        (id text, version int, definition jsonb, primary key (id, version));
-create table scopes       (id uuid primary key, parent_id uuid references scopes, narrows boolean not null);
+create table scopes       (id uuid primary key, namespace_id text not null default 'default',
+                           parent_id uuid references scopes, narrows boolean not null);
+create unique index scopes_root on scopes (namespace_id) where parent_id is null;
+create index scopes_parent on scopes (parent_id);
 create table scope_readers(scope_id uuid references scopes, principal text, primary key (scope_id, principal));
 create table grants       (scope_id uuid references scopes, principal text, granted_by text,
                            created_at timestamptz not null default now(), primary key (scope_id, principal));
+create table principal_roles (namespace_id text not null default 'default', principal text not null,
+                           role text not null, primary key (namespace_id, principal, role));
 create table items        (id uuid primary key, namespace_id text not null default 'default',
                            type_id text not null, type_version int not null,
-                           container_id uuid references items, scope_id uuid references scopes,
+                           container_id uuid references items, scope_id uuid not null references scopes,
                            state text not null, fields jsonb not null default '{}',
-                           item_seq bigint not null default 0, updated_at timestamptz not null default now());
+                           item_seq bigint not null default 0, updated_at timestamptz not null default now(),
+                           search tsvector generated always as
+                             (jsonb_to_tsvector('simple', fields, '["string"]')) stored);
+create index items_search on items using gin (search);
+create index items_namespace_scope on items (namespace_id, scope_id);
 create table item_events  (item_id uuid references items, item_seq bigint, commit_seq bigint not null unique,
                            actor text not null, on_behalf_of text, agent_session text,
                            originating_hook text, causation_id text, correlation_id text,
