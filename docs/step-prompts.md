@@ -1,6 +1,6 @@
 # Session prompts for each build step
 
-A **step** is one row of the build order in `docs/design.md` (Step 1 to Step 5).
+A **step** is one row of a build order in `docs/design.md` (Steps 1–5, A, A2, 6–7).
 It is finished when its "done when" passes, however long that takes: a couple of
 hours or several sittings.
 
