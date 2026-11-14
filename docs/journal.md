@@ -115,6 +115,15 @@ Ideas noted during the spike, not built yet.
 - Type migration must re-arm timers for the new version: a running workflow
   carries its timer table in the Snapshot, so after a migration it must reload
   the table (and `TimerDone`) for the Item's new version. (Step 6)
+- A timer that comes due while a hold is open is refused as "held" and spent:
+  it does not fire again after the hold resolves. Revisit with real SLA
+  objects, together with the open question: does the SLA clock pause during a
+  hold? (Step 6)
+- The bounded `wait` on `Transition` polls `item_holds` every ~50 ms. Use
+  `LISTEN/NOTIFY` to wake waiters instead. (Step 6)
+- The workflow has no `GetVersion` branches, so changing its code breaks the
+  replay of running histories. Before the first product: replay tests against
+  real recorded histories, and versioned changes. (Step 6)
 
 ## 2026-11-12 — Step 1 (finished)
 
