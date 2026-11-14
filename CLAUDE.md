@@ -46,13 +46,17 @@ whether Go suits me — not to ship production code.
 
 ## Kernel rules that code must never break
 
-- Every write goes through the kernel's operations (create, update, transition,
-  link, archive). Nothing writes Item state from the side.
+Words: the **kernel** is the whole core layer (item service, lifecycle, relay,
+worker); the **item service** is the one program that reads and writes Items.
+
+
+- Every write goes through the item service's operations (create, update,
+  transition, link, archive). Nothing writes Item state from the side.
 - A write is one Postgres transaction: Item row + event + outbox row. The Item
   row is locked during the write, so `item_seq` has no gaps.
 - Every write takes an idempotency key and returns `commit_seq`.
 - Lifecycle logic lives in one pure function in `internal/lifecycle/`, used by
-  both the kernel and the Temporal workflow. No lifecycle logic anywhere else.
+  both the item service and the Temporal workflow. No lifecycle logic anywhere else.
 - No personal data (names, emails, free text) in `item_events.payload` —
   opaque IDs only.
 - Every outbound path (API responses, search results, webhooks, agent context,

@@ -10,6 +10,16 @@ Every unit of work is an **Item** of a **Type**. Trackers (Jira-like), chat
 (Slack-like) and a helpdesk will be apps built on the kernel. The kernel stays
 small; everything product-specific is a Type or an app.
 
+## Names: kernel and item service
+
+- **Kernel**: the whole core layer, everything that is not an app. Today that
+  is the item service, `internal/lifecycle`, the relay (`cmd/relay`) and the
+  workflow worker (`cmd/worker`); later the fan-out. Several programs, one layer.
+- **Item service**: the one program that serves reads and writes of Items
+  (`ItemService` in the proto). It is the only door to Item state.
+- Say "the item service" for the program and "the kernel" for the layer.
+  In code: `cmd/itemservice` and `internal/itemservice` (type `Service`).
+
 ## Item
 
 Seven parts:
@@ -62,7 +72,7 @@ or similar later.
 ## Write path
 
 ```
-client → kernel service (Go, stateless)
+client → item service (Go, stateless)
            check the request is well formed
            BEGIN
              claim idempotency key (namespace, actor, key)
@@ -131,8 +141,8 @@ client → kernel service (Go, stateless)
   lowest undelivered seq and the refusal is not written to history. Continue-as-new
   carries the loaded state. A run completes when the Item's state has no behavior.
 - The workflow is a thin scheduler of timers and waits. It uses pure functions
-  from `internal/lifecycle` (`TimerFor`); guards stay in the kernel. Timer-driven
-  transitions go back through the kernel's write path (as an activity) with
+  from `internal/lifecycle` (`TimerFor`); guards stay in the item service. Timer-driven
+  transitions go back through the item service's write path (as an activity) with
   `expected_item_seq`, so history stays in one place and a stale timer cannot
   make a wrong move. Stale, rejected and "Item not found" are final; any other
   failure retries with backoff, without limit.
@@ -245,8 +255,8 @@ passes, however long that takes.
 plan is in the "Work kernel: Spike plan" doc. In short: Temporal activities
 run `on_enter`, `on_exit` and `on_complete` hooks and write their results back
 through the normal write path. A blocking check holds a transition until it
-allows, denies or corrects it. Write APIs take a bounded `wait`. The kernel
-makes no synchronous outside calls.
+allows, denies or corrects it. Write APIs take a bounded `wait`. The item
+service makes no synchronous outside calls.
 
 **Go checkpoint, after Step 3:** if most time went into fighting the language
 rather than the design, stop and decide whether to rerun in Java.
