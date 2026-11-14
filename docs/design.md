@@ -71,8 +71,18 @@ A Type is versioned YAML data that **names code but never contains it**.
 - Items stay on the Type version they were created with. Versioning rule:
   **pin the lifecycle, evolve the schema, float the policy.**
 
-For the spike, guards can be simple Go-evaluated expressions; we'll choose CEL
-or similar later.
+Guards are CEL expressions (`cel-go`), compiled when a Type loads. Every field
+is a variable named by its ID, typed by the schema and nullable: unset is
+`null`, so "is set" reads `f_x != null`. A guard that cannot be evaluated does
+not hold.
+
+Hooks (Step 6) are declared in the Type version, pinned with the lifecycle:
+`{id, on: enter, state}` for an **enrich** hook (reads some fields, calls out,
+writes others, never holds the Item, optional `fallback`), or `{id, on:
+transition, from, to}` for a **check**. Each names an action (code in
+`internal/hooks`, never in the Type) with `reads` and `writes`, matched to the
+action by position; the action's arity is checked at load. A transition may
+be an `escape` (cancel): it may leave a held state.
 
 ## Write path
 
@@ -184,6 +194,33 @@ client → item service (Go, stateless)
   kernel write, which retrying cannot fix) are final; any other
   failure retries with backoff, without limit.
 
+## Holds (Step 6)
+
+- Asking for a transition that has a check does not move the Item. Under the
+  row lock the requester is checked (visibility, guards, required fields,
+  `allowed`); then one transaction writes a `transition_requested` event
+  (payload `from`, `requested_to`, `hold_id`; no `to`) and an `item_holds` row.
+- While the hold is open, the fields the check reads are frozen, and only a
+  declared escape leaves the state (it cancels the hold). Anything else is
+  `ErrHeld`, an `ErrStale`, naming the hold. A timer refused as held is spent.
+- The check runs as an activity and calls `ResolveHold` under the key
+  `hold:<id>`: **allow** and **correct** (allow with the hook's patch) apply the
+  requester's transition after checking the requester again (still sees the
+  Item, still in `allowed`, guards hold on the current fields), else
+  `transition_denied` with reason `requester_lost_access`, `forbidden` or
+  `guard_failed`; **deny** writes `transition_denied`; **error** writes
+  `transition_failed`. Reasons are codes, never free text. The resolving event
+  records the hook as actor and the root human as `on_behalf_of`.
+- Each hook has a budget (ScheduleToClose, default 15 min). When it runs out,
+  an enrich hook writes its fallback (if any) and a check resolves as error.
+- `Transition` takes a bounded `wait` (0 to 5 s, not part of the idempotency
+  hash) and answers `applied`, `denied`, `pending` or `error` with the hold ID.
+  A retry with the same key reports the hold's current outcome. `Get` shows
+  the Item's latest hold.
+- Variant D: an enrich hook prefetches a fact (`on_hold`) into a field and a
+  CEL guard refuses at once on it; the check is the backstop for a stale or
+  missing prefetch. Enrich hooks of a state already left are skipped.
+
 ## Policy
 
 - **Principals are typed IDs**, given by the caller: `user:<id>`, `agent:<id>`,
@@ -201,9 +238,14 @@ client → item service (Go, stateless)
   `causation_id` or non-zero `hop`, with `ErrInvalid`; `correlation_id` stays
   open to callers, as a claim. The kernel's own actors write through
   `Service.Internal()` (`Update` and `Transition` only):
+  - It serves `Update`, `Transition`, `ResolveHold` (a check settles its hold)
+    and `HookInput` (a hook reads its declared `reads`, nothing else).
   - It accepts `system:timer` and `hook:<type>:<hook-id>` only; any other
     `system:` actor is `ErrInvalid` until it is defined. It refuses people,
     agents, an `on_behalf_of` set by the caller and any agent session.
+  - On a Type that declares hooks, a hook must be declared and writes only
+    its `writes`. No kernel actor makes a checked transition itself
+    (`ErrForbidden`): only `ResolveHold` applies it, for a requester.
   - A write names its cause: `originating_hook` (for the timer
     `timer:<type>@v<version>:<state>`, for a hook
     `hook:<type>@v<version>:<hook-id>` naming that hook; either way on the
@@ -450,6 +492,13 @@ create table idempotency  (namespace_id text not null default 'default', actor t
                            request_hash text not null, result jsonb not null,
                            created_at timestamptz not null default now(),
                            primary key (namespace_id, actor, key));
+create table item_holds   (id uuid primary key, item_id uuid not null references items, hook text not null,
+                           from_state text not null, to_state text not null, requested_seq bigint not null,
+                           requester text not null, requester_on_behalf_of text, requester_agent_session text,
+                           status text not null default 'open',  -- open, allowed, denied, error, canceled
+                           reason text, resolved_seq bigint, created_at timestamptz not null default now(),
+                           resolved_at timestamptz, foreign key (item_id, requested_seq) references item_events);
+create unique index item_holds_one_open on item_holds (item_id) where status = 'open';
 ```
 
 ## API contract (first cut)
@@ -469,7 +518,9 @@ message WriteResult { string item_id = 1; int64 commit_seq = 2; int64 item_seq =
 // clients. The five write responses each wrap a WriteResult.
 // Every write request carries idempotency_key and principal (actor, on_behalf_of).
 // UpdateRequest and TransitionRequest take an optional expected_item_seq;
-// TransitionRequest also takes an optional fields patch.
+// TransitionRequest also takes an optional fields patch and a bounded wait,
+// and TransitionResponse adds outcome, hold_id and reason. Item carries its
+// latest hold.
 ```
 
 ## Spike build order
