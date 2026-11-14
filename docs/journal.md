@@ -657,3 +657,29 @@ no-outbox checks for the listener-less `intake` Type; `Hop: 1` on one FireTimer 
 on_enter prefetch + CEL guard, wider `HasListeners`. Answers given ahead:
 "corrects" = `allowed` with a field patch applied with the move, recorded as
 supplied by the hook, never a new target state; `cel-go` is approved.
+
+## 2026-11-14 — Step 6, part 2: hooks, holds, bounded wait, variant D (built; two test fixes await approval)
+
+**Built:** ticket v3 (triage, two enrich hooks, approve checked by `erp_check`, cancel as escape). CEL guards
+(`cel.dev/cel-go`, the renamed `cel-go`) replace the spike parser. Hooks are declared in the Type and checked at
+load, including each action's arity (`internal/hooks`). `item_holds`; `ResolveHold` re-checks the requester
+(access, guards, `allowed`). Frozen reads, escapes, `ErrHeld`. `Transition.Wait` (polls the hold every 50 ms).
+`HookInput`. Hook activities run as `workflow.Go` coroutines bounded by a budget. Stub CRM/ERP (`internal/connstub`);
+`go run ./cmd/bench -holds`.
+
+**Numbers (4 vCPU, `-holds`):** time to a definitive answer, 60 approvals at 4 concurrent callers, wait 3 s:
+p50/p95 111/163 ms at 50 ms stub latency, 568/619 ms at 500 ms; 100% answered within the wait. Write
+latency p50/p95 (update; hold request): baseline 5.6/8.7 and 5.8/10.5 ms; stubs down 4.5/6.9 and 5.6/9.0; worker
+stopped 4.2/5.5 and 4.4/5.9. Unchanged, as the design wants.
+
+**Surprises:** `cel-go` moved to `cel.dev/cel-go` at v0.32. Nullable typed variables make `f_x != null` and type
+errors at load work with no custom code. The new hook workflow tests delivered their trigger a minute after
+a start in a quiet state, which Update-With-Start never does, so the run ended at once. The fix rewrites
+approved tests and waits for approval. `Transition` returning `TransitionResult` trips the Project source test
+(its allowlist names `WriteResult` only), and that fix waits for approval too.
+
+**Open:** which hooks ran is inferred from `causation_id` = the entering event, so a hook that wrote nothing
+reruns on a reload (its key makes the write a no-op, but the connector is called again). `buf` is not installed
+here, so the proto change is not linted.
+
+**Next session:** approve or reject the two test fixes, then open the PR. Then Step 7.
