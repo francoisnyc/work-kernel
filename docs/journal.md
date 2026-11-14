@@ -57,9 +57,6 @@ Ideas noted during the spike, not built yet.
   statement would close the tiny window between them. (Step 4)
 - A kernel write must name a cause on the same Item. Link reactions will
   write to another Item, so that rule relaxes when they arrive. (Step 6)
-- `FireTimer` returns the item service's `ErrInvalid` as a plain, retryable
-  error, so a malformed kernel write would retry forever. Make it
-  non-retryable (and the same for hook activities). (Step 6)
 - `lifecycle.HasListeners` decides whether an event gets an outbox row. Today it
   only knows timers. Hooks, link reactions and subscriptions must widen it when
   they arrive, or their events are silently never sent. (Step 5)
@@ -619,3 +616,31 @@ through the session user's approval ✓; sessions cannot be invented ✓.
 
 **Next session:** option B (Steps 6–7: holds and connectors). Before exposing any API:
 the `system:timer` impersonation item under Later.
+
+## 2026-11-14 — Step 6, part 1: protect internal principals (finished)
+
+**Built:** `hook:<type>:<hook-id>` principals (no version; `originating_hook` carries
+it). Two doors: the public operations refuse `system:`/`hook:` actors and
+`originating_hook`, `causation_id`, `hop`; `Service.Internal()` (Update, Transition)
+takes only `system:timer` and hooks, with a cause on the same Item, hop 1..`MaxHop` (8),
+origin matching the Item's Type and version, fields and state only, no visibility
+check, `allowed` kept. Kernel writes record the human at the root of the cause as
+`on_behalf_of`. A source test limits `Internal()` callers to `internal/workflow` and
+`internal/hooks`. `FireTimer` writes through `Internal()`; `ErrInvalid` is now a final,
+non-retryable `Invalid` in the activity and the workflow.
+
+**Surprises:** the `Project` source test caught `Internal()` (exempted, approved).
+`activity.GetLogger` panics outside a real activity, so unit-called activities cannot
+log. Hop-0 checks come before the Item lookup, which changed one NotFound test's input.
+`dockerd` has to be started by hand again after a worker restart.
+
+**Approved test changes:** four existing tests moved the timer to `Internal()`;
+no-outbox checks for the listener-less `intake` Type; `Hop: 1` on one FireTimer input.
+
+**Open:** `admit` reads the cause event on every kernel write (one indexed lookup).
+
+**Next session (part 2, fresh session, new PR):** hooks as activities, holds
+(`item_holds`, `transition_requested`/`transition_denied`), bounded `wait`,
+on_enter prefetch + CEL guard, wider `HasListeners`. Answers given ahead:
+"corrects" = `allowed` with a field patch applied with the move, recorded as
+supplied by the hook, never a new target state; `cel-go` is approved.

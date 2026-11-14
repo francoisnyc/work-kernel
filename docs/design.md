@@ -180,7 +180,8 @@ client → item service (Go, stateless)
   from `internal/lifecycle` (`TimerFor`); guards stay in the item service. Timer-driven
   transitions go back through the item service's write path (as an activity) with
   `expected_item_seq`, so history stays in one place and a stale timer cannot
-  make a wrong move. Stale, rejected and "Item not found" are final; any other
+  make a wrong move. Stale, rejected, "Item not found" and invalid (a malformed
+  kernel write, which retrying cannot fix) are final; any other
   failure retries with backoff, without limit.
 
 ## Policy
@@ -203,9 +204,10 @@ client → item service (Go, stateless)
   - It accepts `system:timer` and `hook:<type>:<hook-id>` only; any other
     `system:` actor is `ErrInvalid` until it is defined. It refuses people,
     agents, an `on_behalf_of` set by the caller and any agent session.
-  - A write names its cause: `originating_hook` (`timer:…`, or for a hook
-    `hook:<type>@v<version>:<hook-id>`, naming that hook on the Item's own Type
-    and version) and `causation_id` = an existing event of **the same Item**,
+  - A write names its cause: `originating_hook` (for the timer
+    `timer:<type>@v<version>:<state>`, for a hook
+    `hook:<type>@v<version>:<hook-id>` naming that hook; either way on the
+    Item's own Type and version) and `causation_id` = an existing event of **the same Item**,
     with `hop` ≥ 1. (Link reactions will write to another Item; this rule
     relaxes then.)
   - `hop` above `MaxHop` (8) is `ErrRejected` ("hop limit") and writes nothing.
