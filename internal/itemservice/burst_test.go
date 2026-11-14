@@ -127,7 +127,7 @@ func TestBurst_MessagesIntoOneChannel_RowsPerMessage(t *testing.T) {
 	// Every message is in the channel, in the channel's scope, at item_seq 1.
 	n := count(t, `select count(*) from items m join items c on c.id = m.container_id
 	               where c.id = $1 and m.scope_id = c.scope_id and m.item_seq = 1`, channel.ItemID)
-	if n != burstMessages {
-		t.Errorf("messages in the channel = %d, want %d", n, burstMessages)
+	if n != burstMessages+1 { // + the first message, sent before counting
+		t.Errorf("messages in the channel = %d, want %d", n, burstMessages+1)
 	}
 }

@@ -2,10 +2,12 @@ package itemservice
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/francoisnyc/work-kernel/internal/item"
@@ -42,8 +44,9 @@ type SearchResult struct {
 }
 
 // Search returns the Items that match the query and that the principal can
-// see. If MinSeq is set it first waits, up to Wait, for the commit counter to
-// reach it, and returns ErrNotCaughtUp if it does not.
+// see. If MinSeq is set it first waits, up to Wait, until that write and
+// every older transaction are visible (see waitForCommit), and returns
+// ErrNotCaughtUp if they are not.
 //
 // Today search reads the same Postgres the writes go to, so the wait ends at
 // once. The contract is here so it still holds when search has its own index.
@@ -62,25 +65,25 @@ func (k *Service) Search(ctx context.Context, req SearchRequest) (SearchResult, 
 		return SearchResult{}, err
 	}
 
-	// Read on every request, never cached: a narrowed Item or a removed
-	// reader takes effect on the very next search.
-	visible, err := policy.VisibleScopes(ctx, k.pool, defaultNamespace, req.Principal)
-	if err != nil {
-		return SearchResult{}, err
-	}
-
-	// The scope filter is part of the query, so Postgres applies it before
-	// the limit and an Item the principal cannot see never leaves the database.
+	// The text match runs first, in a MATERIALIZED step the planner cannot
+	// fold into the rest. Without it, Postgres walks Items newest-first and
+	// throws away non-matches, which grows with the size of the scope
+	// (Step A, EXPLAIN). The visibility filter is part of the query, before
+	// the limit, so an Item the principal cannot see never leaves the database.
 	// UUIDv7 IDs sort by creation time, so "id desc" is newest first.
+	args := policy.VisibleArgs(req.Principal)
+	args["ns"], args["q"], args["limit"] = defaultNamespace, req.Query, limit
 	rows, err := k.pool.Query(ctx,
-		`select id, type_id, type_version, container_id, scope_id, state, fields, item_seq
-		 from items
-		 where namespace_id = $1
-		   and scope_id = any($2)
-		   and search @@ plainto_tsquery('simple', $3)
-		 order by id desc
-		 limit $4`,
-		defaultNamespace, visible, req.Query, limit)
+		`with matches as materialized (
+		     select id, type_id, type_version, container_id, scope_id, state, fields, item_seq
+		     from items
+		     where namespace_id = @ns and search @@ plainto_tsquery('simple', @q)
+		 )
+		 select m.id, m.type_id, m.type_version, m.container_id, m.scope_id, m.state, m.fields, m.item_seq
+		 from matches m join scopes s on s.id = m.scope_id
+		 where `+policy.VisibleCondition+`
+		 order by m.id desc
+		 limit @limit`, args)
 	if err != nil {
 		return SearchResult{}, fmt.Errorf("search: %w", err)
 	}
@@ -95,20 +98,27 @@ func (k *Service) Search(ctx context.Context, req SearchRequest) (SearchResult, 
 	}
 
 	// Every outbound path goes through Project. The query has already
-	// filtered by scope, so this drops nothing today; it is where field-level
-	// redaction will happen.
+	// checked each Item's scope, so this drops nothing today; it is where
+	// field-level redaction will happen.
 	res := SearchResult{Items: make([]item.Item, 0, len(found))}
 	for _, it := range found {
-		if projected, ok := policy.Project(req.Principal, visible, it); ok {
+		if projected, ok := policy.Project(req.Principal, []uuid.UUID{*it.ScopeID}, it); ok {
 			res.Items = append(res.Items, projected)
 		}
 	}
 	return res, nil
 }
 
-// waitForCommit returns once the commit counter has reached minSeq. It gives
-// up with ErrNotCaughtUp after wait, or with the context's error if the
-// caller goes away first.
+// waitForCommit returns once the write named by minSeq is visible and every
+// transaction older than it has finished: the write's transaction ID is below
+// the snapshot xmin, the oldest transaction still running. A commit_seq whose
+// event cannot be found yet (still committing, or rolled back) is not reached.
+// It gives up with ErrNotCaughtUp after wait, or with the context's error if
+// the caller goes away first.
+//
+// It does not promise every lower commit_seq: a younger transaction may hold
+// a lower number and still be running. commit_seq names a write; it is not a
+// cursor (docs/design.md, Write path).
 func (k *Service) waitForCommit(ctx context.Context, minSeq int64, wait time.Duration) error {
 	if minSeq == 0 {
 		return nil
@@ -118,17 +128,18 @@ func (k *Service) waitForCommit(ctx context.Context, minSeq int64, wait time.Dur
 	}
 	deadline := time.Now().Add(wait)
 	for {
-		// The counter row is updated inside each write's transaction, so
-		// this read sees a number only once that write has committed.
-		var last int64
-		if err := k.pool.QueryRow(ctx, `select last_seq from commit_counter`).Scan(&last); err != nil {
-			return fmt.Errorf("read commit counter: %w", err)
+		var reached bool
+		err := k.pool.QueryRow(ctx,
+			`select xid < pg_snapshot_xmin(pg_current_snapshot()) from item_events where commit_seq = $1`,
+			minSeq).Scan(&reached)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("read the watermark: %w", err)
 		}
-		if last >= minSeq {
+		if reached {
 			return nil
 		}
 		if !time.Now().Before(deadline) {
-			return fmt.Errorf("%w: commit_seq is %d, wanted %d", ErrNotCaughtUp, last, minSeq)
+			return fmt.Errorf("%w: write %d and the transactions before it are not all visible yet", ErrNotCaughtUp, minSeq)
 		}
 		// select waits on several channels at once and takes whichever is
 		// ready first: here, the caller giving up or the next poll.

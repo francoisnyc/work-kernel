@@ -32,6 +32,13 @@ func (k *Service) write(ctx context.Context, p item.Principal, key, hash string,
 	var res WriteResult
 	// BeginFunc commits if the function returns nil and rolls back otherwise.
 	err := pgx.BeginFunc(ctx, k.pool, func(tx pgx.Tx) error {
+		// set_config(..., true) is SET LOCAL: the timeout ends with this
+		// transaction, so the pooled connection goes back unchanged.
+		_, err := tx.Exec(ctx, `select set_config('statement_timeout', $1, true)`,
+			fmt.Sprintf("%dms", k.writeTimeout.Milliseconds()))
+		if err != nil {
+			return fmt.Errorf("set statement timeout: %w", err)
+		}
 		// Claim the key first. If another transaction holds the same key, this
 		// statement waits for it to finish, then sees its row and inserts nothing.
 		// Keys are scoped by namespace and actor, so two clients never collide.
@@ -142,8 +149,8 @@ func checkExpectedSeq(it lockedItem, expected int64) error {
 	return nil
 }
 
-// appendEvent records one accepted operation: it takes the next commit_seq,
-// then inserts the event, the values the event set, and, when ty has
+// appendEvent records one accepted operation: it inserts the event (which
+// takes its commit_seq), the values the event set, and, when ty has
 // listeners, the outbox row. The caller has already written the Item row at
 // itemSeq.
 //
@@ -152,26 +159,24 @@ func checkExpectedSeq(it lockedItem, expected int64) error {
 func appendEvent(ctx context.Context, tx pgx.Tx, ty *typedef.Type, id uuid.UUID, itemSeq int64, p item.Principal,
 	a item.Attribution, op string, payload map[string]any, values map[string]any) (WriteResult, error) {
 
-	// The update locks the single counter row until the transaction ends, so
-	// writes commit one at a time and commit_seq values become visible in order.
+	// nullif stores an empty Go string as null: "not set".
+	// commit_seq comes from the commit_seq sequence and xid from
+	// pg_current_xact_id(), both column defaults. Taking a sequence number
+	// locks nothing, so writes to different Items no longer queue behind each
+	// other. The numbers are not in commit order; min_seq waits on xid instead
+	// (see Search).
 	var commitSeq int64
 	err := tx.QueryRow(ctx,
-		`update commit_counter set last_seq = last_seq + 1 returning last_seq`).Scan(&commitSeq)
-	if err != nil {
-		return WriteResult{}, fmt.Errorf("take commit_seq: %w", err)
-	}
-
-	// nullif stores an empty Go string as null: "not set".
-	_, err = tx.Exec(ctx,
-		`insert into item_events (item_id, item_seq, commit_seq, actor, on_behalf_of,
+		`insert into item_events (item_id, item_seq, actor, on_behalf_of,
 		                          agent_session, originating_hook, causation_id, correlation_id, hop,
 		                          op, payload)
-		 values ($1, $2, $3, $4, nullif($5, ''),
-		         nullif($6, ''), nullif($7, ''), nullif($8, ''), nullif($9, ''), $10,
-		         $11, $12)`,
-		id, itemSeq, commitSeq, p.Actor, p.OnBehalfOf,
+		 values ($1, $2, $3, nullif($4, ''),
+		         nullif($5, ''), nullif($6, ''), nullif($7, ''), nullif($8, ''), $9,
+		         $10, $11)
+		 returning commit_seq`,
+		id, itemSeq, p.Actor, p.OnBehalfOf,
 		a.AgentSession, a.OriginatingHook, a.CausationID, a.CorrelationID, a.Hop,
-		op, payload)
+		op, payload).Scan(&commitSeq)
 	if err != nil {
 		return WriteResult{}, fmt.Errorf("insert event: %w", err)
 	}

@@ -1,13 +1,15 @@
 // Package policy decides who may see and do what. Every outbound path goes
 // through Project.
 //
-// The data (scopes, readers, roles) lives in Postgres; the decisions are made
-// in Go. VisibleScopes and Roles load the data; Project and
+// The data (scopes, readers, roles) lives in Postgres. CanSee and
+// VisibleCondition answer "may this principal read this scope?" from the kept
+// scopes.open and scope_access; Roles loads roles; Project and
 // AuthorizeTransition are pure functions over what was loaded.
 package policy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -22,49 +24,46 @@ import (
 // caller chooses whether the read is part of its transaction.
 type Querier interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-// VisibleScopes returns the scopes the principal can read in a namespace.
-// Load it once per request and hand it to Project.
+// VisibleCondition is the one rule for "may the principal read scope s?",
+// as SQL over a row `s` of scopes and the named arguments @actor and @behalf
+// (empty when nobody is acted for). A scope is readable when it is open (no
+// narrowing ancestor), or when scope_access lists the actor and, if set, the
+// person acted for: an agent sees only what both may see.
 //
-// The walk starts at the root scope, which everyone reads, and goes down. A
-// node is visible if its parent is and, when the node narrows, the principal
-// is one of its readers. So a child can narrow its parent's access and never
-// widen it.
-//
-// When the principal acts on behalf of someone, the result is the
-// intersection: a narrowing node must list both.
-//
-// Grants (explicit widening) are not built yet.
-func VisibleScopes(ctx context.Context, q Querier, namespaceID string, p item.Principal) ([]uuid.UUID, error) {
-	who := []string{p.Actor}
-	if p.OnBehalfOf != "" && p.OnBehalfOf != p.Actor {
-		who = append(who, p.OnBehalfOf)
+// scope_access is kept up to date in the same transaction as every policy
+// change, so the answer is right on the very next read. It is one indexed
+// lookup per scope: other people's narrowed scopes cost nothing.
+const VisibleCondition = `(s.open or (
+	exists (select 1 from scope_access a where a.scope_id = s.id and a.principal = @actor)
+	and (@behalf = '' or exists (select 1 from scope_access b where b.scope_id = s.id and b.principal = @behalf))))`
+
+// VisibleArgs returns the named arguments VisibleCondition needs.
+// pgx.NamedArgs fills @name placeholders, like named parameters in JDBC templates.
+func VisibleArgs(p item.Principal) pgx.NamedArgs {
+	behalf := p.OnBehalfOf
+	if behalf == p.Actor {
+		behalf = ""
 	}
-	// The inner count asks "how many of these principals read this node?";
-	// all of them must.
-	rows, err := q.Query(ctx,
-		`with recursive visible as (
-		     select id from scopes where namespace_id = $1 and parent_id is null
-		     union all
-		     select s.id
-		     from scopes s
-		     join visible v on s.parent_id = v.id
-		     where not s.narrows
-		        or (select count(*) from scope_readers r
-		            where r.scope_id = s.id and r.principal = any($2)) = $3
-		 )
-		 select id from visible`,
-		namespaceID, who, len(who))
+	return pgx.NamedArgs{"actor": p.Actor, "behalf": behalf}
+}
+
+// CanSee reports whether the principal may read the scope. Grants (explicit
+// widening) are not built yet.
+func CanSee(ctx context.Context, q Querier, p item.Principal, scopeID uuid.UUID) (bool, error) {
+	args := VisibleArgs(p)
+	args["scope"] = scopeID
+	var ok bool
+	err := q.QueryRow(ctx, `select `+VisibleCondition+` from scopes s where s.id = @scope`, args).Scan(&ok)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
 	if err != nil {
-		return nil, fmt.Errorf("read visible scopes: %w", err)
+		return false, fmt.Errorf("check visibility: %w", err)
 	}
-	// CollectRows reads every row and closes the result set.
-	ids, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
-	if err != nil {
-		return nil, fmt.Errorf("read visible scopes: %w", err)
-	}
-	return ids, nil
+	return ok, nil
 }
 
 // Roles returns the roles one principal holds in a namespace. They are the

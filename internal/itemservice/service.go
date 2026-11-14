@@ -86,9 +86,16 @@ type WriteResult struct {
 // Service keeps all Item state in Postgres. The only thing it holds in
 // memory is parsed Types, which never change once registered.
 type Service struct {
-	pool  *pgxpool.Pool
-	types *typedef.Cache // nil when Options.CacheTypes is false
+	pool         *pgxpool.Pool
+	types        *typedef.Cache // nil when Options.CacheTypes is false
+	writeTimeout time.Duration
 }
+
+// DefaultWriteTimeout bounds every statement of a write. A write that waits
+// longer (on a lock, say) fails and rolls back instead of holding its
+// transaction open: an open transaction holds back the min_seq watermark for
+// the whole database.
+const DefaultWriteTimeout = 5 * time.Second
 
 // Options tune a Service.
 type Options struct {
@@ -96,6 +103,9 @@ type Options struct {
 	// read. New turns it on: in Step 5 the cache cut single-writer write
 	// latency by 19-30% (docs/journal.md).
 	CacheTypes bool
+	// WriteTimeout is the statement timeout on the write path; zero means
+	// DefaultWriteTimeout. There is no "no timeout".
+	WriteTimeout time.Duration
 }
 
 // New returns a Service that uses the given connection pool, with the Type
@@ -106,7 +116,10 @@ func New(pool *pgxpool.Pool) *Service {
 
 // NewWithOptions returns a Service with the given options.
 func NewWithOptions(pool *pgxpool.Pool, opts Options) *Service {
-	k := &Service{pool: pool}
+	k := &Service{pool: pool, writeTimeout: opts.WriteTimeout}
+	if k.writeTimeout <= 0 {
+		k.writeTimeout = DefaultWriteTimeout
+	}
 	if opts.CacheTypes {
 		k.types = &typedef.Cache{}
 	}
@@ -160,19 +173,15 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 		if err != nil {
 			return WriteResult{}, fmt.Errorf("new item id: %w", err)
 		}
-		// The Item starts in its container's scope, or in a narrower one of
-		// its own. A container the principal cannot see does not exist for them.
-		scopeID, err := parentScope(ctx, tx, req.ContainerID, true)
+		// The Item starts in its container's node (made now if this is the
+		// container's first child), or the root scope. A container the
+		// principal cannot see does not exist for them.
+		scopeID, err := childScope(ctx, tx, req.ContainerID)
 		if err != nil {
 			return WriteResult{}, err
 		}
 		if err := checkVisible(ctx, tx, req.Principal, scopeID); err != nil {
 			return WriteResult{}, err
-		}
-		if req.Narrow != nil {
-			if scopeID, err = insertScope(ctx, tx, scopeID, readers); err != nil {
-				return WriteResult{}, err
-			}
 		}
 
 		// A row inserted in this transaction is locked until commit, so no
@@ -184,6 +193,17 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 			id, defaultNamespace, ty.ID, ty.Version, req.ContainerID, scopeID, ty.InitialState, fields, itemSeq)
 		if err != nil {
 			return WriteResult{}, fmt.Errorf("insert item: %w", err)
+		}
+		// A narrowed Item gets a node of its own. The node names the Item, so
+		// the Item row has to exist first.
+		if req.Narrow != nil {
+			node, err := insertNode(ctx, tx, scopeID, id, true, readers)
+			if err != nil {
+				return WriteResult{}, err
+			}
+			if _, err := tx.Exec(ctx, `update items set scope_id = $2 where id = $1`, id, node); err != nil {
+				return WriteResult{}, fmt.Errorf("move item into its node: %w", err)
+			}
 		}
 
 		// The payload records which fields were set, never their values:
@@ -221,24 +241,30 @@ func requestHash(op string, req any) (string, error) {
 // Get returns the Item as the principal may see it. An Item they may not see
 // is ErrNotFound, exactly like one that does not exist.
 func (k *Service) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item.Item, error) {
-	// Nothing is cached: the scopes are read on every request, so a change
-	// of readers takes effect on the very next read.
-	visible, err := policy.VisibleScopes(ctx, k.pool, defaultNamespace, p)
-	if err != nil {
-		return item.Item{}, err
-	}
+	// One statement reads the Item and decides visibility from its scope,
+	// so the two always agree. Nothing is cached: a change of readers takes
+	// effect on the very next read.
+	args := policy.VisibleArgs(p)
+	args["id"], args["ns"] = id, defaultNamespace
 	it := item.Item{ID: id}
-	err = k.pool.QueryRow(ctx,
-		`select type_id, type_version, container_id, scope_id, state, fields, item_seq
-		 from items where id = $1 and namespace_id = $2`, id, defaultNamespace,
-	).Scan(&it.TypeID, &it.TypeVersion, &it.ContainerID, &it.ScopeID, &it.State, &it.Fields, &it.ItemSeq)
+	var visible bool
+	err := k.pool.QueryRow(ctx,
+		`select i.type_id, i.type_version, i.container_id, i.scope_id, i.state, i.fields, i.item_seq, `+
+			policy.VisibleCondition+`
+		 from items i join scopes s on s.id = i.scope_id
+		 where i.id = @id and i.namespace_id = @ns`, args,
+	).Scan(&it.TypeID, &it.TypeVersion, &it.ContainerID, &it.ScopeID, &it.State, &it.Fields, &it.ItemSeq, &visible)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return item.Item{}, ErrNotFound
 	}
 	if err != nil {
 		return item.Item{}, fmt.Errorf("read item: %w", err)
 	}
-	it, ok := policy.Project(p, visible, it)
+	if !visible {
+		return item.Item{}, ErrNotFound
+	}
+	// The scope was found readable above; Project is still the one door out.
+	it, ok := policy.Project(p, []uuid.UUID{*it.ScopeID}, it)
 	if !ok {
 		return item.Item{}, ErrNotFound
 	}
