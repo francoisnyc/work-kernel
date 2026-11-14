@@ -222,18 +222,31 @@ func (r *Relay) deliverItem(ctx context.Context, id uuid.UUID) error {
 // delivery turns an event row into what is sent: its shape, never a field
 // value, plus the Type's answer to "does this start a workflow?".
 func (r *Relay) delivery(ctx context.Context, id uuid.UUID, ev pendingEvent) (Delivery, error) {
-	// Only the keys that say which state the event enters are read.
+	// Only the keys that say which state the event enters, and which hold
+	// it opens or closes, are read: opaque IDs and state names.
 	var shape struct {
-		State string `json:"state"` // create
-		From  string `json:"from"`  // transition
-		To    string `json:"to"`    // transition
+		State          string `json:"state"`            // create
+		From           string `json:"from"`             // transition and the hold events
+		To             string `json:"to"`               // transition
+		RequestedTo    string `json:"requested_to"`     // transition_requested, _denied, _failed
+		HoldID         string `json:"hold_id"`          // every event that opens or closes a hold
+		CanceledHoldID string `json:"canceled_hold_id"` // an escape
 	}
 	if err := json.Unmarshal(ev.Payload, &shape); err != nil {
 		return Delivery{}, fmt.Errorf("decode payload of event %d: %w", ev.Seq, err)
 	}
-	entered := shape.To
-	if ev.Op == "create" {
+	// Belt and braces: only a create or a transition enters a state, whatever
+	// keys another event's payload carries.
+	var entered string
+	switch ev.Op {
+	case "create":
 		entered = shape.State
+	case "transition":
+		entered = shape.To
+	}
+	holdID := shape.HoldID
+	if holdID == "" {
+		holdID = shape.CanceledHoldID
 	}
 
 	ty, err := r.types.Load(ev.TypeID, ev.TypeVersion, func() (*typedef.Type, error) {
@@ -247,11 +260,12 @@ func (r *Relay) delivery(ctx context.Context, id uuid.UUID, ev pendingEvent) (De
 		UpdateID: fmt.Sprintf("%s:%d", id, ev.Seq),
 		Event: workflow.Event{
 			Seq: ev.Seq, Op: ev.Op, From: shape.From, To: entered, At: ev.At,
+			RequestedTo: shape.RequestedTo, HoldID: holdID,
 			CorrelationID: ev.CorrelationID, Hop: ev.Hop,
 		},
-		// The Type decides, in one place, whether entering this state needs
-		// a workflow. An event that enters no state never does.
-		Start: entered != "" && lifecycle.NeedsWorkflow(ty, entered),
+		// The Type decides, in one place, whether this event needs a
+		// running workflow: it enters a state with behavior, or opens a hold.
+		Start: lifecycle.StartsWorkflow(ty, lifecycle.Event{Op: ev.Op, Entered: entered}),
 	}, nil
 }
 

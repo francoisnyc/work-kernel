@@ -73,6 +73,12 @@ type Event struct {
 
 	CorrelationID string
 	Hop           int
+
+	// For the events of a hold: the state a transition request asks for,
+	// and the hold the event opens (transition_requested) or closes (any
+	// other event that names it). Opaque IDs and state names only.
+	RequestedTo string
+	HoldID      string
 }
 
 // ApplyResult answers one delivered event.
