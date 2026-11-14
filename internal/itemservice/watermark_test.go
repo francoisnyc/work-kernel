@@ -163,11 +163,19 @@ func TestMinSeq_WaitsForAWriteStillCommitting(t *testing.T) {
 	w := beginWriter(t)
 	seq := w.event(id, 1000)
 
+	// The goroutine reports its commit on a channel, and the test waits for
+	// it before returning: t.Fatalf may only be called from the test's own
+	// goroutine, and the test's cleanup must not roll back the transaction
+	// while the commit is still running.
+	committed := make(chan error, 1)
 	go func() {
 		time.Sleep(300 * time.Millisecond)
-		w.commit()
+		committed <- w.tx.Commit(context.Background())
 	}()
 	took, err := searchWait(t, k, seq, 10*time.Second)
+	if cerr := <-committed; cerr != nil {
+		t.Fatalf("commit: %v", cerr)
+	}
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
