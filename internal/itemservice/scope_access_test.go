@@ -593,3 +593,32 @@ func TestScopeAccess_NarrowingWritesRowsOnlyForTheNarrowingScope(t *testing.T) {
 	}
 	assertAccessMatchesRecompute(t)
 }
+
+// Regression (found by the move property test): a recompute whose subtree
+// root is an inheriting scope must keep the rows of a narrowing scope below
+// it. writeAccess once looked up what such a scope inherits only among the
+// scopes it had just computed, found nothing for the narrowing scope above
+// the root, and wrote the scope no rows at all.
+func TestScopeAccess_NarrowingBelowAnInheritingRootKeepsItsRows(t *testing.T) {
+	k := itemservice.New(pool)
+	admin, bob, carol := person("admin"), person("bob"), person("carol")
+	// space (narrows: admin, bob) > folder (inherits) > report (narrows: admin, bob, carol)
+	space := createAs(t, k, admin, "space", &itemservice.Narrow{Readers: readers(admin, bob)}, nil)
+	folder := createAs(t, k, admin, "folder", nil, &space.ItemID)
+	report := createAs(t, k, admin, "report", &itemservice.Narrow{Readers: readers(admin, bob, carol)}, &folder.ItemID)
+	want := sorted(admin.Actor, bob.Actor)
+	if got := accessOf(t, scopeOf(t, report.ItemID)); !slices.Equal(got, want) {
+		t.Fatalf("before: report readers = %v, want %v", got, want)
+	}
+
+	// Inherit on the folder: it has a child, so its node stays and its
+	// subtree is recomputed from the folder, an inheriting root.
+	setPolicy(t, k, admin, folder.ItemID, itemservice.PolicyPatch{Inherit: true})
+
+	if got := accessOf(t, scopeOf(t, report.ItemID)); !slices.Equal(got, want) {
+		t.Errorf("after: report readers = %v, want %v", got, want)
+	}
+	assertVisible(t, k, bob, report.ItemID)
+	assertHidden(t, k, carol, report.ItemID)
+	assertAccessMatchesRecompute(t)
+}

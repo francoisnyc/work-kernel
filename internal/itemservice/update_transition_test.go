@@ -215,7 +215,7 @@ func TestUpdate_MergesFieldsAndRecordsTheEvent(t *testing.T) {
 	// Set one field, change one, clear one (nil), leave nothing else touched.
 	res, err := k.Update(ctx, itemservice.UpdateRequest{
 		IdempotencyKey: newKey(),
-		Principal:      item.Principal{Actor: "agent:7", OnBehalfOf: "user:alice"},
+		Principal:      withSession(t, k, item.Principal{Actor: "agent:7", OnBehalfOf: "user:alice"}),
 		ItemID:         id,
 		Fields:         map[string]any{"f_assignee": "user-bob", "f_priority": 3, "f_title": nil},
 	})
@@ -442,10 +442,11 @@ func TestTransition_Legal_IsRecorded(t *testing.T) {
 	ctx := testCtx(t)
 	k := itemservice.New(pool)
 	id := createTicket(t, k, map[string]any{"f_title": "Printer on fire", "f_assignee": "user-bob"})
+	agent := withSession(t, k, item.Principal{Actor: "agent:7", OnBehalfOf: "user:alice"})
 
 	res, err := k.Transition(ctx, itemservice.TransitionRequest{
 		IdempotencyKey: newKey(),
-		Principal:      item.Principal{Actor: "agent:7", OnBehalfOf: "user:alice"},
+		Principal:      agent,
 		ItemID:         id,
 		ToState:        "in_progress",
 	})
@@ -487,7 +488,11 @@ func TestTransition_Legal_IsRecorded(t *testing.T) {
 	if actor != "agent:7" || onBehalfOf == nil || *onBehalfOf != "user:alice" {
 		t.Errorf("event actor = %q, on_behalf_of = %v", actor, onBehalfOf)
 	}
-	if agentSession != nil || originatingHook != nil || causationID != nil || correlationID != nil || hop != 0 {
+	// Step A2: the agent's (minted) session is stored on its events.
+	if agentSession == nil || *agentSession != agent.AgentSession {
+		t.Errorf("event agent_session = %v, want %s", agentSession, agent.AgentSession)
+	}
+	if originatingHook != nil || causationID != nil || correlationID != nil || hop != 0 {
 		t.Errorf("unfilled attribution columns should be null with hop 0")
 	}
 	var payload struct {

@@ -152,7 +152,11 @@ func childScope(ctx context.Context, tx pgx.Tx, containerID *uuid.UUID) (uuid.UU
 			return scope, nil
 		}
 		// The node was removed in between (an inherit on a container that
-		// had no children yet). Fall through and make a new one.
+		// had no children yet). Making one now would mean asking for FOR
+		// UPDATE while holding FOR SHARE: two children doing that wait on
+		// each other. Start the transaction again instead; its first look
+		// will then take the FOR UPDATE path directly.
+		return uuid.Nil, errRetry
 	}
 
 	parent, owns, err := read("for update")
@@ -171,6 +175,25 @@ func childScope(ctx context.Context, tx pgx.Tx, containerID *uuid.UUID) (uuid.UU
 		return uuid.Nil, fmt.Errorf("move container into its node: %w", err)
 	}
 	return node, nil
+}
+
+// landingScope is the scope a child of the container lands under as things
+// stand: the container's current scope, or the root with no container. A
+// missing container is ErrNotFound.
+func landingScope(ctx context.Context, tx pgx.Tx, containerID *uuid.UUID) (uuid.UUID, error) {
+	if containerID == nil {
+		return rootScope(ctx, tx)
+	}
+	var scope uuid.UUID
+	err := tx.QueryRow(ctx, `select scope_id from items where id = $1 and namespace_id = $2`,
+		*containerID, defaultNamespace).Scan(&scope)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, ErrNotFound
+	}
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("read container scope: %w", err)
+	}
+	return scope, nil
 }
 
 // insertNode creates the scope node that belongs to the Item owner, under
@@ -356,25 +379,26 @@ func writeAccess(ctx context.Context, tx pgx.Tx, root uuid.UUID, ids []uuid.UUID
 	// scope points at itself, and its effective readers are its own readers,
 	// intersected with what it inherits (a nil set means open).
 	ptr := map[uuid.UUID]uuid.UUID{} // uuid.Nil = open
+	// access holds the effective readers of every narrowing scope a scope
+	// here may point to: the ones computed below, and the one the root's
+	// parent points to (outside the subtree). Without the latter, a
+	// narrowing scope under an inheriting root would intersect with nothing.
 	access := map[uuid.UUID]map[string]bool{}
+	var outside uuid.UUID // what the root's parent points to; uuid.Nil = open
+	if parentPtr != nil {
+		outside = *parentPtr
+		access[outside] = map[string]bool{}
+		for _, p := range parentAccess {
+			access[outside][p] = true
+		}
+	}
 	for _, id := range ids {
 		n := nodes[id]
-		var (
-			inheritedPtr uuid.UUID
-			inherited    map[string]bool
-		)
-		if id == root {
-			if parentPtr != nil {
-				inheritedPtr = *parentPtr
-				inherited = map[string]bool{}
-				for _, p := range parentAccess {
-					inherited[p] = true
-				}
-			}
-		} else {
+		inheritedPtr := outside
+		if id != root {
 			inheritedPtr = ptr[n.parent]
-			inherited = access[inheritedPtr]
 		}
+		inherited := access[inheritedPtr]
 		if !n.narrows {
 			ptr[id] = inheritedPtr
 			continue
@@ -524,4 +548,84 @@ func removeNode(ctx context.Context, tx pgx.Tx, node uuid.UUID) error {
 		}
 	}
 	return nil
+}
+
+// lockForMove takes the namespace-wide move lock, then the moved Item's row
+// and the destination's, in ID order.
+func lockForMove(ctx context.Context, tx pgx.Tx, id uuid.UUID, to *uuid.UUID) error {
+	// An advisory lock is a named lock with no row behind it; the _xact_
+	// form is released when the transaction ends.
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtext('move:' || $1))`, defaultNamespace); err != nil {
+		return fmt.Errorf("take the move lock: %w", err)
+	}
+	ids := []uuid.UUID{id}
+	if to != nil && *to != id {
+		ids = append(ids, *to)
+	}
+	_, err := tx.Exec(ctx,
+		`select id from items where id = any($1) and namespace_id = $2 order by id for update`, ids, defaultNamespace)
+	if err != nil {
+		return fmt.Errorf("lock Items for the move: %w", err)
+	}
+	return nil
+}
+
+// move puts the locked Item under a new container (nil = the top level) and
+// returns the Item's scope afterwards. The destination must be visible to
+// the principal (else ErrNotFound) and must not be the Item or below it
+// (ErrInvalid). If the Item has a node of its own, the node moves with it
+// and the pointers below are recomputed; no descendant Item row changes.
+func (k *Service) move(ctx context.Context, tx pgx.Tx, p item.Principal, id uuid.UUID, to *uuid.UUID) (uuid.UUID, error) {
+	target, err := landingScope(ctx, tx, to)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if to != nil {
+		if err := checkVisible(ctx, tx, p, target); err != nil {
+			return uuid.Nil, err
+		}
+		var cycle bool
+		err := tx.QueryRow(ctx,
+			`with recursive up (id, container_id) as (
+			     select id, container_id from items where id = $1
+			     union all
+			     select i.id, i.container_id from items i join up on i.id = up.container_id
+			 )
+			 select exists (select 1 from up where id = $2)`, *to, id).Scan(&cycle)
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("check for a cycle: %w", err)
+		}
+		if cycle {
+			return uuid.Nil, fmt.Errorf("%w: an Item cannot move into itself or anything below it", ErrInvalid)
+		}
+	}
+	if err := checkAgentWrite(ctx, tx, p, target); err != nil {
+		return uuid.Nil, err
+	}
+
+	parent, err := childScope(ctx, tx, to)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	var node uuid.UUID
+	err = tx.QueryRow(ctx, `select id from scopes where item_id = $1`, id).Scan(&node)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return parent, nil // no node of its own: the Item simply lands in parent
+	}
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("read the Item's node: %w", err)
+	}
+	// The node changes parent. Share-lock the new parent first (its foreign
+	// key needs it), then lock the node's subtree: ancestor before descendant.
+	if _, err := tx.Exec(ctx, `select 1 from scopes where id = $1 for key share`, parent); err != nil {
+		return uuid.Nil, fmt.Errorf("lock the new parent scope: %w", err)
+	}
+	ids, err := lockSubtree(ctx, tx, node)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if _, err := tx.Exec(ctx, `update scopes set parent_id = $2 where id = $1`, node, parent); err != nil {
+		return uuid.Nil, fmt.Errorf("move scope: %w", err)
+	}
+	return node, writeAccess(ctx, tx, node, ids, nil)
 }

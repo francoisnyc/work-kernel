@@ -96,6 +96,18 @@ Ideas noted during the spike, not built yet.
   the WAL flush (`synchronous_commit=off` changed nothing): most likely CPU
   shared by Go, Postgres and the containers. Measure on separate machines
   before tuning anything. (Step A)
+- `Project` must redact container and scope IDs once grants exist. Today a
+  narrow-only tree means anyone who sees an Item sees its container; the move
+  property test checks that `Get` never names a container its reader cannot see.
+  (Step A2)
+- Approval unlocks a whole scope for the rest of the session. Narrower later:
+  approve a specific draft write (ties into "every action others see has a
+  draft step"). (Step A2)
+- Search records every result's narrowing scope, so a broad search makes almost
+  every later write need approval. Correct, but agents should use short,
+  task-scoped sessions; revisit the UX with real agents. (Step A2)
+- The namespace-wide move lock serializes all moves in a namespace. Narrow it
+  (for example, a lock per affected tree) if moves get frequent. (Step A2)
 
 ## 2026-11-12 — Step 1 (finished)
 
@@ -550,3 +562,50 @@ equals a naive evaluator under random and concurrent edits ✓; CI green ✓.
 
 **Next session:** Step A2 (one `visible()` check for every output path, moves as policy
 changes, agent write rules), then option B (Steps 6–7).
+
+## 2026-11-14 — Step A2: permission paths around the core (finished)
+
+**Built:**
+- **One door, enforced.** A source-parsing test fails if an exported read of the item
+  service skips `policy.Project`. `StateEntry`, `Type` and `StartAgentSession` are
+  documented exemptions.
+- **Moves as a container patch on `Update`.** The mover must see the Item and the
+  destination; a move into itself or a descendant is refused; a widening move needs
+  `ConfirmWiden`. One event names `container_from` and `container_to`. Moves take a
+  namespace-wide move lock, then the Item rows in ID order.
+- **Server-minted agent sessions** (`StartAgentSession`, migration 00007). Reads record
+  narrowing scopes, and the agent write rule returns `*NeedsApprovalError` until the
+  session's user calls `ApproveWiden` for that scope.
+
+**Surprises:**
+- The move property test found a bug that had been there since Step A part 2. A
+  recompute whose subtree root inherits wrote no rows for a narrowing scope below it:
+  `writeAccess` looked up the inherited readers only among scopes it had just computed.
+  Fixed, with a fixed regression test. Random tests over shapes paid off a second time.
+- The node-churn test reproduced the predicted deadlock: a first child that finds the
+  container's node gone after waiting upgraded `FOR SHARE` to `FOR UPDATE`. It now
+  retries the whole transaction (errRetry, at most 3 times) instead.
+- Row locks alone cannot stop moves on disjoint pairs from closing a cycle, hence the
+  namespace-wide move lock (Later: narrow it if moves get frequent).
+- Caller-chosen sessions would have let an agent escape the rule with a fresh session;
+  minting them closed that.
+- The container-ID leak cannot happen in a narrow-only tree (seeing an Item implies
+  seeing its container). Redaction waits for grants (Later); the move property test
+  guards it.
+
+**Changed tests (approved):** agent principals get minted sessions (identifiers only);
+`TestTransition_Legal_IsRecorded` expects the agent's session on its event;
+`StartAgentSession` joined the `Project` test's exemption list; a bug fixed in one new
+agent test.
+
+**Numbers:** no bench rerun; Step A2 adds no work to the hot paths beyond one session
+lookup per agent request. The two property tests take about 2 s each locally under
+`-race`.
+
+**Done when:** every read path goes through `Project`, enforced by a test ✓; moves are
+tested for widening, narrowing, hidden destinations, cycles and crossing moves ✓; the
+agent rule refuses a write from a narrow read into a wider scope, and unlocks it only
+through the session user's approval ✓; sessions cannot be invented ✓.
+
+**Next session:** option B (Steps 6–7: holds and connectors). Before exposing any API:
+the `system:timer` impersonation item under Later.

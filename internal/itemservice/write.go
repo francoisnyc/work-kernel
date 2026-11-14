@@ -15,6 +15,13 @@ import (
 	"github.com/francoisnyc/work-kernel/internal/typedef"
 )
 
+// errRetry is returned from inside a write when it lost a race it cannot
+// finish without risking a deadlock; write runs the whole transaction again.
+var errRetry = errors.New("itemservice: retry the transaction")
+
+// maxRetries bounds how often write reruns a transaction that hit errRetry.
+const maxRetries = 3
+
 // write runs one write operation in one transaction, wrapped in the
 // idempotency protocol shared by every operation:
 //
@@ -31,13 +38,17 @@ func (k *Service) write(ctx context.Context, p item.Principal, key, hash string,
 
 	var res WriteResult
 	// BeginFunc commits if the function returns nil and rolls back otherwise.
-	err := pgx.BeginFunc(ctx, k.pool, func(tx pgx.Tx) error {
+	run := func(tx pgx.Tx) error {
 		// set_config(..., true) is SET LOCAL: the timeout ends with this
 		// transaction, so the pooled connection goes back unchanged.
 		_, err := tx.Exec(ctx, `select set_config('statement_timeout', $1, true)`,
 			fmt.Sprintf("%dms", k.writeTimeout.Milliseconds()))
 		if err != nil {
 			return fmt.Errorf("set statement timeout: %w", err)
+		}
+		// An agent's session must be one minted for this agent and user.
+		if err := checkSession(ctx, tx, p); err != nil {
+			return err
 		}
 		// Claim the key first. If another transaction holds the same key, this
 		// statement waits for it to finish, then sees its row and inserts nothing.
@@ -66,7 +77,17 @@ func (k *Service) write(ctx context.Context, p item.Principal, key, hash string,
 			return fmt.Errorf("store idempotency result: %w", err)
 		}
 		return nil
-	})
+	}
+	// A transaction that lost a race it cannot finish safely (errRetry)
+	// is rolled back and run again from the start: everything it read is
+	// read afresh, and its idempotency key was released with the rollback.
+	var err error
+	for attempt := 0; ; attempt++ {
+		err = pgx.BeginFunc(ctx, k.pool, run)
+		if !errors.Is(err, errRetry) || attempt == maxRetries {
+			break
+		}
+	}
 	if err != nil {
 		return WriteResult{}, err
 	}

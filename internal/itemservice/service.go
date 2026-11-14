@@ -140,6 +140,10 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 	if err := checkAttribution(req.Attribution); err != nil {
 		return WriteResult{}, err
 	}
+	attr, err := sessionAttribution(req.Principal, req.Attribution)
+	if err != nil {
+		return WriteResult{}, err
+	}
 	var readers []string
 	if req.Narrow != nil {
 		var err error
@@ -179,11 +183,20 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 		// The Item starts in its container's node (made now if this is the
 		// container's first child), or the root scope. A container the
 		// principal cannot see does not exist for them.
+		// The scope the new Item lands under, before childScope may give the
+		// container a node: the target of the agent write rule.
+		target, err := landingScope(ctx, tx, req.ContainerID)
+		if err != nil {
+			return WriteResult{}, err
+		}
 		scopeID, err := childScope(ctx, tx, req.ContainerID)
 		if err != nil {
 			return WriteResult{}, err
 		}
 		if err := checkVisible(ctx, tx, req.Principal, scopeID); err != nil {
+			return WriteResult{}, err
+		}
+		if err := checkAgentWrite(ctx, tx, req.Principal, target); err != nil {
 			return WriteResult{}, err
 		}
 
@@ -223,7 +236,7 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 		if req.Narrow != nil {
 			payload["readers"] = readers // opaque IDs, sorted
 		}
-		return appendEvent(ctx, tx, ty, id, itemSeq, req.Principal, req.Attribution, "create", payload, fields)
+		return appendEvent(ctx, tx, ty, id, itemSeq, req.Principal, attr, "create", payload, fields)
 	})
 }
 
@@ -247,19 +260,26 @@ func (k *Service) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item
 	if err := checkPrincipal(p); err != nil {
 		return item.Item{}, err
 	}
+	if err := checkSession(ctx, k.pool, p); err != nil {
+		return item.Item{}, err
+	}
 	// One statement reads the Item and decides visibility from its scope,
 	// so the two always agree. Nothing is cached: a change of readers takes
 	// effect on the very next read.
 	args := policy.VisibleArgs(p)
 	args["id"], args["ns"] = id, defaultNamespace
 	it := item.Item{ID: id}
-	var visible bool
+	var (
+		visible     bool
+		policyScope *uuid.UUID
+	)
 	err := k.pool.QueryRow(ctx,
-		`select i.type_id, i.type_version, i.container_id, i.scope_id, i.state, i.fields, i.item_seq, `+
-			policy.VisibleCondition+`
+		`select i.type_id, i.type_version, i.container_id, i.scope_id, i.state, i.fields, i.item_seq,
+		        s.policy_scope_id, `+policy.VisibleCondition+`
 		 from items i join scopes s on s.id = i.scope_id
 		 where i.id = @id and i.namespace_id = @ns`, args,
-	).Scan(&it.TypeID, &it.TypeVersion, &it.ContainerID, &it.ScopeID, &it.State, &it.Fields, &it.ItemSeq, &visible)
+	).Scan(&it.TypeID, &it.TypeVersion, &it.ContainerID, &it.ScopeID, &it.State, &it.Fields, &it.ItemSeq,
+		&policyScope, &visible)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return item.Item{}, ErrNotFound
 	}
@@ -273,6 +293,10 @@ func (k *Service) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item
 	it, ok := policy.Project(p, []uuid.UUID{*it.ScopeID}, it)
 	if !ok {
 		return item.Item{}, ErrNotFound
+	}
+	// An agent's read is recorded for the write rule (narrowing scopes only).
+	if err := recordReads(ctx, k.pool, p, []*uuid.UUID{policyScope}); err != nil {
+		return item.Item{}, err
 	}
 	return it, nil
 }

@@ -268,6 +268,55 @@ client → item service (Go, stateless)
   only receives event shapes without field values (relay → our Temporal) is not
   a principal, so those payloads do not pass through `Project`. For the same
   reason a timer's write is not subject to visibility; it is subject to `allowed`.
+- **One door, enforced.** Every exported read of the item service calls
+  `policy.Project`; a test parses the package and fails if a new read does not.
+  `StateEntry` and `Type` are the only exemptions: they feed the workflow, not a
+  principal. Any count, facet or total is computed after `Project`, never before.
+- **History on the way out.** Event payloads keep opaque container IDs
+  (`container_id`, `container_from`, `container_to`) for audit and replay.
+  Anything that later exposes history or Watch to a principal passes each such
+  ID through `Project` and redacts what that reader cannot see.
+- **Moves are a change to the Item's container part,** made through `Update` (a
+  `Move` patch: a destination, or none for the top level). One `Update`, one
+  event, whose payload names `container_from` and `container_to`.
+  - The mover must see the Item and the destination (and pass any `allowed`
+    rule); a destination they cannot see is `ErrNotFound`.
+  - A move into the Item itself or anything below it is `ErrInvalid`.
+  - A move that widens who can see any scope in the moved subtree (effective
+    readers before vs after) needs `ConfirmWiden`; otherwise `ErrInvalid`.
+  - Locks: the Item rows involved in ID order, then scopes ancestor-first.
+    Pointers below the moved Item are recomputed; no descendant Item row changes.
+  - Moves also take one namespace-wide move lock (a transaction advisory lock).
+    Row locks alone cannot stop a cycle made by moves on disjoint pairs (A into
+    B and C into D, then B into C and D into A, each pair checked before the
+    others commit). Moves are rare, so serializing them costs little.
+- **The agent write rule.** Every read by an agent records, per agent session,
+  each narrowing scope it read (`agent_session_reads`); open scopes restrict
+  nothing. A write by the agent must land at or below every recorded scope.
+  Otherwise it is `ErrNeedsApproval`, naming the target scope. Writes are field
+  updates, transitions with fields, creates (target: the container's scope, or
+  the root), moves (target: the destination's scope) and policy changes that
+  widen readers, `Inherit` included. A plain transition puts no content anywhere.
+  - Approval is a separate act by the human, not a flag the agent could set:
+    `ApproveWiden(user, session, scope)` records an audited row in
+    `agent_session_approvals` for that one scope. It counts only when the
+    approver is the `on_behalf_of` user of the agent's request, and the approver
+    must see the scope (else `ErrNotFound`). The agent's retry then succeeds.
+  - An `agent:` actor without a session is `ErrInvalid`, on reads and writes.
+  - **Sessions are minted by the server**, never chosen by the caller:
+    `StartAgentSession(agent, on_behalf_of)` returns a session ID and stores
+    `agent_sessions(session, agent, on_behalf_of, created_at)`. Every agent read
+    and write must use a session that exists and belongs to that agent and that
+    `on_behalf_of` user; otherwise `ErrInvalid`, and nothing is recorded or
+    written. Without this, an agent could escape the rule with a fresh session.
+  - A policy change that widens readers needs approval whenever the session has
+    recorded any narrowing read: the content it exposes may be what was read.
+  - An approval by anyone other than the session's user is recorded but never
+    counts.
+  - `agent_session_reads.scope_id` has no foreign key: a recorded scope may be
+    removed later (`Inherit` on an Item without children). The record stays, no
+    target is below it any more, and every write in that session then needs
+    approval. Conservative, never silently looser.
 
 ## Search
 
@@ -290,7 +339,8 @@ client → item service (Go, stateless)
 
 ## Agents (later in the spike)
 
-- An agent is its own principal with a human sponsor.
+- An agent is its own principal with a human sponsor. Its principal carries the
+  agent session (`Principal.AgentSession`), on reads and writes alike.
 - Acting for a user: rights = user's rights ∩ agent's grant.
 - Every event records attribution:
   - `actor`: whose permissions were checked (user, agent, or `hook:<id>@<version>`)
@@ -325,6 +375,13 @@ create index scopes_parent on scopes (parent_id);
 create table scope_readers(scope_id uuid references scopes, principal text, primary key (scope_id, principal));
 create table grants       (scope_id uuid references scopes, principal text, granted_by text,
                            created_at timestamptz not null default now(), primary key (scope_id, principal));
+create table agent_sessions (session text primary key, agent text not null, on_behalf_of text,
+                           created_at timestamptz not null default now());
+create table agent_session_reads (session text references agent_sessions, scope_id uuid,  -- no FK: see Policy
+                           primary key (session, scope_id));   -- narrowing scopes an agent session read
+create table agent_session_approvals (session text references agent_sessions, scope_id uuid, approved_by text,
+                           created_at timestamptz not null default now(),
+                           primary key (session, scope_id, approved_by));
 create table principal_roles (namespace_id text not null default 'default', principal text not null,
                            role text not null, primary key (namespace_id, principal, role));
 create table items        (id uuid primary key, namespace_id text not null default 'default',

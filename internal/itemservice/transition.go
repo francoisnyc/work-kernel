@@ -41,6 +41,10 @@ func (k *Service) Transition(ctx context.Context, req TransitionRequest) (WriteR
 	if err := checkOptions(req.ExpectedItemSeq, req.Attribution); err != nil {
 		return WriteResult{}, err
 	}
+	attr, err := sessionAttribution(req.Principal, req.Attribution)
+	if err != nil {
+		return WriteResult{}, err
+	}
 	hash, err := requestHash("transition", req)
 	if err != nil {
 		return WriteResult{}, err
@@ -63,6 +67,13 @@ func (k *Service) Transition(ctx context.Context, req TransitionRequest) (WriteR
 		}
 		if err := checkExpectedSeq(it, req.ExpectedItemSeq); err != nil {
 			return WriteResult{}, err
+		}
+		// A transition with fields puts content into the Item's scope; a
+		// plain transition does not.
+		if len(req.Fields) > 0 {
+			if err := checkAgentWrite(ctx, tx, req.Principal, it.ScopeID); err != nil {
+				return WriteResult{}, err
+			}
 		}
 		ty, err := k.loadType(ctx, tx, it.TypeID, it.TypeVersion)
 		if err != nil {
@@ -106,7 +117,7 @@ func (k *Service) Transition(ctx context.Context, req TransitionRequest) (WriteR
 				payload["cleared_field_ids"] = sortedKeys(cleared)
 			}
 		}
-		return appendEvent(ctx, tx, ty, req.ItemID, itemSeq, req.Principal, req.Attribution, "transition", payload, set)
+		return appendEvent(ctx, tx, ty, req.ItemID, itemSeq, req.Principal, attr, "transition", payload, set)
 	})
 }
 

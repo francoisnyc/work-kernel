@@ -410,7 +410,7 @@ func TestPolicy_MalformedRequests_AreInvalid(t *testing.T) {
 func TestPolicy_HidingTheItemFromYourself_IsInvalid(t *testing.T) {
 	k := itemservice.New(pool)
 	alice, bob := person("alice"), person("bob")
-	agent := item.Principal{Actor: "agent:" + uuid.NewString()[:8], OnBehalfOf: alice.Actor}
+	agent := withSession(t, k, item.Principal{Actor: "agent:" + uuid.NewString()[:8], OnBehalfOf: alice.Actor})
 	created := createAs(t, k, alice, "mine", nil, nil)
 
 	check := func(what string, err error) {

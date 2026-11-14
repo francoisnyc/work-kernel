@@ -41,11 +41,16 @@ func IsKind(id string, kinds ...string) bool {
 }
 
 // Valid reports whether the principal may act: the actor is a user, an
-// agent or a system principal, and on_behalf_of, when set, is a user (the
-// human at the root of a chain).
+// agent or a system principal; on_behalf_of, when set, is a user (the human
+// at the root of a chain); and an agent, and only an agent, names its
+// session. Whether that session exists and is the agent's is checked against
+// the database by the item service.
 func (p Principal) Valid() bool {
 	if !IsKind(p.Actor, KindUser, KindAgent, KindSystem) {
 		return false
 	}
-	return p.OnBehalfOf == "" || IsKind(p.OnBehalfOf, KindUser)
+	if p.OnBehalfOf != "" && !IsKind(p.OnBehalfOf, KindUser) {
+		return false
+	}
+	return (p.AgentSession != "") == IsKind(p.Actor, KindAgent)
 }

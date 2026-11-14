@@ -33,8 +33,8 @@ func TestPrincipals_ActorAndOnBehalfOfMustBeTyped(t *testing.T) {
 		{"actor with an unknown type", item.Principal{Actor: "robot:7"}},
 		{"actor with an empty ID", item.Principal{Actor: "user:"}},
 		{"a group cannot act", item.Principal{Actor: "group:support"}},
-		{"untyped on_behalf_of", item.Principal{Actor: "agent:7", OnBehalfOf: "alice"}},
-		{"on_behalf_of is not a user", item.Principal{Actor: "agent:7", OnBehalfOf: "agent:8"}},
+		{"untyped on_behalf_of", item.Principal{Actor: "agent:7", OnBehalfOf: "alice", AgentSession: "session-7"}},
+		{"on_behalf_of is not a user", item.Principal{Actor: "agent:7", OnBehalfOf: "agent:8", AgentSession: "session-7"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -65,7 +65,7 @@ func TestPrincipals_TypedActorsAreAccepted(t *testing.T) {
 	k := itemservice.New(pool)
 	for _, p := range []item.Principal{
 		{Actor: "user:" + uuid.NewString()},
-		{Actor: "agent:" + uuid.NewString(), OnBehalfOf: "user:" + uuid.NewString()},
+		withSession(t, k, item.Principal{Actor: "agent:" + uuid.NewString(), OnBehalfOf: "user:" + uuid.NewString()}),
 		{Actor: "system:timer"},
 	} {
 		if _, err := k.Create(testCtx(t), itemservice.CreateRequest{
