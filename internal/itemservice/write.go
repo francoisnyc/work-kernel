@@ -124,6 +124,16 @@ func lockItem(ctx context.Context, tx pgx.Tx, id uuid.UUID) (lockedItem, error) 
 	return it, nil
 }
 
+// checkPrincipal refuses a principal that is not typed: the actor must be
+// user:, agent: or system:, and on_behalf_of, when set, a user:.
+func checkPrincipal(p item.Principal) error {
+	if !p.Valid() {
+		return fmt.Errorf("%w: principals are typed IDs (user:<id>, agent:<id>, system:<id>), "+
+			"and on_behalf_of must be a user", ErrInvalid)
+	}
+	return nil
+}
+
 // checkAttribution refuses malformed attribution before any work is done.
 func checkAttribution(a item.Attribution) error {
 	if a.Hop < 0 {

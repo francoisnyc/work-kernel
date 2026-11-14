@@ -35,6 +35,9 @@ func (k *Service) Transition(ctx context.Context, req TransitionRequest) (WriteR
 	if req.IdempotencyKey == "" || req.Principal.Actor == "" || req.ToState == "" {
 		return WriteResult{}, fmt.Errorf("%w: idempotency key, actor and target state are required", ErrInvalid)
 	}
+	if err := checkPrincipal(req.Principal); err != nil {
+		return WriteResult{}, err
+	}
 	if err := checkOptions(req.ExpectedItemSeq, req.Attribution); err != nil {
 		return WriteResult{}, err
 	}

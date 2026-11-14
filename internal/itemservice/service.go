@@ -134,6 +134,9 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 		// like an exception with a cause.
 		return WriteResult{}, fmt.Errorf("%w: idempotency key, actor and type are required", ErrInvalid)
 	}
+	if err := checkPrincipal(req.Principal); err != nil {
+		return WriteResult{}, err
+	}
 	if err := checkAttribution(req.Attribution); err != nil {
 		return WriteResult{}, err
 	}
@@ -241,6 +244,9 @@ func requestHash(op string, req any) (string, error) {
 // Get returns the Item as the principal may see it. An Item they may not see
 // is ErrNotFound, exactly like one that does not exist.
 func (k *Service) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item.Item, error) {
+	if err := checkPrincipal(p); err != nil {
+		return item.Item{}, err
+	}
 	// One statement reads the Item and decides visibility from its scope,
 	// so the two always agree. Nothing is cached: a change of readers takes
 	// effect on the very next read.

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"slices"
 
 	"github.com/google/uuid"
@@ -36,6 +35,13 @@ func checkReaders(readers []string, p item.Principal) ([]string, error) {
 	}
 	if slices.Contains(readers, "") {
 		return nil, fmt.Errorf("%w: a reader ID is empty", ErrInvalid)
+	}
+	// Readers are users or agents. group: is reserved until groups exist,
+	// and system: principals read nothing through scopes.
+	for _, r := range readers {
+		if !item.IsKind(r, item.KindUser, item.KindAgent) {
+			return nil, fmt.Errorf("%w: reader %q must be user:<id> or agent:<id>", ErrInvalid, r)
+		}
 	}
 	if !slices.Contains(readers, p.Actor) ||
 		(p.OnBehalfOf != "" && !slices.Contains(readers, p.OnBehalfOf)) {
@@ -174,9 +180,9 @@ func insertNode(ctx context.Context, tx pgx.Tx, parent, owner uuid.UUID, narrows
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("new scope id: %w", err)
 	}
-	// open is a placeholder here; recomputeAccess sets it.
+	// policy_scope_id starts null; recomputeAccess sets it.
 	_, err = tx.Exec(ctx,
-		`insert into scopes (id, namespace_id, parent_id, narrows, open, item_id) values ($1, $2, $3, $4, false, $5)`,
+		`insert into scopes (id, namespace_id, parent_id, narrows, item_id) values ($1, $2, $3, $4, $5)`,
 		id, defaultNamespace, parent, narrows, owner)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("insert scope: %w", err)
@@ -223,6 +229,36 @@ func recomputeAccess(ctx context.Context, tx pgx.Tx, root uuid.UUID) error {
 // once it gets the locks. While the locks are held no scope can be added
 // below (a new child scope's foreign key needs its parent row).
 func lockSubtree(ctx context.Context, tx pgx.Tx, root uuid.UUID) ([]uuid.UUID, error) {
+	// The subtree is listed before the locks are taken, so a scope added in
+	// between (a narrowing or a first child below) would be missed and keep a
+	// stale pointer. List it again once locked, and repeat until it holds
+	// still: no scope can be added under a locked one (its parent_id foreign
+	// key needs a share lock on the parent row).
+	ids, err := subtreeOf(ctx, tx, root)
+	if err != nil {
+		return nil, err
+	}
+	for {
+		// Postgres sorts first and locks rows as it returns them, so the
+		// order by position in ids is the lock order.
+		_, err = tx.Exec(ctx,
+			`select id from scopes where id = any($1) order by array_position($1, id) for update`, ids)
+		if err != nil {
+			return nil, fmt.Errorf("lock subtree: %w", err)
+		}
+		again, err := subtreeOf(ctx, tx, root)
+		if err != nil {
+			return nil, err
+		}
+		if slices.Equal(again, ids) {
+			return ids, nil
+		}
+		ids = again
+	}
+}
+
+// subtreeOf lists the scope and every scope below it, top-down.
+func subtreeOf(ctx context.Context, tx pgx.Tx, root uuid.UUID) ([]uuid.UUID, error) {
 	rows, err := tx.Query(ctx,
 		`with recursive t (id, depth) as (
 		     select $1::uuid, 0
@@ -237,17 +273,10 @@ func lockSubtree(ctx context.Context, tx pgx.Tx, root uuid.UUID) ([]uuid.UUID, e
 	if err != nil {
 		return nil, fmt.Errorf("read subtree: %w", err)
 	}
-	// Postgres sorts first and locks rows as it returns them, so the order
-	// by position in ids is the lock order.
-	_, err = tx.Exec(ctx,
-		`select id from scopes where id = any($1) order by array_position($1, id) for update`, ids)
-	if err != nil {
-		return nil, fmt.Errorf("lock subtree: %w", err)
-	}
 	return ids, nil
 }
 
-// writeAccess rewrites scopes.open and scope_access for a subtree already
+// writeAccess rewrites scopes.policy_scope_id and scope_access for a subtree already
 // locked by lockSubtree: from the root's parent down, each scope gets its
 // parent's access, narrowed by its own readers when it narrows. rootNarrows,
 // when not nil, is the root's new narrows flag, written in the same UPDATE.
@@ -308,75 +337,91 @@ func writeAccess(ctx context.Context, tx pgx.Tx, root uuid.UUID, ids []uuid.UUID
 		return fmt.Errorf("read subtree readers: %w", err)
 	}
 
-	// What the root's parent grants: open, or a set of principals.
+	// What the root's parent grants: its pointer (uuid.Nil when open) and
+	// the effective readers of the scope it points to.
 	var (
-		parentOpen   bool
+		parentPtr    *uuid.UUID
 		parentAccess []string
 	)
 	err = tx.QueryRow(ctx,
-		`select p.open, coalesce(array(select principal from scope_access where scope_id = p.id), '{}')
-		 from scopes p where p.id = $1`, nodes[root].parent).Scan(&parentOpen, &parentAccess)
+		`select p.policy_scope_id,
+		        coalesce(array(select principal from scope_access where scope_id = p.policy_scope_id), '{}')
+		 from scopes p where p.id = $1`, nodes[root].parent).Scan(&parentPtr, &parentAccess)
 	if err != nil {
 		return fmt.Errorf("read parent scope: %w", err)
 	}
 
-	// Walk top-down: ids is ordered by depth, so a parent is always done
-	// before its children. A nil set means open.
+	// Walk top-down: ids is ordered by depth, so a parent is done before its
+	// children. An inheriting scope takes its parent's pointer; a narrowing
+	// scope points at itself, and its effective readers are its own readers,
+	// intersected with what it inherits (a nil set means open).
+	ptr := map[uuid.UUID]uuid.UUID{} // uuid.Nil = open
 	access := map[uuid.UUID]map[string]bool{}
-	open := map[uuid.UUID]bool{}
 	for _, id := range ids {
 		n := nodes[id]
-		var inherited map[string]bool
-		inheritedOpen := parentOpen
+		var (
+			inheritedPtr uuid.UUID
+			inherited    map[string]bool
+		)
 		if id == root {
-			if !parentOpen {
+			if parentPtr != nil {
+				inheritedPtr = *parentPtr
 				inherited = map[string]bool{}
 				for _, p := range parentAccess {
 					inherited[p] = true
 				}
 			}
 		} else {
-			inherited, inheritedOpen = access[n.parent], open[n.parent]
+			inheritedPtr = ptr[n.parent]
+			inherited = access[inheritedPtr]
 		}
-		switch {
-		case !n.narrows:
-			access[id], open[id] = inherited, inheritedOpen
-		case inheritedOpen:
-			access[id], open[id] = maps.Clone(readers[id]), false
-		default:
-			mine := map[string]bool{}
-			for p := range inherited {
-				if readers[id][p] {
-					mine[p] = true
-				}
+		if !n.narrows {
+			ptr[id] = inheritedPtr
+			continue
+		}
+		ptr[id] = id
+		mine := map[string]bool{}
+		for p := range readers[id] {
+			if inheritedPtr == uuid.Nil || inherited[p] {
+				mine[p] = true
 			}
-			access[id], open[id] = mine, false
 		}
+		access[id] = mine
 	}
 
+	// Each scope row is written at most once, and only when it changes:
+	// a reader change on an already narrowed scope moves no pointer.
+	// Empty, not nil, slices: pgx sends a nil slice as NULL.
+	upIDs, upPtrs := []uuid.UUID{}, []*uuid.UUID{}
+	for _, id := range ids {
+		var p *uuid.UUID
+		if ptr[id] != uuid.Nil {
+			v := ptr[id]
+			p = &v
+		}
+		upIDs, upPtrs = append(upIDs, id), append(upPtrs, p)
+	}
+	_, err = tx.Exec(ctx,
+		`update scopes s set policy_scope_id = u.ptr,
+		                     narrows = case when s.id = $3 then $4 else s.narrows end
+		 from unnest($1::uuid[], $2::uuid[]) as u (id, ptr)
+		 where s.id = u.id
+		   and (s.policy_scope_id is distinct from u.ptr or (s.id = $3 and s.narrows <> $4))`,
+		upIDs, upPtrs, root, nodes[root].narrows)
+	if err != nil {
+		return fmt.Errorf("set pointers: %w", err)
+	}
+
+	// Only narrowing scopes hold rows: clear the subtree's, write theirs.
 	if _, err := tx.Exec(ctx, `delete from scope_access where scope_id = any($1)`, ids); err != nil {
 		return fmt.Errorf("clear scope_access: %w", err)
 	}
-	// Start from empty, not nil, slices: pgx sends a nil slice as NULL, and
-	// "id = any(NULL)" would make scopes.open NULL.
 	scopeCol, principalCol := []uuid.UUID{}, []string{}
-	openIDs, closedIDs := []uuid.UUID{}, []uuid.UUID{}
 	for _, id := range ids {
-		if open[id] {
-			openIDs = append(openIDs, id)
-			continue
-		}
-		closedIDs = append(closedIDs, id)
 		for p := range access[id] {
 			scopeCol = append(scopeCol, id)
 			principalCol = append(principalCol, p)
 		}
-	}
-	_, err = tx.Exec(ctx,
-		`update scopes set open = (id = any($1)), narrows = case when id = $3 then $4 else narrows end
-		 where id = any($1) or id = any($2)`, openIDs, closedIDs, root, nodes[root].narrows)
-	if err != nil {
-		return fmt.Errorf("set scopes.open: %w", err)
 	}
 	if len(scopeCol) > 0 {
 		_, err = tx.Exec(ctx,
@@ -390,76 +435,93 @@ func writeAccess(ctx context.Context, tx pgx.Tx, root uuid.UUID, ids []uuid.UUID
 }
 
 // applyPolicy carries out a policy patch on a locked Item and returns the
-// Item's scope afterwards. readers is the patch's reader list as returned by
+// Item's scope afterwards, and a node the caller must remove with removeNode
+// once it has moved the Item out of it (uuid.Nil when there is none). readers is the patch's reader list as returned by
 // checkPolicyPatch (nil for inherit).
 //
 // An Item has a node of its own once it is narrowed or has a child. A patch
 // changes that node in place (its flag and readers), so no descendant row
 // changes; only scope_access below it is recomputed. The one exception is
 // inherit on an Item that owns a node but has no children: the node is no
-// longer needed and is removed.
-func applyPolicy(ctx context.Context, tx pgx.Tx, id uuid.UUID, it lockedItem, patch *PolicyPatch, readers []string) (uuid.UUID, error) {
+// longer needed; the caller removes it after moving the Item out.
+func applyPolicy(ctx context.Context, tx pgx.Tx, id uuid.UUID, it lockedItem, patch *PolicyPatch, readers []string) (scope, remove uuid.UUID, err error) {
 	var node uuid.UUID
-	err := tx.QueryRow(ctx, `select id from scopes where item_id = $1`, id).Scan(&node)
+	err = tx.QueryRow(ctx, `select id from scopes where item_id = $1`, id).Scan(&node)
 	owns := err == nil
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return uuid.Nil, fmt.Errorf("read the Item's node: %w", err)
+		return uuid.Nil, uuid.Nil, fmt.Errorf("read the Item's node: %w", err)
 	}
 
 	switch {
 	case !patch.Inherit && owns:
 		ids, err := lockSubtree(ctx, tx, node) // before touching the node
 		if err != nil {
-			return uuid.Nil, err
+			return uuid.Nil, uuid.Nil, err
 		}
 		if err := replaceReaders(ctx, tx, node, readers); err != nil {
-			return uuid.Nil, err
+			return uuid.Nil, uuid.Nil, err
 		}
 		narrows := true
-		return node, writeAccess(ctx, tx, node, ids, &narrows)
+		return node, uuid.Nil, writeAccess(ctx, tx, node, ids, &narrows)
 
 	case !patch.Inherit:
 		// No node yet, so no children either: the new node has nothing below it.
-		return insertNode(ctx, tx, it.ScopeID, id, true, readers)
+		node, err := insertNode(ctx, tx, it.ScopeID, id, true, readers)
+		return node, uuid.Nil, err
 
 	case !owns:
-		return it.ScopeID, nil // inherit on an Item that is not narrowed
+		return it.ScopeID, uuid.Nil, nil // inherit on an Item that is not narrowed
 
 	default:
 		var hasChildren bool
 		err := tx.QueryRow(ctx, `select exists (select 1 from items where container_id = $1)`, id).Scan(&hasChildren)
 		if err != nil {
-			return uuid.Nil, fmt.Errorf("look for children: %w", err)
+			return uuid.Nil, uuid.Nil, fmt.Errorf("look for children: %w", err)
+		}
+		// Without children the node goes and the Item moves up to the parent
+		// scope, whose row its foreign key will share-lock. Take that lock
+		// now, before the node's: locks stay top-down (ancestor first), so a
+		// concurrent change to the parent cannot hold it while waiting for us.
+		var parent uuid.UUID
+		if err := tx.QueryRow(ctx, `select parent_id from scopes where id = $1`, node).Scan(&parent); err != nil {
+			return uuid.Nil, uuid.Nil, fmt.Errorf("read parent scope: %w", err)
+		}
+		if !hasChildren {
+			if _, err := tx.Exec(ctx, `select 1 from scopes where id = $1 for key share`, parent); err != nil {
+				return uuid.Nil, uuid.Nil, fmt.Errorf("lock parent scope: %w", err)
+			}
 		}
 		ids, err := lockSubtree(ctx, tx, node) // before touching the node
 		if err != nil {
-			return uuid.Nil, err
+			return uuid.Nil, uuid.Nil, err
 		}
 		if hasChildren {
 			if err := replaceReaders(ctx, tx, node, nil); err != nil {
-				return uuid.Nil, err
+				return uuid.Nil, uuid.Nil, err
 			}
 			narrows := false
-			return node, writeAccess(ctx, tx, node, ids, &narrows)
+			return node, uuid.Nil, writeAccess(ctx, tx, node, ids, &narrows)
 		}
-		var parent uuid.UUID
-		if err := tx.QueryRow(ctx, `select parent_id from scopes where id = $1`, node).Scan(&parent); err != nil {
-			return uuid.Nil, fmt.Errorf("read parent scope: %w", err)
-		}
-		// The Item leaves the node before the node goes (items.scope_id is a
-		// foreign key).
-		if _, err := tx.Exec(ctx, `update items set scope_id = $2 where id = $1`, id, parent); err != nil {
-			return uuid.Nil, fmt.Errorf("move Item out of its node: %w", err)
-		}
-		for _, q := range []string{
-			`delete from scope_access where scope_id = $1`,
-			`delete from scope_readers where scope_id = $1`,
-			`delete from scopes where id = $1`,
-		} {
-			if _, err := tx.Exec(ctx, q, node); err != nil {
-				return uuid.Nil, fmt.Errorf("remove scope: %w", err)
-			}
-		}
-		return parent, nil
+		// No children: the node is no longer needed. The caller moves the
+		// Item to the parent scope in its one UPDATE of the Item row, then
+		// removes the node. Updating the row here as well would make that
+		// second UPDATE re-check the row's foreign keys, share-locking the
+		// container's Item row, which a concurrent change to the container
+		// holds FOR UPDATE while it waits for this subtree.
+		return parent, node, nil
 	}
+}
+
+// removeNode deletes a node no Item uses any more, with its readers and rows.
+func removeNode(ctx context.Context, tx pgx.Tx, node uuid.UUID) error {
+	for _, q := range []string{
+		`delete from scope_access where scope_id = $1`,
+		`delete from scope_readers where scope_id = $1`,
+		`delete from scopes where id = $1`,
+	} {
+		if _, err := tx.Exec(ctx, q, node); err != nil {
+			return fmt.Errorf("remove scope: %w", err)
+		}
+	}
+	return nil
 }

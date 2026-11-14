@@ -29,16 +29,17 @@ type Querier interface {
 
 // VisibleCondition is the one rule for "may the principal read scope s?",
 // as SQL over a row `s` of scopes and the named arguments @actor and @behalf
-// (empty when nobody is acted for). A scope is readable when it is open (no
-// narrowing ancestor), or when scope_access lists the actor and, if set, the
-// person acted for: an agent sees only what both may see.
+// (empty when nobody is acted for). A scope is readable when nothing at or
+// above it narrows (policy_scope_id is null), or when the nearest narrowing
+// scope's scope_access lists the actor and, if set, the person acted for: an
+// agent sees only what both may see.
 //
-// scope_access is kept up to date in the same transaction as every policy
-// change, so the answer is right on the very next read. It is one indexed
-// lookup per scope: other people's narrowed scopes cost nothing.
-const VisibleCondition = `(s.open or (
-	exists (select 1 from scope_access a where a.scope_id = s.id and a.principal = @actor)
-	and (@behalf = '' or exists (select 1 from scope_access b where b.scope_id = s.id and b.principal = @behalf))))`
+// Pointers and rows are kept up to date in the same transaction as every
+// policy change, so the answer is right on the very next read. It is one
+// indexed lookup per scope: other people's narrowed scopes cost nothing.
+const VisibleCondition = `(s.policy_scope_id is null or (
+	exists (select 1 from scope_access a where a.scope_id = s.policy_scope_id and a.principal = @actor)
+	and (@behalf = '' or exists (select 1 from scope_access b where b.scope_id = s.policy_scope_id and b.principal = @behalf))))`
 
 // VisibleArgs returns the named arguments VisibleCondition needs.
 // pgx.NamedArgs fills @name placeholders, like named parameters in JDBC templates.

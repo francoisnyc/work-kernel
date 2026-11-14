@@ -33,6 +33,9 @@ func (k *Service) Update(ctx context.Context, req UpdateRequest) (WriteResult, e
 	if req.IdempotencyKey == "" || req.Principal.Actor == "" || (len(req.Fields) == 0 && req.Policy == nil) {
 		return WriteResult{}, fmt.Errorf("%w: idempotency key, actor and at least one field are required", ErrInvalid)
 	}
+	if err := checkPrincipal(req.Principal); err != nil {
+		return WriteResult{}, err
+	}
 	if err := checkOptions(req.ExpectedItemSeq, req.Attribution); err != nil {
 		return WriteResult{}, err
 	}
@@ -72,9 +75,9 @@ func (k *Service) Update(ctx context.Context, req UpdateRequest) (WriteResult, e
 
 		merged, set, cleared := applyPatch(it.Fields, req.Fields)
 
-		scopeID := it.ScopeID
+		scopeID, remove := it.ScopeID, uuid.Nil
 		if req.Policy != nil {
-			if scopeID, err = applyPolicy(ctx, tx, req.ItemID, it, req.Policy, readers); err != nil {
+			if scopeID, remove, err = applyPolicy(ctx, tx, req.ItemID, it, req.Policy, readers); err != nil {
 				return WriteResult{}, err
 			}
 		}
@@ -85,6 +88,11 @@ func (k *Service) Update(ctx context.Context, req UpdateRequest) (WriteResult, e
 			req.ItemID, merged, itemSeq, scopeID)
 		if err != nil {
 			return WriteResult{}, fmt.Errorf("update item: %w", err)
+		}
+		if remove != uuid.Nil {
+			if err := removeNode(ctx, tx, remove); err != nil {
+				return WriteResult{}, err
+			}
 		}
 
 		payload := map[string]any{"field_ids": sortedKeys(set)}

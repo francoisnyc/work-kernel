@@ -54,6 +54,9 @@ func (k *Service) Search(ctx context.Context, req SearchRequest) (SearchResult, 
 	if req.Principal.Actor == "" || strings.TrimSpace(req.Query) == "" {
 		return SearchResult{}, fmt.Errorf("%w: actor and query are required", ErrInvalid)
 	}
+	if err := checkPrincipal(req.Principal); err != nil {
+		return SearchResult{}, err
+	}
 	if req.MinSeq < 0 || req.Wait < 0 || req.Limit < 0 {
 		return SearchResult{}, fmt.Errorf("%w: min_seq, wait and limit cannot be negative", ErrInvalid)
 	}
