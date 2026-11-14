@@ -47,6 +47,12 @@ Ideas noted during the spike, not built yet.
 - Search indexes every string value in `fields`, enum values included, with the
   `simple` configuration (no stemming). Choose per-field indexing and a language
   later. Erasure must also cover `items.search`, which follows `items.fields`. (Step 4)
+- Narrowing a container rewrites every descendant's `scope_id` in one
+  transaction: O(descendants). Proposed fix: give every container its own scope
+  node at creation (`narrows = false`, inheriting), so narrowing flips that
+  node's flag and readers in place and no descendant row changes.
+  `VisibleScopes` then has to treat non-narrowing nodes as inheriting their
+  parent. (Step 4)
 - `Get` reads the visible scopes and then the Item in two statements. One
   statement would close the tiny window between them. (Step 4)
 
@@ -162,7 +168,7 @@ for both activities: the load completes the workflow, the timer's write is not r
   Steps 1–3 was fought for because of the language. Caveat: this judges the code I wrote;
   how readable it is to you, coming from Java, is the half only you can assess.
 
-## 2026-11-14 — Step 4 (not finished: one Step 1 test awaits a decision)
+## 2026-11-14 — Step 4 (finished)
 
 **Built:** the rename to `itemservice` (PR #8). Then Step 4: migration 00003 (root scope,
 `scope_id` NOT NULL, `principal_roles`, generated `search` column, indexes);
@@ -183,10 +189,9 @@ search column one line, but it indexes enum values too.
 **Numbers:** 43 new tests. `itemservice` tests ~9 s, of which 2 s is the default-wait test.
 
 **Open questions and risks:**
-- `TestGet_ReturnsCreatedItem` (Step 1) expects `ScopeID` nil; every Item now has a scope.
-  Left untouched and failing. It needs a decision.
-- `design.md` edits for Step 4 are a separate commit, for review.
-- PRs #7 and #8 showed as open on GitHub all session, so this branch still carries the
-  rename and has not been rebased on them.
+- `TestGet_ReturnsCreatedItem` (Step 1) expected `ScopeID` nil. With approval it now
+  asserts the scope is set; the root-scope test checks which one.
+- PR #8 carries the rename and Step 4 together. PR #7 (the "Names" section) was still
+  open; once it merges, its last sentence about `cmd/kernel` is out of date.
 
-**Next session:** settle the Step 1 test, get the suite green, then Step 5.
+**Next session:** Step 5, Phase A.
