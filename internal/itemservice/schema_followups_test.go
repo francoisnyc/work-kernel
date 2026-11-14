@@ -9,7 +9,6 @@ package itemservice_test
 import (
 	"reflect"
 	"testing"
-	"time"
 
 	"github.com/francoisnyc/work-kernel/internal/item"
 	"github.com/francoisnyc/work-kernel/internal/itemservice"
@@ -189,89 +188,10 @@ func TestErasingFieldValues_LeavesTheEventLogIntact(t *testing.T) {
 	}
 }
 
-// --- commit counter ---
+// --- commit_seq ---
 
-// commit_seq is the counter's value, not a sequence's. Tests in this package
-// run one after another, so nothing else moves the counter in between.
-func TestCreate_CommitSeqComesFromTheCounter(t *testing.T) {
-	ctx := testCtx(t)
-	k := itemservice.New(pool)
-
-	var before int64
-	if err := pool.QueryRow(ctx, `select last_seq from commit_counter`).Scan(&before); err != nil {
-		t.Fatalf("read commit_counter: %v", err)
-	}
-
-	res, err := k.Create(ctx, newRequest())
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	var after int64
-	if err := pool.QueryRow(ctx, `select last_seq from commit_counter`).Scan(&after); err != nil {
-		t.Fatalf("read commit_counter: %v", err)
-	}
-	if res.CommitSeq != before+1 || after != res.CommitSeq {
-		t.Errorf("counter %d -> %d, CommitSeq = %d; want CommitSeq = counter = %d",
-			before, after, res.CommitSeq, before+1)
-	}
-
-	// No sequence is left behind the column.
-	var columnDefault *string
-	err = pool.QueryRow(ctx,
-		`select column_default from information_schema.columns
-		 where table_name = 'item_events' and column_name = 'commit_seq'`).Scan(&columnDefault)
-	if err != nil {
-		t.Fatalf("read column default: %v", err)
-	}
-	if columnDefault != nil {
-		t.Errorf("item_events.commit_seq default = %q, want none", *columnDefault)
-	}
-}
-
-// A write holds the counter row until it commits, so commit_seq values become
-// visible in order. We hold the row ourselves and check that Create waits.
-func TestCreate_WaitsForTheCommitCounterLock(t *testing.T) {
-	ctx := testCtx(t)
-	k := itemservice.New(pool)
-
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	// Rollback after Commit is a harmless no-op, so this is safe on every path.
-	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, `select last_seq from commit_counter for update`); err != nil {
-		t.Fatalf("lock commit_counter: %v", err)
-	}
-
-	// A channel carries the goroutine's result back, like a Future.
-	done := make(chan error, 1)
-	go func() {
-		_, err := k.Create(ctx, newRequest())
-		done <- err
-	}()
-
-	// select waits for whichever channel is ready first.
-	select {
-	case err := <-done:
-		t.Fatalf("Create finished while the counter was locked (err = %v)", err)
-	case <-time.After(300 * time.Millisecond):
-		// Still waiting, as expected.
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		t.Fatalf("release lock: %v", err)
-	}
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("Create after release: %v", err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("Create did not finish after the counter was released")
-	}
-}
+// Step A replaced the commit counter with a sequence and a watermark; its
+// tests are in watermark_test.go.
 
 // --- indexes ---
 

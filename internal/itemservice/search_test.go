@@ -19,13 +19,16 @@ import (
 	"github.com/francoisnyc/work-kernel/internal/itemservice"
 )
 
-// lastCommitSeq reads the commit counter. Tests in a package run one at a
-// time, so the counter does not move under a test.
+// lastCommitSeq returns the last commit_seq handed out. Tests in a package
+// run one at a time, so nothing else takes a number under a test. (Step A:
+// commit_seq comes from a sequence; is_called is false until its first use.)
 func lastCommitSeq(t *testing.T) int64 {
 	t.Helper()
 	var n int64
-	if err := pool.QueryRow(testCtx(t), `select last_seq from commit_counter`).Scan(&n); err != nil {
-		t.Fatalf("read commit counter: %v", err)
+	err := pool.QueryRow(testCtx(t),
+		`select case when is_called then last_value else last_value - 1 end from commit_seq`).Scan(&n)
+	if err != nil {
+		t.Fatalf("read commit_seq: %v", err)
 	}
 	return n
 }
