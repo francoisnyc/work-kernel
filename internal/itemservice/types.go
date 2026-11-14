@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/jackc/pgx/v5"
 
@@ -50,9 +51,38 @@ type querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-// loadType reads a registered Type. Postgres is the only store, which keeps
-// the item service stateless; a cache can come later if Step 5's numbers ask for it.
-func loadType(ctx context.Context, q querier, id string, version int) (*typedef.Type, error) {
+// typeCache holds parsed Types by (id, version). sync.Map is a map that is
+// safe for concurrent use without a lock of our own, like ConcurrentHashMap.
+// A *typedef.Type is never modified after parsing, so sharing it is safe.
+type typeCache struct {
+	m sync.Map // typeKey -> *typedef.Type
+}
+
+type typeKey struct {
+	id      string
+	version int
+}
+
+// loadType returns a registered Type, from the cache when it is enabled.
+func (k *Service) loadType(ctx context.Context, q querier, id string, version int) (*typedef.Type, error) {
+	if k.types == nil {
+		return readType(ctx, q, id, version)
+	}
+	key := typeKey{id, version}
+	// Load returns `any`; the .(*typedef.Type) type assertion casts it back.
+	if ty, ok := k.types.m.Load(key); ok {
+		return ty.(*typedef.Type), nil
+	}
+	ty, err := readType(ctx, q, id, version)
+	if err != nil {
+		return nil, err
+	}
+	k.types.m.Store(key, ty)
+	return ty, nil
+}
+
+// readType reads a registered Type from Postgres and parses it.
+func readType(ctx context.Context, q querier, id string, version int) (*typedef.Type, error) {
 	var def []byte
 	err := q.QueryRow(ctx,
 		`select definition from types where id = $1 and version = $2`, id, version).Scan(&def)

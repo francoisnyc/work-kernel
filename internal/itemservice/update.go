@@ -62,7 +62,7 @@ func (k *Service) Update(ctx context.Context, req UpdateRequest) (WriteResult, e
 		if err := checkExpectedSeq(it, req.ExpectedItemSeq); err != nil {
 			return WriteResult{}, err
 		}
-		ty, err := loadType(ctx, tx, it.TypeID, it.TypeVersion)
+		ty, err := k.loadType(ctx, tx, it.TypeID, it.TypeVersion)
 		if err != nil {
 			return WriteResult{}, err
 		}

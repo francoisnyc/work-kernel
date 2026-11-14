@@ -83,14 +83,33 @@ type WriteResult struct {
 	ItemSeq   int64     `json:"item_seq"`
 }
 
-// Service is stateless; all state lives in Postgres.
+// Service keeps all Item state in Postgres. The only thing it may hold in
+// memory is parsed Types (see Options.CacheTypes), which never change.
 type Service struct {
-	pool *pgxpool.Pool
+	pool  *pgxpool.Pool
+	types *typeCache // nil unless Options.CacheTypes
+}
+
+// Options tune a Service. The zero value is the default.
+type Options struct {
+	// CacheTypes keeps each parsed Type version in memory after its first
+	// read. A registered version never changes, so the cache needs no
+	// invalidation. Off by default: see the Step 5 numbers in docs/journal.md.
+	CacheTypes bool
 }
 
 // New returns a Service that uses the given connection pool.
 func New(pool *pgxpool.Pool) *Service {
-	return &Service{pool: pool}
+	return NewWithOptions(pool, Options{})
+}
+
+// NewWithOptions returns a Service with the given options.
+func NewWithOptions(pool *pgxpool.Pool, opts Options) *Service {
+	k := &Service{pool: pool}
+	if opts.CacheTypes {
+		k.types = &typeCache{}
+	}
+	return k
 }
 
 // Create writes a new Item, its first event and, if its Type has listeners,
@@ -118,7 +137,7 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 
 	// A Type version never changes once registered, so it can be read
 	// outside the write transaction.
-	ty, err := loadType(ctx, k.pool, req.TypeID, req.TypeVersion)
+	ty, err := k.loadType(ctx, k.pool, req.TypeID, req.TypeVersion)
 	if err != nil {
 		return WriteResult{}, err
 	}
@@ -271,5 +290,5 @@ func (k *Service) StateEntry(ctx context.Context, id uuid.UUID) (StateEntry, err
 
 // Type returns a registered Type version.
 func (k *Service) Type(ctx context.Context, id string, version int) (*typedef.Type, error) {
-	return loadType(ctx, k.pool, id, version)
+	return k.loadType(ctx, k.pool, id, version)
 }
