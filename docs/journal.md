@@ -87,6 +87,15 @@ Ideas noted during the spike, not built yet.
 - Groups as readers: `scope_access` would hold group IDs and the check becomes
   "the principal or one of their groups", keeping the table O(scopes × reader
   entries) instead of O(scopes × people). Nothing to build yet. (Step A)
+- Search cost after Step A: match-first is O(matches). A word in ~10,000
+  Items costs ~14 ms, where the old flattened shape took ~1 ms (and ~11 ms for
+  a rare word). Options: cap the match step, pick the shape from the estimated
+  match count, or move search to its own index (which `min_seq` already
+  allows). (Step A)
+- After Step A the write ceiling on the 4-vCPU bench box is neither a lock nor
+  the WAL flush (`synchronous_commit=off` changed nothing): most likely CPU
+  shared by Go, Postgres and the containers. Measure on separate machines
+  before tuning anything. (Step A)
 
 ## 2026-11-12 — Step 1 (finished)
 
@@ -376,3 +385,87 @@ reach no workflow, cost a Temporal round-trip each, and are not actions.
 
 **Next session:** the follow-up spike (Steps 6–7: holds and connectors), starting with
 `HasListeners` and the Temporal cost limits above.
+
+## 2026-11-14 — Step A, hardening (finished in code; CI waits on one test fix)
+
+**Built:** `commit_seq` from a sequence and `xid8` on every event (migration 00004),
+replacing the commit counter; `min_seq` waits until the write's transaction ID is below
+the snapshot xmin; a 5 s statement timeout on writes and a 60 s
+`idle_in_transaction_session_timeout`. `scopes.item_id` (unique), `scopes.open` and
+`scope_access` (migration 00005): a container gets its node with its first child,
+narrowing flips a node in place, and `Get`, writes and `Search` share one indexed rule
+(`policy.VisibleCondition`). Search matches first, then filters and sorts. `cmd/bench
+-explain`, lock-wait sampling and a `synchronous_commit=off` diagnostic in the bench.
+
+**Surprises:**
+- Two deadlocks came out of the concurrent policy test, both from Postgres row-lock
+  rules rather than from the design. Strengthening a lock the transaction already held
+  queues behind a waiter: so lock the subtree before touching the node. A second UPDATE
+  of a row the transaction already changed re-checks its foreign keys, taking a share
+  lock on the parent scope another change holds: so write each scope row once.
+- A child created while another child was making the container's node saw the container
+  "disappear": after waiting for a row lock, Postgres re-checks the query against the
+  new row version, and a join can miss a row committed after the statement began. Lock
+  the row in a statement of its own, then read.
+- `synchronous_commit=off` gained nothing, so the new ceiling is not the disk flush.
+- Match-first search is not a free win; see the plans below.
+
+**Changed tests (approved):** the two counter tests became watermark tests; the
+`lastCommitSeq` helper reads the sequence; the burst test sends one message before
+counting (and so counts 201 messages in the channel, a consequence noted in the
+implementation commit). Open: `TestMinSeq_WaitsForAWriteStillCommitting` races under
+`-race` (its goroutine is not waited for); a fix is proposed, not applied.
+
+### Numbers: Step 5 → Step A
+
+Same bench, same 4-vCPU container type, but this run's CPU is 2.30 GHz against Step 5's
+2.10 GHz: compare ratios within a run more than absolute numbers across runs.
+
+| | Step 5 | Step A |
+| --- | --- | --- |
+| Create p50, 1 writer, cache on | 2.31 ms | 2.03 ms |
+| Create, 16 writers (writes/s, ×1 writer) | 630 (1.5×) | 1,300 (2.8×) |
+| Update, 16 writers | 746 (1.7×) | 1,328 (2.7×) |
+| Transition, 16 writers | 966 (2.0×) | 1,463 (2.6×) |
+| Lock waits during 16-writer runs | not measured | 0 samples in every run |
+| Burst, 1 writer (msgs/s) | 370 | 418 |
+| Burst, 16 writers, 1 channel | 807 | 1,451 (3.5×) |
+| Burst, 16 writers, 16 channels | 874 | 1,444 |
+| Rows per message, outbox rows, new scopes | 4, 0, 0 | 4, 0, 0 |
+| Get, principal reading 1,000 narrowed scopes | 3.75 ms (34.5 in run 1) | 0.17 ms |
+| Get, principal reading none | 2.32 ms | 0.16 ms |
+| Create by a principal reading none, 1,000 narrowed scopes exist | 5.05 ms | 2.15 ms |
+| Search ("rare" word, 1,001 matches), light / heavy | 16.7 / 38.9 ms | 3.8 / 4.6 ms |
+| Search, common word (~10,000 matches) | not measured | 14.4 ms (flattened: 0.85 ms) |
+| Temporal per ticket: runs, events, bytes, actions | 2, 42, 6,194, 9 | 2, 42, 6,196, 9 |
+
+`synchronous_commit` (ticket Create, cache on): on 562 / 1,478 writes/s (1 / 16 writers),
+off 514 / 1,444. No difference: the flush is not the limit.
+
+**Done when:** no write waits on a shared row lock (0 lock-wait samples) ✓; 16 writers
+reach 2.5–2.8× one writer (3.5× for messages) ✓; `min_seq` and the relay lose and
+reorder nothing (watermark tests, relay tests unchanged) ✓; a principal who reads no
+narrowed scope pays nothing for 1,000 of them (Create 2.15 ms against 2.03) ✓. CI green
+waits on the test fix above.
+
+### Plan shapes (EXPLAIN ANALYZE, before / after ANALYZE)
+
+- **Get, principal reading 1,000 scopes.** Before Step A: a recursive walk over every
+  scope; 3.5 ms with no statistics, 109 ms after ANALYZE (sequential scan, nested loop,
+  500,500 rows discarded). After: three index lookups (items pkey, scopes pkey,
+  scope_access pkey): 0.14 / 0.05 ms.
+- **Search, light principal, 1,001 matches.** Before: walk `items` newest-first and
+  discard non-matches (31,016 discarded, 11 ms). After: the match step (bitmap scan,
+  then a sequential scan once analyzed: 3% of rows match), then the visibility test per
+  match: 8.0 / 4.8 ms.
+- **Search, common word, ~10,000 matches.** Match-first: 22 / 14 ms, growing with
+  matches. Flattened: 11 ms before ANALYZE, 0.17 ms after (newest-first finds 50 matches
+  in 152 rows). The flattened shape is fast when matches are recent and slow when they
+  are old; match-first is O(matches) either way. Kept match-first for predictability;
+  see Later.
+- **OR vs UNION ALL.** The OR plan filters scopes first (17 rows) after ANALYZE and
+  costs a scopes-pkey lookup per match before; UNION ALL was slower (28.6 ms against
+  22 ms). Kept the OR.
+
+**Next session:** apply the approved race fix (if approved), get CI green, mark #10
+ready. Then option B (Steps 6–7).
