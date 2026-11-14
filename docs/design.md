@@ -186,11 +186,34 @@ client → item service (Go, stateless)
 ## Policy
 
 - **Principals are typed IDs**, given by the caller: `user:<id>`, `agent:<id>`,
-  `group:<id>`, and `system:<id>` for the kernel's own actors (`system:timer`).
+  `group:<id>`, and for the kernel's own actors `system:<id>` (`system:timer`)
+  and `hook:<type>:<hook-id>` (a Type's hook).
   The actor, `on_behalf_of`, every reader and every role holder is one. An
   untyped ID is `ErrInvalid`. Only users and agents are readers today; `group:`
   is reserved and refused until groups exist, so groups need no migration later.
-  In a Type's `allowed` list a principal entry reads `principal:user:<id>`.
+  In a Type's `allowed` list a principal entry reads `principal:user:<id>`. It
+  may name a hook of the same Type, `principal:hook:<type>:<hook-id>`; another
+  Type's hook is refused at load, since a hook acts only on its own Type.
+- **Two doors.** The item service's public operations (`Create`, `Update`,
+  `Transition`, `Get`, `Search`, `StartAgentSession`) serve people and agents.
+  They refuse a `system:` or `hook:` actor, and any `originating_hook`,
+  `causation_id` or non-zero `hop`, with `ErrInvalid`; `correlation_id` stays
+  open to callers, as a claim. The kernel's own actors write through
+  `Service.Internal()` (`Update` and `Transition` only):
+  - It accepts `system:timer` and `hook:<type>:<hook-id>` only; any other
+    `system:` actor is `ErrInvalid` until it is defined. It refuses people,
+    agents, an `on_behalf_of` set by the caller and any agent session.
+  - A write names its cause: `originating_hook` (`timer:…`, or for a hook
+    `hook:<type>@v<version>:<hook-id>`, naming that hook on the Item's own Type
+    and version) and `causation_id` = an existing event of **the same Item**,
+    with `hop` ≥ 1. (Link reactions will write to another Item; this rule
+    relaxes then.)
+  - `hop` above `MaxHop` (8) is `ErrRejected` ("hop limit") and writes nothing.
+  - It changes fields and state only, never policy or container.
+  - It skips visibility (see Boundary) and still applies `allowed`.
+  - Only the worker and the hook runner may call `Internal()`. Go cannot limit
+    an exported method to some packages of a module, so a test reads the
+    module's source and fails on any other caller.
 - **Scopes**: every container has a scope node, created with the container. It
   inherits (`narrows = false`) until the container is narrowed, which then flips
   the node's flag and readers in place. An Item's read access comes from its
@@ -343,8 +366,14 @@ client → item service (Go, stateless)
   agent session (`Principal.AgentSession`), on reads and writes alike.
 - Acting for a user: rights = user's rights ∩ agent's grant.
 - Every event records attribution:
-  - `actor`: whose permissions were checked (user, agent, or `hook:<id>@<version>`)
-  - `on_behalf_of`: the human at the root, if different
+  - `actor`: whose permissions were checked (user, agent, `system:timer`, or
+    `hook:<type>:<hook-id>`, with no version, so `allowed` matches across versions)
+  - `on_behalf_of`: the human at the root, if different. On a kernel write
+    (timer, hook) the kernel fills it from the cause: the cause's
+    `on_behalf_of` if set, else the cause's actor if it is a `user:`, else
+    empty. A timer or hook triggered by an agent working for Ana records Ana.
+    It is attribution only, never checked for visibility or `allowed`: a hook
+    must not fail because that human later lost access.
   - `agent_session`: set when an agent acts
   - `originating_hook`: set when a hook or connector caused the write
   - `causation_id`: the event that caused this write
@@ -353,12 +382,20 @@ client → item service (Go, stateless)
 
   Build the columns in Step 2; callers fill them as they appear. Since Step 3,
   write requests carry them (`agent_session`, `originating_hook`, `causation_id`,
-  `correlation_id`, `hop`) as a Go-only field, not yet in the API.
+  `correlation_id`, `hop`) as a Go-only field, not yet in the API. Since Step 6,
+  only the internal door may set `originating_hook`, `causation_id` and `hop`
+  (see Policy, "Two doors").
 
   A timer's write is recorded as: `actor` = `system:timer`, `originating_hook` =
   `timer:<type>@v<version>:<state>`, `causation_id` = the `item:seq` of the event
   that entered the state, `correlation_id` inherited from that event, `hop` = that
   event's hop + 1. Its idempotency key is `timer:<item>:<entered seq>:<expected seq>`.
+  It writes through `Internal()`.
+
+  A hook's write is recorded the same way: `actor` = `hook:<type>:<hook-id>`,
+  `originating_hook` = `hook:<type>@v<version>:<hook-id>`, `causation_id` = the
+  event that triggered it, `hop` = that event's hop + 1, and `on_behalf_of` as
+  above.
 
 ## Schema (first cut)
 
