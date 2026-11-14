@@ -86,8 +86,9 @@ client → item service (Go, stateless)
              check the principal can see the Item (else: not found)
              validate schema + lifecycle + policy against the locked row
              write Item row (item_seq + 1)
-             take next commit_seq (commit_counter row, locked)
-             insert item_events (item_id, item_seq, commit_seq, attribution…, op, payload)
+             take commit_seq from a sequence (no lock)
+             insert item_events (item_id, item_seq, commit_seq, xid, attribution…, op, payload)
+               xid = pg_current_xact_id(), the writing transaction's ID
              insert item_event_values (field values for this event)
              insert outbox (item_id, item_seq)
              store the result under the idempotency key
@@ -112,10 +113,31 @@ client → item service (Go, stateless)
     the transition's `allowed` list does not include them (HTTP 403). The
     lifecycle is asked first, so an illegal move is always `ErrRejected`.
   - `ErrStale` — someone changed the Item first; re-read and retry (HTTP 409).
-- `commit_seq` lets later reads/searches wait until the write is visible. For
-  the spike it comes from a single locked counter row, so numbers become visible
-  in commit order (a `bigserial` does not guarantee that). This serializes writes;
-  revisit after the spike (snapshot-xmin watermark).
+- `commit_seq` names a write so that a later read can wait for it (`min_seq`).
+  It comes from a plain sequence, so writes no longer queue on one row. Sequence
+  numbers are taken in one order and committed in another, and a rolled-back
+  write leaves a gap, so `commit_seq` is **not** a cursor: "everything up to S"
+  cannot be read off it.
+- **What `min_seq` guarantees.** Every event stores the ID of the transaction
+  that wrote it. A transaction ID below `pg_snapshot_xmin(pg_current_snapshot())`
+  belongs to a transaction that has finished; no later commit can carry it. So a
+  read with `min_seq = S` looks up the event S's transaction ID and waits until
+  the reader's watermark has passed it. Then the write S is visible, together with
+  everything written by older transactions. It does **not** promise every event
+  with a lower `commit_seq`: a younger transaction may have taken a lower number
+  and still be running. That is enough for read-your-writes, which is what
+  `min_seq` is for.
+- **What that rules out.** Watch and any external index need "nothing before
+  this point is missing", and `commit_seq` cannot give it. They will read from a
+  **post-commit sequencer**: one background process that reads events whose
+  transaction ID is below xmin, orders them, and stamps a gap-free log position.
+  Watch and indexers use that position as their cursor. Not built yet.
+- The relay does not need the watermark. It delivers per Item in `item_seq`
+  order, and the Item's row lock means write n+1 cannot start before write n has
+  committed, so it never sees a gap within an Item.
+- **A long transaction holds the watermark back for the whole database**, so
+  every `min_seq` wait would time out. The write path runs with a statement
+  timeout, and the database with `idle_in_transaction_session_timeout`.
 
 ### Events and personal data
 
@@ -161,9 +183,11 @@ client → item service (Go, stateless)
 
 ## Policy
 
-- **Scopes**: a scope node per container that narrows access. An Item's read
-  access comes from its nearest ancestor scope that narrows it. Each Item stores
-  one `scope_id`, never null.
+- **Scopes**: every container has a scope node, created with the container. It
+  inherits (`narrows = false`) until the container is narrowed, which then flips
+  the node's flag and readers in place. An Item's read access comes from its
+  nearest ancestor scope that narrows it. Each Item stores one `scope_id`, never
+  null: its own node if it is a container or narrowed, else its container's node.
 - **Root scope**: each namespace has one root scope (no parent, `narrows = false`)
   that every principal in the namespace reads. An Item that is not narrowed, in
   no container, is in it. There is no "null means everyone".
@@ -175,9 +199,7 @@ client → item service (Go, stateless)
   event and bump `item_seq`; the payload holds reader IDs only.
   - A change that would hide the Item from the principal making it (or from
     `on_behalf_of`) is `ErrInvalid`. Recovery by an admin comes later, with grants.
-  - Narrowing a container moves the Items that inherit from it under its new
-    node, and `inherit` moves them back. Their `scope_id` changes; they get no
-    event, since nothing about them changed.
+  - Narrowing a container changes only its own node; no descendant row changes.
 - **Roles** live in `principal_roles(namespace_id, principal, role)`: the
   server's own record, read on every write that needs it, never claimed by a caller.
 - **On behalf of**: when an agent acts for a user, both must see the Item and
@@ -185,9 +207,20 @@ client → item service (Go, stateless)
 - **Grants** widen explicitly (e.g. share one ticket with a customer). A grant
   attaches to a scope node. Effective readers = (parent readers narrowed by this
   node) + grants.
+- **Who can see what is kept, not computed per request.** `scopes.open` is true
+  for a scope with no narrowing ancestor: everyone in the namespace reads it.
+  For every other scope, `scope_access(scope_id, principal)` lists its effective
+  readers: the readers of every narrowing ancestor, intersected. Both are updated
+  in the same transaction as the reader or policy change that affects them, so a
+  narrowed Item or a removed reader is hidden on the very next read. A principal
+  pays only for the scopes they are in; other people's narrowed scopes cost nothing.
+- **Get and writes** check the Item's one scope: `open`, or a row in
+  `scope_access` for the principal (and for `on_behalf_of`). One indexed lookup,
+  with no query over other scopes.
+- **Search** filters with the same test, joined in SQL.
+- Walking up from a scope is what a policy change does to recompute
+  `scope_access` for the subtree it affects: O(scopes below the change).
 - API in `internal/policy`:
-  - `VisibleScopes(principal)` — loaded once per request, never cached, so a
-    narrowed Item or a removed reader is hidden on the very next read.
   - `Project(principal, visible, item)` — pure. All-or-nothing per Item for the
     spike; redacting single fields comes later.
   - `AuthorizeTransition(principal, roles, transition)` — pure. "Is the move
@@ -206,11 +239,15 @@ client → item service (Go, stateless)
 - `Search` matches the string values in an Item's fields, using Postgres
   full-text search on a generated `tsvector` column. The column is part of the
   row, so it cannot fall behind a write.
-- The filter is `scope_id = ANY(visible scopes)`, applied in SQL before the
-  limit, never after fetching.
-- `min_seq`: Search waits until `commit_seq` has reached it, up to a bound
-  (default 2 s), then returns the retryable `ErrNotCaughtUp`. On one Postgres
-  the wait ends at once; the contract is there for when search has its own index.
+- The visibility filter (see Policy) is applied in SQL before the limit, never
+  after fetching.
+- The text match runs first and the sort and limit after it, in a subquery the
+  planner cannot flatten. Otherwise Postgres walks Items newest-first and
+  discards non-matches, which grows with the size of the scope (Step A, `EXPLAIN`).
+- `min_seq`: Search waits until the watermark has passed the transaction that
+  wrote `min_seq` (see Write path), up to a bound (default 2 s), then returns the
+  retryable `ErrNotCaughtUp`. On one Postgres the wait ends at once; the contract
+  is there for when search has its own index.
 
 ## Agents (later in the spike)
 
@@ -239,7 +276,10 @@ client → item service (Go, stateless)
 ```sql
 create table types        (id text, version int, definition jsonb, primary key (id, version));
 create table scopes       (id uuid primary key, namespace_id text not null default 'default',
-                           parent_id uuid references scopes, narrows boolean not null);
+                           parent_id uuid references scopes, narrows boolean not null,
+                           open boolean not null);  -- no narrowing ancestor
+create table scope_access (scope_id uuid references scopes, principal text,
+                           primary key (scope_id, principal));  -- effective readers
 create unique index scopes_root on scopes (namespace_id) where parent_id is null;
 create index scopes_parent on scopes (parent_id);
 create table scope_readers(scope_id uuid references scopes, principal text, primary key (scope_id, principal));
@@ -256,7 +296,9 @@ create table items        (id uuid primary key, namespace_id text not null defau
                              (jsonb_to_tsvector('simple', fields, '["string"]')) stored);
 create index items_search on items using gin (search);
 create index items_namespace_scope on items (namespace_id, scope_id);
-create table item_events  (item_id uuid references items, item_seq bigint, commit_seq bigint not null unique,
+create table item_events  (item_id uuid references items, item_seq bigint,
+                           commit_seq bigint not null unique default nextval('commit_seq'),
+                           xid xid8 not null default pg_current_xact_id(),
                            actor text not null, on_behalf_of text, agent_session text,
                            originating_hook text, causation_id text, correlation_id text,
                            hop int not null default 0, op text not null, payload jsonb,
@@ -264,7 +306,6 @@ create table item_events  (item_id uuid references items, item_seq bigint, commi
 create table item_event_values (item_id uuid, item_seq bigint, field_values jsonb not null,
                            primary key (item_id, item_seq),
                            foreign key (item_id, item_seq) references item_events);
-create table commit_counter (id boolean primary key default true check (id), last_seq bigint not null);
 create table outbox       (item_id uuid, item_seq bigint, delivered_at timestamptz,
                            primary key (item_id, item_seq));
 create index outbox_pending on outbox (item_id, item_seq) where delivered_at is null;
@@ -307,6 +348,14 @@ passes, however long that takes.
 | 3 | Outbox relay with per-Item ordering; interpreter workflow started lazily with Update-With-Start; one durable timer | Killing the worker mid-timer still fires it; duplicates and gaps handled |
 | 4 | Scopes and `VisibleScopes`; Postgres full-text search with `min_seq`; one narrowed Item | A second user never sees the narrowed Item, even right after a change |
 | 5 | Type v2 while v1 Items run; measure actions, history bytes, write latency; burst test: 10,000 messages into one channel (a Type with no lifecycle); write up | Both versions complete; burst numbers show rows and latency per message, and no outbox rows when nothing listens; all numbers recorded in `docs/journal.md` |
+
+**Hardening, Step A (after Step 5):** `EXPLAIN` the unstable reads; replace
+the commit counter with the sequence and watermark above; keep visibility in
+`scopes.open` and `scope_access`, with a scope node per container. Done when 16
+writers wait on no shared row lock and reach at least 2× the 1-writer
+throughput on the same machine, `min_seq` and the relay lose and reorder
+nothing, a principal who sees one scope pays nothing for others' narrowed
+scopes, and the same bench is rerun and compared in `docs/journal.md`.
 
 **Follow-up spike, Steps 6–7 (after Step 5):** holds and connectors. The
 plan is in the "Work kernel: Spike plan" doc. In short: Temporal activities

@@ -77,6 +77,13 @@ Ideas noted during the spike, not built yet.
   and runs on every read and write. With 1,000 narrowed scopes in the namespace,
   even a principal who sees one scope pays for the walk. Fix: check one Item's
   scope ancestors upward instead, or keep a principal → scopes table. (Step 5)
+- A post-commit sequencer: one background process that reads events whose
+  transaction ID is below the snapshot xmin, orders them, and stamps a gap-free
+  log position. Watch and external indexes need "nothing before this point is
+  missing", which `commit_seq` cannot give once it comes from a plain sequence.
+  (Step A)
+- A metric for the age of the xmin watermark: a long transaction holds it back
+  for the whole database and every `min_seq` wait times out. (Step A)
 
 ## 2026-11-12 — Step 1 (finished)
 
