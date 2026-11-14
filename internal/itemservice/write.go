@@ -89,6 +89,8 @@ func storedResult(ctx context.Context, tx pgx.Tx, actor, key, hash string) (Writ
 type lockedItem struct {
 	TypeID      string
 	TypeVersion int
+	ContainerID *uuid.UUID
+	ScopeID     uuid.UUID
 	State       string
 	Fields      map[string]any
 	ItemSeq     int64
@@ -100,10 +102,10 @@ type lockedItem struct {
 func lockItem(ctx context.Context, tx pgx.Tx, id uuid.UUID) (lockedItem, error) {
 	var it lockedItem
 	err := tx.QueryRow(ctx,
-		`select type_id, type_version, state, fields, item_seq
+		`select type_id, type_version, container_id, scope_id, state, fields, item_seq
 		 from items where id = $1 and namespace_id = $2 for update`,
 		id, defaultNamespace,
-	).Scan(&it.TypeID, &it.TypeVersion, &it.State, &it.Fields, &it.ItemSeq)
+	).Scan(&it.TypeID, &it.TypeVersion, &it.ContainerID, &it.ScopeID, &it.State, &it.Fields, &it.ItemSeq)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return lockedItem{}, ErrNotFound
 	}

@@ -22,15 +22,26 @@ type UpdateRequest struct {
 	// Zero means "no check" (an Item's first item_seq is 1).
 	ExpectedItemSeq int64
 	Attribution     item.Attribution // optional; what caused this write
+	// Policy is an optional change to who may read the Item. A request must
+	// carry a Fields patch, a Policy patch, or both; both make one write.
+	Policy *PolicyPatch
 }
 
-// Update applies a field patch to an Item and records an "update" event.
+// Update applies a field patch, a policy patch or both to an Item and records
+// one "update" event.
 func (k *Service) Update(ctx context.Context, req UpdateRequest) (WriteResult, error) {
-	if req.IdempotencyKey == "" || req.Principal.Actor == "" || len(req.Fields) == 0 {
+	if req.IdempotencyKey == "" || req.Principal.Actor == "" || (len(req.Fields) == 0 && req.Policy == nil) {
 		return WriteResult{}, fmt.Errorf("%w: idempotency key, actor and at least one field are required", ErrInvalid)
 	}
 	if err := checkOptions(req.ExpectedItemSeq, req.Attribution); err != nil {
 		return WriteResult{}, err
+	}
+	var readers []string
+	if req.Policy != nil {
+		var err error
+		if readers, err = checkPolicyPatch(req.Policy, req.Principal); err != nil {
+			return WriteResult{}, err
+		}
 	}
 	hash, err := requestHash("update", req)
 	if err != nil {
@@ -41,6 +52,11 @@ func (k *Service) Update(ctx context.Context, req UpdateRequest) (WriteResult, e
 		// Validation needs the Item's Type, so it runs after the row is locked.
 		it, err := lockItem(ctx, tx, req.ItemID)
 		if err != nil {
+			return WriteResult{}, err
+		}
+		// Visibility comes before every other check, so a principal who
+		// cannot see the Item learns nothing about it: not even "stale".
+		if err := checkVisible(ctx, tx, req.Principal, it.ScopeID); err != nil {
 			return WriteResult{}, err
 		}
 		if err := checkExpectedSeq(it, req.ExpectedItemSeq); err != nil {
@@ -56,10 +72,17 @@ func (k *Service) Update(ctx context.Context, req UpdateRequest) (WriteResult, e
 
 		merged, set, cleared := applyPatch(it.Fields, req.Fields)
 
+		scopeID := it.ScopeID
+		if req.Policy != nil {
+			if scopeID, err = applyPolicy(ctx, tx, req.ItemID, it, req.Policy, readers); err != nil {
+				return WriteResult{}, err
+			}
+		}
+
 		itemSeq := it.ItemSeq + 1
 		_, err = tx.Exec(ctx,
-			`update items set fields = $2, item_seq = $3, updated_at = now() where id = $1`,
-			req.ItemID, merged, itemSeq)
+			`update items set fields = $2, item_seq = $3, scope_id = $4, updated_at = now() where id = $1`,
+			req.ItemID, merged, itemSeq, scopeID)
 		if err != nil {
 			return WriteResult{}, fmt.Errorf("update item: %w", err)
 		}
@@ -67,6 +90,14 @@ func (k *Service) Update(ctx context.Context, req UpdateRequest) (WriteResult, e
 		payload := map[string]any{"field_ids": sortedKeys(set)}
 		if len(cleared) > 0 {
 			payload["cleared_field_ids"] = sortedKeys(cleared)
+		}
+		// The policy change is recorded as reader IDs only: no names.
+		if req.Policy != nil {
+			if req.Policy.Inherit {
+				payload["inherit"] = true
+			} else {
+				payload["readers"] = readers
+			}
 		}
 		return appendEvent(ctx, tx, req.ItemID, itemSeq, req.Principal, req.Attribution, "update", payload, set)
 	})
