@@ -18,8 +18,7 @@ small; everything product-specific is a Type or an app.
 - **Item service**: the one program that serves reads and writes of Items
   (`ItemService` in the proto). It is the only door to Item state.
 - Say "the item service" for the program and "the kernel" for the layer.
-  The code still uses `cmd/kernel` and `internal/kernel`; Step 4 renames them
-  to `cmd/itemservice` and `internal/itemservice`.
+  In code: `cmd/itemservice` and `internal/itemservice` (type `Service`).
 
 ## Item
 
