@@ -65,9 +65,10 @@ func (a *Activities) LoadItem(ctx context.Context, itemID string) (Snapshot, err
 // guards, history and the outbox all apply as for a person's transition. It
 // uses the internal door: only the kernel may act as system:timer.
 //
-// The item service's final answers (stale, rejected, not found) are returned as
-// non-retryable errors, which the workflow tells apart by type. Anything else (the
-// database is away, a timeout) is returned as is, and Temporal retries it.
+// The item service's final answers (stale, rejected, not found, invalid) are
+// returned as non-retryable errors, which the workflow tells apart by type.
+// Anything else (the database is away, a timeout) is returned as is, and
+// Temporal retries it.
 func (a *Activities) FireTimer(ctx context.Context, in FireTimerInput) error {
 	id, err := uuid.Parse(in.ItemID)
 	if err != nil {
@@ -95,6 +96,10 @@ func (a *Activities) FireTimer(ctx context.Context, in FireTimerInput) error {
 		activity.GetLogger(ctx).Info("the item service refused a timer's move",
 			"item", in.ItemID, "from", in.FromState, "to", in.ToState, "reason", err.Error())
 		return temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeRejected, err)
+	case errors.Is(err, itemservice.ErrInvalid):
+		// A malformed request is a bug; the same request can never succeed,
+		// and each retry would be billed. The workflow logs it with the reason.
+		return temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeInvalid, err)
 	}
 	return err
 }

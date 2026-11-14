@@ -19,10 +19,11 @@ const (
 	ActivityFireTimer = "FireTimer" // asks the item service to make a timer's move
 
 	// Error types by which the activities report the item service's final answers.
-	// All three are non-retryable.
+	// All four are non-retryable.
 	ErrTypeStale    = "Stale"    // the Item moved on; the workflow is behind
 	ErrTypeRejected = "Rejected" // the Type's rules refuse the move
 	ErrTypeNotFound = "NotFound" // the Item does not exist (any more)
+	ErrTypeInvalid  = "Invalid"  // the request is malformed; the same request can never succeed
 )
 
 // TimerSpec is one state's timer, reduced to what the workflow needs.
@@ -99,7 +100,8 @@ type FireTimerInput struct {
 // activityOptions: an attempt may take 30 seconds; a failed one is retried
 // with growing pauses, forever (MaximumAttempts 0 means no limit), so an
 // outage delays a timer but never loses it. Errors the activities mark as
-// non-retryable (Stale, Rejected) are the exception: they return at once.
+// non-retryable (Stale, Rejected, NotFound, Invalid) are the exception: they
+// return at once.
 var activityOptions = workflow.ActivityOptions{
 	StartToCloseTimeout: 30 * time.Second,
 	RetryPolicy: &temporal.RetryPolicy{
@@ -268,8 +270,10 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 				return err
 			}
 			continue
-		case errors.As(err, &appErr) && (appErr.Type() == ErrTypeRejected || appErr.Type() == ErrTypeNotFound):
-			// Final either way: the rules say no, or the Item is gone.
+		case errors.As(err, &appErr) && (appErr.Type() == ErrTypeRejected || appErr.Type() == ErrTypeNotFound ||
+			appErr.Type() == ErrTypeInvalid):
+			// Final either way: the rules say no, the Item is gone, or the
+			// request is malformed (a bug, which retrying cannot fix).
 			log.Info("the item service refused a timer's move",
 				"item", in.ItemID, "from", req.FromState, "to", req.ToState, "reason", appErr.Message())
 		default:
