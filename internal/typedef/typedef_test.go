@@ -55,8 +55,8 @@ func TestParse_TicketType(t *testing.T) {
 	if !ok {
 		t.Fatal("transition open -> in_progress not found")
 	}
-	if tr.Guard != "f_assignee is set" {
-		t.Errorf("guard = %q, want %q", tr.Guard, "f_assignee is set")
+	if tr.Guard != "f_assignee != null" {
+		t.Errorf("guard = %q, want %q", tr.Guard, "f_assignee != null")
 	}
 	tr, ok = ty.Transition("in_progress", "resolved")
 	if !ok || !reflect.DeepEqual(tr.Required, []string{"f_resolution"}) {
@@ -81,7 +81,7 @@ states:
   - {id: draft, category: backlog}
   - {id: published, category: done}
 transitions:
-  - {from: draft, to: published, guard: 'f_owner is set', required: [f_owner]}
+  - {from: draft, to: published, guard: 'f_owner != null', required: [f_owner]}
 `
 	if _, err := typedef.Parse([]byte(valid)); err != nil {
 		t.Fatalf("the base Type should be valid: %v", err)
@@ -103,9 +103,9 @@ transitions:
 		{"transition to unknown state", "to: published", "to: limbo", "limbo"},
 		{"transition from unknown state", "from: draft", "from: limbo", "limbo"},
 		{"required unknown field", "required: [f_owner]", "required: [f_ghost]", "f_ghost"},
-		{"guard on unknown field", "f_owner is set", "f_ghost is set", "f_ghost"},
-		{"guard syntax", "f_owner is set", "f_owner >>> 3", "guard"},
-		{"guard literal of the wrong type", "f_owner is set", "f_owner == 3", "f_owner"},
+		{"guard on unknown field", "f_owner != null", "f_ghost != null", "f_ghost"},
+		{"guard syntax", "f_owner != null", "f_owner >>> 3", "guard"},
+		{"guard literal of the wrong type", "f_owner != null", "f_owner == 3", "f_owner"},
 		{"duplicate transition",
 			"transitions:", "transitions:\n  - {from: draft, to: published}", "published"},
 	}

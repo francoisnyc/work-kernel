@@ -74,7 +74,7 @@ func transition(t *testing.T, k *itemservice.Service, id uuid.UUID, to string) i
 	if err != nil {
 		t.Fatalf("Transition to %s: %v", to, err)
 	}
-	return res
+	return res.WriteResult
 }
 
 func get(t *testing.T, k *itemservice.Service, id uuid.UUID) item.Item {

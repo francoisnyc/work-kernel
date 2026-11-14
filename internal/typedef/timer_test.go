@@ -25,7 +25,7 @@ states:
 transitions:
   - {from: draft, to: review}
   - {from: review, to: draft}
-  - {from: review, to: published, guard: 'f_owner is set'}
+  - {from: review, to: published, guard: 'f_owner != null'}
 `
 
 // A state's timer parses into a duration and a target state; other states have none.
