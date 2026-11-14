@@ -259,6 +259,67 @@ func TestContainer_FirstChildCreatesTheContainersNode(t *testing.T) {
 	}
 }
 
+// Eight first children created at the same moment still give the container
+// exactly one node, and all eight share it. The node is unique per container
+// and the path that creates it locks the container row FOR UPDATE.
+func TestContainer_ConcurrentFirstChildren_OneNode(t *testing.T) {
+	k := itemservice.New(pool)
+	alice := person("alice")
+	space := createAs(t, k, alice, "space", nil, nil)
+	scopesBefore := count(t, `select count(*) from scopes`)
+
+	const children = 8
+	ids := make([]uuid.UUID, children)
+	errs := make(chan error, children)
+	start := make(chan struct{}) // closed to release every goroutine at once
+	var wg sync.WaitGroup
+	for i := range children {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			res, err := k.Create(testCtx(t), itemservice.CreateRequest{
+				IdempotencyKey: newKey(), Principal: alice, TypeID: "ticket", TypeVersion: 1,
+				ContainerID: &space.ItemID, Fields: map[string]any{"f_title": fmt.Sprintf("child %d", i)},
+			})
+			ids[i] = res.ItemID
+			if err != nil {
+				errs <- err
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Errorf("Create child: %v", err)
+	}
+
+	// scopes.item_id names the Item a node belongs to, unique per Item.
+	n := count(t, `select count(*) from pg_indexes where tablename = 'scopes'
+	               and indexdef like 'CREATE UNIQUE INDEX%(item_id)%'`)
+	if n != 1 {
+		t.Errorf("unique indexes on scopes (item_id) = %d, want 1", n)
+	}
+	if n := count(t, `select count(*) from scopes where item_id = $1`, space.ItemID); n != 1 {
+		t.Fatalf("scope nodes belonging to the container = %d, want 1", n)
+	}
+	if added := count(t, `select count(*) from scopes`) - scopesBefore; added != 1 {
+		t.Errorf("scopes added by 8 first children = %d, want 1", added)
+	}
+	node := scopeOf(t, space.ItemID)
+	var owner uuid.UUID
+	if err := pool.QueryRow(testCtx(t), `select item_id from scopes where id = $1`, node).Scan(&owner); err != nil || owner != space.ItemID {
+		t.Fatalf("the container's scope belongs to %s (err %v), want the container", owner, err)
+	}
+	for i, id := range ids {
+		if id != uuid.Nil && scopeOf(t, id) != node {
+			t.Errorf("child %d is not in the container's node", i)
+		}
+	}
+	assertNothingWritten(t, space.ItemID, 1)
+}
+
 // Narrowing a container flips its node in place: no descendant row changes
 // (not its scope_id, not its updated_at), however deep.
 func TestContainer_NarrowingChangesNoDescendantRow(t *testing.T) {

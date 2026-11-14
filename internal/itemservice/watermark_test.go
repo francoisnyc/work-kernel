@@ -308,13 +308,15 @@ func TestWrite_DefaultStatementTimeout(t *testing.T) {
 }
 
 // The database ends transactions left idle, so one forgotten session cannot
-// hold the watermark back for everyone.
+// hold the watermark back for everyone. ALTER DATABASE ... SET only applies
+// to sessions opened afterwards, so the test opens a fresh connection rather
+// than borrowing one from the pool.
 func TestDatabase_IdleInTransactionTimeoutIsSet(t *testing.T) {
-	conn, err := pool.Acquire(testCtx(t))
+	conn, err := pgx.ConnectConfig(testCtx(t), pool.Config().ConnConfig.Copy())
 	if err != nil {
-		t.Fatalf("acquire: %v", err)
+		t.Fatalf("connect: %v", err)
 	}
-	defer conn.Release()
+	defer func() { _ = conn.Close(context.Background()) }()
 	var setting string
 	if err := conn.QueryRow(testCtx(t), `show idle_in_transaction_session_timeout`).Scan(&setting); err != nil {
 		t.Fatalf("show: %v", err)

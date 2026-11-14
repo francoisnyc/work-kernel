@@ -71,6 +71,16 @@ func TestBurst_MessagesIntoOneChannel_RowsPerMessage(t *testing.T) {
 		t.Errorf("channel outbox rows = %d, want 0", n)
 	}
 
+	// The channel's first message gives it its scope node (Step A). Send it
+	// before counting, so the burst measures the steady state: 4 rows per
+	// message and no new scope.
+	if _, err := k.Create(testCtx(t), itemservice.CreateRequest{
+		IdempotencyKey: newKey(), Principal: alice, TypeID: "message", TypeVersion: 1,
+		ContainerID: &channel.ItemID, Fields: map[string]any{"f_body": "first"},
+	}); err != nil {
+		t.Fatalf("first message: %v", err)
+	}
+
 	before := tableRows(t)
 
 	// Each writer sends every burstWriters-th message. A buffered channel
