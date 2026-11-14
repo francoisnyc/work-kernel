@@ -55,6 +55,28 @@ Ideas noted during the spike, not built yet.
   parent. (Step 4)
 - `Get` reads the visible scopes and then the Item in two statements. One
   statement would close the tiny window between them. (Step 4)
+- `lifecycle.HasListeners` decides whether an event gets an outbox row. Today it
+  only knows timers. Hooks, link reactions and subscriptions must widen it when
+  they arrive, or their events are silently never sent. (Step 5)
+- "Evolve the schema": old Items should read new optional fields added in a later
+  version. Today everything is pinned to the Item's version. (Step 5)
+- "Float the policy": move `allowed` out of transitions into a policy section
+  keyed by transition name, so it can follow the newest version while the
+  lifecycle stays pinned. (Step 5)
+- Migrating an Item to a new Type version: a state map (old state → new state),
+  a dry run that lists what would move and what has no mapping, a `migrated`
+  event recording both versions, and a running workflow that reloads its timer
+  table (the entering event stays the same, so a timer keeps its start). (Step 5)
+- Rejected gaps are billed: a validator rejection is an action even though it
+  never reaches history, so every relay retry of a gap costs money. Add a
+  counter metric for gap rejections. (Step 5)
+- Unlimited activity retries are billed per attempt: a stuck Item costs about
+  1,440 actions a day at the 1-minute backoff cap. Cap the attempts, or alert
+  when an Item's activity has retried for more than an hour. (Step 5)
+- `VisibleScopes` walks every child scope of the scopes a principal can read,
+  and runs on every read and write. With 1,000 narrowed scopes in the namespace,
+  even a principal who sees one scope pays for the walk. Fix: check one Item's
+  scope ancestors upward instead, or keep a principal → scopes table. (Step 5)
 
 ## 2026-11-12 — Step 1 (finished)
 
