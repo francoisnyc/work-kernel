@@ -335,6 +335,22 @@ type StateEntry struct {
 	EnteredAt     time.Time // when that event was written
 	CorrelationID string    // of that event; empty if not set
 	Hop           int       // of that event
+
+	// HooksRun are the hooks that already wrote for this entry: events whose
+	// cause is the entering event. OpenHold is the Item's open hold, if any.
+	HooksRun []string
+	OpenHold *HoldEntry
+}
+
+// HoldEntry is an open hold, as the workflow needs it: opaque IDs, state
+// names and the request's attribution.
+type HoldEntry struct {
+	ID            uuid.UUID
+	Hook          string
+	From, To      string
+	RequestedSeq  int64
+	CorrelationID string
+	Hop           int
 }
 
 // StateEntry reads an Item's state and the event that entered it, in one
@@ -361,6 +377,33 @@ func (k *Service) StateEntry(ctx context.Context, id uuid.UUID) (StateEntry, err
 	}
 	if err != nil {
 		return StateEntry{}, fmt.Errorf("read state entry: %w", err)
+	}
+
+	// A hook's write names the hook as actor, hook:<type>:<hook-id>.
+	rows, err := k.pool.Query(ctx,
+		`select distinct split_part(actor, ':', 3) from item_events
+		 where item_id = $1 and causation_id = $2 and actor like 'hook:%'
+		 order by 1`, id, fmt.Sprintf("%s:%d", id, se.EnteredSeq))
+	if err != nil {
+		return StateEntry{}, fmt.Errorf("read hooks run: %w", err)
+	}
+	// CollectRows reads every row with the given function, then closes them.
+	se.HooksRun, err = pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return StateEntry{}, fmt.Errorf("read hooks run: %w", err)
+	}
+
+	h := HoldEntry{}
+	err = k.pool.QueryRow(ctx,
+		`select h.id, h.hook, h.from_state, h.to_state, h.requested_seq, coalesce(e.correlation_id, ''), e.hop
+		 from item_holds h join item_events e on e.item_id = h.item_id and e.item_seq = h.requested_seq
+		 where h.item_id = $1 and h.status = 'open'`, id,
+	).Scan(&h.ID, &h.Hook, &h.From, &h.To, &h.RequestedSeq, &h.CorrelationID, &h.Hop)
+	switch {
+	case err == nil:
+		se.OpenHold = &h
+	case !errors.Is(err, pgx.ErrNoRows):
+		return StateEntry{}, fmt.Errorf("read open hold: %w", err)
 	}
 	return se, nil
 }
