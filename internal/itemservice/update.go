@@ -1,4 +1,4 @@
-package kernel
+package itemservice
 
 import (
 	"context"
@@ -25,7 +25,7 @@ type UpdateRequest struct {
 }
 
 // Update applies a field patch to an Item and records an "update" event.
-func (k *Kernel) Update(ctx context.Context, req UpdateRequest) (WriteResult, error) {
+func (k *Service) Update(ctx context.Context, req UpdateRequest) (WriteResult, error) {
 	if req.IdempotencyKey == "" || req.Principal.Actor == "" || len(req.Fields) == 0 {
 		return WriteResult{}, fmt.Errorf("%w: idempotency key, actor and at least one field are required", ErrInvalid)
 	}

@@ -109,7 +109,7 @@ func Parse(data []byte) (*Type, error) {
 }
 
 // FromJSON reads a Type from the JSON form produced by json.Marshal, which
-// is how the kernel stores it in Postgres.
+// is how the item service stores it in Postgres.
 func FromJSON(data []byte) (*Type, error) {
 	var t Type
 	if err := json.Unmarshal(data, &t); err != nil {

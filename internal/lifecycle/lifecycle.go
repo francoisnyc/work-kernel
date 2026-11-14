@@ -36,7 +36,7 @@ type Result struct {
 // Transition decides whether an Item of Type t, in state current with the
 // given fields, may move to state to. It is pure: no I/O, no clock, no
 // randomness, and it does not modify its arguments. That makes it safe to
-// call from the kernel and from inside a Temporal workflow alike.
+// call from the item service and from inside a Temporal workflow alike.
 //
 // A legal move returns the new state. An illegal one returns a *Rejection.
 func Transition(t *typedef.Type, current string, fields map[string]any, to string) (Result, error) {

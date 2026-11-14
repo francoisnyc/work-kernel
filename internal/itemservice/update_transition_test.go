@@ -2,7 +2,7 @@
 //
 // The ticket Type in types/ticket.v1.yaml is registered once in TestMain
 // (see registerTicketType), so every test can create tickets.
-package kernel_test
+package itemservice_test
 
 import (
 	"context"
@@ -18,7 +18,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/francoisnyc/work-kernel/internal/item"
-	"github.com/francoisnyc/work-kernel/internal/kernel"
+	"github.com/francoisnyc/work-kernel/internal/itemservice"
 	"github.com/francoisnyc/work-kernel/internal/typedef"
 )
 
@@ -38,13 +38,13 @@ func registerTicketType(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return kernel.New(pool).RegisterType(ctx, ty)
+	return itemservice.New(pool).RegisterType(ctx, ty)
 }
 
 func newKey() string { return "key-" + uuid.NewString() }
 
 // createTicket creates a ticket with the given fields and returns its ID.
-func createTicket(t *testing.T, k *kernel.Kernel, fields map[string]any) uuid.UUID {
+func createTicket(t *testing.T, k *itemservice.Service, fields map[string]any) uuid.UUID {
 	t.Helper()
 	req := newRequest()
 	req.Fields = fields
@@ -55,9 +55,9 @@ func createTicket(t *testing.T, k *kernel.Kernel, fields map[string]any) uuid.UU
 	return res.ItemID
 }
 
-func update(t *testing.T, k *kernel.Kernel, id uuid.UUID, fields map[string]any) kernel.WriteResult {
+func update(t *testing.T, k *itemservice.Service, id uuid.UUID, fields map[string]any) itemservice.WriteResult {
 	t.Helper()
-	res, err := k.Update(testCtx(t), kernel.UpdateRequest{
+	res, err := k.Update(testCtx(t), itemservice.UpdateRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: id, Fields: fields,
 	})
 	if err != nil {
@@ -66,9 +66,9 @@ func update(t *testing.T, k *kernel.Kernel, id uuid.UUID, fields map[string]any)
 	return res
 }
 
-func transition(t *testing.T, k *kernel.Kernel, id uuid.UUID, to string) kernel.WriteResult {
+func transition(t *testing.T, k *itemservice.Service, id uuid.UUID, to string) itemservice.WriteResult {
 	t.Helper()
-	res, err := k.Transition(testCtx(t), kernel.TransitionRequest{
+	res, err := k.Transition(testCtx(t), itemservice.TransitionRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: id, ToState: to,
 	})
 	if err != nil {
@@ -77,7 +77,7 @@ func transition(t *testing.T, k *kernel.Kernel, id uuid.UUID, to string) kernel.
 	return res
 }
 
-func get(t *testing.T, k *kernel.Kernel, id uuid.UUID) item.Item {
+func get(t *testing.T, k *itemservice.Service, id uuid.UUID) item.Item {
 	t.Helper()
 	it, err := k.Get(testCtx(t), alice, id)
 	if err != nil {
@@ -106,7 +106,7 @@ func assertNothingWritten(t *testing.T, id uuid.UUID, wantSeq int) {
 // A Type version is immutable: registering it again is a no-op, changing it is refused.
 func TestRegisterType_VersionIsImmutable(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	ty, err := loadTicketType()
 	if err != nil {
 		t.Fatalf("load ticket Type: %v", err)
@@ -129,7 +129,7 @@ states:
 	if err != nil {
 		t.Fatalf("parse changed Type: %v", err)
 	}
-	if err := k.RegisterType(ctx, changed); !errors.Is(err, kernel.ErrInvalid) {
+	if err := k.RegisterType(ctx, changed); !errors.Is(err, itemservice.ErrInvalid) {
 		t.Fatalf("register a changed definition: error = %v, want ErrInvalid", err)
 	}
 }
@@ -138,12 +138,12 @@ states:
 
 func TestCreate_UnknownType_IsRejected(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	req := newRequest()
 	req.TypeID = "type-" + uuid.NewString()
 
 	_, err := k.Create(ctx, req)
-	if !errors.Is(err, kernel.ErrInvalid) {
+	if !errors.Is(err, itemservice.ErrInvalid) {
 		t.Fatalf("Create error = %v, want ErrInvalid", err)
 	}
 	if n := count(t, `select count(*) from items where type_id = $1`, req.TypeID); n != 0 {
@@ -157,7 +157,7 @@ func TestCreate_UnknownType_IsRejected(t *testing.T) {
 // The Type chooses the initial state when the request names none.
 func TestCreate_WithoutState_StartsInTheInitialState(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	req := newRequest()
 	req.State = ""
 
@@ -172,12 +172,12 @@ func TestCreate_WithoutState_StartsInTheInitialState(t *testing.T) {
 
 func TestCreate_InANonInitialState_IsRejected(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	req := newRequest()
 	req.State = "resolved"
 
 	_, err := k.Create(ctx, req)
-	if !errors.Is(err, kernel.ErrRejected) {
+	if !errors.Is(err, itemservice.ErrRejected) {
 		t.Fatalf("Create error = %v, want ErrRejected", err)
 	}
 	if n := count(t, `select count(*) from idempotency where key = $1`, req.IdempotencyKey); n != 0 {
@@ -187,12 +187,12 @@ func TestCreate_InANonInitialState_IsRejected(t *testing.T) {
 
 func TestCreate_InvalidFields_AreRejected(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	req := newRequest()
 	req.Fields = map[string]any{"f_title": "ok", "f_ghost": "not in the Type"}
 
 	_, err := k.Create(ctx, req)
-	if !errors.Is(err, kernel.ErrRejected) {
+	if !errors.Is(err, itemservice.ErrRejected) {
 		t.Fatalf("Create error = %v, want ErrRejected", err)
 	}
 	if !strings.Contains(err.Error(), "f_ghost") {
@@ -204,7 +204,7 @@ func TestCreate_InvalidFields_AreRejected(t *testing.T) {
 
 func TestUpdate_MergesFieldsAndRecordsTheEvent(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createTicket(t, k, map[string]any{"f_title": "Call Jane Doe", "f_priority": 2})
 
 	var createdAt time.Time
@@ -213,7 +213,7 @@ func TestUpdate_MergesFieldsAndRecordsTheEvent(t *testing.T) {
 	}
 
 	// Set one field, change one, clear one (nil), leave nothing else touched.
-	res, err := k.Update(ctx, kernel.UpdateRequest{
+	res, err := k.Update(ctx, itemservice.UpdateRequest{
 		IdempotencyKey: newKey(),
 		Principal:      item.Principal{Actor: "agent-7", OnBehalfOf: "user-alice"},
 		ItemID:         id,
@@ -312,13 +312,13 @@ func TestUpdate_InvalidFields_AreRejected(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			k := kernel.New(pool)
+			k := itemservice.New(pool)
 			id := createTicket(t, k, map[string]any{"f_title": "Printer on fire"})
 
-			_, err := k.Update(testCtx(t), kernel.UpdateRequest{
+			_, err := k.Update(testCtx(t), itemservice.UpdateRequest{
 				IdempotencyKey: newKey(), Principal: alice, ItemID: id, Fields: c.fields,
 			})
-			if !errors.Is(err, kernel.ErrRejected) {
+			if !errors.Is(err, itemservice.ErrRejected) {
 				t.Fatalf("Update error = %v, want ErrRejected", err)
 			}
 			if !strings.Contains(err.Error(), c.want) {
@@ -330,9 +330,9 @@ func TestUpdate_InvalidFields_AreRejected(t *testing.T) {
 }
 
 func TestUpdate_MalformedRequest_IsInvalid(t *testing.T) {
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createTicket(t, k, nil)
-	good := kernel.UpdateRequest{
+	good := itemservice.UpdateRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: id, Fields: map[string]any{"f_title": "x"},
 	}
 
@@ -343,9 +343,9 @@ func TestUpdate_MalformedRequest_IsInvalid(t *testing.T) {
 	noFields := good
 	noFields.Fields = nil
 
-	for name, req := range map[string]kernel.UpdateRequest{"no key": noKey, "no actor": noActor, "no fields": noFields} {
+	for name, req := range map[string]itemservice.UpdateRequest{"no key": noKey, "no actor": noActor, "no fields": noFields} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := k.Update(testCtx(t), req); !errors.Is(err, kernel.ErrInvalid) {
+			if _, err := k.Update(testCtx(t), req); !errors.Is(err, itemservice.ErrInvalid) {
 				t.Fatalf("Update error = %v, want ErrInvalid", err)
 			}
 			assertNothingWritten(t, id, 1)
@@ -355,9 +355,9 @@ func TestUpdate_MalformedRequest_IsInvalid(t *testing.T) {
 
 func TestUpdate_SameKeyTwice_ReturnsSameResultAndWritesOnce(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createTicket(t, k, nil)
-	req := kernel.UpdateRequest{
+	req := itemservice.UpdateRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: id, Fields: map[string]any{"f_title": "x"},
 	}
 
@@ -376,11 +376,11 @@ func TestUpdate_SameKeyTwice_ReturnsSameResultAndWritesOnce(t *testing.T) {
 }
 
 func TestUpdate_UnknownItem_ReturnsNotFound(t *testing.T) {
-	k := kernel.New(pool)
-	req := kernel.UpdateRequest{
+	k := itemservice.New(pool)
+	req := itemservice.UpdateRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: uuid.New(), Fields: map[string]any{"f_title": "x"},
 	}
-	if _, err := k.Update(testCtx(t), req); !errors.Is(err, kernel.ErrNotFound) {
+	if _, err := k.Update(testCtx(t), req); !errors.Is(err, itemservice.ErrNotFound) {
 		t.Fatalf("Update error = %v, want ErrNotFound", err)
 	}
 	if n := count(t, `select count(*) from idempotency where key = $1`, req.IdempotencyKey); n != 0 {
@@ -391,7 +391,7 @@ func TestUpdate_UnknownItem_ReturnsNotFound(t *testing.T) {
 // Kernel rule: the Item row is locked during a write, so item_seq has no gaps.
 func TestUpdate_Concurrent_ItemSeqHasNoGaps(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createTicket(t, k, nil)
 
 	const writers = 8
@@ -402,7 +402,7 @@ func TestUpdate_Concurrent_ItemSeqHasNoGaps(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			res, err := k.Update(ctx, kernel.UpdateRequest{
+			res, err := k.Update(ctx, itemservice.UpdateRequest{
 				IdempotencyKey: newKey(), Principal: alice, ItemID: id,
 				Fields: map[string]any{"f_priority": i},
 			})
@@ -440,10 +440,10 @@ func TestUpdate_Concurrent_ItemSeqHasNoGaps(t *testing.T) {
 // Step 2 "done when": legal transitions are recorded, with attribution.
 func TestTransition_Legal_IsRecorded(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createTicket(t, k, map[string]any{"f_title": "Printer on fire", "f_assignee": "user-bob"})
 
-	res, err := k.Transition(ctx, kernel.TransitionRequest{
+	res, err := k.Transition(ctx, itemservice.TransitionRequest{
 		IdempotencyKey: newKey(),
 		Principal:      item.Principal{Actor: "agent-7", OnBehalfOf: "user-alice"},
 		ItemID:         id,
@@ -527,13 +527,13 @@ func TestTransition_Illegal_IsRejectedWithAReason(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			k := kernel.New(pool)
+			k := itemservice.New(pool)
 			id := createTicket(t, k, c.fields)
 
-			_, err := k.Transition(testCtx(t), kernel.TransitionRequest{
+			_, err := k.Transition(testCtx(t), itemservice.TransitionRequest{
 				IdempotencyKey: newKey(), Principal: alice, ItemID: id, ToState: c.to,
 			})
-			if !errors.Is(err, kernel.ErrRejected) {
+			if !errors.Is(err, itemservice.ErrRejected) {
 				t.Fatalf("Transition error = %v, want ErrRejected", err)
 			}
 			for _, want := range c.wantInReason {
@@ -550,14 +550,14 @@ func TestTransition_Illegal_IsRejectedWithAReason(t *testing.T) {
 }
 
 func TestTransition_MissingRequiredField_IsRejected(t *testing.T) {
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createTicket(t, k, map[string]any{"f_assignee": "user-bob"})
 	transition(t, k, id, "in_progress")
 
-	_, err := k.Transition(testCtx(t), kernel.TransitionRequest{
+	_, err := k.Transition(testCtx(t), itemservice.TransitionRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: id, ToState: "resolved",
 	})
-	if !errors.Is(err, kernel.ErrRejected) {
+	if !errors.Is(err, itemservice.ErrRejected) {
 		t.Fatalf("Transition error = %v, want ErrRejected", err)
 	}
 	if !strings.Contains(err.Error(), "f_resolution") {
@@ -573,13 +573,13 @@ func TestTransition_MissingRequiredField_IsRejected(t *testing.T) {
 // retries with the same key.
 func TestTransition_RejectionDoesNotConsumeTheKey(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createTicket(t, k, nil)
-	req := kernel.TransitionRequest{
+	req := itemservice.TransitionRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: id, ToState: "in_progress",
 	}
 
-	if _, err := k.Transition(ctx, req); !errors.Is(err, kernel.ErrRejected) {
+	if _, err := k.Transition(ctx, req); !errors.Is(err, itemservice.ErrRejected) {
 		t.Fatalf("first Transition error = %v, want ErrRejected", err)
 	}
 	if n := count(t, `select count(*) from idempotency where key = $1`, req.IdempotencyKey); n != 0 {
@@ -600,9 +600,9 @@ func TestTransition_RejectionDoesNotConsumeTheKey(t *testing.T) {
 // A retry returns the stored result even after the Item has moved on.
 func TestTransition_SameKeyTwice_ReturnsSameResultAndWritesOnce(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createTicket(t, k, map[string]any{"f_assignee": "user-bob"})
-	req := kernel.TransitionRequest{
+	req := itemservice.TransitionRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: id, ToState: "in_progress",
 	}
 
@@ -626,19 +626,19 @@ func TestTransition_SameKeyTwice_ReturnsSameResultAndWritesOnce(t *testing.T) {
 }
 
 func TestTransition_UnknownItem_ReturnsNotFound(t *testing.T) {
-	k := kernel.New(pool)
-	_, err := k.Transition(testCtx(t), kernel.TransitionRequest{
+	k := itemservice.New(pool)
+	_, err := k.Transition(testCtx(t), itemservice.TransitionRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: uuid.New(), ToState: "in_progress",
 	})
-	if !errors.Is(err, kernel.ErrNotFound) {
+	if !errors.Is(err, itemservice.ErrNotFound) {
 		t.Fatalf("Transition error = %v, want ErrNotFound", err)
 	}
 }
 
 func TestTransition_MalformedRequest_IsInvalid(t *testing.T) {
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createTicket(t, k, map[string]any{"f_assignee": "user-bob"})
-	good := kernel.TransitionRequest{
+	good := itemservice.TransitionRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: id, ToState: "in_progress",
 	}
 
@@ -649,9 +649,9 @@ func TestTransition_MalformedRequest_IsInvalid(t *testing.T) {
 	noState := good
 	noState.ToState = ""
 
-	for name, req := range map[string]kernel.TransitionRequest{"no key": noKey, "no actor": noActor, "no state": noState} {
+	for name, req := range map[string]itemservice.TransitionRequest{"no key": noKey, "no actor": noActor, "no state": noState} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := k.Transition(testCtx(t), req); !errors.Is(err, kernel.ErrInvalid) {
+			if _, err := k.Transition(testCtx(t), req); !errors.Is(err, itemservice.ErrInvalid) {
 				t.Fatalf("Transition error = %v, want ErrInvalid", err)
 			}
 			assertNothingWritten(t, id, 1)
@@ -662,20 +662,20 @@ func TestTransition_MalformedRequest_IsInvalid(t *testing.T) {
 // One key names one request, whatever the operation.
 func TestWrite_KeyReusedForAnotherOperation_IsRejected(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createTicket(t, k, map[string]any{"f_assignee": "user-bob"})
 	key := newKey()
 
-	_, err := k.Update(ctx, kernel.UpdateRequest{
+	_, err := k.Update(ctx, itemservice.UpdateRequest{
 		IdempotencyKey: key, Principal: alice, ItemID: id, Fields: map[string]any{"f_title": "x"},
 	})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	_, err = k.Transition(ctx, kernel.TransitionRequest{
+	_, err = k.Transition(ctx, itemservice.TransitionRequest{
 		IdempotencyKey: key, Principal: alice, ItemID: id, ToState: "in_progress",
 	})
-	if !errors.Is(err, kernel.ErrIdempotencyKeyReuse) {
+	if !errors.Is(err, itemservice.ErrIdempotencyKeyReuse) {
 		t.Fatalf("Transition error = %v, want ErrIdempotencyKeyReuse", err)
 	}
 	assertNothingWritten(t, id, 2)
@@ -687,14 +687,14 @@ func TestWrite_KeyReusedForAnotherOperation_IsRejected(t *testing.T) {
 // operation, in order, and none of the rejected ones.
 func TestTicket_WalksItsLifecycle(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createTicket(t, k, map[string]any{"f_title": "Printer on fire"})
 
 	// Rejected: nobody is assigned yet.
-	_, err := k.Transition(ctx, kernel.TransitionRequest{
+	_, err := k.Transition(ctx, itemservice.TransitionRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: id, ToState: "in_progress",
 	})
-	if !errors.Is(err, kernel.ErrRejected) {
+	if !errors.Is(err, itemservice.ErrRejected) {
 		t.Fatalf("early Transition error = %v, want ErrRejected", err)
 	}
 

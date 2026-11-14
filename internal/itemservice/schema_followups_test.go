@@ -4,7 +4,7 @@
 //
 // This file is in the same package as kernel_test.go, so it shares that file's
 // TestMain, pool and helpers. Go compiles all files of a package together.
-package kernel_test
+package itemservice_test
 
 import (
 	"reflect"
@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/francoisnyc/work-kernel/internal/item"
-	"github.com/francoisnyc/work-kernel/internal/kernel"
+	"github.com/francoisnyc/work-kernel/internal/itemservice"
 )
 
 var bob = item.Principal{Actor: "user-bob"}
@@ -22,7 +22,7 @@ var bob = item.Principal{Actor: "user-bob"}
 // Two clients that pick the same key must not collide.
 func TestCreate_SameKeyDifferentActors_AreIndependentWrites(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	aliceReq := newRequest()
 	bobReq := aliceReq // a struct assignment copies the value, including the key
 	bobReq.Principal = bob
@@ -71,7 +71,7 @@ func TestCreate_SameKeyDifferentActors_AreIndependentWrites(t *testing.T) {
 
 func TestCreate_ItemIsInDefaultNamespace(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 
 	res, err := k.Create(ctx, newRequest())
 	if err != nil {
@@ -94,7 +94,7 @@ func TestCreate_ItemIsInDefaultNamespace(t *testing.T) {
 // are null and hop is 0.
 func TestCreate_EventHasEmptyAttributionColumns(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 
 	res, err := k.Create(ctx, newRequest())
 	if err != nil {
@@ -128,7 +128,7 @@ func TestCreate_EventHasEmptyAttributionColumns(t *testing.T) {
 // TestCreate_EventPayloadHasFieldIDsButNoValues still guards the payload.
 func TestCreate_StoresFieldValuesBesideTheEvent(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	req := newRequest()
 
 	res, err := k.Create(ctx, req)
@@ -151,7 +151,7 @@ func TestCreate_StoresFieldValuesBesideTheEvent(t *testing.T) {
 // An event that sets no field has no values row.
 func TestCreate_WithoutFields_StoresNoValuesRow(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	req := newRequest()
 	req.Fields = nil
 
@@ -169,7 +169,7 @@ func TestCreate_WithoutFields_StoresNoValuesRow(t *testing.T) {
 // Erasing personal data deletes values rows; the event log stays intact.
 func TestErasingFieldValues_LeavesTheEventLogIntact(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 
 	res, err := k.Create(ctx, newRequest())
 	if err != nil {
@@ -195,7 +195,7 @@ func TestErasingFieldValues_LeavesTheEventLogIntact(t *testing.T) {
 // run one after another, so nothing else moves the counter in between.
 func TestCreate_CommitSeqComesFromTheCounter(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 
 	var before int64
 	if err := pool.QueryRow(ctx, `select last_seq from commit_counter`).Scan(&before); err != nil {
@@ -233,7 +233,7 @@ func TestCreate_CommitSeqComesFromTheCounter(t *testing.T) {
 // visible in order. We hold the row ourselves and check that Create waits.
 func TestCreate_WaitsForTheCommitCounterLock(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 
 	tx, err := pool.Begin(ctx)
 	if err != nil {

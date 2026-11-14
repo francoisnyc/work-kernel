@@ -1,4 +1,4 @@
-package kernel
+package itemservice
 
 import (
 	"context"
@@ -29,7 +29,7 @@ type TransitionRequest struct {
 // records a "transition" event. With a Fields patch, the patch and the move
 // are one write: one row lock, one event. An illegal move or an invalid patch
 // returns ErrRejected with the reason and writes nothing.
-func (k *Kernel) Transition(ctx context.Context, req TransitionRequest) (WriteResult, error) {
+func (k *Service) Transition(ctx context.Context, req TransitionRequest) (WriteResult, error) {
 	if req.IdempotencyKey == "" || req.Principal.Actor == "" || req.ToState == "" {
 		return WriteResult{}, fmt.Errorf("%w: idempotency key, actor and target state are required", ErrInvalid)
 	}
@@ -56,7 +56,7 @@ func (k *Kernel) Transition(ctx context.Context, req TransitionRequest) (WriteRe
 			return WriteResult{}, err
 		}
 
-		// All lifecycle logic lives in lifecycle.Transition; the kernel only
+		// All lifecycle logic lives in lifecycle.Transition; the item service only
 		// asks and records. Two %w verbs wrap both errors, so callers can match
 		// ErrRejected with errors.Is and read the *lifecycle.Rejection with errors.As.
 		//

@@ -8,14 +8,14 @@ import (
 	"github.com/google/uuid"
 	"go.temporal.io/sdk/temporal"
 
-	"github.com/francoisnyc/work-kernel/internal/kernel"
+	"github.com/francoisnyc/work-kernel/internal/itemservice"
 	wf "github.com/francoisnyc/work-kernel/internal/workflow"
 )
 
-// Both activities turn kernel.ErrNotFound into a non-retryable error of type
+// Both activities turn itemservice.ErrNotFound into a non-retryable error of type
 // NotFound. Left as a plain error it would be retried forever.
 func TestActivities_MissingItem_IsANonRetryableNotFound(t *testing.T) {
-	a := &wf.Activities{Kernel: kernel.New(pool)}
+	a := &wf.Activities{Items: itemservice.New(pool)}
 	missing := uuid.NewString()
 
 	_, loadErr := a.LoadItem(serverCtx(t), missing)

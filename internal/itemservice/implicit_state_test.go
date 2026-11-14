@@ -1,6 +1,6 @@
 // Tests for the PR #5 follow-up: Items of a Type without a lifecycle live in
 // the Type's one implicit state.
-package kernel_test
+package itemservice_test
 
 import (
 	"errors"
@@ -9,13 +9,13 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/francoisnyc/work-kernel/internal/kernel"
+	"github.com/francoisnyc/work-kernel/internal/itemservice"
 	"github.com/francoisnyc/work-kernel/internal/typedef"
 )
 
 // registerMessageType registers a Type with fields and no states. Registering
 // the same definition again is a no-op, so every test may call it.
-func registerMessageType(t *testing.T, k *kernel.Kernel) {
+func registerMessageType(t *testing.T, k *itemservice.Service) {
 	t.Helper()
 	ty, err := typedef.Parse([]byte(`
 id: message
@@ -31,10 +31,10 @@ fields:
 	}
 }
 
-func createMessage(t *testing.T, k *kernel.Kernel) uuid.UUID {
+func createMessage(t *testing.T, k *itemservice.Service) uuid.UUID {
 	t.Helper()
 	registerMessageType(t, k)
-	res, err := k.Create(testCtx(t), kernel.CreateRequest{
+	res, err := k.Create(testCtx(t), itemservice.CreateRequest{
 		IdempotencyKey: newKey(), Principal: alice, TypeID: "message", TypeVersion: 1,
 		Fields: map[string]any{"f_body": "hello"},
 	})
@@ -47,7 +47,7 @@ func createMessage(t *testing.T, k *kernel.Kernel) uuid.UUID {
 // An Item of a Type without states is created in the implicit state, and can
 // be updated like any other Item.
 func TestCreate_TypeWithoutStates_UsesTheImplicitState(t *testing.T) {
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createMessage(t, k)
 
 	if got := get(t, k, id).State; got != "default" {
@@ -65,15 +65,15 @@ func TestCreate_TypeWithoutStates_UsesTheImplicitState(t *testing.T) {
 // With one state and no transitions there is nowhere to go: every transition
 // is rejected with a reason and writes nothing.
 func TestTransition_TypeWithoutStates_IsRejected(t *testing.T) {
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createMessage(t, k)
 
 	for _, to := range []string{"default", "done"} {
 		t.Run("to "+to, func(t *testing.T) {
-			_, err := k.Transition(testCtx(t), kernel.TransitionRequest{
+			_, err := k.Transition(testCtx(t), itemservice.TransitionRequest{
 				IdempotencyKey: newKey(), Principal: alice, ItemID: id, ToState: to,
 			})
-			if !errors.Is(err, kernel.ErrRejected) {
+			if !errors.Is(err, itemservice.ErrRejected) {
 				t.Fatalf("Transition error = %v, want ErrRejected", err)
 			}
 			if !strings.Contains(err.Error(), to) {

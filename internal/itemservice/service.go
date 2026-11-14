@@ -1,6 +1,6 @@
-// Package kernel holds the write operations (create, update, transition, link,
+// Package itemservice holds the write operations (create, update, transition, link,
 // archive) and reads. Every change to an Item goes through this package.
-package kernel
+package itemservice
 
 import (
 	"context"
@@ -26,19 +26,19 @@ import (
 var (
 	// ErrInvalid means the request is malformed (for example, no idempotency
 	// key) or names a Type that is not registered.
-	ErrInvalid = errors.New("kernel: invalid request")
+	ErrInvalid = errors.New("itemservice: invalid request")
 	// ErrNotFound means no Item has the given ID.
-	ErrNotFound = errors.New("kernel: item not found")
+	ErrNotFound = errors.New("itemservice: item not found")
 	// ErrRejected means the request is well formed but the Item's Type refuses
 	// it: an unknown or mistyped field, or an illegal transition. The error
 	// text carries the reason.
-	ErrRejected = errors.New("kernel: rejected")
+	ErrRejected = errors.New("itemservice: rejected")
 	// ErrStale means the request named an expected item_seq and the Item has
 	// moved since. Unlike ErrRejected, the write may well be fine: the caller
 	// should re-read the Item and try again.
-	ErrStale = errors.New("kernel: stale")
+	ErrStale = errors.New("itemservice: stale")
 	// ErrIdempotencyKeyReuse means the key was already used with a different request.
-	ErrIdempotencyKeyReuse = errors.New("kernel: idempotency key reused with a different request")
+	ErrIdempotencyKeyReuse = errors.New("itemservice: idempotency key reused with a different request")
 )
 
 // defaultNamespace is the only namespace in the spike. The column exists so
@@ -64,19 +64,19 @@ type WriteResult struct {
 	ItemSeq   int64     `json:"item_seq"`
 }
 
-// Kernel is stateless; all state lives in Postgres.
-type Kernel struct {
+// Service is stateless; all state lives in Postgres.
+type Service struct {
 	pool *pgxpool.Pool
 }
 
-// New returns a Kernel that uses the given connection pool.
-func New(pool *pgxpool.Pool) *Kernel {
-	return &Kernel{pool: pool}
+// New returns a Service that uses the given connection pool.
+func New(pool *pgxpool.Pool) *Service {
+	return &Service{pool: pool}
 }
 
 // Create writes a new Item, its first event and an outbox row in one
 // transaction. The same idempotency key returns the stored result.
-func (k *Kernel) Create(ctx context.Context, req CreateRequest) (WriteResult, error) {
+func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, error) {
 	if req.IdempotencyKey == "" || req.Principal.Actor == "" || req.TypeID == "" {
 		// %w wraps ErrInvalid, so callers can still match it with errors.Is,
 		// like an exception with a cause.
@@ -155,7 +155,7 @@ func requestHash(op string, req any) (string, error) {
 }
 
 // Get returns the Item as the principal may see it.
-func (k *Kernel) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item.Item, error) {
+func (k *Service) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item.Item, error) {
 	it := item.Item{ID: id}
 	err := k.pool.QueryRow(ctx,
 		`select type_id, type_version, container_id, scope_id, state, fields, item_seq
@@ -188,7 +188,7 @@ type StateEntry struct {
 
 // StateEntry reads an Item's state and the event that entered it, in one
 // statement, so the two always agree.
-func (k *Kernel) StateEntry(ctx context.Context, id uuid.UUID) (StateEntry, error) {
+func (k *Service) StateEntry(ctx context.Context, id uuid.UUID) (StateEntry, error) {
 	var se StateEntry
 	// Only create and transition events enter a state.
 	err := k.pool.QueryRow(ctx,
@@ -215,6 +215,6 @@ func (k *Kernel) StateEntry(ctx context.Context, id uuid.UUID) (StateEntry, erro
 }
 
 // Type returns a registered Type version.
-func (k *Kernel) Type(ctx context.Context, id string, version int) (*typedef.Type, error) {
+func (k *Service) Type(ctx context.Context, id string, version int) (*typedef.Type, error) {
 	return loadType(ctx, k.pool, id, version)
 }

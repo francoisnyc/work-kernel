@@ -1,7 +1,7 @@
 // Tests for Step 3, commit 1: an optional expected_item_seq on Update and
 // Transition (an if-match against lost updates), and attribution fields on
 // write requests. The timer's write needs both.
-package kernel_test
+package itemservice_test
 
 import (
 	"errors"
@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/francoisnyc/work-kernel/internal/item"
-	"github.com/francoisnyc/work-kernel/internal/kernel"
+	"github.com/francoisnyc/work-kernel/internal/itemservice"
 )
 
 // assertStale checks that err is ErrStale and not ErrRejected. The two mean
@@ -21,10 +21,10 @@ import (
 // first, so re-read and retry (HTTP 409).
 func assertStale(t *testing.T, err error) {
 	t.Helper()
-	if !errors.Is(err, kernel.ErrStale) {
+	if !errors.Is(err, itemservice.ErrStale) {
 		t.Fatalf("error = %v, want ErrStale", err)
 	}
-	if errors.Is(err, kernel.ErrRejected) {
+	if errors.Is(err, itemservice.ErrRejected) {
 		t.Fatalf("error %v matches ErrRejected too; stale must be its own error", err)
 	}
 }
@@ -34,17 +34,17 @@ func assertStale(t *testing.T, err error) {
 // A write that names the Item's current item_seq goes through.
 func TestExpectedItemSeq_Match_IsAccepted(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createTicket(t, k, map[string]any{"f_title": "Printer on fire"}) // item_seq 1
 
-	up, err := k.Update(ctx, kernel.UpdateRequest{
+	up, err := k.Update(ctx, itemservice.UpdateRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: id,
 		Fields: map[string]any{"f_assignee": "user-bob"}, ExpectedItemSeq: 1,
 	})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	tr, err := k.Transition(ctx, kernel.TransitionRequest{
+	tr, err := k.Transition(ctx, itemservice.TransitionRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: id,
 		ToState: "in_progress", ExpectedItemSeq: 2,
 	})
@@ -59,11 +59,11 @@ func TestExpectedItemSeq_Match_IsAccepted(t *testing.T) {
 // A Transition based on an old item_seq fails as stale and writes nothing,
 // even though the move itself is legal.
 func TestTransition_ExpectedItemSeq_Mismatch_IsStale(t *testing.T) {
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createTicket(t, k, map[string]any{"f_assignee": "user-bob"}) // item_seq 1
 	update(t, k, id, map[string]any{"f_title": "moved on"})            // item_seq 2
 
-	_, err := k.Transition(testCtx(t), kernel.TransitionRequest{
+	_, err := k.Transition(testCtx(t), itemservice.TransitionRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: id,
 		ToState: "in_progress", ExpectedItemSeq: 1,
 	})
@@ -80,11 +80,11 @@ func TestTransition_ExpectedItemSeq_Mismatch_IsStale(t *testing.T) {
 
 // The same if-match protects Update.
 func TestUpdate_ExpectedItemSeq_Mismatch_IsStale(t *testing.T) {
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createTicket(t, k, map[string]any{"f_title": "first"}) // item_seq 1
 	update(t, k, id, map[string]any{"f_title": "second"})        // item_seq 2
 
-	_, err := k.Update(testCtx(t), kernel.UpdateRequest{
+	_, err := k.Update(testCtx(t), itemservice.UpdateRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: id,
 		Fields: map[string]any{"f_title": "third"}, ExpectedItemSeq: 1,
 	})
@@ -97,10 +97,10 @@ func TestUpdate_ExpectedItemSeq_Mismatch_IsStale(t *testing.T) {
 
 // An expected item_seq ahead of the Item is just as stale as one behind it.
 func TestExpectedItemSeq_AheadOfTheItem_IsStale(t *testing.T) {
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createTicket(t, k, nil)
 
-	_, err := k.Update(testCtx(t), kernel.UpdateRequest{
+	_, err := k.Update(testCtx(t), itemservice.UpdateRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: id,
 		Fields: map[string]any{"f_title": "x"}, ExpectedItemSeq: 7,
 	})
@@ -110,20 +110,20 @@ func TestExpectedItemSeq_AheadOfTheItem_IsStale(t *testing.T) {
 
 // Zero means "no check" (the field is optional); a negative number is malformed.
 func TestExpectedItemSeq_Negative_IsInvalid(t *testing.T) {
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createTicket(t, k, map[string]any{"f_assignee": "user-bob"})
 
-	_, err := k.Update(testCtx(t), kernel.UpdateRequest{
+	_, err := k.Update(testCtx(t), itemservice.UpdateRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: id,
 		Fields: map[string]any{"f_title": "x"}, ExpectedItemSeq: -1,
 	})
-	if !errors.Is(err, kernel.ErrInvalid) {
+	if !errors.Is(err, itemservice.ErrInvalid) {
 		t.Errorf("Update error = %v, want ErrInvalid", err)
 	}
-	_, err = k.Transition(testCtx(t), kernel.TransitionRequest{
+	_, err = k.Transition(testCtx(t), itemservice.TransitionRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: id, ToState: "in_progress", ExpectedItemSeq: -1,
 	})
-	if !errors.Is(err, kernel.ErrInvalid) {
+	if !errors.Is(err, itemservice.ErrInvalid) {
 		t.Errorf("Transition error = %v, want ErrInvalid", err)
 	}
 	assertNothingWritten(t, id, 1)
@@ -132,7 +132,7 @@ func TestExpectedItemSeq_Negative_IsInvalid(t *testing.T) {
 // The lost-update case the check exists for: eight writers all read item_seq 1
 // and write on that basis. Exactly one wins; the rest get ErrStale.
 func TestUpdate_ExpectedItemSeq_Concurrent_OneWins(t *testing.T) {
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createTicket(t, k, nil)
 
 	const writers = 8
@@ -142,7 +142,7 @@ func TestUpdate_ExpectedItemSeq_Concurrent_OneWins(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, errs[i] = k.Update(testCtx(t), kernel.UpdateRequest{
+			_, errs[i] = k.Update(testCtx(t), itemservice.UpdateRequest{
 				IdempotencyKey: newKey(), Principal: alice, ItemID: id,
 				Fields: map[string]any{"f_title": "from-" + uuid.NewString()}, ExpectedItemSeq: 1,
 			})
@@ -168,9 +168,9 @@ func TestUpdate_ExpectedItemSeq_Concurrent_OneWins(t *testing.T) {
 // expected item_seq is behind: the key is looked up before anything is checked.
 func TestExpectedItemSeq_RetryAfterSuccess_ReturnsTheStoredResult(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createTicket(t, k, map[string]any{"f_assignee": "user-bob"})
-	req := kernel.TransitionRequest{
+	req := itemservice.TransitionRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: id, ToState: "in_progress", ExpectedItemSeq: 1,
 	}
 
@@ -191,12 +191,12 @@ func TestExpectedItemSeq_RetryAfterSuccess_ReturnsTheStoredResult(t *testing.T) 
 // A stale rejection does not use up the key: the caller re-reads and retries.
 func TestExpectedItemSeq_StaleDoesNotConsumeTheKey(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createTicket(t, k, nil)
 	update(t, k, id, map[string]any{"f_title": "moved on"}) // item_seq 2
 	key := newKey()
 
-	_, err := k.Update(ctx, kernel.UpdateRequest{
+	_, err := k.Update(ctx, itemservice.UpdateRequest{
 		IdempotencyKey: key, Principal: alice, ItemID: id,
 		Fields: map[string]any{"f_title": "mine"}, ExpectedItemSeq: 1,
 	})
@@ -226,7 +226,7 @@ func attribution(t *testing.T, id uuid.UUID, itemSeq int64) (actor string, a ite
 // three operations. This is how a timer's transition will name its timer.
 func TestWrite_AttributionIsStoredOnTheEvent(t *testing.T) {
 	ctx := testCtx(t)
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	timer := item.Principal{Actor: "system:timer"}
 
 	createReq := newRequest()
@@ -247,7 +247,7 @@ func TestWrite_AttributionIsStoredOnTheEvent(t *testing.T) {
 		CorrelationID:   "corr-1",
 		Hop:             1,
 	}
-	up, err := k.Update(ctx, kernel.UpdateRequest{
+	up, err := k.Update(ctx, itemservice.UpdateRequest{
 		IdempotencyKey: newKey(), Principal: timer, ItemID: id,
 		Fields: map[string]any{"f_assignee": "user-bob"}, Attribution: want,
 	})
@@ -258,7 +258,7 @@ func TestWrite_AttributionIsStoredOnTheEvent(t *testing.T) {
 		t.Errorf("update event: actor %q, attribution %+v; want system:timer, %+v", actor, got, want)
 	}
 
-	tr, err := k.Transition(ctx, kernel.TransitionRequest{
+	tr, err := k.Transition(ctx, itemservice.TransitionRequest{
 		IdempotencyKey: newKey(), Principal: timer, ItemID: id, ToState: "in_progress", Attribution: want,
 	})
 	if err != nil {
@@ -271,14 +271,14 @@ func TestWrite_AttributionIsStoredOnTheEvent(t *testing.T) {
 
 // hop counts depth in a chain, so it cannot be negative.
 func TestWrite_NegativeHop_IsInvalid(t *testing.T) {
-	k := kernel.New(pool)
+	k := itemservice.New(pool)
 	id := createTicket(t, k, nil)
 
-	_, err := k.Update(testCtx(t), kernel.UpdateRequest{
+	_, err := k.Update(testCtx(t), itemservice.UpdateRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: id,
 		Fields: map[string]any{"f_title": "x"}, Attribution: item.Attribution{Hop: -1},
 	})
-	if !errors.Is(err, kernel.ErrInvalid) {
+	if !errors.Is(err, itemservice.ErrInvalid) {
 		t.Fatalf("Update error = %v, want ErrInvalid", err)
 	}
 	assertNothingWritten(t, id, 1)

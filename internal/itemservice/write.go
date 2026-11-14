@@ -1,4 +1,4 @@
-package kernel
+package itemservice
 
 import (
 	"context"
@@ -24,7 +24,7 @@ import (
 // the key, so a rejected request can be retried with the same key.
 //
 // apply is a function value, like passing a lambda to a template method.
-func (k *Kernel) write(ctx context.Context, p item.Principal, key, hash string,
+func (k *Service) write(ctx context.Context, p item.Principal, key, hash string,
 	apply func(tx pgx.Tx) (WriteResult, error)) (WriteResult, error) {
 
 	var res WriteResult

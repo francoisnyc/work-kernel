@@ -1,4 +1,4 @@
-package kernel
+package itemservice
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 // again does nothing. A different definition under the same (id, version) is
 // refused: Items are pinned to the version they were created with, so a
 // version must never change. Publish a new version instead.
-func (k *Kernel) RegisterType(ctx context.Context, t *typedef.Type) error {
+func (k *Service) RegisterType(ctx context.Context, t *typedef.Type) error {
 	def, err := json.Marshal(t)
 	if err != nil {
 		return fmt.Errorf("encode type: %w", err)
@@ -51,7 +51,7 @@ type querier interface {
 }
 
 // loadType reads a registered Type. Postgres is the only store, which keeps
-// the kernel stateless; a cache can come later if Step 5's numbers ask for it.
+// the item service stateless; a cache can come later if Step 5's numbers ask for it.
 func loadType(ctx context.Context, q querier, id string, version int) (*typedef.Type, error) {
 	var def []byte
 	err := q.QueryRow(ctx,

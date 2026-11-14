@@ -20,7 +20,7 @@ import (
 	"go.temporal.io/sdk/worker"
 
 	"github.com/francoisnyc/work-kernel/internal/item"
-	"github.com/francoisnyc/work-kernel/internal/kernel"
+	"github.com/francoisnyc/work-kernel/internal/itemservice"
 	"github.com/francoisnyc/work-kernel/internal/relay"
 	"github.com/francoisnyc/work-kernel/internal/typedef"
 	wf "github.com/francoisnyc/work-kernel/internal/workflow"
@@ -59,7 +59,7 @@ func registerJobType(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return kernel.New(pool).RegisterType(ctx, ty)
+	return itemservice.New(pool).RegisterType(ctx, ty)
 }
 
 var alice = item.Principal{Actor: "user-alice"}
@@ -69,7 +69,7 @@ var alice = item.Principal{Actor: "user-alice"}
 // stack is one test's kernel, relay and worker, on a task queue of its own.
 type stack struct {
 	t          *testing.T
-	k          *kernel.Kernel
+	k          *itemservice.Service
 	queue      string
 	closeDelay time.Duration // see wf.WorkerOptions.CloseDelay; zero except in one test
 	worker     worker.Worker
@@ -88,7 +88,7 @@ func newStackWithCloseDelay(t *testing.T, closeDelay time.Duration) *stack {
 	if _, err := pool.Exec(serverCtx(t), `update outbox set delivered_at = now() where delivered_at is null`); err != nil {
 		t.Fatalf("clear outbox: %v", err)
 	}
-	s := &stack{t: t, k: kernel.New(pool), queue: "items-" + uuid.NewString(), closeDelay: closeDelay}
+	s := &stack{t: t, k: itemservice.New(pool), queue: "items-" + uuid.NewString(), closeDelay: closeDelay}
 	s.startWorker()
 	s.startRelay()
 	t.Cleanup(func() {
@@ -134,7 +134,7 @@ func (s *stack) startRelay() {
 
 func (s *stack) createJob(fields map[string]any) uuid.UUID {
 	s.t.Helper()
-	res, err := s.k.Create(serverCtx(s.t), kernel.CreateRequest{
+	res, err := s.k.Create(serverCtx(s.t), itemservice.CreateRequest{
 		IdempotencyKey: "key-" + uuid.NewString(), Principal: alice, TypeID: "job", TypeVersion: 1,
 		Fields: fields, Attribution: item.Attribution{CorrelationID: "corr-" + uuid.NewString()},
 	})
@@ -144,9 +144,9 @@ func (s *stack) createJob(fields map[string]any) uuid.UUID {
 	return res.ItemID
 }
 
-func (s *stack) move(id uuid.UUID, to string) kernel.WriteResult {
+func (s *stack) move(id uuid.UUID, to string) itemservice.WriteResult {
 	s.t.Helper()
-	res, err := s.k.Transition(serverCtx(s.t), kernel.TransitionRequest{
+	res, err := s.k.Transition(serverCtx(s.t), itemservice.TransitionRequest{
 		IdempotencyKey: "key-" + uuid.NewString(), Principal: alice, ItemID: id, ToState: to,
 	})
 	if err != nil {
@@ -155,9 +155,9 @@ func (s *stack) move(id uuid.UUID, to string) kernel.WriteResult {
 	return res
 }
 
-func (s *stack) setNote(id uuid.UUID, note string) kernel.WriteResult {
+func (s *stack) setNote(id uuid.UUID, note string) itemservice.WriteResult {
 	s.t.Helper()
-	res, err := s.k.Update(serverCtx(s.t), kernel.UpdateRequest{
+	res, err := s.k.Update(serverCtx(s.t), itemservice.UpdateRequest{
 		IdempotencyKey: "key-" + uuid.NewString(), Principal: alice, ItemID: id,
 		Fields: map[string]any{"f_note": note},
 	})
