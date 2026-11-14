@@ -67,10 +67,12 @@ func run() error {
 	if err := typeRead(ctx, pool); err != nil {
 		return err
 	}
-	if err := manyScopes(ctx, pool); err != nil {
+	// The burst runs before manyScopes: every write checks visibility, and
+	// that check walks the namespace's narrowed scopes.
+	if err := burst(ctx, pool); err != nil {
 		return err
 	}
-	if err := burst(ctx, pool); err != nil {
+	if err := manyScopes(ctx, pool); err != nil {
 		return err
 	}
 	return temporalCost(ctx, pool)
@@ -331,6 +333,21 @@ func manyScopes(ctx context.Context, pool *pgxpool.Pool) error {
 		fmt.Printf("| %s | %s | %d | %s | %s |\n", c.name, c.p.Actor, c.scopes, ms(lat.pct(0.5)), ms(lat.pct(0.95)))
 	}
 	fmt.Println()
+
+	// Writes check visibility too. Compare with the Create rows above,
+	// measured before any narrowed scope existed.
+	lat, _, err := timeAll(latencyN, 1, func(int) error {
+		_, err := k.Create(ctx, itemservice.CreateRequest{
+			IdempotencyKey: key(), Principal: light, TypeID: "ticket", TypeVersion: 1,
+			Fields: map[string]any{"f_title": "printer", "f_assignee": "user-bob"},
+		})
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("A ticket Create by %s (1 visible scope) once %d narrowed scopes exist in the namespace: p50 %s ms, p95 %s ms.\n\n",
+		light.Actor, heavyScopes, ms(lat.pct(0.5)), ms(lat.pct(0.95)))
 	return nil
 }
 
@@ -678,9 +695,11 @@ func historyOf(ctx context.Context, tc client.Client, id uuid.UUID) ([]runCost, 
 }
 
 // costOf reads one run's history. Actions are counted with Temporal Cloud's
-// billing rules as recorded in docs/journal.md: a workflow start, each
-// accepted update, each timer started, each activity attempt, each signal,
-// each marker and search-attribute upsert. Completion is free.
+// billing rules (docs.temporal.io/cloud/actions, read 2026-11-14): a
+// workflow start, each accepted update, each timer started, each activity
+// scheduled plus each retry, each signal. Completion is free. Updates
+// rejected by the validator are billed but never reach history; the relay
+// would have to count those.
 func costOf(ctx context.Context, tc client.Client, workflowID, runID string) (runCost, error) {
 	desc, err := tc.DescribeWorkflowExecution(ctx, workflowID, runID)
 	if err != nil {
@@ -706,15 +725,13 @@ func costOf(ctx context.Context, tc client.Client, workflowID, runID string) (ru
 			rc.actions["timer"]++
 		case enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED:
 			// A retried activity records only its last attempt's start, with
-			// the attempt number: each attempt is an action.
+			// the attempt number: one action when scheduled, one per retry.
 			rc.actions["activity"] += int(ev.GetActivityTaskStartedEventAttributes().GetAttempt())
 		case enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED:
 			rc.actions["signal"]++
-		case enumspb.EVENT_TYPE_MARKER_RECORDED:
-			rc.actions["marker"]++
-		case enumspb.EVENT_TYPE_UPSERT_WORKFLOW_SEARCH_ATTRIBUTES:
-			rc.actions["search attributes"]++
 		}
+		// Continue-as-new is billed as the new run's start, which that run's
+		// own history counts.
 	}
 	return rc, nil
 }
