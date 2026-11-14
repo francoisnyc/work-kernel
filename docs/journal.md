@@ -36,6 +36,19 @@ Ideas noted during the spike, not built yet.
   waiting for the next poll. (Step 3 Phase A)
 - The relay is a single instance. To run several, claim an Item's pending rows
   with `FOR UPDATE SKIP LOCKED`. (Step 3 Phase A)
+- Grants on scope nodes (audited) are the admin path, including recovering an
+  Item nobody can see. Until then a policy change may not hide an Item from the
+  one making it. (Step 4)
+- The timer's exemption from visibility trusts the request's `Actor`. When the
+  API is exposed, only internal callers may act as `system:*`. (Step 4)
+- `VisibleScopes` returns every scope a principal can read, and each narrowed
+  Item has its own. Fine for a spike; at scale, check one scope's ancestors or
+  join in SQL. (Step 4)
+- Search indexes every string value in `fields`, enum values included, with the
+  `simple` configuration (no stemming). Choose per-field indexing and a language
+  later. Erasure must also cover `items.search`, which follows `items.fields`. (Step 4)
+- `Get` reads the visible scopes and then the Item in two statements. One
+  statement would close the tiny window between them. (Step 4)
 
 ## 2026-11-12 — Step 1 (finished)
 
@@ -148,3 +161,32 @@ for both activities: the load completes the workflow, the timer's write is not r
   (Update-With-Start, validators, a time-skipping test environment), and nothing in
   Steps 1–3 was fought for because of the language. Caveat: this judges the code I wrote;
   how readable it is to you, coming from Java, is the half only you can assess.
+
+## 2026-11-14 — Step 4 (not finished: one Step 1 test awaits a decision)
+
+**Built:** the rename to `itemservice` (PR #8). Then Step 4: migration 00003 (root scope,
+`scope_id` NOT NULL, `principal_roles`, generated `search` column, indexes);
+`policy.VisibleScopes`, `Roles`, pure `Project` and `AuthorizeTransition`; `Create.Narrow`
+and the `Update` policy patch; `ErrNotFound` for hidden Items on reads and writes;
+`ErrForbidden` for `allowed`; the on-behalf-of intersection; `Search` with `min_seq` and
+`ErrNotCaughtUp`; the typedef load checks for `allowed` and timers.
+
+**Decisions:** `ticket.v1` dropped `allowed`, a test Type carries it; lifecycle is asked
+before policy; a policy change may not hide the Item from its author; the timer skips
+visibility but not `allowed`; narrowing a container re-points the children that inherit.
+
+**Surprises:** `scopes` needed a `namespace_id` to have one root per namespace. Copying the
+container's `scope_id` onto a child means narrowing the container later must move the
+children; that was not in the plan and has its own test. `jsonb_to_tsvector` made the
+search column one line, but it indexes enum values too.
+
+**Numbers:** 43 new tests. `itemservice` tests ~9 s, of which 2 s is the default-wait test.
+
+**Open questions and risks:**
+- `TestGet_ReturnsCreatedItem` (Step 1) expects `ScopeID` nil; every Item now has a scope.
+  Left untouched and failing. It needs a decision.
+- `design.md` edits for Step 4 are a separate commit, for review.
+- PRs #7 and #8 showed as open on GitHub all session, so this branch still carries the
+  rename and has not been rebased on them.
+
+**Next session:** settle the Step 1 test, get the suite green, then Step 5.
