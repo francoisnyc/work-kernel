@@ -308,6 +308,26 @@ func TestHold_AllowAppliesTheRequestersTransition(t *testing.T) {
 	}
 }
 
+// An agent asking for a user: both must pass `allowed`, at the request and
+// again at the resolution. The resolving event records the human at the
+// root (the agent's on_behalf_of), the same rule as every kernel write.
+func TestHold_AgentRequester_RecordsTheRootHuman(t *testing.T) {
+	k := itemservice.New(pool)
+	id, ana := v3Ticket(t, k)
+	agent := withSession(t, k, item.Principal{Actor: "agent:" + uuid.NewString()[:8], OnBehalfOf: ana.Actor})
+	grantRole(t, item.Principal{Actor: agent.Actor}, "approver")
+
+	req, err := approve(t, k, agent, id, newKey(), 0)
+	assertOutcome(t, "approve by the agent", req, err, itemservice.OutcomePending, 4)
+	if _, err := resolve(t, k, id, req.HoldID, itemservice.VerdictAllow, nil, ""); err != nil {
+		t.Fatalf("ResolveHold allow: %v", err)
+	}
+	if op, _ := event(t, id, 5); op != "transition" {
+		t.Fatalf("event 5 = %s, want the transition", op)
+	}
+	assertKernelEvent(t, id, 5, erpCheckV3.Actor, ana.Actor, v3Cause(erpCheckV3, id, 4))
+}
+
 // correct is allow with the hook's field patch, applied with the move and
 // recorded as supplied by the hook. It never chooses another target state.
 func TestHold_CorrectAppliesThePatchWithTheMove(t *testing.T) {
@@ -414,6 +434,23 @@ func TestHold_AllowRechecksTheRequester(t *testing.T) {
 			t.Errorf("event 5 = %s %v, want transition_denied for forbidden", op, payload)
 		}
 		if state, _ := holdOf(t, k, ana, id); state != "in_progress" {
+			t.Errorf("state = %q, want in_progress", state)
+		}
+	})
+	t.Run("the requester can no longer see the Item", func(t *testing.T) {
+		id, ana := v3Ticket(t, k)
+		req := requestHold(t, k, ana, id)
+		bob := person("bob")
+		setPolicy(t, k, bob, id, itemservice.PolicyPatch{Readers: readers(bob)}) // 5: ana is narrowed out
+		assertHidden(t, k, ana, id)
+		if _, err := resolve(t, k, id, req.HoldID, itemservice.VerdictAllow, nil, ""); err != nil {
+			t.Fatalf("ResolveHold allow: %v", err)
+		}
+		op, payload := event(t, id, 6)
+		if op != "transition_denied" || payload["reason"] != "requester_lost_access" {
+			t.Errorf("event 6 = %s %v, want transition_denied for requester_lost_access", op, payload)
+		}
+		if state, _ := holdOf(t, k, bob, id); state != "in_progress" {
 			t.Errorf("state = %q, want in_progress", state)
 		}
 	})
@@ -656,6 +693,22 @@ func TestTransition_Wait(t *testing.T) {
 		_, err = approve(t, k, ana, id, newKey(), -time.Second)
 		assertInvalid(t, "negative wait", err)
 		assertNothingWritten(t, id, 3)
+	})
+
+	// The cap itself, tested with a short one: a wait at the cap is honored,
+	// in full; one past it is refused.
+	t.Run("a wait at the cap", func(t *testing.T) {
+		short := itemservice.NewWithOptions(pool, itemservice.Options{MaxWait: 300 * time.Millisecond})
+		id, ana := v3Ticket(t, short)
+		_, err := approve(t, short, ana, id, newKey(), 301*time.Millisecond)
+		assertInvalid(t, "wait past a 300 ms cap", err)
+		start := time.Now()
+		res, err := approve(t, short, ana, id, newKey(), 300*time.Millisecond)
+		took := time.Since(start)
+		assertOutcome(t, "wait at the cap", res, err, itemservice.OutcomePending, 4)
+		if took < 300*time.Millisecond || took > time.Second {
+			t.Errorf("answered after %v, want about 300 ms", took)
+		}
 	})
 
 	t.Run("answers as soon as the hold resolves", func(t *testing.T) {

@@ -64,14 +64,17 @@ id: gate
 version: 1
 initial_state: open
 fields:
-  - {id: f_amount, type: int}
+  - {id: f_customer, type: string}
+  - {id: f_amount,   type: int}
+  - {id: f_ref,      type: string}
 states:
   - {id: open, category: todo}
   - {id: done, category: done}
 transitions:
   - {from: open, to: done}
 hooks:
-  - {id: check, on: transition, from: open, to: done, kind: check, action: erp.check_credit, reads: [f_amount]}
+  - {id: check, on: transition, from: open, to: done, kind: check, action: erp.check_credit,
+     reads: [f_customer, f_amount], writes: [f_ref]}
 `))
 	if err != nil {
 		t.Fatalf("parse a Type with only a check hook: %v", err)

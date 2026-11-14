@@ -258,6 +258,32 @@ func TestE2E_StalePrefetch_IsCaughtByTheHold(t *testing.T) {
 	}
 }
 
+// Triage is left before any prefetch ran (no worker yet): the enrich hooks
+// for a state already left are skipped, f_on_hold stays unset, the guard
+// passes, and the check is what denies the customer on hold.
+func TestE2E_TriageLeftBeforeThePrefetch_TheCheckStillDenies(t *testing.T) {
+	h := newHookStack(t)
+	h.erp.SetCustomer(h.customer, connstub.Customer{OnHold: true, CreditLimit: 1000})
+	h.stopWorker()
+	ana := approver(t)
+	id := h.newTicket(ana)
+	h.toInProgress(ana, id)
+	h.startHookWorker()
+	h.waitDelivered(id) // the workflow has caught up: it now knows the Item is in in_progress
+
+	if f := h.fields(ana, id); f["f_on_hold"] != nil || f["f_plan"] != nil {
+		t.Fatalf("prefetched fields %v; want none before the approval", f)
+	}
+	res, took := h.approve(ana, id, 3*time.Second)
+	if res.Outcome != itemservice.OutcomeDenied || res.Reason != "customer_on_hold" {
+		t.Fatalf("approve = %+v after %v, want denied for customer_on_hold", res, took)
+	}
+	h.waitDelivered(id)
+	if f := h.fields(ana, id); f["f_on_hold"] != nil {
+		t.Errorf("f_on_hold = %v: the prefetch of a state already left must be skipped", f["f_on_hold"])
+	}
+}
+
 // The ERP corrects: it supplies the cost center, written with the move.
 func TestE2E_TheCheckCorrects(t *testing.T) {
 	h := newHookStack(t)

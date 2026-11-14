@@ -136,6 +136,13 @@ func TestParse_RejectsBrokenHooks(t *testing.T) {
 			"from: open, to: approved, kind: enrich", "enrich"},
 		{"unknown kind", "kind: enrich, action: crm.get_plan", "kind: poke, action: crm.get_plan", "poke"},
 		{"no action", "action: erp.get_credit_status,", "action: '',", "action"},
+		// An action is code: the Type may only name one that exists, and must
+		// give it as many reads and writes as it takes and returns.
+		{"unknown action", "action: erp.get_credit_status,", "action: erp.nope,", "erp.nope"},
+		{"action arity does not match the reads", "reads: [f_customer, f_amount]", "reads: [f_customer]",
+			"erp.check_credit"},
+		{"action arity does not match the writes", "writes: [f_plan], fallback", "writes: [f_plan, f_ref], fallback",
+			"crm.get_plan"},
 		{"reads an unknown field", "reads: [f_customer, f_amount]", "reads: [f_customer, f_ghost]", "f_ghost"},
 		{"writes an unknown field", "writes: [f_ref]", "writes: [f_ghost]", "f_ghost"},
 		{"a check that reads nothing", "reads: [f_customer, f_amount]", "reads: []", "reads"},

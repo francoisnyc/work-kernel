@@ -119,6 +119,10 @@ Ideas noted during the spike, not built yet.
   it does not fire again after the hold resolves. Revisit with real SLA
   objects, together with the open question: does the SLA clock pause during a
   hold? (Step 6)
+- Once hooks are real, every hook must be declared, including on Types that
+  declare none today. For the spike, a Type without a `hooks` section still
+  accepts writes from any hook of its own Type (part 1's tests rely on it).
+  (Step 6)
 - The bounded `wait` on `Transition` polls `item_holds` every ~50 ms. Use
   `LISTEN/NOTIFY` to wake waiters instead. (Step 6)
 - The workflow has no `GetVersion` branches, so changing its code breaks the
