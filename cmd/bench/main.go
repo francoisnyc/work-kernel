@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -73,6 +74,9 @@ func run() error {
 		return err
 	}
 	if err := typeRead(ctx, pool); err != nil {
+		return err
+	}
+	if err := syncCommitOff(ctx, pool); err != nil {
 		return err
 	}
 	// The burst runs before manyScopes: every write checks visibility, and
@@ -199,8 +203,11 @@ func latency(ctx context.Context, pool *pgxpool.Pool) error {
 	fmt.Println("## Write latency (ticket v1, ms)")
 	fmt.Println()
 	fmt.Printf("%d calls per row after %d warm-up calls. Tickets have a timer, so every write also writes an outbox row.\n\n", latencyN, latencyWarmUp)
-	fmt.Println("| Operation | Writers | Type cache | p50 | p95 | writes/s |")
-	fmt.Println("| --- | --- | --- | --- | --- | --- |")
+	fmt.Println("Lock waits: share of 5 ms samples of pg_stat_activity in which some backend of this")
+	fmt.Println("database waited on a heavyweight lock (row or transaction), and the most waiting at once.")
+	fmt.Println()
+	fmt.Println("| Operation | Writers | Type cache | p50 | p95 | writes/s | Lock waits |")
+	fmt.Println("| --- | --- | --- | --- | --- | --- | --- |")
 	for _, cache := range []bool{false, true} {
 		k := itemservice.NewWithOptions(pool, itemservice.Options{CacheTypes: cache})
 		if _, err := createTickets(ctx, k, latencyWarmUp); err != nil {
@@ -209,6 +216,7 @@ func latency(ctx context.Context, pool *pgxpool.Pool) error {
 		for _, writers := range []int{1, 16} {
 			label := map[bool]string{false: "off", true: "on"}[cache]
 
+			w := watchLocks(ctx, pool)
 			lat, wall, err := timeAll(latencyN, writers, func(i int) error {
 				_, err := k.Create(ctx, itemservice.CreateRequest{
 					IdempotencyKey: key(), Principal: alice, TypeID: "ticket", TypeVersion: 1,
@@ -219,12 +227,13 @@ func latency(ctx context.Context, pool *pgxpool.Pool) error {
 			if err != nil {
 				return err
 			}
-			report("Create", writers, label, lat, wall)
+			report("Create", writers, label, lat, wall, w.stop())
 
 			ids, err := createTickets(ctx, k, latencyN)
 			if err != nil {
 				return err
 			}
+			w = watchLocks(ctx, pool)
 			lat, wall, err = timeAll(latencyN, writers, func(i int) error {
 				_, err := k.Update(ctx, itemservice.UpdateRequest{
 					IdempotencyKey: key(), Principal: alice, ItemID: ids[i],
@@ -235,8 +244,9 @@ func latency(ctx context.Context, pool *pgxpool.Pool) error {
 			if err != nil {
 				return err
 			}
-			report("Update", writers, label, lat, wall)
+			report("Update", writers, label, lat, wall, w.stop())
 
+			w = watchLocks(ctx, pool)
 			lat, wall, err = timeAll(latencyN, writers, func(i int) error {
 				_, err := k.Transition(ctx, itemservice.TransitionRequest{
 					IdempotencyKey: key(), Principal: alice, ItemID: ids[i], ToState: "in_progress",
@@ -246,16 +256,127 @@ func latency(ctx context.Context, pool *pgxpool.Pool) error {
 			if err != nil {
 				return err
 			}
-			report("Transition", writers, label, lat, wall)
+			report("Transition", writers, label, lat, wall, w.stop())
 		}
 	}
 	fmt.Println()
 	return nil
 }
 
-func report(op string, writers int, cache string, lat stats, wall time.Duration) {
-	fmt.Printf("| %s | %d | %s | %s | %s | %.0f |\n", op, writers, cache,
-		ms(lat.pct(0.5)), ms(lat.pct(0.95)), float64(len(lat))/wall.Seconds())
+func report(op string, writers int, cache string, lat stats, wall time.Duration, locks string) {
+	fmt.Printf("| %s | %d | %s | %s | %s | %.0f | %s |\n", op, writers, cache,
+		ms(lat.pct(0.5)), ms(lat.pct(0.95)), float64(len(lat))/wall.Seconds(), locks)
+}
+
+// lockWatch samples pg_stat_activity while a run is going, to show whether
+// writers wait on each other's locks.
+type lockWatch struct {
+	done   chan struct{}
+	result chan string
+}
+
+// watchLocks starts sampling every 5 ms on a connection of its own.
+func watchLocks(ctx context.Context, pool *pgxpool.Pool) *lockWatch {
+	w := &lockWatch{done: make(chan struct{}), result: make(chan string, 1)}
+	go func() {
+		var samples, waiting, most int
+		events := map[string]int{}
+		tick := time.NewTicker(5 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-w.done:
+				top := ""
+				for e, n := range events {
+					if top == "" || n > events[top] {
+						top = e
+					}
+				}
+				if waiting == 0 {
+					w.result <- fmt.Sprintf("0 of %d", samples)
+				} else {
+					w.result <- fmt.Sprintf("%d of %d (max %d, mostly %s)", waiting, samples, most, top)
+				}
+				return
+			case <-tick.C:
+			}
+			rows, err := pool.Query(ctx,
+				`select wait_event from pg_stat_activity
+				 where datname = current_database() and pid <> pg_backend_pid() and wait_event_type = 'Lock'`)
+			if err != nil {
+				continue
+			}
+			n := 0
+			for rows.Next() {
+				var e string
+				if rows.Scan(&e) == nil {
+					events[e]++
+					n++
+				}
+			}
+			rows.Close()
+			samples++
+			if n > 0 {
+				waiting++
+			}
+			most = max(most, n)
+		}
+	}()
+	return w
+}
+
+func (w *lockWatch) stop() string {
+	close(w.done)
+	return <-w.result
+}
+
+// syncCommitOff is a diagnostic only: with synchronous_commit off a commit
+// does not wait for the WAL flush. If writes then scale much better, the
+// ceiling left after Step A is the disk flush, not a lock.
+func syncCommitOff(ctx context.Context, pool *pgxpool.Pool) error {
+	cfg := pool.Config().Copy()
+	cfg.ConnConfig.RuntimeParams["synchronous_commit"] = "off"
+	off, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer off.Close()
+	fmt.Println("## Diagnostic: synchronous_commit = off (ticket Create, ms)")
+	fmt.Println()
+	fmt.Println("Not a setting to run with; it shows what the disk flush costs.")
+	fmt.Println()
+	fmt.Println("| synchronous_commit | Writers | p50 | p95 | writes/s | Lock waits |")
+	fmt.Println("| --- | --- | --- | --- | --- | --- |")
+	for _, c := range []struct {
+		label string
+		pool  *pgxpool.Pool
+	}{{"on", pool}, {"off", off}} {
+		k := itemservice.New(c.pool)
+		for _, writers := range []int{1, 16} {
+			w := watchLocks(ctx, pool)
+			lat, wall, err := timeAll(latencyN, writers, func(int) error {
+				_, err := k.Create(ctx, itemservice.CreateRequest{
+					IdempotencyKey: key(), Principal: alice, TypeID: "ticket", TypeVersion: 1,
+					Fields: map[string]any{"f_title": "printer", "f_assignee": "user-bob"},
+				})
+				return err
+			})
+			if err != nil {
+				return err
+			}
+			fmt.Printf("| %s | %d | %s | %s | %.0f | %s |\n", c.label, writers,
+				ms(lat.pct(0.5)), ms(lat.pct(0.95)), float64(len(lat))/wall.Seconds(), w.stop())
+		}
+	}
+	fmt.Println()
+	return nil
+}
+
+// burstWord gives every third message the same word, so after the three
+// burst scenarios about 10,000 messages share each of three words: the
+// common-word search case.
+func burstWord(i int) string {
+	return []string{"alpha", "beta", "gamma"}[i%3]
 }
 
 // --- the cost of reading a Type ---
@@ -314,7 +435,7 @@ func manyScopes(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 
 	fmt.Printf("## Reads for a principal with %d narrowed scopes (ms)\n\n", heavyScopes)
-	fmt.Println("| Read | Principal | Visible scopes | p50 | p95 |")
+	fmt.Println("| Read | Principal | Narrowed scopes it reads | p50 | p95 |")
 	fmt.Println("| --- | --- | --- | --- | --- |")
 	cases := []struct {
 		name   string
@@ -322,15 +443,26 @@ func manyScopes(ctx context.Context, pool *pgxpool.Pool) error {
 		scopes int
 		op     func() error
 	}{
-		{"Get", light, 1, func() error { _, err := k.Get(ctx, light, plain.ItemID); return err }},
-		{"Get", heavy, heavyScopes + 1, func() error { _, err := k.Get(ctx, heavy, narrowed); return err }},
-		{"Search", light, 1, func() error {
+		{"Get", light, 0, func() error { _, err := k.Get(ctx, light, plain.ItemID); return err }},
+		{"Get", heavy, heavyScopes, func() error { _, err := k.Get(ctx, heavy, narrowed); return err }},
+		{"Search", light, 0, func() error {
 			_, err := k.Search(ctx, itemservice.SearchRequest{Principal: light, Query: term})
 			return err
 		}},
-		{"Search", heavy, heavyScopes + 1, func() error {
+		{"Search", heavy, heavyScopes, func() error {
 			_, err := k.Search(ctx, itemservice.SearchRequest{Principal: heavy, Query: term})
 			return err
+		}},
+		// About 10,000 messages share "alpha" (see burstWord).
+		{"Search, common word", light, 0, func() error {
+			_, err := k.Search(ctx, itemservice.SearchRequest{Principal: light, Query: "alpha"})
+			return err
+		}},
+		{"Search, common word, flattened (before Step A)", light, 0, func() error {
+			return flatSearch(ctx, pool, light, "alpha")
+		}},
+		{"Search, rare word, flattened (before Step A)", light, 0, func() error {
+			return flatSearch(ctx, pool, light, term)
 		}},
 	}
 	for _, c := range cases {
@@ -357,6 +489,18 @@ func manyScopes(ctx context.Context, pool *pgxpool.Pool) error {
 	fmt.Printf("A ticket Create by %s (1 visible scope) once %d narrowed scopes exist in the namespace: p50 %s ms, p95 %s ms.\n\n",
 		light.Actor, heavyScopes, ms(lat.pct(0.5)), ms(lat.pct(0.95)))
 	return nil
+}
+
+// flatSearch runs the search without the MATERIALIZED step, the query shape
+// before Step A, for comparison only.
+func flatSearch(ctx context.Context, pool *pgxpool.Pool, p item.Principal, q string) error {
+	rows, err := pool.Query(ctx, explainSearchFlat,
+		pgx.NamedArgs{"actor": p.Actor, "behalf": "", "ns": "default", "q": q, "limit": 50})
+	if err != nil {
+		return err
+	}
+	rows.Close()
+	return rows.Err()
 }
 
 // --- the burst ---
@@ -392,8 +536,8 @@ func burst(ctx context.Context, pool *pgxpool.Pool) error {
 	fmt.Printf("## Burst: %d chat messages\n\n", burstMessages)
 	fmt.Println("`message` and `channel` have no lifecycle, so no listeners. Bytes are the growth of all tables with their indexes.")
 	fmt.Println()
-	fmt.Println("| Scenario | Wall | msgs/s | p50 ms | p95 ms | Rows/msg | Outbox rows | Bytes/msg |")
-	fmt.Println("| --- | --- | --- | --- | --- | --- | --- | --- |")
+	fmt.Println("| Scenario | Wall | msgs/s | p50 ms | p95 ms | Rows/msg | Outbox rows | Bytes/msg | Lock waits |")
+	fmt.Println("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
 	var perTable map[string]int64
 	for _, sc := range []struct {
 		name              string
@@ -413,19 +557,29 @@ func burst(ctx context.Context, pool *pgxpool.Pool) error {
 				return err
 			}
 			chans[i] = res.ItemID
+			// The first message gives the channel its scope node; send it
+			// before counting so the burst measures the steady state.
+			if _, err := k.Create(ctx, itemservice.CreateRequest{
+				IdempotencyKey: key(), Principal: alice, TypeID: "message", TypeVersion: 1,
+				ContainerID: &chans[i], Fields: map[string]any{"f_body": "first"},
+			}); err != nil {
+				return err
+			}
 		}
 		before, err := snap(ctx, pool)
 		if err != nil {
 			return err
 		}
+		w := watchLocks(ctx, pool)
 		lat, wall, err := timeAll(burstMessages, sc.writers, func(i int) error {
 			ch := chans[i%sc.channels]
 			_, err := k.Create(ctx, itemservice.CreateRequest{
 				IdempotencyKey: key(), Principal: alice, TypeID: "message", TypeVersion: 1,
-				ContainerID: &ch, Fields: map[string]any{"f_body": fmt.Sprintf("hello, this is message %d", i)},
+				ContainerID: &ch, Fields: map[string]any{"f_body": fmt.Sprintf("hello %s message %d", burstWord(i), i)},
 			})
 			return err
 		})
+		locks := w.stop()
 		if err != nil {
 			return err
 		}
@@ -442,10 +596,10 @@ func burst(ctx context.Context, pool *pgxpool.Pool) error {
 				perTable[t] = d
 			}
 		}
-		fmt.Printf("| %s | %.1fs | %.0f | %s | %s | %.2f | %d | %d |\n", sc.name, wall.Seconds(),
+		fmt.Printf("| %s | %.1fs | %.0f | %s | %s | %.2f | %d | %d | %s |\n", sc.name, wall.Seconds(),
 			burstMessages/wall.Seconds(), ms(lat.pct(0.5)), ms(lat.pct(0.95)),
 			float64(rows)/burstMessages, after.rows["outbox"]-before.rows["outbox"],
-			(after.bytes-before.bytes)/burstMessages)
+			(after.bytes-before.bytes)/burstMessages, locks)
 	}
 	fmt.Println()
 	names := make([]string, 0, len(perTable))

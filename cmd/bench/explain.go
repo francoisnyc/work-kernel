@@ -14,30 +14,47 @@ import (
 	"github.com/francoisnyc/work-kernel/internal/testdb"
 )
 
-// The SQL below is copied from policy.VisibleScopes, Service.Get and
-// Service.Search so the plans are those of the real queries. Keep it in
-// step with them; it is used for nothing else.
+// The SQL below is copied from Service.Get and Service.Search (with
+// policy.VisibleCondition spelled out) so the plans are those of the real
+// queries. searchFlat is the same search without the MATERIALIZED step, the
+// shape before Step A; searchUnion splits the visibility OR into two branches.
+// Keep them in step with the code; they are used for nothing else.
 const (
-	explainVisibleScopes = `with recursive visible as (
-		     select id from scopes where namespace_id = $1 and parent_id is null
-		     union all
-		     select s.id
-		     from scopes s
-		     join visible v on s.parent_id = v.id
-		     where not s.narrows
-		        or (select count(*) from scope_readers r
-		            where r.scope_id = s.id and r.principal = any($2)) = $3
+	explainVisible = `(s.open or (
+	exists (select 1 from scope_access a where a.scope_id = s.id and a.principal = @actor)
+	and (@behalf = '' or exists (select 1 from scope_access b where b.scope_id = s.id and b.principal = @behalf))))`
+	explainGet = `select i.type_id, i.type_version, i.container_id, i.scope_id, i.state, i.fields, i.item_seq, ` + explainVisible + `
+		 from items i join scopes s on s.id = i.scope_id
+		 where i.id = @id and i.namespace_id = @ns`
+	explainSearch = `with matches as materialized (
+		     select id, type_id, type_version, container_id, scope_id, state, fields, item_seq
+		     from items
+		     where namespace_id = @ns and search @@ plainto_tsquery('simple', @q)
 		 )
-		 select id from visible`
-	explainGet = `select type_id, type_version, container_id, scope_id, state, fields, item_seq
-		 from items where id = $1 and namespace_id = $2`
-	explainSearch = `select id, type_id, type_version, container_id, scope_id, state, fields, item_seq
-		 from items
-		 where namespace_id = $1
-		   and scope_id = any($2)
-		   and search @@ plainto_tsquery('simple', $3)
+		 select m.id, m.type_id, m.type_version, m.container_id, m.scope_id, m.state, m.fields, m.item_seq
+		 from matches m join scopes s on s.id = m.scope_id
+		 where ` + explainVisible + `
+		 order by m.id desc
+		 limit @limit`
+	explainSearchFlat = `select i.id, i.type_id, i.type_version, i.container_id, i.scope_id, i.state, i.fields, i.item_seq
+		 from items i join scopes s on s.id = i.scope_id
+		 where i.namespace_id = @ns and i.search @@ plainto_tsquery('simple', @q)
+		   and ` + explainVisible + `
+		 order by i.id desc
+		 limit @limit`
+	explainSearchUnion = `with matches as materialized (
+		     select id, type_id, type_version, container_id, scope_id, state, fields, item_seq
+		     from items
+		     where namespace_id = @ns and search @@ plainto_tsquery('simple', @q)
+		 )
+		 select * from (
+		     select m.* from matches m join scopes s on s.id = m.scope_id where s.open
+		     union all
+		     select m.* from matches m join scope_access a on a.scope_id = m.scope_id and a.principal = @actor
+		     where not exists (select 1 from scopes s where s.id = m.scope_id and s.open)
+		 ) v
 		 order by id desc
-		 limit $4`
+		 limit @limit`
 )
 
 // explainMode builds a database like the bench's scopes section, prints the
@@ -80,13 +97,8 @@ func explainMode(ctx context.Context) error {
 		return err
 	}
 
-	fmt.Println("# EXPLAIN (ANALYZE, BUFFERS)")
-	fmt.Println()
-	machine(ctx, pool)
-	if err := explainAll(ctx, pool, "Fresh database: 1,000 narrowed tickets, 1 plain ticket", heavy, light, narrowed, term); err != nil {
-		return err
-	}
-
+	// 30,000 messages in 16 channels; every third one carries the word
+	// "alpha", so about 10,000 Items match it: the common-word case.
 	chans := make([]uuid.UUID, 16)
 	for i := range chans {
 		res, err := k.Create(ctx, itemservice.CreateRequest{
@@ -102,13 +114,23 @@ func explainMode(ctx context.Context) error {
 		ch := chans[i%len(chans)]
 		_, err := k.Create(ctx, itemservice.CreateRequest{
 			IdempotencyKey: key(), Principal: alice, TypeID: "message", TypeVersion: 1,
-			ContainerID: &ch, Fields: map[string]any{"f_body": fmt.Sprintf("hello, this is message %d", i)},
+			ContainerID: &ch, Fields: map[string]any{"f_body": fmt.Sprintf("hello %s message %d", burstWord(i), i)},
 		})
 		return err
 	}); err != nil {
 		return err
 	}
-	return explainAll(ctx, pool, "After the 30,000-message burst", heavy, light, narrowed, term)
+
+	fmt.Println("# EXPLAIN (ANALYZE, BUFFERS)")
+	fmt.Println()
+	machine(ctx, pool)
+	if err := explainAll(ctx, pool, "Before ANALYZE", heavy, light, narrowed, term); err != nil {
+		return err
+	}
+	if _, err := pool.Exec(ctx, `analyze`); err != nil {
+		return err
+	}
+	return explainAll(ctx, pool, "After ANALYZE", heavy, light, narrowed, term)
 }
 
 func explainAll(ctx context.Context, pool *pgxpool.Pool, title string,
@@ -118,36 +140,32 @@ func explainAll(ctx context.Context, pool *pgxpool.Pool, title string,
 	if err := tableStats(ctx, pool); err != nil {
 		return err
 	}
-	visible := map[string][]uuid.UUID{}
-	for _, p := range []item.Principal{heavy, light} {
-		rows, err := pool.Query(ctx, explainVisibleScopes, "default", []string{p.Actor}, 1)
-		if err != nil {
-			return err
+	args := func(p item.Principal, extra pgx.NamedArgs) pgx.NamedArgs {
+		a := pgx.NamedArgs{"actor": p.Actor, "behalf": "", "ns": "default", "limit": 50}
+		for k, v := range extra {
+			a[k] = v
 		}
-		ids, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
-		if err != nil {
-			return err
-		}
-		visible[p.Actor] = ids
+		return a
 	}
-
 	steps := []struct {
 		name string
 		sql  string
-		args []any
+		args pgx.NamedArgs
 	}{
-		{"VisibleScopes for user-heavy (step 1 of the heavy Get)", explainVisibleScopes, []any{"default", []string{heavy.Actor}, 1}},
-		{"The Item read (step 2 of the heavy Get)", explainGet, []any{narrowed, "default"}},
-		{"VisibleScopes for user-light (step 1 of the light Search)", explainVisibleScopes, []any{"default", []string{light.Actor}, 1}},
-		{"The search query for user-light (step 2)", explainSearch, []any{"default", visible[light.Actor], term, 50}},
-		{"The search query for user-heavy, for comparison", explainSearch, []any{"default", visible[heavy.Actor], term, 50}},
+		{"Get, user-heavy (1,001 scopes)", explainGet, args(heavy, pgx.NamedArgs{"id": narrowed})},
+		{"Search, rare word, user-light", explainSearch, args(light, pgx.NamedArgs{"q": term})},
+		{"Search, rare word, user-heavy", explainSearch, args(heavy, pgx.NamedArgs{"q": term})},
+		{"Search, common word (~10,000 matches), user-light", explainSearch, args(light, pgx.NamedArgs{"q": "alpha"})},
+		{"Search, common word, user-light, flattened (before Step A)", explainSearchFlat, args(light, pgx.NamedArgs{"q": "alpha"})},
+		{"Search, rare word, user-light, flattened (before Step A)", explainSearchFlat, args(light, pgx.NamedArgs{"q": term})},
+		{"Search, common word, user-light, UNION ALL", explainSearchUnion, args(light, pgx.NamedArgs{"q": "alpha"})},
 	}
 	for _, s := range steps {
 		// Run once first, as the bench does, so the plan reflects a warm cache.
-		if rows, err := pool.Query(ctx, s.sql, s.args...); err == nil {
+		if rows, err := pool.Query(ctx, s.sql, s.args); err == nil {
 			rows.Close()
 		}
-		rows, err := pool.Query(ctx, "explain (analyze, buffers) "+s.sql, s.args...)
+		rows, err := pool.Query(ctx, "explain (analyze, buffers) "+s.sql, s.args)
 		if err != nil {
 			return fmt.Errorf("%s: %w", s.name, err)
 		}
