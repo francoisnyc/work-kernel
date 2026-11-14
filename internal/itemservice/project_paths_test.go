@@ -28,8 +28,10 @@ var projectExempt = map[string]string{
 	"Internal": "returns the kernel's write door; its methods return WriteResult and error only, no Item data",
 }
 
-// noItemData are the result types that carry no Item data.
-var noItemData = []string{"WriteResult", "error"}
+// noItemData are the result types that carry no Item data. A
+// TransitionResult is a WriteResult plus an outcome, a hold ID and a reason
+// code (Step 6, part 2).
+var noItemData = []string{"WriteResult", "TransitionResult", "error"}
 
 func TestEveryExportedReadCallsProject(t *testing.T) {
 	fset := token.NewFileSet()
