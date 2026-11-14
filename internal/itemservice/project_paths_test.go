@@ -22,6 +22,8 @@ import (
 var projectExempt = map[string]string{
 	"StateEntry": "feeds the workflow, not a principal: state names and opaque IDs only",
 	"Type":       "feeds the workflow and the relay, not a principal: a Type definition holds no Item data",
+	// Step A2: returns a new session ID only.
+	"StartAgentSession": "returns the minted session ID, no Item data",
 }
 
 // noItemData are the result types that carry no Item data.

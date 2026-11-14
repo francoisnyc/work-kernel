@@ -19,13 +19,24 @@ import (
 	"github.com/francoisnyc/work-kernel/internal/itemservice"
 )
 
-// agentFor returns an agent acting for the user in a session of its own.
-func agentFor(user item.Principal) item.Principal {
-	return item.Principal{
-		Actor:        "agent:" + uuid.NewString()[:8],
-		OnBehalfOf:   user.Actor,
-		AgentSession: "session-" + uuid.NewString()[:8],
+// agentFor returns a new agent acting for the user, in a session the item
+// service minted for it.
+func agentFor(t *testing.T, k *itemservice.Service, user item.Principal) item.Principal {
+	t.Helper()
+	return withSession(t, k, item.Principal{Actor: "agent:" + uuid.NewString()[:8], OnBehalfOf: user.Actor})
+}
+
+// withSession starts a session for the agent (and the user it acts for) and
+// returns the principal carrying it. Sessions are minted by the server, never
+// chosen by the caller.
+func withSession(t *testing.T, k *itemservice.Service, p item.Principal) item.Principal {
+	t.Helper()
+	session, err := k.StartAgentSession(testCtx(t), p)
+	if err != nil {
+		t.Fatalf("StartAgentSession(%+v): %v", p, err)
 	}
+	p.AgentSession = session
+	return p
 }
 
 func assertNeedsApproval(t *testing.T, err error, target uuid.UUID) {
@@ -78,7 +89,7 @@ func newAgentWorld(t *testing.T) agentWorld {
 	t.Helper()
 	k := itemservice.New(pool)
 	user := person("user")
-	agent := agentFor(user)
+	agent := agentFor(t, k, user)
 	w := agentWorld{k: k, user: user, agent: agent}
 	w.open = createAs(t, k, user, "open", nil, nil).ItemID
 	w.space = createAs(t, k, user, "space", &itemservice.Narrow{Readers: []string{user.Actor, agent.Actor}}, nil).ItemID
@@ -103,6 +114,77 @@ func TestAgent_WithoutASession_IsInvalid(t *testing.T) {
 	})
 	if !errors.Is(err, itemservice.ErrInvalid) {
 		t.Errorf("Update: error = %v, want ErrInvalid", err)
+	}
+}
+
+// Sessions are minted by the server and bound to one agent and one user. An
+// unknown session, another agent's session, or the same agent's session used
+// for a different user is ErrInvalid: nothing is recorded, nothing written.
+// Otherwise an agent could escape the write rule with a fresh session that
+// has no recorded reads.
+func TestAgent_SessionMustBeMintedForThisAgentAndUser(t *testing.T) {
+	w := newAgentWorld(t)
+	otherAgent := agentFor(t, w.k, w.user)
+	otherUser := person("other-user")
+	cases := []struct {
+		name string
+		p    item.Principal
+	}{
+		{"unknown session", item.Principal{Actor: w.agent.Actor, OnBehalfOf: w.user.Actor, AgentSession: "session-made-up"}},
+		{"another agent's session", item.Principal{Actor: w.agent.Actor, OnBehalfOf: w.user.Actor, AgentSession: otherAgent.AgentSession}},
+		{"same agent, another user", item.Principal{Actor: w.agent.Actor, OnBehalfOf: otherUser.Actor, AgentSession: w.agent.AgentSession}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if _, err := w.k.Get(testCtx(t), c.p, w.inSpace); !errors.Is(err, itemservice.ErrInvalid) {
+				t.Errorf("Get: error = %v, want ErrInvalid", err)
+			}
+			if _, err := w.k.Search(testCtx(t), itemservice.SearchRequest{Principal: c.p, Query: "space"}); !errors.Is(err, itemservice.ErrInvalid) {
+				t.Errorf("Search: error = %v, want ErrInvalid", err)
+			}
+			_, err := w.k.Update(testCtx(t), itemservice.UpdateRequest{
+				IdempotencyKey: newKey(), Principal: c.p, ItemID: w.open, Fields: map[string]any{"f_title": "x"},
+			})
+			if !errors.Is(err, itemservice.ErrInvalid) {
+				t.Errorf("Update: error = %v, want ErrInvalid", err)
+			}
+			_, err = w.k.Create(testCtx(t), itemservice.CreateRequest{
+				IdempotencyKey: newKey(), Principal: c.p, TypeID: "ticket", TypeVersion: 1,
+			})
+			if !errors.Is(err, itemservice.ErrInvalid) {
+				t.Errorf("Create: error = %v, want ErrInvalid", err)
+			}
+			if got := recordedReads(t, c.p.AgentSession); len(got) != 0 {
+				t.Errorf("recorded reads for session %q: %v, want none", c.p.AgentSession, got)
+			}
+		})
+	}
+	assertNothingWritten(t, w.open, 1)
+	assertNothingWritten(t, w.inSpace, 1)
+}
+
+// StartAgentSession is for agents, acting for a user or for themselves.
+func TestAgent_StartAgentSession_Rules(t *testing.T) {
+	k := itemservice.New(pool)
+	for _, p := range []item.Principal{
+		{Actor: "user:" + uuid.NewString()},
+		{Actor: "system:timer"},
+		{Actor: "agent:" + uuid.NewString(), OnBehalfOf: "agent:" + uuid.NewString()},
+		{Actor: "agent:" + uuid.NewString(), OnBehalfOf: "user:" + uuid.NewString(), AgentSession: "chosen-by-caller"},
+	} {
+		if _, err := k.StartAgentSession(testCtx(t), p); !errors.Is(err, itemservice.ErrInvalid) {
+			t.Errorf("StartAgentSession(%+v): error = %v, want ErrInvalid", p, err)
+		}
+	}
+	a := withSession(t, k, item.Principal{Actor: "agent:" + uuid.NewString(), OnBehalfOf: "user:" + uuid.NewString()})
+	b := withSession(t, k, item.Principal{Actor: a.Actor, OnBehalfOf: a.OnBehalfOf})
+	if a.AgentSession == "" || a.AgentSession == b.AgentSession {
+		t.Errorf("sessions %q and %q: want two distinct, non-empty IDs", a.AgentSession, b.AgentSession)
+	}
+	n := count(t, `select count(*) from agent_sessions where session = $1 and agent = $2 and on_behalf_of = $3
+	               and created_at is not null`, a.AgentSession, a.Actor, a.OnBehalfOf)
+	if n != 1 {
+		t.Errorf("agent_sessions rows for %s = %d, want 1", a.AgentSession, n)
 	}
 }
 
@@ -141,8 +223,7 @@ func TestAgent_ReadsRecordNarrowingScopesOnly(t *testing.T) {
 		t.Errorf("after reading inside the space: recorded %v, want [%s]", got, space)
 	}
 
-	other := w.agent
-	other.AgentSession = "session-" + uuid.NewString()[:8]
+	other := withSession(t, w.k, item.Principal{Actor: w.agent.Actor, OnBehalfOf: w.user.Actor})
 	if got := recordedReads(t, other.AgentSession); len(got) != 0 {
 		t.Errorf("another session: recorded %v, want nothing", got)
 	}

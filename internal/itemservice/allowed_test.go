@@ -250,8 +250,8 @@ func TestTransition_TimerMovesANarrowedItem(t *testing.T) {
 func TestOnBehalfOf_BothMustSeeAndBothMustBeAllowed(t *testing.T) {
 	k := itemservice.New(pool)
 	uma := person("uma")
-	agent := item.Principal{Actor: "agent:" + uuid.NewString()[:8], AgentSession: "session-" + uuid.NewString()[:8]}
-	both := item.Principal{Actor: agent.Actor, OnBehalfOf: uma.Actor, AgentSession: agent.AgentSession}
+	agent := withSession(t, k, item.Principal{Actor: "agent:" + uuid.NewString()[:8]})
+	both := withSession(t, k, item.Principal{Actor: agent.Actor, OnBehalfOf: uma.Actor})
 
 	t.Run("visibility", func(t *testing.T) {
 		onlyUser := createRequest(t, k, uma, &itemservice.Narrow{Readers: readers(uma)})

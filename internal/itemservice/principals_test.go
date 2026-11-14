@@ -65,7 +65,7 @@ func TestPrincipals_TypedActorsAreAccepted(t *testing.T) {
 	k := itemservice.New(pool)
 	for _, p := range []item.Principal{
 		{Actor: "user:" + uuid.NewString()},
-		{Actor: "agent:" + uuid.NewString(), OnBehalfOf: "user:" + uuid.NewString(), AgentSession: "session-" + uuid.NewString()},
+		withSession(t, k, item.Principal{Actor: "agent:" + uuid.NewString(), OnBehalfOf: "user:" + uuid.NewString()}),
 		{Actor: "system:timer"},
 	} {
 		if _, err := k.Create(testCtx(t), itemservice.CreateRequest{

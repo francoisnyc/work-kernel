@@ -153,7 +153,7 @@ func TestCreate_WritesItemEventAndOutbox(t *testing.T) {
 	ctx := testCtx(t)
 	k := itemservice.New(pool)
 	req := newRequest()
-	req.Principal = item.Principal{Actor: "agent:7", OnBehalfOf: "user:alice", AgentSession: "session-7"}
+	req.Principal = withSession(t, k, item.Principal{Actor: "agent:7", OnBehalfOf: "user:alice"})
 
 	res, err := k.Create(ctx, req)
 	if err != nil {

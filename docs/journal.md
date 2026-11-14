@@ -96,6 +96,16 @@ Ideas noted during the spike, not built yet.
   the WAL flush (`synchronous_commit=off` changed nothing): most likely CPU
   shared by Go, Postgres and the containers. Measure on separate machines
   before tuning anything. (Step A)
+- `Project` must redact container and scope IDs once grants exist. Today a
+  narrow-only tree means anyone who sees an Item sees its container; the move
+  property test checks that `Get` never names a container its reader cannot see.
+  (Step A2)
+- Approval unlocks a whole scope for the rest of the session. Narrower later:
+  approve a specific draft write (ties into "every action others see has a
+  draft step"). (Step A2)
+- Search records every result's narrowing scope, so a broad search makes almost
+  every later write need approval. Correct, but agents should use short,
+  task-scoped sessions; revisit the UX with real agents. (Step A2)
 
 ## 2026-11-12 — Step 1 (finished)
 
