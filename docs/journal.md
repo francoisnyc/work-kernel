@@ -217,3 +217,152 @@ search column one line, but it indexes enum values too.
   open; once it merges, its last sentence about `cmd/kernel` is out of date.
 
 **Next session:** Step 5, Phase A.
+
+## 2026-11-14 — Step 5 (finished): the last step of the spike
+
+**Built:** `lifecycle.HasListeners` and the outbox skip; `types/ticket.v2.yaml` (adds
+`waiting`, shortens `in_progress` to 24 h) beside v1, plus `channel` and `message`; the
+Type cache (`typedef.Cache`), now on by default in the item service and the relay;
+`cmd/bench` (`make bench`). New tests: the outbox skip, a 200-message burst in CI, v1 and
+v2 side by side end to end. Two approved assertion changes for Types without listeners.
+
+**Decisions:** everything stays pinned to the Item's Type version; migration, "evolve the
+schema" and "float the policy" are designs under Later. The cache is on (below).
+
+**Surprises:** v1 and v2 side by side needed no code: the workflow only ever sees a timer
+table, never the Type. The first bench run measured the burst after 1,000 narrowed scopes
+existed and every write paid for them (see `VisibleScopes` below), so the order was fixed
+and the bench rerun. Some read numbers moved a lot between runs on the same code (below).
+
+### Numbers
+
+Machine: Intel Xeon @ 2.10 GHz, 4 logical CPUs, 16 GB RAM, a cloud container. Go 1.26.0,
+Postgres 17.12 and the Temporal 1.10.0 dev server in local containers, no tuning. Run of
+2026-11-14 (the second run; the first only differs where noted). Relative numbers, not
+production ones.
+
+**Write latency, ticket v1, ms** (1,000 calls each after 100 warm-up; every ticket write
+also writes an outbox row):
+
+| Operation | Writers | Cache off p50 / p95 | Cache on p50 / p95 | writes/s (off → on) |
+| --- | --- | --- | --- | --- |
+| Create | 1 | 2.85 / 4.60 | 2.31 / 3.48 | 328 → 413 |
+| Update | 1 | 3.21 / 4.92 | 2.25 / 3.13 | 298 → 432 |
+| Transition | 1 | 2.47 / 3.92 | 1.97 / 3.42 | 382 → 477 |
+| Create | 16 | 20.39 / 24.59 | 24.96 / 33.05 | 770 → 630 |
+| Update | 16 | 20.40 / 23.74 | 20.83 / 28.33 | 776 → 746 |
+| Transition | 16 | 16.50 / 19.76 | 16.23 / 19.87 | 956 → 966 |
+
+16 writers give only 2–2.5× the throughput of one, at 7–8× the latency: the single
+commit-counter row serializes every write. Throughput tops out around 800–950 writes/s here.
+
+**Type cache decision: on.** Reading and parsing a Type costs 0.23 ms p50 (0.37 p95) per
+call; cached, effectively 0. With one writer the cache cut p50 by 19–30%, a real share. At
+16 writers the counter dominates and the difference is noise (Create went the wrong way in
+this run and the right way in the first). Versions never change, so nothing invalidates.
+
+**Burst: 10,000 messages** (`message` and `channel` have no listeners):
+
+| Scenario | Wall | msgs/s | p50 / p95 ms | Rows/msg | Outbox rows | Bytes/msg |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 writer, 1 channel | 27.0 s | 370 | 2.57 / 3.99 | 4.00 | 0 | 1,214 |
+| 16 writers, 1 channel | 12.4 s | 807 | 19.47 / 24.55 | 4.00 | 0 | 1,317 |
+| 16 writers, 16 channels | 11.4 s | 874 | 17.72 / 23.36 | 4.00 | 0 | 1,305 |
+
+Each message is one Item row, one event, one values row and one idempotency row; no outbox
+row, no scope, no Temporal call. Bytes include every index (the GIN search index too). One
+channel versus sixteen changes little: the global counter, not the channel, is the limit.
+
+**Reads for a principal with 1,000 narrowed scopes, ms:**
+
+| Read | Principal | Visible scopes | p50 / p95 (run 2) | p50 / p95 (run 1) |
+| --- | --- | --- | --- | --- |
+| Get | light | 1 | 2.32 / 3.34 | 2.06 / 3.17 |
+| Get | heavy | 1,001 | 3.75 / 5.66 | 34.54 / 53.53 |
+| Search | light | 1 | 16.66 / 26.84 | 5.78 / 9.06 |
+| Search | heavy | 1,001 | 38.88 / 57.97 | 39.22 / 60.11 |
+
+A ticket Create by the light principal once 1,000 narrowed scopes exist: 5.05 / 7.16 ms,
+against 2.31 / 3.48 before. The visibility check walks every child of the root scope, so
+everyone pays for scopes they cannot see. Run 1 measured these reads on a database with no
+messages and freshly inserted scopes; run 2 after 30,000 messages. My guess, not verified
+with `EXPLAIN`: the heavy Get swings with table statistics (autovacuum had run by run 2),
+and the light Search slows because the planner walks `id desc` and filters instead of
+using the GIN index. Either way these reads are plan-sensitive and need a look.
+
+**Temporal per ticket** (create → set assignee → `in_progress` → timer fires → `open` →
+`in_progress` → `resolved`; 2 s timer; 3 tickets, identical results):
+
+| Workflow runs | History events | History bytes | Actions |
+| --- | --- | --- | --- |
+| 2 | 42 | 6,194 | 9 |
+
+Actions: 2 starts and 3 updates (two of them Update-With-Start that started a run, billed
+as start + update), 1 timer, 3 activities (`LoadItem` per run, one `FireTimer`), no retries.
+No update was refused for a gap: the relay logs every failed delivery and logged none.
+Counted by Temporal Cloud's rules from docs.temporal.io/cloud/actions, as read on
+2026-11-14: start 1; Update-With-Start that starts 2; de-duplicated start or update 0;
+update accepted 1, rejected by the validator 1 (never in history); timer started 1;
+activity scheduled 1 plus 1 per retry; continue-as-new 1; completion 0; signal-with-start
+1; query 1 per query reaching a worker. Events before the first run (create, set assignee)
+reach no workflow, cost a Temporal round-trip each, and are not actions.
+
+**Open questions:** `EXPLAIN` the heavy Get and the light Search; `VisibleScopes` scaling
+(Later).
+
+## Spike write-up
+
+### What the spike proved
+
+- **The write path holds.** One transaction writes the Item row, the event, its values and
+  (when something listens) an outbox row. Idempotency keys, gap-free `item_seq`, if-match
+  with `ErrStale`, and `commit_seq` for read-your-writes all work, at 2–3 ms per write with
+  one writer on modest hardware.
+- **One pure lifecycle function is enough.** `lifecycle.Transition`, `TimerFor`,
+  `NeedsWorkflow` and `HasListeners` serve the item service, the relay and the workflow.
+  Guards and `allowed` stayed out of the workflow.
+- **Durable behavior is cheap and lazy.** Most Items never touch Temporal. A ticket with a
+  timer costs 2 short runs, 42 history events, about 6 KB and 9 actions for a full
+  lifecycle. A timer survives worker restarts (Step 3).
+- **Versions side by side came for free.** The workflow only ever sees a timer table, never
+  the Type, so v1 and v2 Items ran on one worker with no version logic in it.
+- **"Pay for what you use" is real.** A chat message is 4 rows, about 1.2 KB, no outbox
+  row and no Temporal call.
+- **Policy at the edge works.** A hidden Item is "not found" on every read and write, a
+  narrowed Item disappears on the very next read, and nothing is cached that could leak.
+- **Go fits** (the Step 3 checkpoint): the time went into the design, not the language.
+
+### What surprised us
+
+- The global commit counter, a deliberate simplification, is the throughput ceiling:
+  16 writers buy 2–2.5× the throughput at 7–8× the latency.
+- `VisibleScopes` costs every principal for every narrowed scope in the namespace, on
+  writes as well as reads, and the read plans swing between runs.
+- Temporal's edges shaped the design more than its features: `NotFound` for a completed
+  workflow as well as a missing one, validators that cannot wait, and billing that counts
+  rejected updates and every activity retry.
+- Narrowing a container rewrites its descendants' scopes (Step 4); the fix is a scope node
+  per container.
+- Not one Step 1–4 test had to change for Step 5 except the two approved outbox ones.
+
+### Top risks for the real product
+
+1. **Write throughput.** The commit counter serializes all writes (~800–950/s here).
+   Replace it with a snapshot-xmin watermark before anything else scales.
+2. **Visibility cost.** Check an Item's scope ancestors upward, or keep principal →
+   scopes, and add a scope node per container. Today's walk grows with all scopes.
+3. **Silent event loss.** `HasListeners` must grow with hooks, link reactions and
+   subscriptions; forgetting it drops events without an error.
+4. **Temporal bills.** A stuck Item retries forever (~1,440 actions a day), and gap
+   rejections are billed. Cap or alert, and count both.
+5. **Search on the primary database.** Plans are fragile and every write pays for the GIN
+   index. A separate index makes the `min_seq` contract load-bearing.
+6. **Type evolution.** Pinning everything was right for a spike; real Types need new
+   optional fields, floating policy and a migration with a state map.
+7. **Data growth and erasure.** One idempotency row per write forever (a quarter of a
+   message's rows); erasure must cover `items.fields`, `item_event_values` and `items.search`.
+8. **Trust boundaries.** Attribution and `system:*` principals are trusted from Go callers;
+   an exposed API must restrict them.
+
+**Next session:** the follow-up spike (Steps 6–7: holds and connectors), starting with
+`HasListeners` and the Temporal cost limits above.

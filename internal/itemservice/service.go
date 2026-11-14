@@ -93,8 +93,8 @@ type Service struct {
 // Options tune a Service.
 type Options struct {
 	// CacheTypes keeps each parsed Type version in memory after its first
-	// read. New turns it on: Step 5 measured the per-write Type read at
-	// 13-18% of single-writer write latency (docs/journal.md).
+	// read. New turns it on: in Step 5 the cache cut single-writer write
+	// latency by 19-30% (docs/journal.md).
 	CacheTypes bool
 }
 
