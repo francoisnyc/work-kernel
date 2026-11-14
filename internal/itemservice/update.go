@@ -99,6 +99,6 @@ func (k *Service) Update(ctx context.Context, req UpdateRequest) (WriteResult, e
 				payload["readers"] = readers
 			}
 		}
-		return appendEvent(ctx, tx, req.ItemID, itemSeq, req.Principal, req.Attribution, "update", payload, set)
+		return appendEvent(ctx, tx, ty, req.ItemID, itemSeq, req.Principal, req.Attribution, "update", payload, set)
 	})
 }

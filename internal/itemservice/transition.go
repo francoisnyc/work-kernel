@@ -103,7 +103,7 @@ func (k *Service) Transition(ctx context.Context, req TransitionRequest) (WriteR
 				payload["cleared_field_ids"] = sortedKeys(cleared)
 			}
 		}
-		return appendEvent(ctx, tx, req.ItemID, itemSeq, req.Principal, req.Attribution, "transition", payload, set)
+		return appendEvent(ctx, tx, ty, req.ItemID, itemSeq, req.Principal, req.Attribution, "transition", payload, set)
 	})
 }
 

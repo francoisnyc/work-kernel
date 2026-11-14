@@ -93,8 +93,8 @@ func New(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool}
 }
 
-// Create writes a new Item, its first event and an outbox row in one
-// transaction. The same idempotency key returns the stored result.
+// Create writes a new Item, its first event and, if its Type has listeners,
+// an outbox row, in one transaction. The same idempotency key returns the stored result.
 func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, error) {
 	if req.IdempotencyKey == "" || req.Principal.Actor == "" || req.TypeID == "" {
 		// %w wraps ErrInvalid, so callers can still match it with errors.Is,
@@ -180,7 +180,7 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 		if req.Narrow != nil {
 			payload["readers"] = readers // opaque IDs, sorted
 		}
-		return appendEvent(ctx, tx, id, itemSeq, req.Principal, req.Attribution, "create", payload, fields)
+		return appendEvent(ctx, tx, ty, id, itemSeq, req.Principal, req.Attribution, "create", payload, fields)
 	})
 }
 

@@ -11,6 +11,8 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/francoisnyc/work-kernel/internal/item"
+	"github.com/francoisnyc/work-kernel/internal/lifecycle"
+	"github.com/francoisnyc/work-kernel/internal/typedef"
 )
 
 // write runs one write operation in one transaction, wrapped in the
@@ -141,12 +143,13 @@ func checkExpectedSeq(it lockedItem, expected int64) error {
 }
 
 // appendEvent records one accepted operation: it takes the next commit_seq,
-// then inserts the event, the values the event set, and the outbox row. The
-// caller has already written the Item row at itemSeq.
+// then inserts the event, the values the event set, and, when ty has
+// listeners, the outbox row. The caller has already written the Item row at
+// itemSeq.
 //
 // payload holds the operation's shape (states, field IDs) and never a field
 // value; values go to item_event_values so they can be erased later.
-func appendEvent(ctx context.Context, tx pgx.Tx, id uuid.UUID, itemSeq int64, p item.Principal,
+func appendEvent(ctx context.Context, tx pgx.Tx, ty *typedef.Type, id uuid.UUID, itemSeq int64, p item.Principal,
 	a item.Attribution, op string, payload map[string]any, values map[string]any) (WriteResult, error) {
 
 	// The update locks the single counter row until the transaction ends, so
@@ -183,9 +186,12 @@ func appendEvent(ctx context.Context, tx pgx.Tx, id uuid.UUID, itemSeq int64, p 
 		}
 	}
 
-	_, err = tx.Exec(ctx, `insert into outbox (item_id, item_seq) values ($1, $2)`, id, itemSeq)
-	if err != nil {
-		return WriteResult{}, fmt.Errorf("insert outbox: %w", err)
+	// Pay for what you use: with nothing listening, there is nothing to send.
+	if lifecycle.HasListeners(ty) {
+		_, err = tx.Exec(ctx, `insert into outbox (item_id, item_seq) values ($1, $2)`, id, itemSeq)
+		if err != nil {
+			return WriteResult{}, fmt.Errorf("insert outbox: %w", err)
+		}
 	}
 	return WriteResult{ItemID: id, CommitSeq: commitSeq, ItemSeq: itemSeq}, nil
 }
