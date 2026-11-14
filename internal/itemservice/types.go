@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sync"
 
 	"github.com/jackc/pgx/v5"
 
@@ -51,34 +50,13 @@ type querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-// typeCache holds parsed Types by (id, version). sync.Map is a map that is
-// safe for concurrent use without a lock of our own, like ConcurrentHashMap.
-// A *typedef.Type is never modified after parsing, so sharing it is safe.
-type typeCache struct {
-	m sync.Map // typeKey -> *typedef.Type
-}
-
-type typeKey struct {
-	id      string
-	version int
-}
-
 // loadType returns a registered Type, from the cache when it is enabled.
 func (k *Service) loadType(ctx context.Context, q querier, id string, version int) (*typedef.Type, error) {
+	read := func() (*typedef.Type, error) { return readType(ctx, q, id, version) }
 	if k.types == nil {
-		return readType(ctx, q, id, version)
+		return read()
 	}
-	key := typeKey{id, version}
-	// Load returns `any`; the .(*typedef.Type) type assertion casts it back.
-	if ty, ok := k.types.m.Load(key); ok {
-		return ty.(*typedef.Type), nil
-	}
-	ty, err := readType(ctx, q, id, version)
-	if err != nil {
-		return nil, err
-	}
-	k.types.m.Store(key, ty)
-	return ty, nil
+	return k.types.Load(id, version, read)
 }
 
 // readType reads a registered Type from Postgres and parses it.

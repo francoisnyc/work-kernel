@@ -83,31 +83,32 @@ type WriteResult struct {
 	ItemSeq   int64     `json:"item_seq"`
 }
 
-// Service keeps all Item state in Postgres. The only thing it may hold in
-// memory is parsed Types (see Options.CacheTypes), which never change.
+// Service keeps all Item state in Postgres. The only thing it holds in
+// memory is parsed Types, which never change once registered.
 type Service struct {
 	pool  *pgxpool.Pool
-	types *typeCache // nil unless Options.CacheTypes
+	types *typedef.Cache // nil when Options.CacheTypes is false
 }
 
-// Options tune a Service. The zero value is the default.
+// Options tune a Service.
 type Options struct {
 	// CacheTypes keeps each parsed Type version in memory after its first
-	// read. A registered version never changes, so the cache needs no
-	// invalidation. Off by default: see the Step 5 numbers in docs/journal.md.
+	// read. New turns it on: Step 5 measured the per-write Type read at
+	// 13-18% of single-writer write latency (docs/journal.md).
 	CacheTypes bool
 }
 
-// New returns a Service that uses the given connection pool.
+// New returns a Service that uses the given connection pool, with the Type
+// cache on.
 func New(pool *pgxpool.Pool) *Service {
-	return NewWithOptions(pool, Options{})
+	return NewWithOptions(pool, Options{CacheTypes: true})
 }
 
 // NewWithOptions returns a Service with the given options.
 func NewWithOptions(pool *pgxpool.Pool, opts Options) *Service {
 	k := &Service{pool: pool}
 	if opts.CacheTypes {
-		k.types = &typeCache{}
+		k.types = &typedef.Cache{}
 	}
 	return k
 }
