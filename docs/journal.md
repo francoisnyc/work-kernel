@@ -55,6 +55,11 @@ Ideas noted during the spike, not built yet.
   parent. (Step 4)
 - `Get` reads the visible scopes and then the Item in two statements. One
   statement would close the tiny window between them. (Step 4)
+- A kernel write must name a cause on the same Item. Link reactions will
+  write to another Item, so that rule relaxes when they arrive. (Step 6)
+- `FireTimer` returns the item service's `ErrInvalid` as a plain, retryable
+  error, so a malformed kernel write would retry forever. Make it
+  non-retryable (and the same for hook activities). (Step 6)
 - `lifecycle.HasListeners` decides whether an event gets an outbox row. Today it
   only knows timers. Hooks, link reactions and subscriptions must widen it when
   they arrive, or their events are silently never sent. (Step 5)
