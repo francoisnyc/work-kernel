@@ -44,7 +44,7 @@ func narrowingMode(ctx context.Context) error {
 
 func narrowOnce(ctx context.Context, pool *pgxpool.Pool, n, r int) error {
 	k := itemservice.New(pool)
-	owner := item.Principal{Actor: "user-owner-" + uuid.NewString()[:8]}
+	owner := item.Principal{Actor: "user:owner-" + uuid.NewString()[:8]}
 	create := func(container *uuid.UUID) (uuid.UUID, error) {
 		res, err := k.Create(ctx, itemservice.CreateRequest{
 			IdempotencyKey: key(), Principal: owner, TypeID: "ticket", TypeVersion: 1,
@@ -70,7 +70,7 @@ func narrowOnce(ctx context.Context, pool *pgxpool.Pool, n, r int) error {
 	readers := func(tag string) []string {
 		out := []string{owner.Actor}
 		for i := 1; i < r; i++ {
-			out = append(out, fmt.Sprintf("user-%s-%d", tag, i))
+			out = append(out, fmt.Sprintf("user:%s-%d", tag, i))
 		}
 		return out
 	}

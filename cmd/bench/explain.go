@@ -20,9 +20,9 @@ import (
 // shape before Step A; searchUnion splits the visibility OR into two branches.
 // Keep them in step with the code; they are used for nothing else.
 const (
-	explainVisible = `(s.open or (
-	exists (select 1 from scope_access a where a.scope_id = s.id and a.principal = @actor)
-	and (@behalf = '' or exists (select 1 from scope_access b where b.scope_id = s.id and b.principal = @behalf))))`
+	explainVisible = `(s.policy_scope_id is null or (
+	exists (select 1 from scope_access a where a.scope_id = s.policy_scope_id and a.principal = @actor)
+	and (@behalf = '' or exists (select 1 from scope_access b where b.scope_id = s.policy_scope_id and b.principal = @behalf))))`
 	explainGet = `select i.type_id, i.type_version, i.container_id, i.scope_id, i.state, i.fields, i.item_seq, ` + explainVisible + `
 		 from items i join scopes s on s.id = i.scope_id
 		 where i.id = @id and i.namespace_id = @ns`
@@ -48,10 +48,10 @@ const (
 		     where namespace_id = @ns and search @@ plainto_tsquery('simple', @q)
 		 )
 		 select * from (
-		     select m.* from matches m join scopes s on s.id = m.scope_id where s.open
+		     select m.* from matches m join scopes s on s.id = m.scope_id where s.policy_scope_id is null
 		     union all
-		     select m.* from matches m join scope_access a on a.scope_id = m.scope_id and a.principal = @actor
-		     where not exists (select 1 from scopes s where s.id = m.scope_id and s.open)
+		     select m.* from matches m join scopes s on s.id = m.scope_id
+		     join scope_access a on a.scope_id = s.policy_scope_id and a.principal = @actor
 		 ) v
 		 order by id desc
 		 limit @limit`
@@ -73,8 +73,8 @@ func explainMode(ctx context.Context) error {
 	}
 
 	k := itemservice.New(pool)
-	heavy := item.Principal{Actor: "user-heavy"}
-	light := item.Principal{Actor: "user-light"}
+	heavy := item.Principal{Actor: "user:heavy"}
+	light := item.Principal{Actor: "user:light"}
 	term := "w" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
 	var narrowed uuid.UUID
 	if _, _, err := timeAll(heavyScopes, 16, func(i int) error {

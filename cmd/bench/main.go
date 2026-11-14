@@ -37,7 +37,7 @@ import (
 
 const temporalImage = "temporalio/temporal:1.10.0" // same as the tests and docker-compose.yml
 
-var alice = item.Principal{Actor: "user-alice"}
+var alice = item.Principal{Actor: "user:alice"}
 
 func main() {
 	// flag is the standard library's command-line parser.
@@ -411,8 +411,8 @@ const heavyScopes = 1000
 
 func manyScopes(ctx context.Context, pool *pgxpool.Pool) error {
 	k := itemservice.New(pool)
-	heavy := item.Principal{Actor: "user-heavy"}
-	light := item.Principal{Actor: "user-light"}
+	heavy := item.Principal{Actor: "user:heavy"}
+	light := item.Principal{Actor: "user:light"}
 
 	term := "w" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
 	var narrowed uuid.UUID
