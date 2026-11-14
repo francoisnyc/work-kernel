@@ -22,10 +22,6 @@ Ideas noted during the spike, not built yet.
 - A Type with no behavior at all (no state needs a workflow) should write no
   outbox rows in the first place, kernel side. Needed for Step 5's burst test;
   until then the relay marks such rows delivered. (Step 3 Phase A)
-- When attribution is exposed in the API, only trusted internal principals may
-  set `originating_hook`, `causation_id` and `hop`. A public caller may pass
-  `correlation_id` (a trace) only, and only as a claim. Today attribution is a
-  Go-only request field. (Step 3)
 - The ticket's one timer (48h in `in_progress`, back to `open`) is a stand-in.
   The real first-response SLA comes later, with standalone SLA objects. (Step 3)
 - The relay delivers one Item at a time. Deliver to several Items in parallel,
@@ -39,8 +35,6 @@ Ideas noted during the spike, not built yet.
 - Grants on scope nodes (audited) are the admin path, including recovering an
   Item nobody can see. Until then a policy change may not hide an Item from the
   one making it. (Step 4)
-- The timer's exemption from visibility trusts the request's `Actor`. When the
-  API is exposed, only internal callers may act as `system:*`. (Step 4)
 - `VisibleScopes` returns every scope a principal can read, and each narrowed
   Item has its own. Fine for a spike; at scale, check one scope's ancestors or
   join in SQL. (Step 4)
