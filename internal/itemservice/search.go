@@ -54,7 +54,7 @@ func (k *Service) Search(ctx context.Context, req SearchRequest) (SearchResult, 
 	if req.Principal.Actor == "" || strings.TrimSpace(req.Query) == "" {
 		return SearchResult{}, fmt.Errorf("%w: actor and query are required", ErrInvalid)
 	}
-	if err := checkPrincipal(req.Principal); err != nil {
+	if err := checkPublicPrincipal(req.Principal); err != nil {
 		return SearchResult{}, err
 	}
 	if err := checkSession(ctx, k.pool, req.Principal); err != nil {

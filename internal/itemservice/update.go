@@ -39,8 +39,18 @@ type Move struct {
 }
 
 // Update applies a field patch, a policy patch or both to an Item and records
-// one "update" event.
+// one "update" event. It is the public door: the kernel's own actors use
+// Internal().Update.
 func (k *Service) Update(ctx context.Context, req UpdateRequest) (WriteResult, error) {
+	if err := checkPublic(req.Principal, req.Attribution); err != nil {
+		return WriteResult{}, err
+	}
+	return k.update(ctx, req, nil)
+}
+
+// update is Update's body for both doors. kc is nil for the public door, and
+// the checked cause of a kernel write for the internal one.
+func (k *Service) update(ctx context.Context, req UpdateRequest, kc *kernelCause) (WriteResult, error) {
 	if req.IdempotencyKey == "" || req.Principal.Actor == "" || (len(req.Fields) == 0 && req.Policy == nil && req.Move == nil) {
 		return WriteResult{}, fmt.Errorf("%w: idempotency key, actor and a field, policy or move are required", ErrInvalid)
 	}
@@ -84,7 +94,9 @@ func (k *Service) Update(ctx context.Context, req UpdateRequest) (WriteResult, e
 		}
 		// Visibility comes before every other check, so a principal who
 		// cannot see the Item learns nothing about it: not even "stale".
-		if err := checkVisible(ctx, tx, req.Principal, it.ScopeID); err != nil {
+		// (A kernel write is checked against its cause instead.)
+		recorded, err := admit(ctx, tx, req.Principal, req.ItemID, it, kc)
+		if err != nil {
 			return WriteResult{}, err
 		}
 		if err := checkExpectedSeq(it, req.ExpectedItemSeq); err != nil {
@@ -174,6 +186,6 @@ func (k *Service) Update(ctx context.Context, req UpdateRequest) (WriteResult, e
 			payload["container_from"] = it.ContainerID
 			payload["container_to"] = req.Move.To
 		}
-		return appendEvent(ctx, tx, ty, req.ItemID, itemSeq, req.Principal, attr, "update", payload, set)
+		return appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, attr, "update", payload, set)
 	})
 }

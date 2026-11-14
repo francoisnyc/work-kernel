@@ -30,8 +30,17 @@ type TransitionRequest struct {
 // Transition moves an Item to another state if its Type allows it, and
 // records a "transition" event. With a Fields patch, the patch and the move
 // are one write: one row lock, one event. An illegal move or an invalid patch
-// returns ErrRejected with the reason and writes nothing.
+// returns ErrRejected with the reason and writes nothing. It is the public
+// door: the kernel's own actors use Internal().Transition.
 func (k *Service) Transition(ctx context.Context, req TransitionRequest) (WriteResult, error) {
+	if err := checkPublic(req.Principal, req.Attribution); err != nil {
+		return WriteResult{}, err
+	}
+	return k.transition(ctx, req, nil)
+}
+
+// transition is Transition's body for both doors; kc is as in update.
+func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *kernelCause) (WriteResult, error) {
 	if req.IdempotencyKey == "" || req.Principal.Actor == "" || req.ToState == "" {
 		return WriteResult{}, fmt.Errorf("%w: idempotency key, actor and target state are required", ErrInvalid)
 	}
@@ -57,13 +66,13 @@ func (k *Service) Transition(ctx context.Context, req TransitionRequest) (WriteR
 		if err != nil {
 			return WriteResult{}, err
 		}
-		// A timer's write is internal infrastructure, not a principal reading
-		// the Item, so it is not subject to visibility (docs/design.md,
-		// Policy, "Boundary"). It is still subject to `allowed`, below.
-		if req.Principal.Actor != typedef.TimerPrincipal {
-			if err := checkVisible(ctx, tx, req.Principal, it.ScopeID); err != nil {
-				return WriteResult{}, err
-			}
+		// A kernel write (timer, hook) is internal infrastructure, not a
+		// principal reading the Item, so it is not subject to visibility
+		// (docs/design.md, Policy, "Boundary"). It is still subject to
+		// `allowed`, below.
+		recorded, err := admit(ctx, tx, req.Principal, req.ItemID, it, kc)
+		if err != nil {
+			return WriteResult{}, err
 		}
 		if err := checkExpectedSeq(it, req.ExpectedItemSeq); err != nil {
 			return WriteResult{}, err
@@ -117,7 +126,7 @@ func (k *Service) Transition(ctx context.Context, req TransitionRequest) (WriteR
 				payload["cleared_field_ids"] = sortedKeys(cleared)
 			}
 		}
-		return appendEvent(ctx, tx, ty, req.ItemID, itemSeq, req.Principal, attr, "transition", payload, set)
+		return appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, attr, "transition", payload, set)
 	})
 }
 

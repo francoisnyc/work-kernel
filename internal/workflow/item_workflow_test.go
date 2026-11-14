@@ -197,6 +197,10 @@ func rejected() error {
 	return temporal.NewNonRetryableApplicationError("guard not satisfied", wf.ErrTypeRejected, nil)
 }
 
+func invalid() error {
+	return temporal.NewNonRetryableApplicationError("malformed kernel write", wf.ErrTypeInvalid, nil)
+}
+
 // --- the timer ---
 
 // The timer runs from the moment the Item entered the state, not from when
@@ -413,6 +417,22 @@ func TestItemWorkflow_ItemGoneWhenTheTimerFires_IsNotRetried(t *testing.T) {
 
 	if len(h.fires) != 1 {
 		t.Errorf("FireTimer calls = %d, want 1: not found is not retried", len(h.fires))
+	}
+	h.wantApplied("later transition", later, true)
+}
+
+// The item service finds the timer's write malformed (Step 6: a bad cause, a
+// Type or version that does not match). Retrying the same request cannot
+// fix it, so, like a rejection, it is final: one attempt, logged, and the
+// workflow carries on.
+func TestItemWorkflow_KernelFindsTheTimerInvalid_IsNotRetried(t *testing.T) {
+	h := newHarness(t, snapshot(t, "review", 5, 5, t0))
+	h.fireErrs = []error{invalid()}
+	later := h.deliver(9*time.Hour, transitionEvent(6, "review", "published"))
+	h.runToCompletion()
+
+	if len(h.fires) != 1 {
+		t.Errorf("FireTimer calls = %d, want 1: an invalid write is not retried", len(h.fires))
 	}
 	h.wantApplied("later transition", later, true)
 }
