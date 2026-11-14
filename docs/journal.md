@@ -109,6 +109,12 @@ Ideas noted during the spike, not built yet.
   hook or connection: settled direction in design.md ("Settled direction for
   holds, approvals and agents"). Build each when a step needs it. (Design
   review, 2026-11-14)
+- A timer write refused as `Invalid` is only logged: it is a kernel bug, and
+  the timer is then dropped for that state entry. Add an alert or a counter on
+  Invalid timer writes. (Step 6)
+- Type migration must re-arm timers for the new version: a running workflow
+  carries its timer table in the Snapshot, so after a migration it must reload
+  the table (and `TimerDone`) for the Item's new version. (Step 6)
 
 ## 2026-11-12 — Step 1 (finished)
 
