@@ -455,12 +455,58 @@ throughput on the same machine, `min_seq` and the relay lose and reorder
 nothing, a principal who sees one scope pays nothing for others' narrowed
 scopes, and the same bench is rerun and compared in `docs/journal.md`.
 
-**Follow-up spike, Steps 6–7 (after Step 5):** holds and connectors. The
-plan is in the "Work kernel: Spike plan" doc. In short: Temporal activities
-run `on_enter`, `on_exit` and `on_complete` hooks and write their results back
-through the normal write path. A blocking check holds a transition until it
-allows, denies or corrects it. Write APIs take a bounded `wait`. The item
-service makes no synchronous outside calls.
+**Follow-up spike, Steps 6–7: holds and connectors** (after Step A2). Their job
+is to test the leaning decision of 2026-11-12, that connectors run outside the
+write transaction, with holds and a bounded wait, before it becomes firm.
+Background: `docs/research/extension-points-in-work-platforms.md` and
+`docs/research/connectors-for-the-item-kernel.md`. Setup: stub HTTP servers
+stand in for a CRM and an ERP, with configurable latency, error rate and outage.
+The ticket Type gets three hooks: `on_enter(triage)` fetches the customer's plan
+from the CRM (falling back to `unknown`); a blocking ERP check on `approve`
+answers allow or deny (customer on hold); `on_complete(approval)` creates an
+invoice in the ERP.
+
+| Step | Build | Done when |
+| --- | --- | --- |
+| 6 | First, protect internal principals: only server-side code may act as `system:*` or `hook:*`, and only it may set `originating_hook`, `causation_id` and `hop`. Then hooks as activities that write back through the item service; a **hold** (the Item stays in its state until the check allows, denies or corrects it); a bounded `wait` on `Transition`; the variant D guard: an `on_enter` prefetch of `customer.on_hold` plus a CEL guard (`cel-go`, replacing the spike's parser), with the hold as a backstop. Widen `HasListeners` for hooks | A caller outside the server cannot act as `system:timer` or a hook; with stub latency ≤ 500 ms, p95 time to a definitive answer stays under 3 s with D; kernel write latency is unchanged during a stub outage and while workers are down; a stale prefetched fact is caught by the hold; every hook write carries principal, `on_behalf_of`, originating hook and `causation_id`, and the chain can be rebuilt |
+| 7 | `on_complete` invoice with an idempotency key; forced activity timeouts; variant A (every check as a hold) for comparison; variant B (a synchronous ERP call before the transaction, 2 s timeout) on a throwaway branch, numbers only; write up | No duplicate invoices across 1,000 forced timeouts; p50/p95 recorded for A, B and D at 50 ms, 500 ms and 5 s stub latency, with the share answered within `wait`, in `docs/journal.md` |
+
+Questions to settle along the way: does the SLA clock pause during a hold? Is
+"requested, not yet applied" a substate or a separate field? How does the UI
+show a hold?
+
+### Settled direction for holds, approvals and agents
+
+Recorded so Steps 6–7 do not paint us into a corner. Build only what the
+step's "done when" needs; the rest is direction, not scope.
+
+- **States are business lifecycle, never plumbing.** A state says where the
+  work stands (`triage`, `active`, `waiting`, `done`), never what the system is
+  doing (`calling_erp`, `creating_po`). Multi-step automation runs inside a
+  state, as holds and connector actions.
+- **Untrusted values carry taint, per field.** The Type declares which fields
+  hold free text written from outside (intake, sync, a hook's output, customer
+  text). An agent session that read an untrusted value, in any scope including
+  open ones, cannot act alone on egress or privilege: outbound connector
+  actions, widening readers, changing `allowed`, roles or assignee. Those become
+  a hold a human clears. Ordinary edits stay free. A connector action declares
+  its sensitive parameters (recipient, amount, URL); mapping an untrusted field
+  into one makes a hold.
+- **An approval covers exact inputs.** The Type declares what it covers
+  (`covers: [amount, vendor]`); the token stores a digest of those values, and
+  any change makes it stale. No declaration falls back to `item_seq`. The
+  requester and the Item's creator cannot complete it; an agent acting for a
+  user counts as that user. People and agents complete it the same way.
+- **`ApproveWiden` narrows to one held write** in the product: the held write
+  stores its payload hash, and the approval completes that write only. If the
+  Item moved on, it is stale and the user is asked again.
+- **Kill switch per Type version, hook or connection.** A flag in Postgres,
+  checked first by the connector activity, which returns "paused" without
+  calling out (not in the workflow: it cannot read Postgres, and signalling
+  every workflow is a costly fan-out). On "paused" the workflow parks the Item
+  in a visible hold and waits for a resume event through the relay; it does
+  not retry. It stops the next outbound call, not one in flight, so outbound
+  actions carry idempotency keys; it stops side effects, not writes.
 
 **Go checkpoint, after Step 3:** if most time went into fighting the language
 rather than the design, stop and decide whether to rerun in Java.
