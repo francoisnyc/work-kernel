@@ -258,7 +258,12 @@ func TestAgent_WriteAtOrBelowTheReadScope_IsAllowed(t *testing.T) {
 	w := newAgentWorld(t)
 	assertVisible(t, w.k, w.agent, w.inSpace)
 
-	update(t, w.k, w.inSpace, map[string]any{"f_title": "by the user"}) // user writes are not limited
+	// A user's writes are not limited by the agent rule.
+	if _, err := w.k.Update(testCtx(t), itemservice.UpdateRequest{
+		IdempotencyKey: newKey(), Principal: w.user, ItemID: w.inSpace, Fields: map[string]any{"f_title": "by the user"},
+	}); err != nil {
+		t.Errorf("write by the user: %v", err)
+	}
 	if _, err := w.k.Update(testCtx(t), itemservice.UpdateRequest{
 		IdempotencyKey: newKey(), Principal: w.agent, ItemID: w.inSpace, Fields: map[string]any{"f_title": "same scope"},
 	}); err != nil {

@@ -106,6 +106,8 @@ Ideas noted during the spike, not built yet.
 - Search records every result's narrowing scope, so a broad search makes almost
   every later write need approval. Correct, but agents should use short,
   task-scoped sessions; revisit the UX with real agents. (Step A2)
+- The namespace-wide move lock serializes all moves in a namespace. Narrow it
+  (for example, a lock per affected tree) if moves get frequent. (Step A2)
 
 ## 2026-11-12 — Step 1 (finished)
 
