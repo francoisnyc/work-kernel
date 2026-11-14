@@ -185,6 +185,12 @@ client → item service (Go, stateless)
 
 ## Policy
 
+- **Principals are typed IDs**, given by the caller: `user:<id>`, `agent:<id>`,
+  `group:<id>`, and `system:<id>` for the kernel's own actors (`system:timer`).
+  The actor, `on_behalf_of`, every reader and every role holder is one. An
+  untyped ID is `ErrInvalid`. Only users and agents are readers today; `group:`
+  is reserved and refused until groups exist, so groups need no migration later.
+  In a Type's `allowed` list a principal entry reads `principal:user:<id>`.
 - **Scopes**: every container has a scope node, created with the container. It
   inherits (`narrows = false`) until the container is narrowed, which then flips
   the node's flag and readers in place. An Item's read access comes from its
@@ -202,6 +208,11 @@ client → item service (Go, stateless)
   - A change that would hide the Item from the principal making it (or from
     `on_behalf_of`) is `ErrInvalid`. Recovery by an admin comes later, with grants.
   - Narrowing a container changes only its own node; no descendant row changes.
+- **Only narrowing creates a closed scope.** Sharing a single Item with someone
+  outside its readers will be an additive grant row, never a new scope.
+- **A narrowed child is invisible to its parent's readers** unless they are its
+  readers too. There is no "locked" placeholder in the parent; a discoverable
+  flag may come later.
 - **Roles** live in `principal_roles(namespace_id, principal, role)`: the
   server's own record, read on every write that needs it, never claimed by a caller.
 - **On behalf of**: when an agent acts for a user, both must see the Item and
@@ -212,26 +223,38 @@ client → item service (Go, stateless)
 - **When a scope node appears.** An Item gets its own node when it is narrowed,
   or when it gets its first child (in that child's `Create`). A message that never
   has children costs no node.
-- **Who can see what is kept, not computed per request.** `scopes.open` is true
-  for a scope with no narrowing ancestor: everyone in the namespace reads it.
-  For every other scope, `scope_access(scope_id, principal)` lists its effective
-  readers: the readers of every narrowing ancestor, intersected. Both are updated
-  in the same transaction as the reader or policy change that affects them, so a
-  narrowed Item or a removed reader is hidden on the very next read. A principal
-  pays only for the scopes they are in; other people's narrowed scopes cost nothing.
-- **Get and writes** check the Item's one scope: `open`, or a row in
-  `scope_access` for the principal (and for `on_behalf_of`). One indexed lookup,
-  with no query over other scopes.
+- **Who can see what is kept, not computed per request.** Every scope has a
+  pointer, `policy_scope_id`: the nearest narrowing scope at or above it, or null
+  when nothing above it narrows (everyone in the namespace reads it). Only
+  narrowing scopes have rows in `scope_access(scope_id, principal)`: their
+  effective readers, the readers of every narrowing scope on the way up,
+  intersected. An inheriting scope holds no rows of its own; it points at the
+  scope whose rows apply. Pointers and rows are updated in the same transaction
+  as the reader or policy change that affects them, so a narrowed Item or a
+  removed reader is hidden on the very next read. A principal pays only for the
+  scopes they are in; other people's narrowed scopes cost nothing.
+- **Why a pointer** (Step A measurement): with a copy of the readers on every
+  inheriting scope, narrowing a container with 1,000 descendant scopes to 50
+  readers wrote 50,050 rows (0.8 s), and so did every reader change after it.
+  With the pointer, narrowing writes R rows plus one pointer per inheriting
+  scope down to the next narrowing scope; a reader change writes R rows plus a
+  recompute of each nested narrowing scope below; un-narrowing moves the
+  pointers back.
+- **Get and writes** check the Item's scope: `policy_scope_id` is null, or
+  `scope_access` has a row for (`policy_scope_id`, principal), and for
+  `on_behalf_of` when set. One indexed lookup, with no query over other scopes.
 - **Search** filters with the same test, joined in SQL.
-- Walking up from a scope is what a policy change does to recompute
-  `scope_access` for the subtree it affects: O(scopes below the change).
+- Walking down from a scope is what a policy change does to move pointers and
+  recompute nested narrowing scopes: O(scopes below the change), touching one
+  column per inheriting scope and R rows per narrowing one.
 - **Concurrent policy changes.** A recompute first locks the affected scope rows
   top-down, ancestor before descendant, and only then rewrites `scope_access`.
   Two changes in the same subtree therefore run one after the other, in the same
   lock order, and cannot leave the table wrong or deadlock.
 - **Groups (later).** Readers may become groups. `scope_access` then holds group
-  IDs, and the check becomes "the principal, or one of the principal's groups", so
-  the table stays O(scopes × reader entries), not O(scopes × people).
+  IDs (already a valid typed principal), and the check becomes "the principal, or
+  one of the principal's groups", so the table stays O(narrowing scopes × reader
+  entries), not O(scopes × people).
 - API in `internal/policy`:
   - `Project(principal, visible, item)` — pure. All-or-nothing per Item for the
     spike; redacting single fields comes later.
@@ -253,8 +276,8 @@ client → item service (Go, stateless)
   row, so it cannot fall behind a write.
 - The visibility filter (see Policy) is applied in SQL before the limit, never
   after fetching.
-- The visibility test is "the scope is open, or the principal is in
-  `scope_access`". If the `OR` spoils the plan, it becomes two branches joined
+- The visibility test is "the scope's `policy_scope_id` is null, or the
+  principal is in `scope_access` for it". If the `OR` spoils the plan, it becomes two branches joined
   with `UNION ALL` (open scopes; the principal's scopes), checked with `EXPLAIN`
   on fresh and analyzed databases.
 - The text match runs first and the sort and limit after it, in a subquery the
@@ -293,9 +316,10 @@ client → item service (Go, stateless)
 create table types        (id text, version int, definition jsonb, primary key (id, version));
 create table scopes       (id uuid primary key, namespace_id text not null default 'default',
                            parent_id uuid references scopes, narrows boolean not null,
-                           open boolean not null);  -- no narrowing ancestor
-create table scope_access (scope_id uuid references scopes, principal text,
-                           primary key (scope_id, principal));  -- effective readers
+                           item_id uuid unique references items,      -- the Item this node belongs to
+                           policy_scope_id uuid references scopes);   -- nearest narrowing scope; null = open
+create table scope_access (scope_id uuid references scopes, principal text,  -- typed: user:…, agent:…
+                           primary key (scope_id, principal));  -- effective readers of narrowing scopes only
 create unique index scopes_root on scopes (namespace_id) where parent_id is null;
 create index scopes_parent on scopes (parent_id);
 create table scope_readers(scope_id uuid references scopes, principal text, primary key (scope_id, principal));
@@ -367,7 +391,8 @@ passes, however long that takes.
 
 **Hardening, Step A (after Step 5):** `EXPLAIN` the unstable reads; replace
 the commit counter with the sequence and watermark above; keep visibility in
-`scopes.open` and `scope_access`, with a scope node per container. Done when 16
+`policy_scope_id` and `scope_access`, with a scope node per container; typed
+principal IDs; property tests against a naive evaluator. Done when 16
 writers wait on no shared row lock and reach at least 2× the 1-writer
 throughput on the same machine, `min_seq` and the relay lose and reorder
 nothing, a principal who sees one scope pays nothing for others' narrowed
