@@ -215,7 +215,7 @@ func TestUpdate_MergesFieldsAndRecordsTheEvent(t *testing.T) {
 	// Set one field, change one, clear one (nil), leave nothing else touched.
 	res, err := k.Update(ctx, itemservice.UpdateRequest{
 		IdempotencyKey: newKey(),
-		Principal:      item.Principal{Actor: "agent:7", OnBehalfOf: "user:alice"},
+		Principal:      item.Principal{Actor: "agent:7", OnBehalfOf: "user:alice", AgentSession: "session-7"},
 		ItemID:         id,
 		Fields:         map[string]any{"f_assignee": "user-bob", "f_priority": 3, "f_title": nil},
 	})
@@ -445,7 +445,7 @@ func TestTransition_Legal_IsRecorded(t *testing.T) {
 
 	res, err := k.Transition(ctx, itemservice.TransitionRequest{
 		IdempotencyKey: newKey(),
-		Principal:      item.Principal{Actor: "agent:7", OnBehalfOf: "user:alice"},
+		Principal:      item.Principal{Actor: "agent:7", OnBehalfOf: "user:alice", AgentSession: "session-7"},
 		ItemID:         id,
 		ToState:        "in_progress",
 	})
