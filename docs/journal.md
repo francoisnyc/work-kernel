@@ -469,3 +469,21 @@ waits on the test fix above.
 
 **Next session:** apply the approved race fix (if approved), get CI green, mark #10
 ready. Then option B (Steps 6–7).
+
+### Narrowing cost (`go run ./cmd/bench -narrowing`, 2026-11-14)
+
+A container with N descendant scope nodes (N children, each with a child of its own),
+narrowed to R readers, then narrowed again to a different R readers:
+
+| N nodes | R readers | scope_access rows written | ms | Reader change: rows | ms |
+| --- | --- | --- | --- | --- | --- |
+| 100 | 1 | 101 | 10 | 101 | 8 |
+| 100 | 50 | 5,050 | 62 | 5,050 | 64 |
+| 1,000 | 1 | 1,001 | 48 | 1,001 | 47 |
+| 1,000 | 10 | 10,010 | 743 | 10,010 | 801 |
+| 1,000 | 50 | 50,050 | 784 | 50,050 | 784 |
+
+Rows written are (N + 1) × R, for the first narrowing and for every reader change: every
+inheriting node below holds its own copy of the effective readers. At N = 1,000 and
+R = 50 that is 50,050 rows and ~0.8 s, with the whole subtree locked. Too large: a
+pointer design is proposed before going further.
