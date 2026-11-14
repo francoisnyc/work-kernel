@@ -57,6 +57,9 @@ func (k *Service) Search(ctx context.Context, req SearchRequest) (SearchResult, 
 	if err := checkPrincipal(req.Principal); err != nil {
 		return SearchResult{}, err
 	}
+	if err := checkSession(ctx, k.pool, req.Principal); err != nil {
+		return SearchResult{}, err
+	}
 	if req.MinSeq < 0 || req.Wait < 0 || req.Limit < 0 {
 		return SearchResult{}, fmt.Errorf("%w: min_seq, wait and limit cannot be negative", ErrInvalid)
 	}
@@ -82,7 +85,8 @@ func (k *Service) Search(ctx context.Context, req SearchRequest) (SearchResult, 
 		     from items
 		     where namespace_id = @ns and search @@ plainto_tsquery('simple', @q)
 		 )
-		 select m.id, m.type_id, m.type_version, m.container_id, m.scope_id, m.state, m.fields, m.item_seq
+		 select m.id, m.type_id, m.type_version, m.container_id, m.scope_id, m.state, m.fields, m.item_seq,
+		        s.policy_scope_id
 		 from matches m join scopes s on s.id = m.scope_id
 		 where `+policy.VisibleCondition+`
 		 order by m.id desc
@@ -90,11 +94,16 @@ func (k *Service) Search(ctx context.Context, req SearchRequest) (SearchResult, 
 	if err != nil {
 		return SearchResult{}, fmt.Errorf("search: %w", err)
 	}
-	found, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (item.Item, error) {
-		var it item.Item
-		err := row.Scan(&it.ID, &it.TypeID, &it.TypeVersion, &it.ContainerID, &it.ScopeID,
-			&it.State, &it.Fields, &it.ItemSeq)
-		return it, err
+	// Each row carries the Item and the narrowing scope it is read through.
+	type hit struct {
+		it          item.Item
+		policyScope *uuid.UUID
+	}
+	found, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (hit, error) {
+		var h hit
+		err := row.Scan(&h.it.ID, &h.it.TypeID, &h.it.TypeVersion, &h.it.ContainerID, &h.it.ScopeID,
+			&h.it.State, &h.it.Fields, &h.it.ItemSeq, &h.policyScope)
+		return h, err
 	})
 	if err != nil {
 		return SearchResult{}, fmt.Errorf("search: %w", err)
@@ -102,12 +111,19 @@ func (k *Service) Search(ctx context.Context, req SearchRequest) (SearchResult, 
 
 	// Every outbound path goes through Project. The query has already
 	// checked each Item's scope, so this drops nothing today; it is where
-	// field-level redaction will happen.
+	// field-level redaction will happen. Any count or total is taken from
+	// what Project returns, never before it.
 	res := SearchResult{Items: make([]item.Item, 0, len(found))}
-	for _, it := range found {
-		if projected, ok := policy.Project(req.Principal, []uuid.UUID{*it.ScopeID}, it); ok {
+	var read []*uuid.UUID
+	for _, h := range found {
+		if projected, ok := policy.Project(req.Principal, []uuid.UUID{*h.it.ScopeID}, h.it); ok {
 			res.Items = append(res.Items, projected)
+			read = append(read, h.policyScope)
 		}
+	}
+	// An agent's read of every result is recorded for the write rule.
+	if err := recordReads(ctx, k.pool, req.Principal, read); err != nil {
+		return SearchResult{}, err
 	}
 	return res, nil
 }

@@ -9,6 +9,10 @@ import "github.com/google/uuid"
 type Principal struct {
 	Actor      string // the user or agent making the call
 	OnBehalfOf string // empty when the actor acts for itself
+	// AgentSession is set when an agent acts, on reads and writes alike. It
+	// is a session the item service minted (StartAgentSession), never one
+	// the caller made up.
+	AgentSession string
 }
 
 // Attribution says what caused a write, beyond who made it. Every value is an
