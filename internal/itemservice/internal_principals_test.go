@@ -252,7 +252,7 @@ func TestInternal_RefusesPeopleAgentsAndOnBehalfOf(t *testing.T) {
 		Fields: map[string]any{"f_plan": "gold"}, Attribution: sessioned,
 	})
 	assertInvalid(t, "Internal().Update with an agent session on the attribution", err)
-	assertNothingWritten(t, id, 1)
+	assertNothingWrittenNoOutbox(t, id, 1)
 }
 
 // A kernel write must say what caused it, and the cause must be an event of
@@ -298,8 +298,8 @@ func TestInternal_RequiresACauseOnTheSameItem(t *testing.T) {
 	})
 	assertInvalid(t, "Internal().Update on another Type's Item", err)
 
-	assertNothingWritten(t, id, 1)
-	assertNothingWritten(t, other, 1)
+	assertNothingWrittenNoOutbox(t, id, 1)
+	assertNothingWrittenNoOutbox(t, other, 1)
 	assertNothingWritten(t, ticket, 1)
 }
 
@@ -321,7 +321,7 @@ func TestInternal_UpdateIsFieldsOnly(t *testing.T) {
 		Move: &itemservice.Move{To: nil},
 	})
 	assertInvalid(t, "Internal().Update with a move", err)
-	assertNothingWritten(t, id, 1)
+	assertNothingWrittenNoOutbox(t, id, 1)
 }
 
 // Kernel actors are internal infrastructure acting on the Item that
@@ -479,5 +479,5 @@ func TestInternal_HopLimit(t *testing.T) {
 	if !errors.Is(err, itemservice.ErrRejected) || !strings.Contains(err.Error(), "hop limit") {
 		t.Fatalf("Update at hop %d: error = %v, want ErrRejected with \"hop limit\"", over.Hop, err)
 	}
-	assertNothingWritten(t, id, 2)
+	assertNothingWrittenNoOutbox(t, id, 2)
 }

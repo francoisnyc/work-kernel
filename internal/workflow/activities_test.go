@@ -21,7 +21,7 @@ func TestActivities_MissingItem_IsANonRetryableNotFound(t *testing.T) {
 	_, loadErr := a.LoadItem(serverCtx(t), missing)
 	fireErr := a.FireTimer(serverCtx(t), wf.FireTimerInput{
 		ItemID: missing, TypeID: "job", TypeVersion: 1, FromState: "running", ToState: "queued",
-		ExpectedItemSeq: 2, EnteredSeq: 2, IdempotencyKey: "timer:" + missing + ":2:2",
+		ExpectedItemSeq: 2, EnteredSeq: 2, Hop: 1, IdempotencyKey: "timer:" + missing + ":2:2",
 	})
 
 	for name, err := range map[string]error{"LoadItem": loadErr, "FireTimer": fireErr} {
