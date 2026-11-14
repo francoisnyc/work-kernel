@@ -265,8 +265,16 @@ func (t *Type) check() error {
 			}
 			// A principal entry names a typed principal ID that may act.
 			if strings.HasPrefix(entry, AllowedPrincipalPrefix) &&
-				!item.IsKind(who, item.KindUser, item.KindAgent, item.KindSystem) {
-				return fail("transition %s: allowed entry %q must name user:<id>, agent:<id> or system:<id>", name, entry)
+				!item.IsKind(who, item.KindUser, item.KindAgent, item.KindSystem, item.KindHook) {
+				return fail("transition %s: allowed entry %q must name user:<id>, agent:<id>, system:<id> "+
+					"or hook:<type>:<hook-id>", name, entry)
+			}
+			// A hook acts only on Items of its own Type, so another Type's
+			// hook could never pass this list: naming it is a mistake.
+			if hookType, _, ok := item.HookParts(who); ok && strings.HasPrefix(entry, AllowedPrincipalPrefix) &&
+				hookType != t.ID {
+				return fail("transition %s: allowed entry %q names a hook of Type %q; a hook acts only on its own Type",
+					name, entry, hookType)
 			}
 		}
 		conds, err := ParseGuard(t, tr.Guard)
