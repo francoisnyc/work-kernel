@@ -14,7 +14,7 @@ import (
 	"github.com/francoisnyc/work-kernel/internal/itemservice"
 )
 
-var bob = item.Principal{Actor: "user-bob"}
+var bob = item.Principal{Actor: "user:bob"}
 
 // --- Idempotency keys scoped by (namespace_id, actor, key) ---
 
@@ -40,7 +40,7 @@ func TestCreate_SameKeyDifferentActors_AreIndependentWrites(t *testing.T) {
 	}
 
 	// One record per actor, both in the default namespace.
-	for _, actor := range []string{"user-alice", "user-bob"} {
+	for _, actor := range []string{"user:alice", "user:bob"} {
 		n := count(t,
 			`select count(*) from idempotency where namespace_id = 'default' and actor = $1 and key = $2`,
 			actor, aliceReq.IdempotencyKey)

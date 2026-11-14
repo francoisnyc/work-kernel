@@ -49,7 +49,7 @@ func (w *openWriter) event(id uuid.UUID, itemSeq int64) int64 {
 	var seq int64
 	err := w.tx.QueryRow(context.Background(),
 		`insert into item_events (item_id, item_seq, actor, op, payload)
-		 values ($1, $2, 'user-test', 'update', '{}') returning commit_seq`, id, itemSeq).Scan(&seq)
+		 values ($1, $2, 'user:test', 'update', '{}') returning commit_seq`, id, itemSeq).Scan(&seq)
 	if err != nil {
 		w.t.Fatalf("insert event: %v", err)
 	}

@@ -25,7 +25,7 @@ import (
 // person returns a principal no other test uses. Roles and readers are rows
 // in a database every test shares, so each test brings its own people.
 func person(name string) item.Principal {
-	return item.Principal{Actor: "user-" + name + "-" + uuid.NewString()[:8]}
+	return item.Principal{Actor: "user:" + name + "-" + uuid.NewString()[:8]}
 }
 
 // word returns a search term no other test uses.
@@ -410,7 +410,7 @@ func TestPolicy_MalformedRequests_AreInvalid(t *testing.T) {
 func TestPolicy_HidingTheItemFromYourself_IsInvalid(t *testing.T) {
 	k := itemservice.New(pool)
 	alice, bob := person("alice"), person("bob")
-	agent := item.Principal{Actor: "agent-" + uuid.NewString()[:8], OnBehalfOf: alice.Actor}
+	agent := item.Principal{Actor: "agent:" + uuid.NewString()[:8], OnBehalfOf: alice.Actor}
 	created := createAs(t, k, alice, "mine", nil, nil)
 
 	check := func(what string, err error) {

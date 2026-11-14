@@ -128,7 +128,7 @@ func (f *fakeWorkflows) callsFor(id uuid.UUID) []call {
 
 // --- helpers ---
 
-var alice = item.Principal{Actor: "user-alice"}
+var alice = item.Principal{Actor: "user:alice"}
 
 func testCtx(t *testing.T) context.Context {
 	t.Helper()

@@ -105,7 +105,7 @@ func testCtx(t *testing.T) context.Context {
 	return ctx
 }
 
-var alice = item.Principal{Actor: "user-alice"}
+var alice = item.Principal{Actor: "user:alice"}
 
 // newRequest returns a valid request with a fresh idempotency key.
 func newRequest() itemservice.CreateRequest {
@@ -153,7 +153,7 @@ func TestCreate_WritesItemEventAndOutbox(t *testing.T) {
 	ctx := testCtx(t)
 	k := itemservice.New(pool)
 	req := newRequest()
-	req.Principal = item.Principal{Actor: "agent-7", OnBehalfOf: "user-alice"}
+	req.Principal = item.Principal{Actor: "agent:7", OnBehalfOf: "user:alice"}
 
 	res, err := k.Create(ctx, req)
 	if err != nil {
@@ -186,7 +186,7 @@ func TestCreate_WritesItemEventAndOutbox(t *testing.T) {
 	if itemSeq != res.ItemSeq || commitSeq != res.CommitSeq {
 		t.Errorf("event seqs = (%d, %d), want (%d, %d)", itemSeq, commitSeq, res.ItemSeq, res.CommitSeq)
 	}
-	if actor != "agent-7" || onBehalfOf == nil || *onBehalfOf != "user-alice" {
+	if actor != "agent:7" || onBehalfOf == nil || *onBehalfOf != "user:alice" {
 		t.Errorf("event actor = %q, on_behalf_of = %v", actor, onBehalfOf)
 	}
 	if op != "create" {

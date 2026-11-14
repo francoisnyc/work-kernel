@@ -1,5 +1,5 @@
-// Tests for Step A: visibility kept in scopes.open and scope_access, and a
-// scope node per container, so narrowing a container changes no descendant.
+// Tests for Step A: visibility kept in scopes.policy_scope_id and scope_access,
+// and a scope node per container, so narrowing a container changes no descendant.
 //
 // The behavior tests of Step 4 (visibility_test.go) stay as they are; in
 // particular TestItemNarrowedLater_IsHiddenAtOnce and
@@ -34,10 +34,14 @@ func scopeOf(t *testing.T, id uuid.UUID) uuid.UUID {
 	return s
 }
 
-// accessOf returns the principals scope_access lists for a scope, sorted.
+// accessOf returns the effective readers of a scope, sorted: the
+// scope_access rows of the scope its policy_scope_id points to. (Step A
+// pointer design: an inheriting scope holds no rows of its own.)
 func accessOf(t *testing.T, scope uuid.UUID) []string {
 	t.Helper()
-	rows, err := pool.Query(testCtx(t), `select principal from scope_access where scope_id = $1 order by principal`, scope)
+	rows, err := pool.Query(testCtx(t),
+		`select a.principal from scopes s join scope_access a on a.scope_id = s.policy_scope_id
+		 where s.id = $1 order by a.principal`, scope)
 	if err != nil {
 		t.Fatalf("read scope_access: %v", err)
 	}
@@ -53,13 +57,50 @@ func accessOf(t *testing.T, scope uuid.UUID) []string {
 	return ps
 }
 
+// isOpen reports whether everyone in the namespace reads the scope: nothing
+// at or above it narrows, so its policy_scope_id is null.
 func isOpen(t *testing.T, scope uuid.UUID) bool {
 	t.Helper()
 	var open bool
-	if err := pool.QueryRow(testCtx(t), `select open from scopes where id = $1`, scope).Scan(&open); err != nil {
-		t.Fatalf("read scopes.open: %v", err)
+	if err := pool.QueryRow(testCtx(t), `select policy_scope_id is null from scopes where id = $1`, scope).Scan(&open); err != nil {
+		t.Fatalf("read scopes.policy_scope_id: %v", err)
 	}
 	return open
+}
+
+// expectedPointers computes, from parent_id and narrows alone, the nearest
+// narrowing scope at or above each scope (uuid.Nil when none).
+func expectedPointers(t *testing.T) map[uuid.UUID]uuid.UUID {
+	t.Helper()
+	parent := map[uuid.UUID]*uuid.UUID{}
+	narrows := map[uuid.UUID]bool{}
+	rows, err := pool.Query(testCtx(t), `select id, parent_id, narrows from scopes where namespace_id = 'default'`)
+	if err != nil {
+		t.Fatalf("read scopes: %v", err)
+	}
+	for rows.Next() {
+		var (
+			id uuid.UUID
+			p  *uuid.UUID
+			n  bool
+		)
+		if err := rows.Scan(&id, &p, &n); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		parent[id], narrows[id] = p, n
+	}
+	rows.Close()
+	out := map[uuid.UUID]uuid.UUID{}
+	for id := range parent {
+		out[id] = uuid.Nil
+		for cur := &id; cur != nil; cur = parent[*cur] {
+			if narrows[*cur] {
+				out[id] = *cur
+				break
+			}
+		}
+	}
+	return out
 }
 
 func sorted(ps ...string) []string {
@@ -69,7 +110,7 @@ func sorted(ps ...string) []string {
 }
 
 // expectedAccess recomputes, from scopes and scope_readers alone, what
-// scope_access and scopes.open should hold for every scope in the namespace:
+// the effective access and openness should be for every scope in the namespace:
 // a scope is open when no ancestor (itself included) narrows, and otherwise
 // readable by the intersection of the readers of every narrowing ancestor.
 func expectedAccess(t *testing.T) (open map[uuid.UUID]bool, access map[uuid.UUID][]string) {
@@ -147,17 +188,70 @@ func expectedAccess(t *testing.T) (open map[uuid.UUID]bool, access map[uuid.UUID
 // for every scope.
 func assertAccessMatchesRecompute(t *testing.T) {
 	t.Helper()
+	// Load the stored form in two queries: every pointer, and every
+	// scope_access row.
+	stored := map[uuid.UUID]uuid.UUID{} // uuid.Nil = no pointer
+	rows, err := pool.Query(testCtx(t), `select id, policy_scope_id from scopes where namespace_id = 'default'`)
+	if err != nil {
+		t.Fatalf("read pointers: %v", err)
+	}
+	for rows.Next() {
+		var (
+			id  uuid.UUID
+			ptr *uuid.UUID
+		)
+		if err := rows.Scan(&id, &ptr); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		stored[id] = uuid.Nil
+		if ptr != nil {
+			stored[id] = *ptr
+		}
+	}
+	rows.Close()
+	rowsOf := map[uuid.UUID][]string{}
+	rows, err = pool.Query(testCtx(t), `select scope_id, principal from scope_access order by principal`)
+	if err != nil {
+		t.Fatalf("read scope_access: %v", err)
+	}
+	for rows.Next() {
+		var (
+			id uuid.UUID
+			p  string
+		)
+		if err := rows.Scan(&id, &p); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		rowsOf[id] = append(rowsOf[id], p)
+	}
+	rows.Close()
+
+	// The stored form: each pointer is the nearest narrowing scope, and only
+	// narrowing scopes hold scope_access rows.
+	for id, want := range expectedPointers(t) {
+		if stored[id] != want {
+			t.Errorf("scope %s: policy_scope_id = %v, want %v (uuid.Nil = none)", id, stored[id], want)
+		}
+	}
+	if n := count(t, `select count(*) from scope_access a join scopes s on s.id = a.scope_id where not s.narrows`); n != 0 {
+		t.Errorf("%d scope_access rows belong to scopes that do not narrow", n)
+	}
+	// The effective answer: open, or exactly the intersected readers.
 	open, access := expectedAccess(t)
 	for id, wantOpen := range open {
-		if got := isOpen(t, id); got != wantOpen {
+		ptr := stored[id]
+		if got := ptr == uuid.Nil; got != wantOpen {
 			t.Errorf("scope %s: open = %v, want %v", id, got, wantOpen)
 		}
-		got := accessOf(t, id)
+		var got []string
+		if ptr != uuid.Nil {
+			got = rowsOf[ptr]
+		}
 		if len(got) == 0 && len(access[id]) == 0 {
 			continue
 		}
 		if !slices.Equal(got, access[id]) {
-			t.Errorf("scope %s: scope_access = %v, want %v", id, got, access[id])
+			t.Errorf("scope %s: effective readers = %v, want %v", id, got, access[id])
 		}
 	}
 }
@@ -165,10 +259,14 @@ func assertAccessMatchesRecompute(t *testing.T) {
 // --- the schema ---
 
 func TestSchema_ScopesOpenAndScopeAccess(t *testing.T) {
+	// Step A pointer design: scopes.policy_scope_id replaces scopes.open.
 	n := count(t, `select count(*) from information_schema.columns
-	               where table_name = 'scopes' and column_name = 'open' and data_type = 'boolean' and is_nullable = 'NO'`)
+	               where table_name = 'scopes' and column_name = 'policy_scope_id' and data_type = 'uuid'`)
 	if n != 1 {
-		t.Error("scopes.open (boolean, not null) does not exist")
+		t.Error("scopes.policy_scope_id (uuid) does not exist")
+	}
+	if n := count(t, `select count(*) from information_schema.columns where table_name = 'scopes' and column_name = 'open'`); n != 0 {
+		t.Error("scopes.open still exists")
 	}
 	n = count(t, `select count(*) from information_schema.table_constraints
 	              where table_name = 'scope_access' and constraint_type = 'PRIMARY KEY'`)
@@ -176,7 +274,7 @@ func TestSchema_ScopesOpenAndScopeAccess(t *testing.T) {
 		t.Error("table scope_access with a primary key does not exist")
 	}
 	// The root scope is open and has no access rows.
-	root := count(t, `select count(*) from scopes where parent_id is null and open`)
+	root := count(t, `select count(*) from scopes where parent_id is null and policy_scope_id is null`)
 	if root != 1 {
 		t.Errorf("open root scopes = %d, want 1", root)
 	}
@@ -448,6 +546,50 @@ func TestScopeAccess_ConcurrentChangesOnContainerAndChild(t *testing.T) {
 		} else {
 			t.Errorf("Update: %v", err)
 		}
+	}
+	assertAccessMatchesRecompute(t)
+}
+
+// --- what narrowing writes (the pointer design) ---
+
+// Narrowing a container with N inheriting descendant scopes to R readers
+// writes R scope_access rows, not (N + 1) × R: the descendants only point at
+// the container's scope. A reader change rewrites the same R rows. (With a
+// copy on every scope, N = 1,000 and R = 50 wrote 50,050 rows.)
+func TestScopeAccess_NarrowingWritesRowsOnlyForTheNarrowingScope(t *testing.T) {
+	k := itemservice.New(pool)
+	owner := person("owner")
+	space := createAs(t, k, owner, "space", nil, nil)
+	const n, r = 40, 5
+	for i := range n {
+		child := createAs(t, k, owner, fmt.Sprintf("child %d", i), nil, &space.ItemID)
+		createAs(t, k, owner, "grandchild", nil, &child.ItemID) // gives the child a node
+	}
+	names := []string{owner.Actor}
+	for i := 1; i < r; i++ {
+		names = append(names, person(fmt.Sprintf("reader%d", i)).Actor)
+	}
+	subtreeRows := func() int {
+		return count(t, `with recursive t as (
+		                     select scope_id as id from items where id = $1
+		                     union all
+		                     select s.id from scopes s join t on s.parent_id = t.id)
+		                 select count(*) from scope_access where scope_id in (select id from t)`, space.ItemID)
+	}
+
+	setPolicy(t, k, owner, space.ItemID, itemservice.PolicyPatch{Readers: names})
+	if got := subtreeRows(); got != r {
+		t.Errorf("rows after narrowing = %d, want %d (only the container's scope)", got, r)
+	}
+	setPolicy(t, k, owner, space.ItemID, itemservice.PolicyPatch{Readers: names[:2]})
+	if got := subtreeRows(); got != 2 {
+		t.Errorf("rows after a reader change = %d, want 2", got)
+	}
+	// Every inheriting scope below points at the container's node.
+	node := scopeOf(t, space.ItemID)
+	n2 := count(t, `select count(*) from scopes where parent_id = $1 and policy_scope_id = $1`, node)
+	if n2 != n {
+		t.Errorf("child scopes pointing at the container = %d, want %d", n2, n)
 	}
 	assertAccessMatchesRecompute(t)
 }
