@@ -386,7 +386,7 @@ reach no workflow, cost a Temporal round-trip each, and are not actions.
 **Next session:** the follow-up spike (Steps 6–7: holds and connectors), starting with
 `HasListeners` and the Temporal cost limits above.
 
-## 2026-11-14 — Step A, hardening (finished in code; CI waits on one test fix)
+## 2026-11-14 — Step A, hardening (part 1)
 
 **Built:** `commit_seq` from a sequence and `xid8` on every event (migration 00004),
 replacing the commit counter; `min_seq` waits until the write's transaction ID is below
@@ -487,3 +487,66 @@ Rows written are (N + 1) × R, for the first narrowing and for every reader chan
 inheriting node below holds its own copy of the effective readers. At N = 1,000 and
 R = 50 that is 50,050 rows and ~0.8 s, with the whole subtree locked. Too large: a
 pointer design is proposed before going further.
+
+## 2026-11-14 — Step A, part 2: pointer, typed principals, property test (finished)
+
+**Built:** migration 00006: `scopes.policy_scope_id` points to the nearest narrowing
+scope (null = open), only narrowing scopes keep `scope_access` rows, `scopes.open` goes.
+Typed principal IDs from callers (`user:`, `agent:`, `system:`; `group:` reserved): the
+actor, `on_behalf_of` (a user), readers and Type `principal:` entries are checked, and
+untyped IDs are `ErrInvalid`. A property test: 3 fixed seeds × 30 random steps (creates,
+narrowings, reader changes, inherits, 4 concurrent changes) against a naive evaluator.
+The race in `TestMinSeq_WaitsForAWriteStillCommitting` is fixed (approved).
+
+**Surprises:** the property test found three concurrency bugs the hand-written tests
+missed, all fixed:
+- a foreign key on the new pointer took a share lock on an ancestor's row, which a
+  concurrent change to that ancestor held; the pointer is derived, so it has no FK;
+- the subtree was listed before it was locked, so a scope added in between kept a stale
+  pointer; the list is now repeated after locking until it holds still;
+- inherit that removes a node updated the Item row twice, and the second update
+  re-checked `container_id`, share-locking the container's Item row against a concurrent
+  change to the container; the row is now updated once and the node removed afterwards.
+
+All three share a cause: Postgres row-lock rules (FK checks, re-checks on a second
+update) take locks bottom-up, against the top-down order the design relies on.
+
+**Numbers.** Narrowing a container (`bench -narrowing`), before → after the pointer:
+
+| N nodes | R | Rows written | ms (narrow) | ms (reader change) |
+| --- | --- | --- | --- | --- |
+| 100 | 50 | 5,050 → 50 | 62 → 9 | 64 → 8 |
+| 1,000 | 10 | 10,010 → 10 | 743 → 41 | 801 → 34 |
+| 1,000 | 50 | 50,050 → 50 | 784 → 50 | 784 → 40 |
+
+The remaining ~40 ms is locking the 1,000-scope subtree and moving pointers.
+
+Full bench on the pointer design (same machine type as part 1):
+
+| | Part 1 | Part 2 |
+| --- | --- | --- |
+| Create / Update / Transition, 16 writers, cache on (writes/s) | 1,300 / 1,328 / 1,463 | 1,464 / 1,283 / 1,490 |
+| ×1 writer | 2.8 / 2.7 / 2.6 | 2.6 / 2.2 / 2.5 |
+| Lock waits, every 16-writer run | 0 | 0 |
+| Burst, 1 writer / 16 writers 1 channel / 16 channels (msgs/s) | 418 / 1,451 / 1,444 | 429 / 1,142 / 1,173 |
+| Rows per message, outbox rows | 4, 0 | 4, 0 |
+| Get, light / heavy principal | 0.16 / 0.17 ms | 0.20 / 0.25 ms |
+| Create by light principal, 1,000 narrowed scopes exist | 2.15 ms | 2.26 ms |
+| Search 1,001 matches, light / heavy | 3.8 / 4.6 ms | 4.2 / 4.9 ms |
+| Search, common word / flattened | 14.4 / 0.85 ms | 16.1 / 0.97 ms |
+| Temporal per ticket | 9 actions, 6,196 bytes | 9 actions, 6,209 bytes |
+
+`synchronous_commit`: on 462 / 1,345 writes/s (1 / 16 writers), off 560 / 1,690. Part 1
+showed no difference; this run shows ~25%. Run-to-run noise on this shared 4-vCPU box is
+about ±20% (the 16-writer burst read 1,451 then 1,142 on equivalent code), so neither run
+settles where the ceiling is; Later already says to measure on separate machines.
+
+Property test: 1.9 s locally under `-race`; the `itemservice` package takes 28 s in CI.
+
+**Done when (Step A, all parts):** no shared lock waits ✓; 16 writers ≥ 2× one ✓ (2.2–2.6×);
+`min_seq` and the relay lose and reorder nothing ✓; a principal pays nothing for others'
+narrowed scopes ✓; narrowing cost O(R + scopes below), not O(N × R) ✓; stored visibility
+equals a naive evaluator under random and concurrent edits ✓; CI green ✓.
+
+**Next session:** Step A2 (one `visible()` check for every output path, moves as policy
+changes, agent write rules), then option B (Steps 6–7).
