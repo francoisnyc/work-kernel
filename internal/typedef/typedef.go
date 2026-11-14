@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"cel.dev/cel-go/cel"
 	"go.yaml.in/yaml/v3"
 
 	"github.com/francoisnyc/work-kernel/internal/item"
@@ -86,16 +87,20 @@ type Timer struct {
 type Transition struct {
 	From     string   `yaml:"from" json:"from"`
 	To       string   `yaml:"to" json:"to"`
-	Guard    string   `yaml:"guard" json:"guard,omitempty"`       // expression; see ParseGuard
+	Guard    string   `yaml:"guard" json:"guard,omitempty"`       // a CEL expression; see compileGuard
 	Required []string `yaml:"required" json:"required,omitempty"` // field IDs that must be set
 	// Allowed says who may make the move: entries are "role:<name>" or
 	// "principal:<id>". Empty means anyone who can see the Item. The list is
 	// only checked for shape here; package policy decides.
 	Allowed []string `yaml:"allowed" json:"allowed,omitempty"`
+	// Escape marks a move that may leave a state while a hold is open on it
+	// (cancel, say). Making it cancels the hold.
+	Escape bool `yaml:"escape" json:"escape,omitempty"`
 
-	// Conditions is Guard in parsed form, filled when the Type is loaded.
-	// The "-" tag keeps it out of YAML and JSON.
-	Conditions []Condition `yaml:"-" json:"-"`
+	// Program is Guard compiled, filled when the Type is loaded; nil when
+	// there is no guard. The "-" tag keeps it out of YAML and JSON. Package
+	// lifecycle evaluates it; this package only compiles it.
+	Program cel.Program `yaml:"-" json:"-"`
 }
 
 // Type is one version of a Type definition.
@@ -106,6 +111,7 @@ type Type struct {
 	Fields       []Field      `yaml:"fields" json:"fields,omitempty"`
 	States       []State      `yaml:"states" json:"states"`
 	Transitions  []Transition `yaml:"transitions" json:"transitions,omitempty"`
+	Hooks        []Hook       `yaml:"hooks" json:"hooks,omitempty"`
 }
 
 // Parse reads a Type from YAML and checks it. Unknown keys are errors, so a
@@ -232,8 +238,12 @@ func (t *Type) check() error {
 		return fail("initial_state %q is not a declared state", t.InitialState)
 	}
 
+	guards, err := newGuardEnv(t)
+	if err != nil {
+		return fail("%v", err)
+	}
 	seen = map[string]bool{}
-	// Range copies each element, so index into the slice to store Conditions.
+	// Range copies each element, so index into the slice to store Program.
 	for i := range t.Transitions {
 		tr := &t.Transitions[i]
 		name := tr.From + " -> " + tr.To
@@ -277,11 +287,11 @@ func (t *Type) check() error {
 					name, entry, hookType)
 			}
 		}
-		conds, err := ParseGuard(t, tr.Guard)
+		prg, err := compileGuard(guards, tr.Guard)
 		if err != nil {
 			return fail("transition %s: guard %q: %v", name, tr.Guard, err)
 		}
-		tr.Conditions = conds
+		tr.Program = prg
 	}
 
 	// Timers come last: each must name a transition checked above.
@@ -320,7 +330,9 @@ func (t *Type) check() error {
 		}
 		s.Timer.Duration = d
 	}
-	return nil
+
+	// Hooks last: they name states, transitions and fields checked above.
+	return t.checkHooks()
 }
 
 // maxExactInt is the largest integer a JSON number (a float64) holds exactly.
