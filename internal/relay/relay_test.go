@@ -190,9 +190,15 @@ func ticketInProgress(t *testing.T, k *itemservice.Service) uuid.UUID {
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	_, err = k.Transition(ctx, itemservice.TransitionRequest{
-		IdempotencyKey: newKey(), Principal: alice, ItemID: res.ItemID, ToState: "in_progress",
-		Attribution: item.Attribution{CorrelationID: "corr-2", Hop: 1},
+	// Step 6: only a kernel write carries a hop, so this one goes through
+	// the internal door as the timer, caused by the update before it.
+	_, err = k.Internal().Transition(ctx, itemservice.TransitionRequest{
+		IdempotencyKey: newKey(), Principal: item.Principal{Actor: "system:timer"}, ItemID: res.ItemID,
+		ToState: "in_progress",
+		Attribution: item.Attribution{
+			OriginatingHook: "timer:ticket@v1:open", CausationID: res.ItemID.String() + ":2",
+			CorrelationID: "corr-2", Hop: 1,
+		},
 	})
 	if err != nil {
 		t.Fatalf("Transition: %v", err)

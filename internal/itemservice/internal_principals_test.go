@@ -212,9 +212,10 @@ func TestPublic_CorrelationIDIsAllowed(t *testing.T) {
 
 // --- the internal door ---
 
-// The internal door is for the kernel's own actors. People and agents use
-// the public one; a kernel write is the Type's automation, so it carries no
-// on_behalf_of (the human is found through causation_id instead).
+// The internal door is for the kernel's own actors: system:timer and
+// hook:<type>:<hook-id>, nothing else. People and agents use the public
+// one. A caller cannot set on_behalf_of here (the kernel fills it from the
+// cause), and a kernel actor has no agent session.
 func TestInternal_RefusesPeopleAgentsAndOnBehalfOf(t *testing.T) {
 	k := itemservice.New(pool)
 	alice := person("alice")
@@ -226,8 +227,12 @@ func TestInternal_RefusesPeopleAgentsAndOnBehalfOf(t *testing.T) {
 		agent,
 		{Actor: crmPlan.Actor, OnBehalfOf: alice.Actor},
 		{Actor: timer.Actor, OnBehalfOf: alice.Actor},
+		// Only system:timer is defined; any other system: actor waits
+		// until we define it.
+		{Actor: "system:anything"},
+		{Actor: crmPlan.Actor, AgentSession: agent.AgentSession},
 	} {
-		t.Run(p.Actor+" for "+p.OnBehalfOf, func(t *testing.T) {
+		t.Run(p.Actor+" for "+p.OnBehalfOf+" session "+p.AgentSession, func(t *testing.T) {
 			_, err := k.Internal().Update(testCtx(t), itemservice.UpdateRequest{
 				IdempotencyKey: newKey(), Principal: p, ItemID: id,
 				Fields: map[string]any{"f_plan": "gold"}, Attribution: cause,
@@ -239,6 +244,14 @@ func TestInternal_RefusesPeopleAgentsAndOnBehalfOf(t *testing.T) {
 			assertInvalid(t, "Internal().Transition", err)
 		})
 	}
+	// An agent session on the attribution is refused too.
+	sessioned := cause
+	sessioned.AgentSession = agent.AgentSession
+	_, err := k.Internal().Update(testCtx(t), itemservice.UpdateRequest{
+		IdempotencyKey: newKey(), Principal: crmPlan, ItemID: id,
+		Fields: map[string]any{"f_plan": "gold"}, Attribution: sessioned,
+	})
+	assertInvalid(t, "Internal().Update with an agent session on the attribution", err)
 	assertNothingWritten(t, id, 1)
 }
 
@@ -314,8 +327,9 @@ func TestInternal_UpdateIsFieldsOnly(t *testing.T) {
 // Kernel actors are internal infrastructure acting on the Item that
 // triggered them, so their writes skip visibility: a hook updates and moves
 // an Item narrowed to one person. They are still subject to `allowed`.
-// Every write is recorded with the hook as actor, no on_behalf_of, and the
-// cause it gave.
+// Every write is recorded with the hook as actor, the cause it gave, and as
+// on_behalf_of the human at the root of the cause (here sam, who created
+// the Item).
 func TestInternal_HookWritesSkipVisibilityButNotAllowed(t *testing.T) {
 	k := itemservice.New(pool)
 	sam := person("sam")
@@ -329,7 +343,7 @@ func TestInternal_HookWritesSkipVisibilityButNotAllowed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hook Update of a narrowed Item: %v", err)
 	}
-	assertKernelEvent(t, id, up.ItemSeq, crmPlan.Actor, cause)
+	assertKernelEvent(t, id, up.ItemSeq, crmPlan.Actor, sam.Actor, cause)
 
 	// Not named in `allowed`: forbidden, even through the internal door.
 	_, err = k.Internal().Transition(testCtx(t), itemservice.TransitionRequest{
@@ -345,24 +359,96 @@ func TestInternal_HookWritesSkipVisibilityButNotAllowed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hook Transition named in allowed: %v", err)
 	}
-	assertKernelEvent(t, id, tr.ItemSeq, erpCheck.Actor, cause)
+	assertKernelEvent(t, id, tr.ItemSeq, erpCheck.Actor, sam.Actor, cause)
 	if it := getAs(t, k, sam, id); it.State != "approved" || it.Fields["f_plan"] != "gold" {
 		t.Errorf("Item = %s %v, want approved with f_plan gold", it.State, it.Fields)
 	}
 }
 
-// assertKernelEvent checks that event seq was written by actor, with no
-// on_behalf_of and the attribution the request gave.
-func assertKernelEvent(t *testing.T, id uuid.UUID, seq int64, actor string, want item.Attribution) {
+// assertKernelEvent checks that event seq was written by actor, on behalf
+// of onBehalfOf ("" for none), with the attribution the request gave.
+func assertKernelEvent(t *testing.T, id uuid.UUID, seq int64, actor, onBehalfOf string, want item.Attribution) {
 	t.Helper()
 	gotActor, got := attribution(t, id, seq)
 	if gotActor != actor || got != want {
 		t.Errorf("event %d: actor %q, attribution %+v; want %q, %+v", seq, gotActor, got, actor, want)
 	}
-	if n := count(t, `select count(*) from item_events where item_id = $1 and item_seq = $2
-	                  and on_behalf_of is null`, id, seq); n != 1 {
-		t.Errorf("event %d has an on_behalf_of; a kernel write carries none", seq)
+	var gotOBO string
+	if err := pool.QueryRow(testCtx(t),
+		`select coalesce(on_behalf_of, '') from item_events where item_id = $1 and item_seq = $2`, id, seq,
+	).Scan(&gotOBO); err != nil {
+		t.Fatalf("read on_behalf_of of event %d: %v", seq, err)
 	}
+	if gotOBO != onBehalfOf {
+		t.Errorf("event %d: on_behalf_of = %q, want %q", seq, gotOBO, onBehalfOf)
+	}
+}
+
+// The kernel fills on_behalf_of on every kernel write with the human at the
+// root of its cause: the cause's on_behalf_of if set, else the cause's actor
+// if it is a user, else nothing. It is attribution only: the hook writes even
+// after that human has lost sight of the Item.
+func TestInternal_OnBehalfOfIsTheHumanAtTheRoot(t *testing.T) {
+	k := itemservice.New(pool)
+	ana := person("ana")
+
+	t.Run("an agent working for ana", func(t *testing.T) {
+		agent := withSession(t, k, item.Principal{Actor: "agent:" + uuid.NewString()[:8], OnBehalfOf: ana.Actor})
+		id := createIntake(t, k, agent, nil)
+		first := hookCause(crmPlan, id, 1)
+		up, err := k.Internal().Update(testCtx(t), itemservice.UpdateRequest{
+			IdempotencyKey: newKey(), Principal: crmPlan, ItemID: id,
+			Fields: map[string]any{"f_plan": "gold"}, Attribution: first,
+		})
+		if err != nil {
+			t.Fatalf("hook Update: %v", err)
+		}
+		assertKernelEvent(t, id, up.ItemSeq, crmPlan.Actor, ana.Actor, first)
+
+		// One hop further: the cause is the hook's own event, which already
+		// names ana.
+		second := hookCause(erpCheck, id, up.ItemSeq)
+		second.Hop = 2
+		tr, err := k.Internal().Transition(testCtx(t), itemservice.TransitionRequest{
+			IdempotencyKey: newKey(), Principal: erpCheck, ItemID: id, ToState: "approved", Attribution: second,
+		})
+		if err != nil {
+			t.Fatalf("hook Transition: %v", err)
+		}
+		assertKernelEvent(t, id, tr.ItemSeq, erpCheck.Actor, ana.Actor, second)
+	})
+
+	t.Run("ana, who can no longer see the Item", func(t *testing.T) {
+		id := createIntake(t, k, ana, &itemservice.Narrow{Readers: readers(ana)})
+		bob := person("bob")
+		setPolicy(t, k, ana, id, itemservice.PolicyPatch{Readers: readers(ana, bob)})
+		cause := hookCause(crmPlan, id, 1)
+		// bob narrows ana out after the event that triggers the hook.
+		setPolicy(t, k, bob, id, itemservice.PolicyPatch{Readers: readers(bob)})
+		assertHidden(t, k, ana, id)
+		up, err := k.Internal().Update(testCtx(t), itemservice.UpdateRequest{
+			IdempotencyKey: newKey(), Principal: crmPlan, ItemID: id,
+			Fields: map[string]any{"f_plan": "gold"}, Attribution: cause,
+		})
+		if err != nil {
+			t.Fatalf("hook Update after ana lost access: %v", err)
+		}
+		assertKernelEvent(t, id, up.ItemSeq, crmPlan.Actor, ana.Actor, cause)
+	})
+
+	t.Run("an agent acting for itself: no human", func(t *testing.T) {
+		agent := withSession(t, k, item.Principal{Actor: "agent:" + uuid.NewString()[:8]})
+		id := createIntake(t, k, agent, nil)
+		cause := hookCause(crmPlan, id, 1)
+		up, err := k.Internal().Update(testCtx(t), itemservice.UpdateRequest{
+			IdempotencyKey: newKey(), Principal: crmPlan, ItemID: id,
+			Fields: map[string]any{"f_plan": "gold"}, Attribution: cause,
+		})
+		if err != nil {
+			t.Fatalf("hook Update: %v", err)
+		}
+		assertKernelEvent(t, id, up.ItemSeq, crmPlan.Actor, "", cause)
+	})
 }
 
 // A chain of kernel writes stops at itemservice.MaxHop (8). A write one hop

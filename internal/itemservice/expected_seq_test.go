@@ -240,14 +240,15 @@ func TestWrite_AttributionIsStoredOnTheEvent(t *testing.T) {
 		t.Errorf("create event attribution = %+v, want %+v", got, createReq.Attribution)
 	}
 
+	// Step 6: kernel attribution goes through the internal door, and a
+	// kernel actor has no agent session.
 	want := item.Attribution{
-		AgentSession:    "session-42",
 		OriginatingHook: "timer:ticket@v1:open",
 		CausationID:     id.String() + ":1",
 		CorrelationID:   "corr-1",
 		Hop:             1,
 	}
-	up, err := k.Update(ctx, itemservice.UpdateRequest{
+	up, err := k.Internal().Update(ctx, itemservice.UpdateRequest{
 		IdempotencyKey: newKey(), Principal: timer, ItemID: id,
 		Fields: map[string]any{"f_assignee": "user-bob"}, Attribution: want,
 	})
@@ -258,7 +259,7 @@ func TestWrite_AttributionIsStoredOnTheEvent(t *testing.T) {
 		t.Errorf("update event: actor %q, attribution %+v; want system:timer, %+v", actor, got, want)
 	}
 
-	tr, err := k.Transition(ctx, itemservice.TransitionRequest{
+	tr, err := k.Internal().Transition(ctx, itemservice.TransitionRequest{
 		IdempotencyKey: newKey(), Principal: timer, ItemID: id, ToState: "in_progress", Attribution: want,
 	})
 	if err != nil {

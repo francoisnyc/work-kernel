@@ -11,6 +11,7 @@ package itemservice_test
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -235,14 +236,25 @@ func TestTransition_TimerMovesANarrowedItem(t *testing.T) {
 		t.Fatalf("Transition to in_progress: %v", err)
 	}
 
-	if err := move(t, k, systemTimer, id, "open", newKey()); err != nil {
+	// Step 6: the timer writes through the internal door, with its cause.
+	_, err := k.Internal().Transition(testCtx(t), itemservice.TransitionRequest{
+		IdempotencyKey: newKey(), Principal: systemTimer, ItemID: id, ToState: "open",
+		Attribution: item.Attribution{
+			OriginatingHook: "timer:request@v1:in_progress",
+			CausationID:     fmt.Sprintf("%s:2", id),
+			Hop:             1,
+		},
+	})
+	if err != nil {
 		t.Fatalf("the timer's move back to open: %v", err)
 	}
 	if it := getAs(t, k, sam, id); it.State != "open" {
 		t.Errorf("state = %q, want open", it.State)
 	}
-	// The exemption is for writes the timer makes, not for reading as it.
-	assertHidden(t, k, systemTimer, id)
+	// The exemption is for writes the timer makes, not for reading as it:
+	// the public door refuses system: actors outright (Step 6).
+	_, err = k.Get(testCtx(t), systemTimer, id)
+	assertInvalid(t, "Get as system:timer", err)
 }
 
 // An agent acting on behalf of a user has the rights of both, intersected:

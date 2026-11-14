@@ -59,14 +59,13 @@ func TestPrincipals_ActorAndOnBehalfOfMustBeTyped(t *testing.T) {
 	assertNothingWritten(t, id, 1)
 }
 
-// The kinds that may act today all work: a user, an agent for a user, and
-// the kernel's own system:timer.
+// The kinds that may act through the public door both work: a user and an
+// agent for a user. The kernel's own actors use Internal() (Step 6).
 func TestPrincipals_TypedActorsAreAccepted(t *testing.T) {
 	k := itemservice.New(pool)
 	for _, p := range []item.Principal{
 		{Actor: "user:" + uuid.NewString()},
 		withSession(t, k, item.Principal{Actor: "agent:" + uuid.NewString(), OnBehalfOf: "user:" + uuid.NewString()}),
-		{Actor: "system:timer"},
 	} {
 		if _, err := k.Create(testCtx(t), itemservice.CreateRequest{
 			IdempotencyKey: newKey(), Principal: p, TypeID: "ticket", TypeVersion: 1,
