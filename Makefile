@@ -4,7 +4,7 @@ BUF   := go run github.com/bufbuild/buf/cmd/buf@v1.75.0
 
 DATABASE_URL ?= postgres://kernel:kernel@localhost:5432/kernel?sslmode=disable
 
-.PHONY: up down migrate gen test vet
+.PHONY: up down migrate gen test vet bench
 
 up: ## start Postgres and the Temporal dev server
 	docker compose up -d --wait
@@ -23,3 +23,6 @@ vet:
 
 test: ## run all tests (needs Docker for testcontainers)
 	go test ./...
+
+bench: ## measure the spike (needs Docker; takes a few minutes)
+	go run ./cmd/bench
