@@ -380,6 +380,12 @@ func TestGet_ReturnsCreatedItem(t *testing.T) {
 		Fields:      map[string]any{"f_title": "Printer on fire", "f_priority": float64(2)},
 		ItemSeq:     1,
 	}
+	// Since Step 4 every Item has a scope. Which one is checked by
+	// TestCreate_PlainItem_IsInTheRootScope; here it only has to be set.
+	if got.ScopeID == nil {
+		t.Error("Get: ScopeID is nil, want the Item's scope")
+	}
+	got.ScopeID = nil
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Get = %+v\nwant  %+v", got, want)
 	}
