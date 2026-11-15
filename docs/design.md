@@ -379,7 +379,9 @@ client → item service (Go, stateless)
     rule); a destination they cannot see is `ErrNotFound`.
   - A move into the Item itself or anything below it is `ErrInvalid`.
   - A move that widens who can see any scope in the moved subtree (effective
-    readers before vs after) needs `ConfirmWiden`; otherwise `ErrInvalid`.
+    readers before vs after) needs `ConfirmWiden`; otherwise `ErrRejected`
+    (`widen_not_confirmed`; over the API `FAILED_PRECONDITION` / `WIDEN_NOT_CONFIRMED`):
+    the request is valid, and the client asks the user and resends it confirmed.
   - Locks: the Item rows involved in ID order, then scopes ancestor-first.
     Pointers below the moved Item are recomputed; no descendant Item row changes.
   - Moves also take one namespace-wide move lock (a transaction advisory lock).

@@ -177,6 +177,12 @@ Ideas noted during the spike, not built yet.
   kernel's own field check if it shows up in write latency. (Step 0, part 1)
 - Agent sessions and `ApproveWiden` carry no namespace yet; Part 2's agent
   sessions must scope them like everything else. (Step 0, part 1)
+- API error messages: kernel error text passes through today (NEEDS_APPROVAL
+  names the scope in its message). Rule: dynamic values go in ErrorInfo
+  metadata, and each reason's message comes from a fixed set. NEEDS_APPROVAL
+  puts the scope in metadata (`scope`): the agent needs it to ask for
+  approval. Add a test that no reason's message ever contains an ID. Do it in
+  Step 0, part 2. (PR #18 review)
 
 ## 2026-11-12 — Step 1 (finished)
 
@@ -902,8 +908,8 @@ assumed a single root scope in the database. Go 1.24's `http.Protocols` serves h
 with no extra library. buf v1.75 needs a newer Go patch than `go.mod`; the go command fetches it.
 A mutation check (drop the namespace on `Update` only) is caught by the API's namespace guard.
 
-**Open:** design.md's Moves section still says an unconfirmed widening move is `ErrInvalid`; it is
-`ErrRejected` / `WIDEN_NOT_CONFIRMED` now (decided in review). Later has five new items.
+**Open:** Later has six new items (PR #18 review added fixed error messages, with values in
+metadata). design.md's Moves section now matches the widening-move decision.
 
 **Next session:** Step 0, part 2: ListItems, ListItemEvents, filters and paging, created_at and
 created_by columns, category, agent sessions with scopes and powers, and their pli commands.
