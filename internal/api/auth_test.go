@@ -54,6 +54,27 @@ func calls(c kernelv1connect.ItemServiceClient, item string) map[string]func(con
 			_, err := c.ListTypes(ctx, connect.NewRequest(&kernelv1.ListTypesRequest{Parent: "namespaces/acme"}))
 			return err
 		},
+		// Step 0, part 2.
+		"ListItems": func(ctx context.Context) error {
+			_, err := c.ListItems(ctx, connect.NewRequest(&kernelv1.ListItemsRequest{Parent: item}))
+			return err
+		},
+		"ListItemEvents": func(ctx context.Context) error {
+			_, err := c.ListItemEvents(ctx, connect.NewRequest(&kernelv1.ListItemEventsRequest{Parent: item}))
+			return err
+		},
+		"StartAgentSession": func(ctx context.Context) error {
+			_, err := c.StartAgentSession(ctx, connect.NewRequest(&kernelv1.StartAgentSessionRequest{
+				Parent: "namespaces/acme", ActingFor: "user:ana", Scopes: []string{"namespaces/acme"}, Powers: []string{"read"},
+			}))
+			return err
+		},
+		"ApproveWiden": func(ctx context.Context) error {
+			_, err := c.ApproveWiden(ctx, connect.NewRequest(&kernelv1.ApproveWidenRequest{RequestId: newID(),
+				Parent: "namespaces/acme", Session: "ses_x", Scope: "namespaces/acme",
+			}))
+			return err
+		},
 	}
 }
 

@@ -24,8 +24,14 @@ func caller(ctx context.Context) item.Principal {
 // newAuth returns the interceptor that turns a bearer token into the caller.
 // It runs before every handler: no token, an unknown token or another
 // scheme is UNAUTHENTICATED, and nothing else is looked at. Real sign-on
-// (OIDC) later replaces this function only.
-func newAuth(tokens []devtoken.Token) connect.UnaryInterceptorFunc {
+// (OIDC) later replaces the token part only.
+//
+// An agent also names its session in the Pli-Agent-Session header, on every
+// call but StartAgentSession: the session says which user the agent acts
+// for, never the request. The header with a user's token, or an agent's
+// token without it, is INVALID_ARGUMENT naming the header; a session that is
+// not this agent's, in this namespace, is UNAUTHENTICATED / SESSION_INVALID.
+func newAuth(tokens []devtoken.Token, k Kernel) connect.UnaryInterceptorFunc {
 	byToken := make(map[string]item.Principal, len(tokens))
 	for _, t := range tokens {
 		byToken[t.Token] = item.Principal{Actor: t.Principal, Namespace: t.Namespace}
@@ -36,8 +42,29 @@ func newAuth(tokens []devtoken.Token) connect.UnaryInterceptorFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 			p, ok := byToken[bearerToken(req.Header().Get("Authorization"))]
 			if !ok {
-				return nil, apiError(connect.CodeUnauthenticated, "UNAUTHENTICATED",
-					"a valid bearer token is required", nil)
+				return nil, apiError(connect.CodeUnauthenticated, "UNAUTHENTICATED", nil)
+			}
+			session := req.Header().Get(AgentSessionHeader)
+			starting := strings.HasSuffix(req.Spec().Procedure, "/StartAgentSession")
+			switch {
+			case !item.IsKind(p.Actor, item.KindAgent):
+				if session != "" {
+					return nil, badHeader(AgentSessionHeader)
+				}
+			case starting:
+				// A session is started without one: sub-agents come later.
+				if session != "" {
+					return nil, badHeader(AgentSessionHeader)
+				}
+			case session == "":
+				return nil, badHeader(AgentSessionHeader)
+			default:
+				p.AgentSession = session
+				s, err := k.AgentSession(ctx, p)
+				if err != nil {
+					return nil, errorIn(err, p.Namespace, "")
+				}
+				p.OnBehalfOf = s.OnBehalfOf
 			}
 			return next(context.WithValue(ctx, callerKey{}, p), req)
 		}

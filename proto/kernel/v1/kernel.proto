@@ -13,12 +13,22 @@ syntax = "proto3";
 // - Errors carry a standard code and a google.rpc.ErrorInfo with a stable
 //   reason (domain "pli.dev"); see the error table in docs/design.md.
 //
-// kernel.v1 only grows. Paging, filters, ListItems, ListItemEvents and the
-// agent calls arrive in Step 0, part 2; links in Step 1.
+// - Reads page: page_size (default 50, max 500; more is read as 500),
+//   page_token from the previous page's next_page_token, no offsets and no
+//   totals. A page_token is bound to its request, caller and namespace:
+//   sent with any other request it is INVALID_ARGUMENT.
+// - An agent calls with its own token and the session's ID in the
+//   Pli-Agent-Session header (StartAgentSession mints it). The header with a
+//   user's token, or an agent's token without it, is INVALID_ARGUMENT; an
+//   unknown session, or another agent's or another namespace's, is
+//   UNAUTHENTICATED / SESSION_INVALID.
+//
+// kernel.v1 only grows. Links arrive in Step 1.
 package kernel.v1;
 
 import "google/protobuf/duration.proto";
 import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/francoisnyc/work-kernel/gen/kernel/v1;kernelv1";
 
@@ -31,13 +41,25 @@ service ItemService {
   rpc UpdateItem(UpdateItemRequest) returns (UpdateItemResponse);
   // Move the Item to another state, optionally with a field patch and a wait.
   rpc TransitionItem(TransitionItemRequest) returns (TransitionItemResponse);
-  // Items whose string fields contain all the words, among those the caller
-  // can see.
+  // Items whose string fields contain all the words and that match the
+  // filter, among those the caller can see. Words, a filter or both.
   rpc SearchItems(SearchItemsRequest) returns (SearchItemsResponse);
+  // A container's direct children (or the top-level Items), with the same
+  // filters as SearchItems.
+  rpc ListItems(ListItemsRequest) returns (ListItemsResponse);
+  // An Item's history, oldest first, as the caller may see it.
+  rpc ListItemEvents(ListItemEventsRequest) returns (ListItemEventsResponse);
   // One Type version. Types are read-only: they load from files at start.
   rpc GetType(GetTypeRequest) returns (GetTypeResponse);
   // Every Type version the server knows.
   rpc ListTypes(ListTypesRequest) returns (ListTypesResponse);
+  // Called with an agent's token: mint a session in capability mode, with
+  // the scopes it may touch and the powers it may use. Later calls carry its
+  // ID in the Pli-Agent-Session header.
+  rpc StartAgentSession(StartAgentSessionRequest) returns (StartAgentSessionResponse);
+  // Called with a user's token: approve one wider scope for an agent session
+  // acting for that user (the answer to NEEDS_APPROVAL).
+  rpc ApproveWiden(ApproveWidenRequest) returns (ApproveWidenResponse);
 }
 
 // An Item as the caller may see it.
@@ -59,6 +81,22 @@ message Item {
   string etag = 6;
   // The open hold, if any: a checked transition waiting for its check.
   Hold hold = 7;
+  // When the Item was created.
+  google.protobuf.Timestamp create_time = 8;
+  // Who created it (its first event's actor): user:tom, agent:triage-bot.
+  string creator = 9;
+  // The user the creator acted for, when an agent created it; else empty.
+  string creator_on_behalf_of = 10;
+  // The current state's category in the Item's Type version.
+  StateCategory category = 11;
+}
+
+// Another Item named in an Item's history (later, in its links). One the
+// caller cannot see is restricted, with no name.
+message ItemRef {
+  // namespaces/{ns}/items/{item}; empty when restricted.
+  string name = 1;
+  bool restricted = 2;
 }
 
 // A requested transition, held while its check runs.
@@ -195,16 +233,203 @@ enum TransitionOutcome {
 message SearchItemsRequest {
   // namespaces/{ns}
   string parent = 1;
-  // Required: words; an Item must contain all of them.
+  // Words; an Item must contain all of them. Optional when the filter says
+  // something; words, a filter or both are required.
   string query = 2;
   // Optional read-your-writes: answer only once the write with this
   // commit_seq is visible; UNAVAILABLE / NOT_CAUGHT_UP after 2 s.
   int64 min_seq = 3;
+  ItemFilter filter = 4;
+  // Default 50, at most 500 (more is read as 500).
+  int32 page_size = 5;
+  // The previous page's next_page_token, with the same request otherwise.
+  string page_token = 6;
 }
 
 message SearchItemsResponse {
-  // Newest first, at most 50.
+  // Newest first (create time, then name).
   repeated Item items = 1;
+  // Empty on the last page.
+  string next_page_token = 2;
+}
+
+// Conditions on Items, all of which must hold. Within one list, any entry
+// may match.
+message ItemFilter {
+  // Type names without a version, namespaces/{ns}/types/{type}: Items of
+  // any version of these Types.
+  repeated string types = 1;
+  // State IDs.
+  repeated string states = 2;
+  // State categories, read in each Item's own Type version.
+  repeated StateCategory categories = 3;
+  // Conditions on field values. A field filter needs exactly one Type in
+  // types, and the field must have one type in every version of it.
+  repeated FieldFilter fields = 4;
+}
+
+// A condition on one field's value: eq, or a range of one or two bounds.
+// Values are plain JSON as in Item.fields (an int is a string). Ranges are
+// for ordered types only (int); strings, enums and booleans take eq.
+message FieldFilter {
+  // The field ID.
+  string field = 1;
+  google.protobuf.Value eq = 2;
+  google.protobuf.Value gt = 3;
+  google.protobuf.Value gte = 4;
+  google.protobuf.Value lt = 5;
+  google.protobuf.Value lte = 6;
+}
+
+message ListItemsRequest {
+  // The container's name, namespaces/{ns}/items/{item}, for its direct
+  // children; or namespaces/{ns} for the Items at the top level.
+  string parent = 1;
+  ItemFilter filter = 2;
+  // As on SearchItemsRequest.
+  int32 page_size = 3;
+  string page_token = 4;
+}
+
+message ListItemsResponse {
+  // Newest first (create time, then name).
+  repeated Item items = 1;
+  string next_page_token = 2;
+}
+
+message ListItemEventsRequest {
+  // The Item's name, namespaces/{ns}/items/{item}.
+  string parent = 1;
+  // As on SearchItemsRequest.
+  int32 page_size = 2;
+  string page_token = 3;
+}
+
+message ListItemEventsResponse {
+  // Oldest first, by item_seq.
+  repeated ItemEvent events = 1;
+  string next_page_token = 2;
+}
+
+// One accepted operation on an Item, as the caller may see it.
+message ItemEvent {
+  // namespaces/{ns}/items/{item}/events/{item_seq}
+  string name = 1;
+  int64 item_seq = 2;
+  int64 commit_seq = 3;
+  ItemEventKind kind = 4;
+  google.protobuf.Timestamp create_time = 5;
+  // Whose permissions were checked: user:, agent:, system:timer or a hook.
+  string actor = 6;
+  // The human at the root, when different from the actor.
+  string on_behalf_of = 7;
+  // Set when a timer or hook caused the write.
+  string originating_hook = 8;
+  // The event that caused this one, as "item:seq".
+  string causation_id = 9;
+  string correlation_id = 10;
+  int32 hop = 11;
+
+  // CREATED: the Type version and the first state.
+  string type = 12;
+  // TRANSITIONED, TRANSITION_DENIED, TRANSITION_FAILED and
+  // TRANSITION_REQUESTED: the state left or held in.
+  string from_state = 13;
+  // TRANSITIONED, and CREATED (the first state).
+  string to_state = 14;
+  // TRANSITION_REQUESTED, TRANSITION_DENIED, TRANSITION_FAILED.
+  string requested_state = 15;
+  // The hold a held transition opened, resolved or canceled.
+  string hold = 16;
+  // HOOK_FAILED: the hook.
+  string hook = 17;
+  // TRANSITION_DENIED, TRANSITION_FAILED, HOOK_FAILED: a code.
+  string reason = 18;
+
+  // The fields this event set, with the values it set; a cleared field is
+  // null. An erased value is not here: it is in erased_fields.
+  google.protobuf.Struct fields = 19;
+  // Fields this event set whose values have since been erased.
+  repeated string erased_fields = 20;
+  // A narrowing: the new readers. Anyone who sees the Item sees them.
+  Readers readers = 21;
+  // The Item dropped its own readers and inherits its container's again.
+  bool inherit = 22;
+  // CREATED in a container: the container.
+  ItemRef container = 23;
+  // A move: where from and where to; unset means the top level.
+  bool moved = 24;
+  ItemRef container_from = 25;
+  ItemRef container_to = 26;
+}
+
+enum ItemEventKind {
+  ITEM_EVENT_KIND_UNSPECIFIED = 0;
+  ITEM_EVENT_KIND_CREATED = 1;
+  // A field patch, a readers change or a move.
+  ITEM_EVENT_KIND_UPDATED = 2;
+  ITEM_EVENT_KIND_TRANSITIONED = 3;
+  // A checked transition was asked for: a hold opened.
+  ITEM_EVENT_KIND_TRANSITION_REQUESTED = 4;
+  ITEM_EVENT_KIND_TRANSITION_DENIED = 5;
+  ITEM_EVENT_KIND_TRANSITION_FAILED = 6;
+  ITEM_EVENT_KIND_HOOK_FAILED = 7;
+}
+
+message StartAgentSessionRequest {
+  // namespaces/{ns}: the agent's namespace.
+  string parent = 1;
+  // The user the agent acts for (user:ana), who must have granted it; empty
+  // when it acts for itself. Not who is calling: that is the agent's token.
+  string acting_for = 2;
+  // Required: what the session may read and write. Each is a container's
+  // name (the container and everything below it) or namespaces/{ns} (the
+  // whole namespace). Within the agent's grant.
+  repeated string scopes = 3;
+  // Required: read, create, edit_fields, transition:<state> (may move Items
+  // into that state) or transition:* (any), move, comment, outbound. read is
+  // always implied. Within the agent's grant. v1 enforces read versus any
+  // write power.
+  repeated string powers = 4;
+}
+
+message StartAgentSessionResponse {
+  AgentSession session = 1;
+}
+
+message AgentSession {
+  // namespaces/{ns}/agentSessions/{id}
+  string name = 1;
+  // What the Pli-Agent-Session header carries.
+  string id = 2;
+  string agent = 3;
+  string acting_for = 4;
+  repeated string scopes = 5;
+  repeated string powers = 6;
+}
+
+message ApproveWidenRequest {
+  // namespaces/{ns}: the session's namespace.
+  string parent = 1;
+  // The agent session's ID.
+  string session = 2;
+  // The scope from the NEEDS_APPROVAL error's "scope" metadata: a
+  // container's name, or namespaces/{ns}.
+  string scope = 3;
+  // Required, as on every write: the same request_id with the same request
+  // answers as the first time and records nothing more; with a different
+  // request it is ALREADY_EXISTS.
+  string request_id = 4;
+  // Check the approval and answer its audience, recording nothing
+  // (AIP-163). request_id is not needed then.
+  bool validate_only = 5;
+}
+
+message ApproveWidenResponse {
+  // Who the approval lets see the agent session's content: "namespace"
+  // (everyone in the namespace: the scope is open) or "restricted" (the
+  // readers of the scope's Item).
+  string audience = 1;
 }
 
 // One version of a Type definition.

@@ -33,6 +33,12 @@ type Kernel interface {
 	Update(context.Context, itemservice.UpdateRequest) (itemservice.WriteResult, error)
 	Transition(context.Context, itemservice.TransitionRequest) (itemservice.TransitionResult, error)
 	Search(context.Context, itemservice.SearchRequest) (itemservice.SearchResult, error)
+	List(context.Context, itemservice.ListRequest) (itemservice.ListResult, error)
+	ListEvents(context.Context, itemservice.ListEventsRequest) (itemservice.ListEventsResult, error)
+	StartAgentSession(context.Context, itemservice.StartAgentSessionRequest) (string, error)
+	AgentSession(context.Context, item.Principal) (itemservice.AgentSession, error)
+	ApproveWiden(context.Context, itemservice.ApproveWidenRequest) error
+	ApprovalAudience(context.Context, itemservice.ApproveWidenRequest) (itemservice.Audience, error)
 	Type(ctx context.Context, id string, version int) (*typedef.Type, error)
 	ListTypes(context.Context) ([]*typedef.Type, error)
 }
@@ -42,10 +48,17 @@ type Options struct {
 	// Tokens are the dev tokens: the only auth there is in the proof of
 	// concept. A request without one of them is UNAUTHENTICATED.
 	Tokens []devtoken.Token
+	// Grants are what each user let each agent do (dev config for now). An
+	// agent session must fit inside its grant.
+	Grants []devtoken.Grant
 	// SearchWait bounds how long SearchItems waits for min_seq; zero means
 	// the kernel's default (2 s). Tests shorten it.
 	SearchWait time.Duration
 }
+
+// AgentSessionHeader carries an agent's session ID on every call it makes
+// after StartAgentSession.
+const AgentSessionHeader = "Pli-Agent-Session"
 
 // maxWait is the longest TransitionItemRequest.wait accepted.
 const maxWait = itemservice.MaxWait
@@ -53,11 +66,12 @@ const maxWait = itemservice.MaxWait
 // server implements kernelv1connect.ItemServiceHandler.
 type server struct {
 	k          Kernel
+	grants     []devtoken.Grant
 	searchWait time.Duration
 }
 
 // NewHandler returns the path to mount the API under and its handler.
 func NewHandler(k Kernel, opts Options) (string, http.Handler) {
-	s := &server{k: k, searchWait: opts.SearchWait}
-	return kernelv1connect.NewItemServiceHandler(s, connect.WithInterceptors(newAuth(opts.Tokens)))
+	s := &server{k: k, searchWait: opts.SearchWait, grants: opts.Grants}
+	return kernelv1connect.NewItemServiceHandler(s, connect.WithInterceptors(newAuth(opts.Tokens, k)))
 }

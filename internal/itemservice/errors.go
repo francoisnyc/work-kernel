@@ -3,6 +3,7 @@ package itemservice
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -32,7 +33,11 @@ const (
 type RejectedError struct {
 	Code   string
 	Reason string
-	cause  error // the lifecycle's Rejection, when it decided
+	// Metadata carries the refusal's details for the caller, keyed like the
+	// API's ErrorInfo metadata: from_state and to_state for a transition,
+	// fields (comma-separated IDs) for missing fields. Never a value.
+	Metadata map[string]string
+	cause    error // the lifecycle's Rejection, when it decided
 }
 
 func (e *RejectedError) Error() string { return fmt.Sprintf("%v: %s", ErrRejected, e.Reason) }
@@ -56,7 +61,14 @@ func rejected(code, format string, args ...any) error {
 func fromLifecycle(err error) error {
 	var rej *lifecycle.Rejection
 	if errors.As(err, &rej) {
-		return &RejectedError{Code: string(rej.Code), Reason: rej.Reason, cause: rej}
+		md := map[string]string{}
+		if rej.From != "" || rej.To != "" {
+			md["from_state"], md["to_state"] = rej.From, rej.To
+		}
+		if len(rej.Missing) > 0 {
+			md["fields"] = strings.Join(rej.Missing, ",")
+		}
+		return &RejectedError{Code: string(rej.Code), Reason: rej.Reason, Metadata: md, cause: rej}
 	}
 	return err
 }
@@ -66,7 +78,11 @@ func fromLifecycle(err error) error {
 type InvalidError struct {
 	Field   string // the field ID, for a field value
 	Readers bool   // the reader list of a Narrow or a policy patch
-	Reason  string
+	// Path names any other malformed part of the request as the API's
+	// request path: page_token, filter.types, filter.fields[0], scopes,
+	// powers.
+	Path   string
+	Reason string
 }
 
 func (e *InvalidError) Error() string { return fmt.Sprintf("%v: %s", ErrInvalid, e.Reason) }

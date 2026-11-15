@@ -61,6 +61,11 @@ func run(ctx context.Context, args []string, getenv func(string) string, stderr 
 	if err != nil {
 		return err
 	}
+	// Grants live in the same file: what each user let each agent do.
+	grants, err := devtoken.LoadGrants(*tokensPath)
+	if err != nil {
+		return err
+	}
 	fmt.Fprintf(stderr, "WARNING: dev tokens are on (%d from %s). Anyone holding that file can act as its users. "+
 		"Proof of concept only; never expose this server.\n", len(tokens), *tokensPath)
 
@@ -95,7 +100,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stderr 
 		}
 	}
 
-	path, handler := api.NewHandler(k, api.Options{Tokens: tokens})
+	path, handler := api.NewHandler(k, api.Options{Tokens: tokens, Grants: grants})
 	mux := http.NewServeMux()
 	mux.Handle(path, handler)
 	// gRPC needs HTTP/2. Without TLS that is "h2c", which net/http serves

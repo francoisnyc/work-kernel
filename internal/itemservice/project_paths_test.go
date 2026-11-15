@@ -28,6 +28,9 @@ var projectExempt = map[string]string{
 	"Internal": "returns the kernel's write door; its methods return WriteResult and error only, no Item data",
 	// Step 0, part 1: the public API reads Types.
 	"ListTypes": "Types are readable by anyone in the namespace: a Type definition holds no Item data",
+	// Step 0, part 2: the API learns who an agent acts for.
+	"ApprovalAudience": "returns whether a scope is open, no Item data",
+	"AgentSession":     "returns the session's agent, user, namespace, scopes (opaque Item IDs the session was granted) and powers; no Item data",
 }
 
 // noItemData are the result types that carry no Item data. A

@@ -109,7 +109,7 @@ func TestPublic_KernelActorsAreRefused(t *testing.T) {
 			assertInvalid(t, "Get", err)
 			_, err = k.Search(testCtx(t), itemservice.SearchRequest{Principal: p, Query: "x"})
 			assertInvalid(t, "Search", err)
-			_, err = k.StartAgentSession(testCtx(t), p)
+			_, err = k.StartAgentSession(testCtx(t), wholeNamespace(p))
 			assertInvalid(t, "StartAgentSession", err)
 		})
 	}

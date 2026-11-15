@@ -130,7 +130,7 @@ func (k *Service) update(ctx context.Context, req UpdateRequest, kc *kernelCause
 			}
 		}
 		if len(req.Fields) > 0 {
-			if err := checkAgentWrite(ctx, tx, req.Principal, it.ScopeID); err != nil {
+			if err := checkAgentWrite(ctx, tx, req.Principal, it.ScopeID, &req.ItemID); err != nil {
 				return WriteResult{}, err
 			}
 		}
@@ -167,7 +167,7 @@ func (k *Service) update(ctx context.Context, req UpdateRequest, kc *kernelCause
 						"this move lets more people see the Item; confirm it with ConfirmWiden")
 				}
 				if req.Policy != nil {
-					if err := checkAgentWiden(ctx, tx, req.Principal, it.ScopeID); err != nil {
+					if err := checkAgentWiden(ctx, tx, req.Principal, it.ScopeID, &req.ItemID); err != nil {
 						return WriteResult{}, err
 					}
 				}

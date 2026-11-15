@@ -27,6 +27,90 @@ type Token struct {
 
 type file struct {
 	Tokens []Token `yaml:"tokens"`
+	Grants []Grant `yaml:"grants"`
+}
+
+// Grant is what a user let an agent do, in one namespace: the scopes a
+// session may cover (namespaces/{ns} for all of it, or container names) and
+// the powers it may hold. A grant with no user is for the agent acting for
+// itself.
+type Grant struct {
+	Agent     string   `yaml:"agent"`     // agent:<id>
+	User      string   `yaml:"user"`      // user:<id>, or empty
+	Namespace string   `yaml:"namespace"` // the namespace of both
+	Scopes    []string `yaml:"scopes"`
+	Powers    []string `yaml:"powers"`
+}
+
+// LoadGrants reads a dev-token file's grants.
+func LoadGrants(path string) ([]Grant, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("dev tokens: %w", err)
+	}
+	gs, err := ParseGrants(data)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return gs, nil
+}
+
+// ParseGrants reads and checks the grants of a dev-token file. One bad grant
+// refuses the whole file. A file without grants has none: no agent may
+// start a session.
+func ParseGrants(data []byte) ([]Grant, error) {
+	var f file
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&f); err != nil {
+		return nil, fmt.Errorf("dev tokens: %w", err)
+	}
+	seen := map[[3]string]bool{}
+	for i, g := range f.Grants {
+		fail := func(format string, args ...any) error {
+			return fmt.Errorf("dev tokens: grant %d (%s for %q): %s", i+1, g.Agent, g.User, fmt.Sprintf(format, args...))
+		}
+		switch {
+		case !item.IsKind(g.Agent, item.KindAgent):
+			return nil, fail("agent %q must be agent:<id>", g.Agent)
+		case g.User != "" && !item.IsKind(g.User, item.KindUser):
+			return nil, fail("user %q must be user:<id>, or empty for the agent itself", g.User)
+		case !namespaceName.MatchString(g.Namespace):
+			return nil, fail("namespace %q must be lower-case letters, digits and dashes", g.Namespace)
+		case len(g.Scopes) == 0:
+			return nil, fail("no scopes")
+		case len(g.Powers) == 0:
+			return nil, fail("no powers")
+		}
+		for _, s := range g.Scopes {
+			if !scopeIn(s, g.Namespace) {
+				return nil, fail("scope %q must be namespaces/%s or an Item in it", s, g.Namespace)
+			}
+		}
+		for _, p := range g.Powers {
+			if !item.KnownPower(p) {
+				return nil, fail("unknown power %q", p)
+			}
+		}
+		key := [3]string{g.Agent, g.User, g.Namespace}
+		if seen[key] {
+			return nil, fail("the same agent and user twice in one namespace")
+		}
+		seen[key] = true
+	}
+	return f.Grants, nil
+}
+
+// itemInNamespace matches namespaces/{ns}/items/{uuid}.
+var itemInNamespace = regexp.MustCompile(`^namespaces/([a-z0-9][a-z0-9-]{0,62})/items/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// scopeIn reports whether a grant's scope is its namespace, or an Item in it.
+func scopeIn(scope, ns string) bool {
+	if scope == "namespaces/"+ns {
+		return true
+	}
+	m := itemInNamespace.FindStringSubmatch(scope)
+	return m != nil && m[1] == ns
 }
 
 // namespaceName matches itemservice.ValidNamespace. It is repeated here so

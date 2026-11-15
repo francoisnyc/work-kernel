@@ -386,6 +386,13 @@ func TestGet_ReturnsCreatedItem(t *testing.T) {
 		t.Error("Get: ScopeID is nil, want the Item's scope")
 	}
 	got.ScopeID = nil
+	// Since Step 0, part 2 every Item carries its create time and creator
+	// (TestCreated_* check them); here they only have to be set.
+	if got.CreatedBy != alice.Actor || got.CreatedAt.IsZero() || got.CreatedOnBehalfOf != "" {
+		t.Errorf("Get: created %v by %q for %q, want a time, %s and nobody", got.CreatedAt, got.CreatedBy,
+			got.CreatedOnBehalfOf, alice.Actor)
+	}
+	got.CreatedAt, got.CreatedBy = time.Time{}, ""
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Get = %+v\nwant  %+v", got, want)
 	}

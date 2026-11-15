@@ -3,7 +3,11 @@
 // import graph free of cycles (Go rejects circular imports at compile time).
 package item
 
-import "github.com/google/uuid"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 // Principal says who performs an operation. Both values are opaque IDs.
 type Principal struct {
@@ -46,6 +50,12 @@ type Item struct {
 	// Hold is the Item's latest hold (open, or how it ended), or nil if the
 	// Item never had one. A hold is visible on the Item.
 	Hold *Hold
+	// CreatedAt, CreatedBy and CreatedOnBehalfOf come from the Item's first
+	// event: when, its actor, and the user that actor acted for (empty when
+	// none). Kept on the row so a reader needs no history to show them.
+	CreatedAt         time.Time
+	CreatedBy         string
+	CreatedOnBehalfOf string
 }
 
 // Hold is a request for a checked transition, held while its check runs.

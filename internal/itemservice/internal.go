@@ -186,7 +186,15 @@ func parseOrigin(kind, o string) (typeID string, version int, name string, ok bo
 func admit(ctx context.Context, tx pgx.Tx, p item.Principal, id uuid.UUID, it lockedItem,
 	kc *kernelCause) (item.Principal, error) {
 	if kc == nil {
-		return p, checkVisible(ctx, tx, p, it.ScopeID)
+		if err := checkVisible(ctx, tx, p, it.ScopeID); err != nil {
+			return p, err
+		}
+		// Outside an agent session's scopes the Item does not exist for it;
+		// inside, a read-only session may not write.
+		if err := checkInSession(ctx, tx, p, &id); err != nil {
+			return p, err
+		}
+		return p, checkWritePower(ctx, tx, p)
 	}
 	if kc.typeID != it.TypeID || kc.typeVersion != it.TypeVersion {
 		return item.Principal{}, fmt.Errorf("%w: kernel write: %s ran for %s v%d, on an Item of %s v%d",

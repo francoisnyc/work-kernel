@@ -1,21 +1,42 @@
 // Command pli is the command-line client of the public API v1. It reaches
 // Items only through the API, like any other client.
 //
-//	pli [--server URL] [--tokens FILE] --as NAME <command>
+//	pli [--server URL] [--tokens FILE] --as NAME [--session ID] <command>
 //	  item create --type TYPE [--in ITEM] [--narrow P,P] [--set ID=VALUE]... [--request-id ID]
 //	  item get ITEM
 //	  item update ITEM [--set ID=VALUE]... [--readers P,P | --inherit]
 //	                   [--move-to ITEM | --move-to-top] [--confirm-widen] [--etag E] [--request-id ID]
 //	  item transition ITEM --to STATE [--set ID=VALUE]... [--wait D] [--etag E] [--request-id ID]
-//	  item search WORDS... [--min-seq N]
+//	  item search [WORDS...] [--min-seq N] [FILTERS] [PAGING]
+//	  item list [ITEM] [FILTERS] [PAGING]           (no ITEM: the top level)
+//	  item history ITEM [PAGING]
 //	  type get TYPE
 //	  type list
+//	  agent start [--for USER] --scopes S,S --powers P,P
+//	  agent approve SESSION SCOPE [--yes] [--request-id ID]  (run it --as the user who approves)
+//
+//	FILTERS: [--type TYPE]... [--state S]... [--category C]... [--where F=V|F>V|F>=V|F<V|F<=V]...
+//	PAGING:  [--page-size N] [--page-token T]
 //
 // --server, --tokens and --as default to PLI_SERVER (http://localhost:8080),
 // PLI_TOKENS (dev-tokens.yaml) and PLI_AS. --as names an entry of the
 // dev-token file. ITEM is an Item's name or its bare ID (in the caller's
 // namespace); TYPE is a Type version's name or ticket@3. A --set value is
 // read as JSON when it parses (3, true, null, "3"), else as a string.
+//
+// In FILTERS, TYPE is a Type's name or ID without a version (ticket) and C a
+// category (active, done). A scope S is an ITEM or "namespace" (all of it);
+// POWERS are read, create, edit_fields, transition:<state>, transition:*,
+// move, comment, outbound.
+//
+// Agents: "agent start", called --as an agent, starts a session and saves
+// its ID for that --as name in pli's config directory (os.UserConfigDir,
+// pli/sessions); every later command --as that name sends it in the
+// Pli-Agent-Session header. --session ID sends another. "agent approve" is
+// run --as the user the agent acts for: the approver is whoever the token
+// says, never a flag. It first says who will see the agent's content
+// (everyone in the namespace, or the readers of the scope's Item) and needs
+// --yes to go on from a script.
 //
 // Each response is printed as JSON (protobuf's JSON mapping, with the proto
 // field names). An API error goes to stderr as "error: CODE REASON: message"
@@ -65,15 +86,22 @@ const (
 	exitUsage = 2 // the command line is wrong; nothing was sent
 )
 
-const usage = `usage: pli [--server URL] [--tokens FILE] --as NAME <command>
+const usage = `usage: pli [--server URL] [--tokens FILE] --as NAME [--session ID] <command>
   item create --type TYPE [--in ITEM] [--narrow P,P] [--set ID=VALUE]... [--request-id ID]
   item get ITEM
   item update ITEM [--set ID=VALUE]... [--readers P,P | --inherit]
                    [--move-to ITEM | --move-to-top] [--confirm-widen] [--etag E] [--request-id ID]
   item transition ITEM --to STATE [--set ID=VALUE]... [--wait D] [--etag E] [--request-id ID]
-  item search WORDS... [--min-seq N]
+  item search [WORDS...] [--min-seq N] [FILTERS] [PAGING]
+  item list [ITEM] [FILTERS] [PAGING]           (no ITEM: the top level)
+  item history ITEM [PAGING]
   type get TYPE
-  type list`
+  type list
+  agent start [--for USER] --scopes S,S --powers P,P
+  agent approve SESSION SCOPE [--yes] [--request-id ID]  (run it --as the user who approves)
+
+FILTERS: [--type TYPE]... [--state S]... [--category C]... [--where F=V|F>V|F>=V|F<V|F<=V]...
+PAGING:  [--page-size N] [--page-token T]`
 
 // usageError is a wrong command line: exit 2, nothing sent.
 type usageError struct{ msg string }
@@ -86,7 +114,9 @@ func usagef(format string, args ...any) error { return usageError{fmt.Sprintf(fo
 type cli struct {
 	c      kernelv1connect.ItemServiceClient
 	ns     string
+	as     string // the --as name, under which an agent session is saved
 	stdout io.Writer
+	stderr io.Writer // what pli says besides the response
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -95,6 +125,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	server := global.String("server", envOr("PLI_SERVER", "http://localhost:8080"), "API server URL")
 	tokensPath := global.String("tokens", envOr("PLI_TOKENS", "dev-tokens.yaml"), "dev-token file")
 	as := global.String("as", os.Getenv("PLI_AS"), "the dev-token entry to call as")
+	sessionFlag := global.String("session", "", "an agent session ID to send (default: the one saved for --as)")
 	if err := global.Parse(args); err != nil {
 		fmt.Fprintf(stderr, "pli: %v\n%s\n", err, usage)
 		return exitUsage
@@ -120,11 +151,19 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	tok := tokens[i]
 
+	// An agent sends its session: the one named, else the one saved for
+	// this --as name. A user sends none unless told to.
+	session := *sessionFlag
+	if session == "" && strings.HasPrefix(tok.Principal, "agent:") {
+		session = savedSession(*as)
+	}
 	c := &cli{
 		c: kernelv1connect.NewItemServiceClient(http.DefaultClient, *server,
-			connect.WithProtoJSON(), connect.WithInterceptors(bearer(tok.Token))),
+			connect.WithProtoJSON(), connect.WithInterceptors(bearer(tok.Token, session))),
 		ns:     tok.Namespace,
+		as:     *as,
 		stdout: stdout,
+		stderr: stderr,
 	}
 	commands := map[string]func(context.Context, []string) error{
 		"item create":     c.itemCreate,
@@ -132,6 +171,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		"item update":     c.itemUpdate,
 		"item transition": c.itemTransition,
 		"item search":     c.itemSearch,
+		"item list":       c.itemList,
+		"item history":    c.itemHistory,
+		"agent start":     c.agentStart,
+		"agent approve":   c.agentApprove,
 		"type get":        c.typeGet,
 		"type list":       c.typeList,
 	}
@@ -167,11 +210,18 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
-// bearer sends the token on every call.
-func bearer(token string) connect.UnaryInterceptorFunc {
+// sessionHeader is the header that carries an agent's session ID.
+const sessionHeader = "Pli-Agent-Session"
+
+// bearer sends the token on every call, and the agent session if any, but
+// not when starting a session: a session is started without one.
+func bearer(token, session string) connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 			req.Header().Set("Authorization", "Bearer "+token)
+			if session != "" && !strings.HasSuffix(req.Spec().Procedure, "/StartAgentSession") {
+				req.Header().Set(sessionHeader, session)
+			}
 			return next(ctx, req)
 		}
 	}
@@ -473,15 +523,22 @@ func (c *cli) itemTransition(ctx context.Context, args []string) error {
 func (c *cli) itemSearch(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("item search", flag.ContinueOnError)
 	minSeq := fs.Int64("min-seq", 0, "answer only once the write with this commit_seq is visible")
+	fl, pg := filterFlags(fs), pagingFlags(fs)
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
 	}
-	if len(pos) == 0 {
-		return usagef("want WORDS to search for")
+	filter, err := fl.filter(c.ns)
+	if err != nil {
+		return err
+	}
+	size, err := pg.size()
+	if err != nil {
+		return err
 	}
 	res, err := c.c.SearchItems(ctx, connect.NewRequest(&kernelv1.SearchItemsRequest{
 		Parent: "namespaces/" + c.ns, Query: strings.Join(pos, " "), MinSeq: *minSeq,
+		Filter: filter, PageSize: size, PageToken: *pg.token,
 	}))
 	if err != nil {
 		return err

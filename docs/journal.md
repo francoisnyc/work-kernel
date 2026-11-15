@@ -175,14 +175,25 @@ Ideas noted during the spike, not built yet.
   field values against its Type (ints as strings): one extra query per write,
   and for an agent one more recorded read. Move the conversion into the
   kernel's own field check if it shows up in write latency. (Step 0, part 1)
-- Agent sessions and `ApproveWiden` carry no namespace yet; Part 2's agent
-  sessions must scope them like everything else. (Step 0, part 1)
-- API error messages: kernel error text passes through today (NEEDS_APPROVAL
-  names the scope in its message). Rule: dynamic values go in ErrorInfo
-  metadata, and each reason's message comes from a fixed set. NEEDS_APPROVAL
-  puts the scope in metadata (`scope`): the agent needs it to ask for
-  approval. Add a test that no reason's message ever contains an ID. Do it in
-  Step 0, part 2. (PR #18 review)
+- Filters with several Types or states, and category filters, sort every
+  match before the page (`= any(...)` cannot walk the index in order on
+  Postgres 17): 26-36 ms at 30,000 matches. One Type and one state use `=`
+  and read one page (0.17 ms). Fix when it matters: a UNION ALL per
+  (type, state) pair, each walking `items_namespace_type_state`, merged;
+  or Postgres 18's skip scan. (Step 0, part 2, EXPLAIN)
+- A principal who sees few of many top-level Items pays for the ones they
+  cannot see: listing the top level as user-light walks 1,017 rows to
+  return 17 (3 ms). The same shape as Step A's search; the UNION ALL split
+  of visibility applies here too. (Step 0, part 2, EXPLAIN)
+- An agent session's scopes are checked by walking containers up (one
+  recursive query per Item read or written) and, for Search and List, by
+  expanding the session's containers down. Fine at spike sizes; keep a
+  materialized path if sessions get busy. (Step 0, part 2)
+- A held transition requested by an agent is resolved without checking the
+  session's scopes again; the requester's visibility is. Decide whether a
+  move out of the session's scopes should deny it. (Step 0, part 2)
+- Agent sessions never expire. Add an expiry (and a way to end one) before
+  real agents. (Step 0, part 2)
 
 ## 2026-11-12 — Step 1 (finished)
 
@@ -913,3 +924,62 @@ metadata). design.md's Moves section now matches the widening-move decision.
 
 **Next session:** Step 0, part 2: ListItems, ListItemEvents, filters and paging, created_at and
 created_by columns, category, agent sessions with scopes and powers, and their pli commands.
+
+## 2026-11-15 — Step 0 (proof of concept), part 2: new reads, capability mode, fixed messages (finished)
+
+**Built:** `ListItems` (a container's children, or the top level), `ListItemEvents` (history, projected:
+values from item_event_values, cleared as null, erased named, reader lists shown, unseen containers
+restricted, no session ID), filters on Search and List (Types, states, categories as (type, version,
+state), field equality and int ranges; a filter alone is a search), keyset paging on (created_at, id)
+with tokens bound to the read, caller and namespace, and Items with create time, creator, the user the
+creator acted for, and category. Agent sessions in capability mode: scopes (containers or the whole
+namespace) and powers (`transition:<state>`), checked live; outside the scopes NOT_FOUND, read-only
+sessions NOT_ALLOWED; grants in the dev-token file, resolved by the API and fitted by the kernel; the
+`Pli-Agent-Session` header, SESSION_INVALID; sessions in one namespace. ApproveWiden over the API with
+a required request_id and validate_only; NEEDS_APPROVAL names the Item the write lands at and its
+audience (`namespace` or `restricted`). Fixed error messages per reason, details in metadata, an
+uncoded rejection INTERNAL. pli: `item list`, `item history`, filters and paging on `item search`,
+`agent start` (session saved per --as name), `agent approve` (approver = token; says the audience,
+needs --yes in scripts).
+
+**Kernel changes, counted:** (1) migration 00009: items.created_at/created_by/created_on_behalf_of,
+backfilled from event 1; three paging indexes; agent_sessions.namespace_id/scopes/powers.
+(2) `List`, `ListEvents`, `Filter`, paging tokens. (3) `StartAgentSession` takes scopes, powers and a
+grant; `AgentSession`; `ErrSessionInvalid`; scope and power checks in Get, Search, List, ListEvents,
+Create, Update, Transition and moves. (4) `ApproveWiden` takes an idempotency key, approves by Item,
+stays in the session's namespace; `ApprovalAudience`. (5) `NeedsApprovalError` names the Item and
+whether the scope is open. (6) `RejectedError.Metadata` (from_state, to_state, fields), from new
+`lifecycle.Rejection` fields. (7) `item.KnownPower` and the power vocabulary. (8) List and ListEvents
+refuse an empty namespace.
+
+**EXPLAIN** (`go run ./cmd/bench -explain`: 31,000 Items, 30,000 messages in 16 channels, 1,001
+narrowed tickets; Xeon 2.1 GHz, 4 CPUs; Postgres 17.12). Fresh / analyzed:
+
+| Read | Plan | ms fresh | ms analyzed |
+| --- | --- | --- | --- |
+| ListItems, a channel (~1,900 children), page 1 | `items_container_created`, stops at 51 | 0.23 | 0.12 |
+| ListItems, same, page 2 (keyset) | same index, row comparison in the index condition | 0.08 | 0.05 |
+| ListItems, top level, user-light (17 of 1,017 visible) | `items_top_level`, filters 1,000 hidden | 2.7 | 3.2 |
+| Filter: one Type, one state, ~30,000 matches | `items_namespace_type_state`, stops at 51 | 0.22 | 0.17 |
+| Same as `= any(...)` (before the fix) | seq scan + top-N sort | 26 | 30 |
+| Filter: two Types, two states | seq scan + top-N sort | 36 | 26 |
+| Filter: category todo (1,001 hidden tickets) | seq scan fresh; bitmap on the index analyzed | 20 | 0.7 |
+| Filter: Type ticket, state open (1,001 hidden) | `items_namespace_type_state`, filters hidden | 3.9 | 2.6 |
+| ListItemEvents, one Item | `item_events_pkey` + `item_event_values_pkey` | 0.06 | 0.06 |
+
+**Surprises:** `= any('{x}')` costs a sort that `= x` does not, so single values are now `=`. A
+container with no children has no scope node: content created in it lands in the scope it inherits,
+so NEEDS_APPROVAL now names the Item written at, not the scope's owner, and approving an Item approves
+its landing scope (its audience, which the review then asked to show). /dev/null is a character
+device, so "is stdin a terminal" needs more than the mode bit (now golang.org/x/term). Eight of the new tests were wrong
+(no namespace on the new reads, a stale search word, seed arguments, a whole-struct compare); fixed
+with approval. No data race under -race.
+
+**Open:** Later has six new items, among them the multi-value filter sort and sessions not
+expiring. After review: design.md now records this part's decisions (capability mode, approvals and
+their audience, fixed messages); pli asks golang.org/x/term whether stdin is a terminal (the first
+direct dependency added in this part, approved); CI's gofmt check skips the generated gen/.
+
+**Next session:** Step 0, part 3: `docker compose up` for the whole stack, `buf breaking`, the README
+and the scenario script. The script's agent session must start on one container inside a
+namespace-wide grant, so it exercises capability mode, and must pass `--yes` to `agent approve`.

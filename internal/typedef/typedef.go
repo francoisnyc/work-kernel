@@ -37,6 +37,9 @@ const (
 // active or done work.
 var categories = []string{"triage", "backlog", "todo", "active", "waiting", "done", "canceled", "none"}
 
+// ValidCategory reports whether c is one of the fixed state categories.
+func ValidCategory(c string) bool { return slices.Contains(categories, c) }
+
 // A Type that declares no states has no lifecycle. It gets this one implicit
 // state, so every Item still has a state and nothing else needs a special case.
 const (

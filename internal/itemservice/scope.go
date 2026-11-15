@@ -585,6 +585,11 @@ func (k *Service) move(ctx context.Context, tx pgx.Tx, p item.Principal, id uuid
 	if err != nil {
 		return uuid.Nil, err
 	}
+	// An agent session moves Items only to destinations inside its scopes
+	// (to the top level only if it covers the whole namespace).
+	if err := checkInSession(ctx, tx, p, to); err != nil {
+		return uuid.Nil, err
+	}
 	if to != nil {
 		if err := checkVisible(ctx, tx, p, target); err != nil {
 			return uuid.Nil, err
@@ -604,7 +609,7 @@ func (k *Service) move(ctx context.Context, tx pgx.Tx, p item.Principal, id uuid
 			return uuid.Nil, fmt.Errorf("%w: an Item cannot move into itself or anything below it", ErrInvalid)
 		}
 	}
-	if err := checkAgentWrite(ctx, tx, p, target); err != nil {
+	if err := checkAgentWrite(ctx, tx, p, target, to); err != nil {
 		return uuid.Nil, err
 	}
 

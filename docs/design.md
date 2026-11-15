@@ -400,10 +400,29 @@ client → item service (Go, stateless)
     `agent_session_approvals` for that one scope. It counts only when the
     approver is the `on_behalf_of` user of the agent's request, and the approver
     must see the scope (else `ErrNotFound`). The agent's retry then succeeds.
+  - `ErrNeedsApproval` names the **Item the write lands at**: the Item
+    written, the container created in, or a move's destination (none: the
+    top level). Approving that Item approves the scope its content lands in:
+    its own node if it has one, else the scope it inherits. A container with
+    no children yet has no node, so its content lands in its container's
+    scope; naming the scope's owner would name the wrong thing.
+  - **Approving an Item approves its audience**: everyone who reads that
+    scope, which for an open scope is the whole namespace. So the refusal
+    also says whether the scope is open (`audience`: `namespace`) or
+    narrowed (`restricted`), and so does `ApprovalAudience`, which checks an
+    approval without recording it. A client shows the audience before the
+    user approves.
+  - `ApproveWiden` is a write like any other: it takes a required
+    idempotency key; the same key and request again records nothing more;
+    the key with another request is `ErrIdempotencyKeyReuse`. A session that
+    does not exist, or is in another namespace than the approver's, is
+    `ErrNotFound`.
   - An `agent:` actor without a session is `ErrInvalid`, on reads and writes.
   - **Sessions are minted by the server**, never chosen by the caller:
-    `StartAgentSession(agent, on_behalf_of)` returns a session ID and stores
-    `agent_sessions(session, agent, on_behalf_of, created_at)`. Every agent read
+    `StartAgentSession(agent, on_behalf_of, scopes, powers, grant)` returns
+    a session ID and stores `agent_sessions(session, agent, on_behalf_of,
+    namespace_id, scopes, powers, created_at)`. A session belongs to one
+    namespace (see "Who is calling" for scopes, powers and grants). Every agent read
     and write must use a session that exists and belongs to that agent and that
     `on_behalf_of` user; otherwise `ErrInvalid`, and nothing is recorded or
     written. Without this, an agent could escape the rule with a fresh session.
@@ -561,15 +580,45 @@ new call passes the kernel membership test.
   dev-token mode unless started with an explicit flag, and warns on every
   start. Real sign-on (OIDC) later replaces only the interceptor.
 - Agents (in practice an LLM with tools) start sessions in **capability mode**:
-  `StartAgentSession` takes the agent's token, the user it acts for (who must
-  have granted the agent; a config entry for now), and **required** `scopes`
-  (containers it may touch) and `powers` (read, comment, edit fields, which
-  transitions, outbound actions). A session can only narrow these; sub-agents
-  inherit them; reading untrusted text will drop outbound powers (with taint,
-  later). v1 enforces scopes and read-only versus write. Later calls carry the
-  agent's token and the session ID in a header; the server checks they belong
-  together.
-- `ApproveWiden` and future approvals take the approver from the token.
+  `StartAgentSession` takes the agent's token, the user it acts for
+  (`acting_for`: who must have granted the agent; empty for the agent
+  itself), and **required** `scopes` (what it may touch) and `powers`. A
+  session can only narrow these; sub-agents inherit them; reading untrusted
+  text will drop outbound powers (with taint, later).
+  - **Scopes** are container names, each with everything below it, or
+    `namespaces/{ns}`, the whole namespace. Membership is checked at each
+    request, walking containers as they are now, so a move changes what the
+    session sees at once. Outside its scopes an Item does not exist for the
+    session: `NOT_FOUND` on reads and writes alike, before any other check.
+    The top level (creating there, moving there, listing it) needs the whole
+    namespace.
+  - **Powers**: `read` (always implied), `create`, `edit_fields`,
+    `transition:<state>` (may move Items into that state; transitions have no
+    IDs, so the power names the target; its format is checked, the state is
+    not, since a session spans Types), `transition:*` (any), `move`,
+    `comment` (reserved: stored only, will mean "create comment Items") and
+    `outbound`. An unknown power is `INVALID_ARGUMENT`. Every power is
+    stored; v1 enforces read versus any write power: without one, every
+    write is `NOT_ALLOWED`.
+  - **Grants**: what a user let an agent do, scopes and powers, per
+    namespace; a config entry in the dev-token file for now. The API
+    resolves the grant for (agent, user, namespace); the kernel checks the
+    session fits inside it: every scope at or below a granted one, every
+    power covered (`transition:*` covers every `transition:<state>`). No
+    grant, or more than granted, is `NOT_ALLOWED`. A scope the agent or its
+    user cannot see is `NOT_FOUND`.
+  - **The session header.** Every later call carries the agent's token and
+    the session ID in the `Pli-Agent-Session` header; the user the agent
+    acts for comes from the session, never the request. The header with a
+    user's token, or an agent's token without it (except to start a
+    session), is `INVALID_ARGUMENT` naming the header in metadata. An unknown
+    session, another agent's, or another namespace's is `UNAUTHENTICATED` /
+    `SESSION_INVALID`: a bad credential.
+- `ApproveWiden` and future approvals take the approver from the token. It
+  takes a required `request_id`, like every write, and `validate_only`
+  (AIP-163): check the approval and answer its `audience`, recording
+  nothing. `pli agent approve`, run as the user, prints who will see the
+  agent's content and approves only after a "y" at a terminal or `--yes`.
 - Timers and hooks never use the network API.
 
 ### Resources and operations
@@ -633,13 +682,23 @@ fields it names; JSON `null` clears one. No field masks.
 Every error has a standard code and an `ErrorInfo` with a stable reason
 (AIP-193); metadata never names anything the caller can't see.
 
+**Messages are fixed.** Each reason has one message, the same every time;
+dynamic values go in ErrorInfo metadata, never in a message: `hold` (HELD),
+`scope` and `audience` (NEEDS_APPROVAL), `from_state` and `to_state` (a
+transition rule's refusal), `fields` (MISSING_FIELDS, comma-separated IDs),
+`header` (a misused header). A field violation's description may name the
+field, never a value or an ID. A test fails if a message contains an ID.
+A rule's refusal answers with its code; every kernel rejection carries one
+(a test walks the source), and one without a code is a bug: `INTERNAL`.
+
 | Kernel refusal | Code | Reason |
 | --- | --- | --- |
 | Bad or missing token | `UNAUTHENTICATED` | `UNAUTHENTICATED` |
+| Bad agent session (`ErrSessionInvalid`) | `UNAUTHENTICATED` | `SESSION_INVALID` |
 | `ErrInvalid` | `INVALID_ARGUMENT` | `INVALID_REQUEST` (+ field violations) |
 | `ErrNotFound` (hidden or missing) | `NOT_FOUND` | `NOT_FOUND` |
 | `ErrForbidden` | `PERMISSION_DENIED` | `NOT_ALLOWED` |
-| `ErrNeedsApproval` | `PERMISSION_DENIED` | `NEEDS_APPROVAL` |
+| `ErrNeedsApproval` | `PERMISSION_DENIED` | `NEEDS_APPROVAL` (+ scope, audience) |
 | `ErrRejected` | `FAILED_PRECONDITION` | the rule's code, e.g. `GUARD_FAILED` |
 | `ErrStale` | `ABORTED` | `STALE` |
 | `ErrHeld` | `ABORTED` | `HELD` (+ hold name) |
