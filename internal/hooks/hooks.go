@@ -102,6 +102,17 @@ func (c *Connectors) WithoutKeys() *Connectors {
 	return &control
 }
 
+// WithoutResend returns connectors that open a new connection for every
+// request. net/http resends a replayable request (a POST with an
+// Idempotency-Key counts) by itself when a reused connection drops before
+// the answer; without reuse it never does, so a dropped answer reaches the
+// caller and the retry is a new Temporal attempt. Bench and tests only.
+func (c *Connectors) WithoutResend() *Connectors {
+	fresh := *c
+	fresh.http = &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+	return &fresh
+}
+
 // Run calls one action with the values of its hook's reads. key is the
 // hook's idempotency key: an action with a side effect refuses to run
 // without one, since a retry could not be told from a new request.

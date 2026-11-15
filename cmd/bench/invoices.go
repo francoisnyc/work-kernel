@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/client"
 
 	"github.com/francoisnyc/work-kernel/internal/connstub"
@@ -30,7 +31,13 @@ import (
 //   - late answers: the ERP commits each ticket's first invoice request and
 //     answers after 1 s; a hook attempt may take 200 ms, so every first
 //     attempt times out and is retried with the same key.
-//   - dropped answers: the ERP commits, then closes the connection.
+//   - dropped answers: the ERP commits, then closes the connection. With the
+//     default connectors net/http resends the request itself (a POST with an
+//     Idempotency-Key is replayable on a reused connection), inside the same
+//     activity attempt. With "no client resend" every request has its own
+//     connection, so the failure reaches the activity and Temporal retries.
+//     "Temporal retries" counts the tickets whose invoice action succeeded on
+//     a second or later attempt, read from each workflow's history.
 //   - control: late answers with connectors that send no key. It must show
 //     duplicates, or the runs above prove nothing.
 //   - worker stopped: the ERP answers after 15 s (attempts may take 20 s); once
@@ -60,6 +67,7 @@ type invoiceRun struct {
 	tickets        int
 	attemptTimeout time.Duration
 	withoutKeys    bool
+	noResend       bool // connectors.WithoutResend(): net/http never resends
 	stub           func(erp *connstub.Server)
 	// stop, if set, is a worker stop mode: "graceful" or "sigkill".
 	stop string
@@ -107,15 +115,17 @@ func invoicesMode(ctx context.Context) error {
 	fmt.Println("ticket v4; relay polling every 50 ms; hook budget 5 min. Each ticket has its own customer.")
 	fmt.Println("Duplicates = ERP invoices beyond one per ticket, counted on the ERP side.")
 	fmt.Println()
-	fmt.Println("| Run | Tickets | Keys | Attempt timeout | Forced failures | Invoices | Duplicates | hook_failed | All invoiced after |")
-	fmt.Println("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+	fmt.Println("| Run | Tickets | Keys | Attempt timeout | Forced failures | Temporal retries | Invoices | Duplicates | hook_failed | All invoiced after |")
+	fmt.Println("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
 
 	late := func(d time.Duration) func(*connstub.Server) {
 		return func(erp *connstub.Server) { erp.SetFirstAnswerDelay(d) }
 	}
+	drop := func(erp *connstub.Server) { erp.SetDropFirstAnswer(true) }
 	runs := []invoiceRun{
 		{name: "late answers", tickets: invoiceTimeouts, attemptTimeout: 200 * time.Millisecond, stub: late(time.Second)},
-		{name: "dropped answers", tickets: invoiceTimeouts, stub: func(erp *connstub.Server) { erp.SetDropFirstAnswer(true) }},
+		{name: "dropped answers, client resend on", tickets: invoiceTimeouts, stub: drop},
+		{name: "dropped answers, no client resend", tickets: invoiceTimeouts, noResend: true, stub: drop},
 		{name: "control: late answers, no keys", tickets: invoiceControl, attemptTimeout: 200 * time.Millisecond,
 			withoutKeys: true, stub: late(time.Second)},
 		{name: "worker.Stop() mid-activity", tickets: invoiceKills, attemptTimeout: 20 * time.Second,
@@ -175,6 +185,9 @@ func (b *invoiceBench) startWorker(queue string, crm, erp *connstub.Server, r in
 	conn := hooks.NewConnectors(crm.URL, erp.URL)
 	if r.withoutKeys {
 		conn = conn.WithoutKeys()
+	}
+	if r.noResend {
+		conn = conn.WithoutResend()
 	}
 	w := workflow.NewWorker(b.tc, queue, b.k, workflow.WorkerOptions{
 		Connectors: conn, HookBudget: budget, HookAttemptTimeout: r.attemptTimeout,
@@ -267,6 +280,10 @@ func (b *invoiceBench) run(ctx context.Context, r invoiceRun) (string, error) {
 		`select count(*) from item_events where item_id = any($1) and op = 'hook_failed'`, ids).Scan(&failed); err != nil {
 		return "", err
 	}
+	retried, err := b.temporalRetries(ctx, ids)
+	if err != nil {
+		return "", err
+	}
 	keys := "yes"
 	if r.withoutKeys {
 		keys = "no"
@@ -279,9 +296,40 @@ func (b *invoiceBench) run(ctx context.Context, r invoiceRun) (string, error) {
 	if d := erp.DroppedAnswers(); d > 0 {
 		forced = fmt.Sprintf("%d dropped", d)
 	}
-	fmt.Printf("| %s | %d | %s | %s | %s | %d | %d | %d | %s s |\n",
-		r.name, r.tickets, keys, attempt, forced, erp.InvoiceCount(), dups, failed, secs(took))
+	fmt.Printf("| %s | %d | %s | %s | %s | %d | %d | %d | %d | %s s |\n",
+		r.name, r.tickets, keys, attempt, forced, retried, erp.InvoiceCount(), dups, failed, secs(took))
 	return note, nil
+}
+
+// temporalRetries counts the tickets whose invoice action (RunAction) was
+// started more than once by Temporal: the history keeps the last attempt's
+// started event, with its attempt number.
+func (b *invoiceBench) temporalRetries(ctx context.Context, ids []uuid.UUID) (int, error) {
+	retried := make([]bool, len(ids))
+	_, _, err := timeAll(len(ids), invoicePrepares, func(i int) error {
+		iter := b.tc.GetWorkflowHistory(ctx, ids[i].String(), "", false, enumspb.HISTORY_EVENT_FILTER_TYPE_ALL_EVENT)
+		actions := map[int64]bool{} // scheduled event IDs of RunAction
+		for iter.HasNext() {
+			ev, err := iter.Next()
+			if err != nil {
+				return err
+			}
+			if a := ev.GetActivityTaskScheduledEventAttributes(); a != nil && a.GetActivityType().GetName() == workflow.ActivityRunAction {
+				actions[ev.GetEventId()] = true
+			}
+			if a := ev.GetActivityTaskStartedEventAttributes(); a != nil && actions[a.GetScheduledEventId()] && a.GetAttempt() > 1 {
+				retried[i] = true
+			}
+		}
+		return nil
+	})
+	n := 0
+	for _, r := range retried {
+		if r {
+			n++
+		}
+	}
+	return n, err
 }
 
 // ticket creates a v4 ticket for the customer and moves it to in_progress.
