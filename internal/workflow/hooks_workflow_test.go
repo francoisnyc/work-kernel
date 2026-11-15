@@ -117,7 +117,7 @@ func failing() error { return errors.New("connector is down") }
 // workflow then hears it as an event like any other.
 func TestHooks_TransitionRequest_RunsTheCheck(t *testing.T) {
 	h := newHookHarness(t, orderSnapshot("open", 5, 5))
-	h.deliver(time.Minute, requestEvent(6))
+	h.deliver(0, requestEvent(6)) // arrives with the start
 	allowed := h.deliver(2*time.Minute, closing(7, "transition", "approved"))
 	h.runToCompletion()
 
@@ -127,8 +127,8 @@ func TestHooks_TransitionRequest_RunsTheCheck(t *testing.T) {
 	if want := checkInput(6, "corr-7", 1); !reflect.DeepEqual(h.check[0].In, want) {
 		t.Errorf("RunCheck input = %+v\nwant %+v", h.check[0].In, want)
 	}
-	if !h.check[0].At.Equal(t0.Add(time.Minute)) {
-		t.Errorf("RunCheck at %v, want at the request (+1m)", h.check[0].At)
+	if !h.check[0].At.Equal(t0) {
+		t.Errorf("RunCheck at %v, want at the request (the start)", h.check[0].At)
 	}
 	if len(h.resolves) != 0 {
 		t.Errorf("ResolveHold calls = %+v, want none: the check resolved the hold itself", h.resolves)
@@ -140,7 +140,7 @@ func TestHooks_TransitionRequest_RunsTheCheck(t *testing.T) {
 // behavior, until an event closes it.
 func TestHooks_AnOpenHoldKeepsTheWorkflow(t *testing.T) {
 	h := newHookHarness(t, orderSnapshot("open", 5, 5))
-	h.deliver(time.Minute, requestEvent(6))
+	h.deliver(0, requestEvent(6)) // arrives with the start
 	denied := h.deliver(5*time.Hour, closing(7, "transition_denied", ""))
 	h.runToCompletion()
 
@@ -156,7 +156,7 @@ func TestHooks_AnOpenHoldKeepsTheWorkflow(t *testing.T) {
 func TestHooks_CheckBudgetRunsOut_ResolvesAsError(t *testing.T) {
 	h := newHookHarness(t, orderSnapshot("open", 5, 5))
 	h.checkErr["check"] = failing()
-	h.deliver(time.Minute, requestEvent(6))
+	h.deliver(0, requestEvent(6)) // arrives with the start
 	failed := h.deliver(time.Hour, closing(7, "transition_failed", ""))
 	h.runToCompletion()
 
@@ -164,7 +164,7 @@ func TestHooks_CheckBudgetRunsOut_ResolvesAsError(t *testing.T) {
 		t.Errorf("RunCheck calls = %d, want retries within the budget", len(h.check))
 	}
 	for _, c := range h.check {
-		if c.At.After(t0.Add(time.Minute + budget)) {
+		if c.At.After(t0.Add(budget)) {
 			t.Errorf("RunCheck attempt at %v, after the budget ran out", c.At)
 		}
 	}
@@ -175,8 +175,8 @@ func TestHooks_CheckBudgetRunsOut_ResolvesAsError(t *testing.T) {
 	if got := h.resolves[0]; !reflect.DeepEqual(got.In, want) {
 		t.Errorf("ResolveHold input = %+v\nwant %+v", got.In, want)
 	}
-	if at := h.resolves[0].At; at.Before(t0.Add(time.Minute+budget)) || at.After(t0.Add(time.Minute+budget+2*time.Minute)) {
-		t.Errorf("ResolveHold at %v, want just after the budget ran out (+11m)", at)
+	if at := h.resolves[0].At; at.Before(t0.Add(budget)) || at.After(t0.Add(budget+2*time.Minute)) {
+		t.Errorf("ResolveHold at %v, want just after the budget ran out (+10m)", at)
 	}
 	h.wantApplied("transition_failed", failed, true)
 }
@@ -186,7 +186,7 @@ func TestHooks_CheckBudgetRunsOut_ResolvesAsError(t *testing.T) {
 func TestHooks_CheckFailsForGood_ResolvesAsErrorAtOnce(t *testing.T) {
 	h := newHookHarness(t, orderSnapshot("open", 5, 5))
 	h.checkErr["check"] = temporal.NewNonRetryableApplicationError("unknown customer", wf.ErrTypeHookFailed, nil)
-	h.deliver(time.Minute, requestEvent(6))
+	h.deliver(0, requestEvent(6)) // arrives with the start
 	h.deliver(time.Hour, closing(7, "transition_failed", ""))
 	h.runToCompletion()
 
@@ -194,8 +194,8 @@ func TestHooks_CheckFailsForGood_ResolvesAsErrorAtOnce(t *testing.T) {
 		t.Errorf("RunCheck calls = %d, want 1: a permanent failure is not retried", len(h.check))
 	}
 	want := wf.ResolveInput{Hook: checkInput(6, "corr-7", 1), Verdict: "error", Reason: "check_failed"}
-	if len(h.resolves) != 1 || !reflect.DeepEqual(h.resolves[0].In, want) || !h.resolves[0].At.Equal(t0.Add(time.Minute)) {
-		t.Errorf("ResolveHold calls = %+v, want one at +1m: %+v", h.resolves, want)
+	if len(h.resolves) != 1 || !reflect.DeepEqual(h.resolves[0].In, want) || !h.resolves[0].At.Equal(t0) {
+		t.Errorf("ResolveHold calls = %+v, want one at once: %+v", h.resolves, want)
 	}
 }
 
@@ -204,7 +204,7 @@ func TestHooks_CheckFailsForGood_ResolvesAsErrorAtOnce(t *testing.T) {
 func TestHooks_EscapeCallsOffTheCheck(t *testing.T) {
 	h := newHookHarness(t, orderSnapshot("open", 5, 5))
 	h.checkErr["check"] = failing()
-	h.deliver(time.Minute, requestEvent(6))
+	h.deliver(0, requestEvent(6)) // arrives with the start
 	escaped := h.deliver(3*time.Minute, closing(7, "transition", "dropped"))
 	h.runToCompletion()
 
@@ -217,7 +217,7 @@ func TestHooks_EscapeCallsOffTheCheck(t *testing.T) {
 			t.Errorf("RunCheck attempt at %v, after the escape", c.At)
 		}
 	}
-	if now := h.env.Now(); now.After(t0.Add(time.Minute + budget)) {
+	if now := h.env.Now(); now.After(t0.Add(budget)) {
 		t.Errorf("workflow ended at %v: it waited out the canceled check's budget", now)
 	}
 }
@@ -245,7 +245,7 @@ func TestHooks_EnteringAState_RunsItsEnrichHooks(t *testing.T) {
 	h := newHookHarness(t, orderSnapshot("open", 5, 5))
 	enter := transitionEvent(6, "open", "new")
 	enter.CorrelationID, enter.Hop = "corr-2", 0
-	h.deliver(time.Minute, enter)
+	h.deliver(0, enter) // arrives with the start
 	h.runToCompletion()
 
 	got := sortedByHook(h.enrich)
@@ -265,7 +265,7 @@ func TestHooks_EnrichBudgetRunsOut_WritesTheFallback(t *testing.T) {
 	h := newHookHarness(t, orderSnapshot("open", 5, 5))
 	h.enrichErr["get_plan"] = failing()
 	h.enrichErr["get_status"] = failing()
-	h.deliver(time.Minute, transitionEvent(6, "open", "new"))
+	h.deliver(0, transitionEvent(6, "open", "new")) // arrives with the start
 	h.runToCompletion()
 
 	if len(h.fallback) != 1 {
@@ -274,7 +274,7 @@ func TestHooks_EnrichBudgetRunsOut_WritesTheFallback(t *testing.T) {
 	if want := enrichInput("get_plan", 6, "", 1); !reflect.DeepEqual(h.fallback[0].In, want) {
 		t.Errorf("EnrichFallback input = %+v\nwant %+v", h.fallback[0].In, want)
 	}
-	if at := h.fallback[0].At; at.Before(t0.Add(time.Minute + budget)) {
+	if at := h.fallback[0].At; at.Before(t0.Add(budget)) {
 		t.Errorf("fallback written at %v, before the budget ran out", at)
 	}
 }
@@ -335,4 +335,63 @@ func TestHooks_TimerRefusedAsHeld_IsSpent(t *testing.T) {
 		t.Errorf("FireTimer calls = %+v, want one: a held timer is spent", h.fires)
 	}
 	h.wantApplied("the later transition", done, true)
+}
+
+// The common path for approve: the run is already alive (the Item sits in a
+// state with a timer) when the transition request arrives, as a plain
+// Update. The check runs at once, the hold resolves, and the timer is
+// handled as if the hold had not been there: a denial leaves the Item in
+// the state, so the timer fires on time with the latest item_seq; an
+// allowed move leaves the state, so the timer is canceled.
+func TestHooks_RequestReachesARunningWorkflow(t *testing.T) {
+	timed := func() wf.Snapshot {
+		s := orderSnapshot("open", 5, 5)
+		s.Timers = map[string]wf.TimerSpec{"open": {After: 4 * time.Hour, To: "new"}}
+		return s
+	}
+
+	t.Run("denied: the timer still fires", func(t *testing.T) {
+		h := newHookHarness(t, timed())
+		req := h.deliver(time.Hour, requestEvent(6))
+		denied := h.deliver(2*time.Hour, closing(7, "transition_denied", ""))
+		back := h.deliver(4*time.Hour+time.Minute, transitionEvent(8, "open", "new")) // the timer's own write
+		h.runToCompletion()
+
+		h.wantApplied("the request", req, true)
+		h.wantApplied("the denial", denied, true)
+		h.wantApplied("the timer's transition", back, true)
+		if len(h.check) != 1 || !h.check[0].At.Equal(t0.Add(time.Hour)) ||
+			!reflect.DeepEqual(h.check[0].In, checkInput(6, "corr-7", 1)) {
+			t.Errorf("RunCheck calls = %+v, want one at +1h for the request", h.check)
+		}
+		if len(h.fires) != 1 {
+			t.Fatalf("FireTimer calls = %+v, want one", h.fires)
+		}
+		f := h.fires[0]
+		if !f.At.Equal(t0.Add(4*time.Hour)) || f.In.ExpectedItemSeq != 7 || f.In.EnteredSeq != 5 {
+			t.Errorf("FireTimer = %+v, want +4h (from the entry, not the hold), expected seq 7, entered seq 5", f)
+		}
+		// Entering `new` runs its enrich hooks, caused by the timer's event.
+		if got := sortedByHook(h.enrich); len(got) != 2 || got[0].In.CauseSeq != 8 {
+			t.Errorf("RunEnrich calls = %+v, want two, caused by event 8", got)
+		}
+	})
+
+	t.Run("allowed: the move cancels the timer", func(t *testing.T) {
+		h := newHookHarness(t, timed())
+		h.deliver(time.Hour, requestEvent(6))
+		allowed := h.deliver(2*time.Hour, closing(7, "transition", "approved"))
+		h.runToCompletion()
+
+		h.wantApplied("the allowed transition", allowed, true)
+		if len(h.check) != 1 {
+			t.Errorf("RunCheck calls = %+v, want one", h.check)
+		}
+		if len(h.fires) != 0 {
+			t.Errorf("FireTimer calls = %+v, want none: the Item left the timed state", h.fires)
+		}
+		if now := h.env.Now(); now.After(t0.Add(3 * time.Hour)) {
+			t.Errorf("workflow ended at %v: it waited for a canceled timer", now)
+		}
+	})
 }
