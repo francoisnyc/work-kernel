@@ -39,6 +39,11 @@ const (
 	ErrTypeHookFailed = "HookFailed" // the hook failed for good (unknown customer, bad input)
 )
 
+// MaxRetryInterval caps the pause between two attempts of an activity. A
+// hook gives up when its next attempt cannot start within its budget, so it
+// may end up to this long before the budget runs out.
+const MaxRetryInterval = time.Minute
+
 // DefaultHookBudget is how long a hook may keep retrying before it gives up:
 // an enrich hook then writes its fallback, a check resolves its hold as error.
 const DefaultHookBudget = 15 * time.Minute
@@ -185,7 +190,7 @@ var activityOptions = workflow.ActivityOptions{
 	RetryPolicy: &temporal.RetryPolicy{
 		InitialInterval:    time.Second,
 		BackoffCoefficient: 2,
-		MaximumInterval:    time.Minute,
+		MaximumInterval:    MaxRetryInterval,
 		MaximumAttempts:    0,
 	},
 }

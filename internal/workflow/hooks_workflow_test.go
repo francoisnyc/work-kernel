@@ -26,7 +26,22 @@ import (
 const (
 	holdID = "0193a1b2-0000-7000-8000-0000000000a1"
 	budget = 10 * time.Minute
+	// margin is how late after its budget a hook may still give up.
+	margin = 5 * time.Second
 )
+
+// assertGaveUpAtTheBudget checks when a hook gave up, for a hook started at
+// the start. Temporal schedules no retry that would start after the budget
+// (ScheduleToClose), so a hook gives up as soon as its next attempt cannot
+// fit: up to one retry interval early, never later than the budget.
+func assertGaveUpAtTheBudget(t *testing.T, what string, at time.Time) {
+	t.Helper()
+	earliest, latest := t0.Add(budget-wf.MaxRetryInterval), t0.Add(budget+margin)
+	if at.Before(earliest) || at.After(latest) {
+		t.Errorf("%s at %v, want between %v and %v (the budget, less one retry interval, plus %v)",
+			what, at, earliest, latest, margin)
+	}
+}
 
 // orderSnapshot is what LoadItem reports for an order: entering `new` runs
 // two enrich hooks (get_plan has a fallback), and open -> approved is
@@ -175,9 +190,7 @@ func TestHooks_CheckBudgetRunsOut_ResolvesAsError(t *testing.T) {
 	if got := h.resolves[0]; !reflect.DeepEqual(got.In, want) {
 		t.Errorf("ResolveHold input = %+v\nwant %+v", got.In, want)
 	}
-	if at := h.resolves[0].At; at.Before(t0.Add(budget)) || at.After(t0.Add(budget+2*time.Minute)) {
-		t.Errorf("ResolveHold at %v, want just after the budget ran out (+10m)", at)
-	}
+	assertGaveUpAtTheBudget(t, "ResolveHold", h.resolves[0].At)
 	h.wantApplied("transition_failed", failed, true)
 }
 
@@ -274,9 +287,7 @@ func TestHooks_EnrichBudgetRunsOut_WritesTheFallback(t *testing.T) {
 	if want := enrichInput("get_plan", 6, "", 1); !reflect.DeepEqual(h.fallback[0].In, want) {
 		t.Errorf("EnrichFallback input = %+v\nwant %+v", h.fallback[0].In, want)
 	}
-	if at := h.fallback[0].At; at.Before(t0.Add(budget)) {
-		t.Errorf("fallback written at %v, before the budget ran out", at)
-	}
+	assertGaveUpAtTheBudget(t, "the fallback", h.fallback[0].At)
 }
 
 // --- a run that starts with work already pending ---
