@@ -57,13 +57,16 @@ func (in *Internal) HookFailed(ctx context.Context, req HookFailedRequest) (Writ
 	if kc.hookID == "" {
 		return WriteResult{}, fmt.Errorf("%w: only an action hook records hook_failed, not %s", ErrInvalid, req.Principal.Actor)
 	}
+	if req.Principal, err = k.inItemsNamespace(ctx, req.Principal, req.ItemID); err != nil {
+		return WriteResult{}, err
+	}
 	hash, err := requestHash("hook_failed", req)
 	if err != nil {
 		return WriteResult{}, err
 	}
 
 	return k.write(ctx, req.Principal, req.IdempotencyKey, hash, func(tx pgx.Tx) (WriteResult, error) {
-		it, err := lockItem(ctx, tx, req.ItemID)
+		it, err := lockItem(ctx, tx, nsOf(req.Principal), req.ItemID)
 		if err != nil {
 			return WriteResult{}, err
 		}

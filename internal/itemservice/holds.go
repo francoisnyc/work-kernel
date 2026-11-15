@@ -104,7 +104,7 @@ func (h *openHold) rule() lifecycle.Hold {
 func heldError(h *openHold, err error) error {
 	var rej *lifecycle.Rejection
 	if errors.As(err, &rej) {
-		return fmt.Errorf("%w: hold %s: %s", ErrHeld, h.id, rej.Reason)
+		return &HeldError{HoldID: h.id, Reason: rej.Reason}
 	}
 	return err
 }
@@ -225,13 +225,16 @@ func (in *Internal) ResolveHold(ctx context.Context, req ResolveHoldRequest) (Wr
 	if err := checkVerdict(req); err != nil {
 		return WriteResult{}, err
 	}
+	if req.Principal, err = k.inItemsNamespace(ctx, req.Principal, req.ItemID); err != nil {
+		return WriteResult{}, err
+	}
 	hash, err := requestHash("resolve_hold", req)
 	if err != nil {
 		return WriteResult{}, err
 	}
 
 	return k.write(ctx, req.Principal, req.IdempotencyKey, hash, func(tx pgx.Tx) (WriteResult, error) {
-		it, err := lockItem(ctx, tx, req.ItemID)
+		it, err := lockItem(ctx, tx, nsOf(req.Principal), req.ItemID)
 		if err != nil {
 			return WriteResult{}, err
 		}
@@ -250,6 +253,8 @@ func (in *Internal) ResolveHold(ctx context.Context, req ResolveHoldRequest) (Wr
 			        requester, coalesce(requester_on_behalf_of, ''), coalesce(requester_agent_session, '')
 			 from item_holds where id = $1 and item_id = $2`, req.HoldID, req.ItemID,
 		).Scan(&status, &hook, &from, &to, &requestedSeq, &requester.Actor, &requester.OnBehalfOf, &requester.AgentSession)
+		// The requester acted in the Item's namespace; it is checked there again.
+		requester.Namespace = req.Principal.Namespace
 		if errors.Is(err, pgx.ErrNoRows) {
 			return WriteResult{}, fmt.Errorf("%w: no hold %s on this Item", ErrNotFound, req.HoldID)
 		}
@@ -391,8 +396,8 @@ func (in *Internal) HookInput(ctx context.Context, req HookInputRequest) (map[st
 	}
 	it := item.Item{ID: req.ItemID}
 	err = k.pool.QueryRow(ctx,
-		`select type_id, type_version, scope_id, state, fields, item_seq from items where id = $1 and namespace_id = $2`,
-		req.ItemID, defaultNamespace,
+		`select type_id, type_version, scope_id, state, fields, item_seq from items where id = $1`,
+		req.ItemID, // the kernel's own read: by ID, in any namespace
 	).Scan(&it.TypeID, &it.TypeVersion, &it.ScopeID, &it.State, &it.Fields, &it.ItemSeq)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound

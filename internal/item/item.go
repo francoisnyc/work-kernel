@@ -13,6 +13,12 @@ type Principal struct {
 	// is a session the item service minted (StartAgentSession), never one
 	// the caller made up.
 	AgentSession string
+	// Namespace is the namespace the principal acts in: the same principal
+	// ID in two namespaces is two principals. Empty means "default" (the
+	// spike's earlier tests rely on it; docs/journal.md, Later: make the
+	// kernel require it). The json:"-" tag keeps it out of the idempotency
+	// request hash: the namespace already scopes the key.
+	Namespace string `json:"-"`
 }
 
 // Attribution says what caused a write, beyond who made it. Every value is an

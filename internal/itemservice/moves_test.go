@@ -78,9 +78,10 @@ func TestMove_Widening_NeedsConfirmation(t *testing.T) {
 	open := createAs(t, k, admin, "open space", nil, nil)
 	it := createAs(t, k, admin, "moving", nil, &secret.ItemID)
 
+	// Not malformed: valid, but the caller must confirm it (Step 0, part 1).
 	_, err := moveTo(t, k, admin, it.ItemID, &open.ItemID, false)
-	if !errors.Is(err, itemservice.ErrInvalid) {
-		t.Fatalf("unconfirmed widening move: error = %v, want ErrInvalid", err)
+	if !errors.Is(err, itemservice.ErrRejected) || !isWidenNotConfirmed(err) {
+		t.Fatalf("unconfirmed widening move: error = %v, want ErrRejected (widen_not_confirmed)", err)
 	}
 	assertNothingWritten(t, it.ItemID, 1)
 	assertHidden(t, k, bob, it.ItemID)
@@ -101,8 +102,8 @@ func TestMove_ToTheTopLevel(t *testing.T) {
 	secret := createAs(t, k, admin, "secret space", &itemservice.Narrow{Readers: readers(admin)}, nil)
 	it := createAs(t, k, admin, "moving", nil, &secret.ItemID)
 
-	if _, err := moveTo(t, k, admin, it.ItemID, nil, false); !errors.Is(err, itemservice.ErrInvalid) {
-		t.Errorf("unconfirmed move to the top level: error = %v, want ErrInvalid", err)
+	if _, err := moveTo(t, k, admin, it.ItemID, nil, false); !isWidenNotConfirmed(err) {
+		t.Errorf("unconfirmed move to the top level: error = %v, want ErrRejected (widen_not_confirmed)", err)
 	}
 	res, err := moveTo(t, k, admin, it.ItemID, nil, true)
 	if err != nil {
@@ -130,8 +131,8 @@ func TestMove_AContainerMovesItsSubtree(t *testing.T) {
 	grandchild := createAs(t, k, admin, "grandchild", nil, &child.ItemID)
 	assertHidden(t, k, bob, grandchild.ItemID)
 
-	if _, err := moveTo(t, k, admin, folder.ItemID, nil, false); !errors.Is(err, itemservice.ErrInvalid) {
-		t.Fatalf("unconfirmed widening move of a container: error = %v, want ErrInvalid", err)
+	if _, err := moveTo(t, k, admin, folder.ItemID, nil, false); !isWidenNotConfirmed(err) {
+		t.Fatalf("unconfirmed widening move of a container: error = %v, want ErrRejected (widen_not_confirmed)", err)
 	}
 	if _, err := moveTo(t, k, admin, folder.ItemID, nil, true); err != nil {
 		t.Fatalf("move: %v", err)
@@ -266,4 +267,11 @@ func TestMove_CrossingMoves_NoDeadlockNoCycle(t *testing.T) {
 		}
 	}
 	assertAccessMatchesRecompute(t)
+}
+
+// isWidenNotConfirmed reports whether err is the refusal of an unconfirmed
+// widening move: ErrRejected with code widen_not_confirmed.
+func isWidenNotConfirmed(err error) bool {
+	var rej *itemservice.RejectedError
+	return errors.As(err, &rej) && errors.Is(err, itemservice.ErrRejected) && rej.Code == "widen_not_confirmed"
 }
