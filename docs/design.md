@@ -643,6 +643,8 @@ Every error has a standard code and an `ErrorInfo` with a stable reason
 | `ErrHeld` | `ABORTED` | `HELD` (+ hold name) |
 | `ErrIdempotencyKeyReuse` | `ALREADY_EXISTS` | `IDEMPOTENCY_KEY_REUSED` |
 | `ErrNotCaughtUp` | `UNAVAILABLE` | `NOT_CAUGHT_UP` |
+| The caller canceled the call | `CANCELED` | `CANCELED` |
+| The call ran out of time | `DEADLINE_EXCEEDED` | `DEADLINE_EXCEEDED` |
 | anything else | `INTERNAL` | `INTERNAL` |
 
 ### Versioning
