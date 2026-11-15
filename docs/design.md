@@ -530,27 +530,147 @@ create table item_holds   (id uuid primary key, item_id uuid not null references
 create unique index item_holds_one_open on item_holds (item_id) where status = 'open';
 ```
 
-## API contract (first cut)
+## Public API (v1)
 
-```protobuf
-service ItemService {
-  rpc Create(CreateRequest) returns (CreateResponse);
-  rpc Update(UpdateRequest) returns (UpdateResponse);
-  rpc Transition(TransitionRequest) returns (TransitionResponse);
-  rpc Link(LinkRequest) returns (LinkResponse);
-  rpc Archive(ArchiveRequest) returns (ArchiveResponse);
-  rpc Get(GetRequest) returns (GetResponse);
-  rpc Search(SearchRequest) returns (SearchResponse); // accepts min_seq
-}
-message WriteResult { string item_id = 1; int64 commit_seq = 2; int64 item_seq = 3; }
-// Each RPC has its own response message, so it can grow without breaking
-// clients. The five write responses each wrap a WriteResult.
-// Every write request carries idempotency_key and principal (actor, on_behalf_of).
-// UpdateRequest and TransitionRequest take an optional expected_item_seq;
-// TransitionRequest also takes an optional fields patch and a bounded wait,
-// and TransitionResponse adds outcome, hold_id and reason. Item carries its
-// latest hold.
-```
+Designed and reviewed 2026-11-15 ("Work kernel: Public API" in the design
+docs). This section is the spec for step 0 of the proof of concept. The proto
+in `proto/kernel/v1` is the first cut from before the spike and is replaced to
+match.
+
+**Principles.** One contract for every client (the `pli` CLI first, then UIs,
+bots, agents through an MCP server, other people's apps); nothing reaches Items
+any other way, and the internal door never goes over the network. Served with
+connect-go, so every operation answers gRPC, gRPC-Web and JSON over HTTP.
+Follow the published conventions: Google's API design guides (AIPs) for
+resources, paging, errors; Stripe's model for idempotency keys.
+
+**No generic action call.** Every operation that isn't "change fields" or
+"move state" gets its own named, typed call (`ApproveHold`, `RankItem`), never
+a catch-all `Action(item, name, json)` (Unix's `ioctl` is the warning). Each
+new call passes the kernel membership test.
+
+### Who is calling
+
+- A bearer token on every call; an interceptor turns it into the principal and
+  puts it in the request context. **No request message carries a principal.**
+  `on_behalf_of` is never a request field either.
+- Proof of concept: a config file maps dev tokens to principals
+  (`ana -> user:ana`); `pli --as ana` picks a token. The server refuses
+  dev-token mode unless started with an explicit flag, and warns on every
+  start. Real sign-on (OIDC) later replaces only the interceptor.
+- Agents (in practice an LLM with tools) start sessions in **capability mode**:
+  `StartAgentSession` takes the agent's token, the user it acts for (who must
+  have granted the agent; a config entry for now), and **required** `scopes`
+  (containers it may touch) and `powers` (read, comment, edit fields, which
+  transitions, outbound actions). A session can only narrow these; sub-agents
+  inherit them; reading untrusted text will drop outbound powers (with taint,
+  later). v1 enforces scopes and read-only versus write. Later calls carry the
+  agent's token and the session ID in a header; the server checks they belong
+  together.
+- `ApproveWiden` and future approvals take the approver from the token.
+- Timers and hooks never use the network API.
+
+### Resources and operations
+
+Names carry the namespace from day one: `namespaces/{ns}/items/{item}`,
+`namespaces/{ns}/types/{type}/versions/{n}`. Names stay flat: an Item's
+container is a field, not part of its name, so a move never renames it.
+
+| Operation | What it does |
+| --- | --- |
+| `CreateItem` | Create an Item of a Type, optionally in a container and narrowed |
+| `GetItem` | One Item as the caller sees it; hidden and missing are the same answer |
+| `UpdateItem` | A field patch, a readers change, or a move (one per call, as today) |
+| `TransitionItem` | Move state, optionally with a patch and a `wait`; returns the outcome |
+| `SearchItems` | Words and/or filters over what the caller can see; paged |
+| `ListItems` | A container's direct children, same filters; paged |
+| `ListItemEvents` | An Item's history, projected for the caller; paged |
+| `LinkItems`, `UnlinkItems` | Add or remove a link of a type the source's Type declares |
+| `GetType`, `ListTypes` | Read Type definitions (read-only; Types load from files at start) |
+| `StartAgentSession`, `ApproveWiden` | The agent rules |
+
+`Link` and `Archive` as they stand in the first-cut proto are removed until
+built. Every write returns the Item after the write plus `item_seq` and
+`commit_seq`. An Item carries its name, Type and version, container, state and
+category, fields, `etag`, links (both directions), the open hold if any, create
+and update times, and creator.
+
+### Field values
+
+Plain JSON values (`google.protobuf.Value`), converted and checked against the
+field's type in the Type on the server: int64 and decimals as strings, dates
+and timestamps as ISO 8601 strings, principals as `user:ana`, enums by name. A
+mismatch is `INVALID_ARGUMENT` naming the field. A patch changes only the
+fields it names; JSON `null` clears one. No field masks.
+
+### Writes
+
+- `request_id` (the idempotency key) is **required** on every write; same key
+  and same request returns the stored result, same key and a different request
+  is `ALREADY_EXISTS` / `IDEMPOTENCY_KEY_REUSED`. A request refused before any
+  work uses no key.
+- `etag` on any write: refused as `ABORTED` / `STALE` if the Item moved on.
+  Today it is `item_seq` as a string; clients treat it as opaque.
+- `TransitionItem` takes `wait` (default 0, at most 5 s) and answers `APPLIED`,
+  `DENIED` (with a reason code), `ERROR` or `PENDING` with the hold's name. A
+  denied held transition is a successful call, not an error.
+
+### Reads
+
+- Paging everywhere: `page_size` (default 50, max 500), `page_token`,
+  `next_page_token`. Opaque tokens, no offsets, no exact totals.
+- Filters on `SearchItems` and `ListItems`: Type, state, category, field
+  equality and ranges, principal fields ("assigned to me"), links ("linked to
+  X as `sprint`"). A filter alone is a valid search.
+- `min_seq` on search for read-your-writes; `UNAVAILABLE` / `NOT_CAUGHT_UP`
+  after 2 s. `GetItem` always reads the latest state.
+- Every read goes through `Project`. `Watch` comes later, after the sequencer.
+
+### Errors
+
+Every error has a standard code and an `ErrorInfo` with a stable reason
+(AIP-193); metadata never names anything the caller can't see.
+
+| Kernel refusal | Code | Reason |
+| --- | --- | --- |
+| Bad or missing token | `UNAUTHENTICATED` | `UNAUTHENTICATED` |
+| `ErrInvalid` | `INVALID_ARGUMENT` | `INVALID_REQUEST` (+ field violations) |
+| `ErrNotFound` (hidden or missing) | `NOT_FOUND` | `NOT_FOUND` |
+| `ErrForbidden` | `PERMISSION_DENIED` | `NOT_ALLOWED` |
+| `ErrNeedsApproval` | `PERMISSION_DENIED` | `NEEDS_APPROVAL` |
+| `ErrRejected` | `FAILED_PRECONDITION` | the rule's code, e.g. `GUARD_FAILED` |
+| `ErrStale` | `ABORTED` | `STALE` |
+| `ErrHeld` | `ABORTED` | `HELD` (+ hold name) |
+| `ErrIdempotencyKeyReuse` | `ALREADY_EXISTS` | `IDEMPOTENCY_KEY_REUSED` |
+| `ErrNotCaughtUp` | `UNAVAILABLE` | `NOT_CAUGHT_UP` |
+| anything else | `INTERNAL` | `INTERNAL` |
+
+### Versioning
+
+`kernel.v1` only grows: new operations, optional fields, enum values, reasons
+and metadata keys. Anything breaking is `v2`, served side by side. `buf lint`
+and `buf breaking` (against `main`) run in CI. Clients ignore unknown enum
+values and fields; every enum keeps `UNSPECIFIED = 0`. Until the proof of
+concept is done and someone else depends on v1, breaking changes are allowed
+but listed in the journal.
+
+## Links, containment and people (decided 2026-11-15)
+
+- **A Type declares its link types** like its fields: name, inverse name,
+  allowed target Types, at most one or many. A link change is an event on the
+  source Item (with `item_seq`, so history and etags see it). Links are
+  visible to CEL guards and usable as search filters. A link to something the
+  caller can't see shows as "a restricted item". **Links never change who can
+  see anything.** A `max 1` link (a story's `epic`, its `sprint`) can be shown
+  like a field but stays a link.
+- **Containment is the one privileged link:** at most one, no cycles, the only
+  link that carries permissions. It keeps its own storage and enforcement
+  (scope pointer, move lock, `ConfirmWiden`).
+- **People are principals, referenced by a principal field type**
+  (`assignee`, `reporter`, `approvers`): the server checks the value is a
+  real principal; search can filter by it. A person's profile is a `person`
+  Item tied to its principal, with `manager` and team links, written only by
+  HR or a sync; identity, roles and groups never live in Items.
 
 ## Spike build order
 
@@ -643,6 +763,20 @@ step's "done when" needs; the rest is direction, not scope.
 
 **Go checkpoint, after Step 3:** if most time went into fighting the language
 rather than the design, stop and decide whether to rerun in Java.
+
+## Proof of concept build order (after Step 7)
+
+Goal (decision log 2026-11-15): prove the kernel is a building block by
+running a Bonita-style vacation request and a Jira-style project on it, driven
+only through the public API by the `pli` CLI. Scenario scripts in `pli`
+commands are the end-to-end tests; every kernel change a step needs is counted
+in the journal.
+
+| Step | Build | Done when |
+| --- | --- | --- |
+| 0 | Public API v1 server (`cmd/itemservice`, connect-go) and the `pli` CLI (`cmd/pli`) over what exists: create, get, update (patch, readers, move), transition with `wait`, search with filters, list by container, item history, Types read-only, agent sessions with required scopes and powers. Dev-token auth, the error table, paging, `request_id`, `etag`, plain-JSON field values. `buf lint` and `buf breaking` in CI. `docker compose up` runs Postgres, Temporal, the item service, relay and worker | A scripted `pli` session creates, edits, moves (including a held approve with `wait`), searches with filters, lists a container and reads history, acting as two users; every named refusal comes back with its code and reason; an agent session refused outside its scopes; a cross-namespace attempt fails on every operation; a stranger can run it from the README |
+| 1 | Link types and principal fields | Declared link types with cardinality, inverse and allowed targets, enforced; link changes are events with etags; guards and search see links; principal fields checked |
+| 2+ | Vacation request: human approvals, acting timers, link reactions (the balance), a stub email connector; then the Jira scenarios | Planned per step when reached |
 
 ## Out of scope for the spike
 
