@@ -340,6 +340,10 @@ type StateEntry struct {
 	// cause is the entering event. OpenHold is the Item's open hold, if any.
 	HooksRun []string
 	OpenHold *HoldEntry
+	// PendingActions are the action hooks not yet completed, for any entry
+	// of their state, not just the current one: an action is never dropped
+	// because the Item moved on (or the worker died).
+	PendingActions []PendingAction
 }
 
 // HoldEntry is an open hold, as the workflow needs it: opaque IDs, state
@@ -404,6 +408,14 @@ func (k *Service) StateEntry(ctx context.Context, id uuid.UUID) (StateEntry, err
 		se.OpenHold = &h
 	case !errors.Is(err, pgx.ErrNoRows):
 		return StateEntry{}, fmt.Errorf("read open hold: %w", err)
+	}
+
+	ty, err := k.loadType(ctx, k.pool, se.TypeID, se.TypeVersion)
+	if err != nil {
+		return StateEntry{}, err
+	}
+	if se.PendingActions, err = k.pendingActions(ctx, id, ty); err != nil {
+		return StateEntry{}, err
 	}
 	return se, nil
 }

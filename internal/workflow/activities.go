@@ -29,6 +29,9 @@ type Activities struct {
 	Items      *itemservice.Service
 	Connectors *hooks.Connectors // the outside world the hooks call; nil when no Type has hooks
 	HookBudget time.Duration     // zero means DefaultHookBudget
+	// HookAttemptTimeout bounds one attempt of a hook; zero means the
+	// default. Tests and the bench only, to force timeouts.
+	HookAttemptTimeout time.Duration
 }
 
 // LoadItem reads what a new run needs to know about its Item: where it is,
@@ -53,7 +56,11 @@ func (a *Activities) LoadItem(ctx context.Context, itemID string) (Snapshot, err
 	}
 	timers := map[string]TimerSpec{}
 	enrich := map[string][]HookSpec{}
+	actions := map[string][]string{}
 	for _, s := range ty.States {
+		for _, h := range lifecycle.ActionHooks(ty, s.ID) {
+			actions[s.ID] = append(actions[s.ID], h.ID)
+		}
 		if timer, ok := lifecycle.TimerFor(ty, s.ID); ok {
 			timers[s.ID] = TimerSpec{After: timer.Duration, To: timer.To}
 		}
@@ -82,6 +89,12 @@ func (a *Activities) LoadItem(ctx context.Context, itemID string) (Snapshot, err
 		EnteredSeq: se.EnteredSeq, EnteredAt: se.EnteredAt,
 		CorrelationID: se.CorrelationID, Hop: se.Hop,
 		Enrich: enrich, Checks: checks, HookBudget: a.HookBudget, PendingEnrich: pending,
+		HookAttemptTimeout: a.HookAttemptTimeout, Actions: actions,
+	}
+	for _, pa := range se.PendingActions {
+		snap.PendingActions = append(snap.PendingActions, PendingAction{
+			HookID: pa.Hook, CauseSeq: pa.CauseSeq, CorrelationID: pa.CorrelationID, Hop: pa.Hop,
+		})
 	}
 	if h := se.OpenHold; h != nil {
 		snap.Hold = &OpenHold{
@@ -151,6 +164,9 @@ type WorkerOptions struct {
 	// HookBudget bounds each hook (ScheduleToClose); zero means
 	// DefaultHookBudget (15 min). Tests and the bench set it short.
 	HookBudget time.Duration
+	// HookAttemptTimeout bounds one attempt of a hook (StartToClose); zero
+	// means min(30 s, budget). Tests and the bench only: it forces timeouts.
+	HookAttemptTimeout time.Duration
 }
 
 // NewWorker returns a worker, not yet started, that runs Item workflows and
@@ -164,12 +180,15 @@ func NewWorker(c client.Client, taskQueue string, k *itemservice.Service, opts W
 	w.RegisterWorkflowWithOptions(run, workflow.RegisterOptions{Name: Name})
 
 	// Registered by name, because the workflow calls them by name.
-	a := &Activities{Items: k, Connectors: opts.Connectors, HookBudget: opts.HookBudget}
+	a := &Activities{Items: k, Connectors: opts.Connectors, HookBudget: opts.HookBudget,
+		HookAttemptTimeout: opts.HookAttemptTimeout}
 	w.RegisterActivityWithOptions(a.LoadItem, activity.RegisterOptions{Name: ActivityLoadItem})
 	w.RegisterActivityWithOptions(a.FireTimer, activity.RegisterOptions{Name: ActivityFireTimer})
 	w.RegisterActivityWithOptions(a.RunEnrich, activity.RegisterOptions{Name: ActivityRunEnrich})
 	w.RegisterActivityWithOptions(a.EnrichFallback, activity.RegisterOptions{Name: ActivityEnrichFallback})
 	w.RegisterActivityWithOptions(a.RunCheck, activity.RegisterOptions{Name: ActivityRunCheck})
 	w.RegisterActivityWithOptions(a.ResolveHold, activity.RegisterOptions{Name: ActivityResolveHold})
+	w.RegisterActivityWithOptions(a.RunAction, activity.RegisterOptions{Name: ActivityRunAction})
+	w.RegisterActivityWithOptions(a.HookFailed, activity.RegisterOptions{Name: ActivityHookFailed})
 	return w
 }

@@ -8,12 +8,23 @@
 //	ERP  GET  /customers/{id}/credit  → {"on_hold": false}
 //	ERP  POST /credit-checks          {"customer_id", "amount"}
 //	                                  → {"verdict": "allow"|"deny"|"correct", "reason", "cost_center"}
+//	ERP  POST /invoices               {"customer_id", "amount"}, header Idempotency-Key
+//	                                  → {"invoice_id": "INV-…"}
 //
-// An unknown customer is 404, an outage 503, an injected error 500.
+// An unknown customer is 404, an outage 503, an injected error 500, all
+// before any effect.
+//
+// The ERP honours idempotency keys like a real one: the same key with the
+// same request returns the invoice it already made, the same key with a
+// different request is 409 {"error": "key_conflict"}, and without a key every
+// request makes an invoice. To force timeouts that matter, the first invoice
+// request for each customer can be committed and then answered late
+// (SetFirstAnswerDelay) or not at all (SetDropFirstAnswer).
 package connstub
 
 import (
 	"encoding/json"
+	"fmt"
 	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
@@ -43,13 +54,40 @@ type Server struct {
 	errorRate float64
 	outage    bool
 	calls     int
+
+	// Invoices (ERP only).
+	invoices    map[string][]string   // customer -> invoice IDs, in order
+	byKey       map[string]invoiceRec // Idempotency-Key -> what it made
+	seen        map[string]bool       // customers that have sent an invoice request
+	lastInvoice int
+	firstDelay  time.Duration
+	dropFirst   bool
+	late        int
+	dropped     int
+
+	arrivals map[string][]Arrival // customer -> requests, as they arrived
+}
+
+// Arrival is when one request for a customer reached the stub, before any
+// latency. The bench uses it to split an approval's time into its legs.
+type Arrival struct {
+	Path string
+	At   time.Time
+}
+
+// invoiceRec is what one key made: the request, to spot a conflict, and the
+// invoice, to return again.
+type invoiceRec struct {
+	customer string
+	amount   int64
+	id       string
 }
 
 // NewCRM starts a stub CRM.
 func NewCRM() *Server {
 	s := newServer()
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /customers/{id}/plan", s.wrap(func(w http.ResponseWriter, c Customer, _ int64) {
+	mux.HandleFunc("GET /customers/{id}/plan", s.wrap(func(w http.ResponseWriter, _ *http.Request, _ string, c Customer, _ int64) {
 		writeJSON(w, map[string]any{"plan": c.Plan})
 	}))
 	s.start(mux)
@@ -60,10 +98,10 @@ func NewCRM() *Server {
 func NewERP() *Server {
 	s := newServer()
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /customers/{id}/credit", s.wrap(func(w http.ResponseWriter, c Customer, _ int64) {
+	mux.HandleFunc("GET /customers/{id}/credit", s.wrap(func(w http.ResponseWriter, _ *http.Request, _ string, c Customer, _ int64) {
 		writeJSON(w, map[string]any{"on_hold": c.OnHold})
 	}))
-	mux.HandleFunc("POST /credit-checks", s.wrap(func(w http.ResponseWriter, c Customer, amount int64) {
+	mux.HandleFunc("POST /credit-checks", s.wrap(func(w http.ResponseWriter, _ *http.Request, _ string, c Customer, amount int64) {
 		switch {
 		case c.OnHold:
 			writeJSON(w, map[string]any{"verdict": "deny", "reason": "customer_on_hold"})
@@ -75,11 +113,73 @@ func NewERP() *Server {
 			writeJSON(w, map[string]any{"verdict": "allow"})
 		}
 	}))
+	mux.HandleFunc("POST /invoices", s.wrap(s.invoice))
 	s.start(mux)
 	return s
 }
 
-func newServer() *Server { return &Server{customers: map[string]Customer{}} }
+func newServer() *Server {
+	return &Server{
+		customers: map[string]Customer{},
+		invoices:  map[string][]string{}, byKey: map[string]invoiceRec{}, seen: map[string]bool{},
+		arrivals: map[string][]Arrival{},
+	}
+}
+
+// invoice makes an invoice, or returns the one its key already made. The
+// effect is committed under the lock, before any delay, so two requests
+// with one key can never both make one.
+func (s *Server) invoice(w http.ResponseWriter, r *http.Request, customer string, _ Customer, amount int64) {
+	key := r.Header.Get("Idempotency-Key")
+	s.mu.Lock()
+	first := !s.seen[customer]
+	s.seen[customer] = true
+	rec, done := s.byKey[key]
+	if key != "" && done && (rec.customer != customer || rec.amount != amount) {
+		s.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "key_conflict"})
+		return
+	}
+	if key == "" || !done {
+		s.lastInvoice++
+		rec = invoiceRec{customer: customer, amount: amount, id: fmt.Sprintf("INV-%d", s.lastInvoice)}
+		s.invoices[customer] = append(s.invoices[customer], rec.id)
+		if key != "" {
+			s.byKey[key] = rec
+		}
+	}
+	delay, drop := s.firstDelay, s.dropFirst
+	s.mu.Unlock()
+
+	if first && drop {
+		// Close the connection without a word: the client cannot tell
+		// whether the invoice was made.
+		if hj, ok := w.(http.Hijacker); ok {
+			if conn, _, err := hj.Hijack(); err == nil {
+				_ = conn.Close()
+				s.count(&s.dropped)
+				return
+			}
+		}
+	}
+	if first && delay > 0 {
+		select {
+		case <-time.After(delay):
+		case <-r.Context().Done():
+			s.count(&s.late) // the client gave up; the invoice stands
+			return
+		}
+	}
+	writeJSON(w, map[string]any{"invoice_id": rec.id})
+}
+
+func (s *Server) count(n *int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	*n++
+}
 
 func (s *Server) start(h http.Handler) {
 	s.srv = httptest.NewServer(h)
@@ -124,11 +224,64 @@ func (s *Server) Calls() int {
 	return s.calls
 }
 
+// SetFirstAnswerDelay makes the ERP commit the first invoice request of each
+// customer and answer it only after d. A client that gives up meanwhile is
+// counted in LateAnswers; its invoice stands. Later requests answer at once.
+func (s *Server) SetFirstAnswerDelay(d time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.firstDelay = d
+}
+
+// SetDropFirstAnswer makes the ERP commit the first invoice request of each
+// customer and close the connection without answering (DroppedAnswers).
+func (s *Server) SetDropFirstAnswer(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dropFirst = on
+}
+
+// Invoices returns a customer's invoice IDs, in the order they were made.
+func (s *Server) Invoices(customer string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.invoices[customer]...)
+}
+
+// InvoiceCount returns how many invoices the ERP has made in all.
+func (s *Server) InvoiceCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastInvoice
+}
+
+// Arrivals returns when each request for a customer arrived, in order.
+func (s *Server) Arrivals(customer string) []Arrival {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]Arrival(nil), s.arrivals[customer]...)
+}
+
+// LateAnswers counts delayed first answers whose client had given up.
+func (s *Server) LateAnswers() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.late
+}
+
+// DroppedAnswers counts first answers dropped by SetDropFirstAnswer.
+func (s *Server) DroppedAnswers() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.dropped
+}
+
 // wrap applies latency, outage and errors, finds the customer, and hands it
 // to the endpoint. The customer comes from the path, or from a POSTed body
-// (with the amount, for a credit check).
-func (s *Server) wrap(serve func(w http.ResponseWriter, c Customer, amount int64)) http.HandlerFunc {
+// (with the amount, for a credit check or an invoice).
+func (s *Server) wrap(serve func(w http.ResponseWriter, r *http.Request, id string, c Customer, amount int64)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		arrived := time.Now()
 		s.mu.Lock()
 		s.calls++
 		latency, outage, errorRate := s.latency, s.outage, s.errorRate
@@ -166,12 +319,13 @@ func (s *Server) wrap(serve func(w http.ResponseWriter, c Customer, amount int64
 		}
 		s.mu.Lock()
 		c, ok := s.customers[id]
+		s.arrivals[id] = append(s.arrivals[id], Arrival{Path: r.URL.Path, At: arrived})
 		s.mu.Unlock()
 		if !ok {
 			http.Error(w, "no such customer", http.StatusNotFound)
 			return
 		}
-		serve(w, c, amount)
+		serve(w, r, id, c, amount)
 	}
 }
 

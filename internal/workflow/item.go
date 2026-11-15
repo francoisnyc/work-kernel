@@ -29,6 +29,11 @@ const (
 	ActivityRunCheck       = "RunCheck"       // runs a check and resolves its hold
 	ActivityResolveHold    = "ResolveHold"    // resolves a hold as error when its check cannot
 
+	// Action hooks (Step 7): a side effect on entering a state, keyed by the
+	// entry, never dropped.
+	ActivityRunAction  = "RunAction"  // runs an action hook and writes back what it made
+	ActivityHookFailed = "HookFailed" // records that an action hook gave up
+
 	// Error types by which the activities report the item service's final answers.
 	// All are non-retryable.
 	ErrTypeStale      = "Stale"      // the Item moved on; the workflow is behind
@@ -37,6 +42,10 @@ const (
 	ErrTypeInvalid    = "Invalid"    // the request is malformed; the same request can never succeed
 	ErrTypeHeld       = "Held"       // an open hold refuses the move; for a timer, final
 	ErrTypeHookFailed = "HookFailed" // the hook failed for good (unknown customer, bad input)
+	// ErrTypeKeyConflict: an action ran again for the same key and got a
+	// different result (a second invoice), or the connector saw the key with
+	// a different request. A duplicate, never "already written".
+	ErrTypeKeyConflict = "KeyConflict"
 )
 
 // MaxRetryInterval caps the pause between two attempts of an activity. A
@@ -84,6 +93,11 @@ type Snapshot struct {
 	Enrich     map[string][]HookSpec
 	Checks     map[string]string
 	HookBudget time.Duration // each hook's ScheduleToClose; zero means DefaultHookBudget
+	// HookAttemptTimeout bounds one attempt of a hook (StartToClose); zero
+	// means min(30 s, budget). Set by tests and the bench only.
+	HookAttemptTimeout time.Duration
+	// Actions maps a state to its action hooks, in the Type's order.
+	Actions map[string][]string
 
 	// PendingEnrich are the enrich hooks of the current state entry not yet
 	// started; they are caused by EnteredSeq. Hold is the Item's open hold,
@@ -91,6 +105,18 @@ type Snapshot struct {
 	// that needs a hook loads that event as already applied.
 	PendingEnrich []string
 	Hold          *OpenHold
+	// PendingActions are action hooks not yet started, for any entry of
+	// their state: LoadItem reports those not yet completed, and entering a
+	// state adds its actions. Leaving the state never drops one.
+	PendingActions []PendingAction
+}
+
+// PendingAction is one action hook to run for one entry of its state.
+type PendingAction struct {
+	HookID        string
+	CauseSeq      int64 // the event that entered the state
+	CorrelationID string
+	Hop           int // of that event
 }
 
 // HookSpec is one enrich hook, reduced to what the workflow needs.
@@ -125,6 +151,12 @@ type HookInput struct {
 	// own write and its fallback share it), hold:<hold> for a check (its
 	// resolution and the error resolution share it). Either way, one write.
 	IdempotencyKey string
+}
+
+// HookFailedInput records that an action hook gave up.
+type HookFailedInput struct {
+	Hook   HookInput
+	Reason string // budget_exhausted, key_conflict or action_failed
 }
 
 // ResolveInput resolves a hold whose check could not answer.
@@ -201,13 +233,16 @@ var activityOptions = workflow.ActivityOptions{
 // The budget is the only bound, so attempts are unlimited. That is said as
 // math.MaxInt32 rather than 0: Temporal's test environment turns 0 into 10
 // attempts, which would end a hook before its budget in unit tests.
-func hookOptions(budget time.Duration) workflow.ActivityOptions {
+func hookOptions(budget, attempt time.Duration) workflow.ActivityOptions {
 	opts := activityOptions
 	retry := *activityOptions.RetryPolicy // a copy: the shared policy stays as it is
 	retry.MaximumAttempts = math.MaxInt32
 	opts.RetryPolicy = &retry
 	opts.ScheduleToCloseTimeout = budget
 	opts.StartToCloseTimeout = min(30*time.Second, budget)
+	if attempt > 0 {
+		opts.StartToCloseTimeout = min(attempt, budget)
+	}
 	return opts
 }
 
@@ -283,6 +318,13 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 			for _, h := range s.Enrich[ev.To] {
 				s.PendingEnrich = append(s.PendingEnrich, h.ID)
 			}
+			// Its action hooks are added, never replaced: an action of a
+			// state already left still runs, for the entry that caused it.
+			for _, id := range s.Actions[ev.To] {
+				s.PendingActions = append(s.PendingActions, PendingAction{
+					HookID: id, CauseSeq: ev.Seq, CorrelationID: ev.CorrelationID, Hop: ev.Hop,
+				})
+			}
 			entries++
 		}
 		return ApplyResult{Applied: true}, nil
@@ -338,7 +380,7 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 		running++
 		workflow.Go(ctx, func(gctx workflow.Context) {
 			defer func() { running--; wake++ }()
-			err := workflow.ExecuteActivity(workflow.WithActivityOptions(gctx, hookOptions(budget)),
+			err := workflow.ExecuteActivity(workflow.WithActivityOptions(gctx, hookOptions(budget, s.HookAttemptTimeout)),
 				ActivityRunEnrich, hin).Get(gctx, nil)
 			if err == nil || !hookGaveUp(err) {
 				logHookEnd(log, hin, err)
@@ -370,7 +412,7 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 		running++
 		workflow.Go(cctx, func(gctx workflow.Context) {
 			defer func() { running--; wake++ }()
-			err := workflow.ExecuteActivity(workflow.WithActivityOptions(gctx, hookOptions(budget)),
+			err := workflow.ExecuteActivity(workflow.WithActivityOptions(gctx, hookOptions(budget, s.HookAttemptTimeout)),
 				ActivityRunCheck, hin).Get(gctx, nil)
 			if err == nil || gctx.Err() != nil || !hookGaveUp(err) {
 				logHookEnd(log, hin, err)
@@ -387,8 +429,31 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 		})
 	}
 
+	// startAction runs one action hook in a coroutine, for one entry of its
+	// state. Nothing cancels it: once the state was entered, the action runs
+	// to completion. If it cannot complete, it records hook_failed with the
+	// reason, through the item service, so the failure is visible on the Item.
+	startAction := func(pa PendingAction) {
+		hin := hookInput(pa.HookID, pa.CauseSeq, pa.CorrelationID, pa.Hop+1)
+		running++
+		workflow.Go(ctx, func(gctx workflow.Context) {
+			defer func() { running--; wake++ }()
+			err := workflow.ExecuteActivity(workflow.WithActivityOptions(gctx, hookOptions(budget, s.HookAttemptTimeout)),
+				ActivityRunAction, hin).Get(gctx, nil)
+			reason, failed := actionFailure(err)
+			if !failed {
+				logHookEnd(log, hin, err)
+				return
+			}
+			err = workflow.ExecuteActivity(gctx, ActivityHookFailed, HookFailedInput{Hook: hin, Reason: reason}).Get(gctx, nil)
+			logHookEnd(log, hin, err)
+		})
+	}
+
 	handlersDone := func() bool { return workflow.AllHandlersFinished(ctx) }
-	busy := func() bool { return running > 0 || s.Hold != nil || len(s.PendingEnrich) > 0 }
+	busy := func() bool {
+		return running > 0 || s.Hold != nil || len(s.PendingEnrich) > 0 || len(s.PendingActions) > 0
+	}
 
 	for {
 		// Hook work the last events (or the load) asked for.
@@ -406,6 +471,11 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 			}
 			if s.Hold != nil && !checkStarted {
 				startCheck()
+			}
+			actions := s.PendingActions
+			s.PendingActions = nil
+			for _, pa := range actions {
+				startAction(pa)
 			}
 		}
 
@@ -529,6 +599,30 @@ func hookGaveUp(err error) bool {
 		}
 	}
 	return !temporal.IsCanceledError(err)
+}
+
+// actionFailure says whether an action hook's error should be recorded as
+// hook_failed, and with which reason. Its budget ran out or it failed for
+// good: yes. The Item is gone, or the workflow was canceled: there is
+// nothing to record on.
+func actionFailure(err error) (reason string, failed bool) {
+	if err == nil || temporal.IsCanceledError(err) {
+		return "", false
+	}
+	var appErr *temporal.ApplicationError
+	if errors.As(err, &appErr) {
+		switch appErr.Type() {
+		case ErrTypeNotFound:
+			return "", false
+		case ErrTypeKeyConflict:
+			return "key_conflict", true
+		case ErrTypeHookFailed, ErrTypeRejected, ErrTypeInvalid, ErrTypeStale, ErrTypeHeld:
+			// Failed for good, or the kernel refused the write-back:
+			// retrying the same request cannot help.
+			return "action_failed", true
+		}
+	}
+	return "budget_exhausted", true
 }
 
 func logHookEnd(log interface{ Info(string, ...any) }, in HookInput, err error) {

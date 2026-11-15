@@ -84,6 +84,17 @@ transition, from, to}` for a **check**. Each names an action (code in
 action by position; the action's arity is checked at load. A transition may
 be an `escape` (cancel): it may leave a held state.
 
+An **action** hook (Step 7) is `{id, on: enter, state, kind: action}`: a side
+effect outside the kernel (an invoice in the ERP). It writes at least one
+field (what it made) and has no fallback. Its idempotency key is one per
+entry into the state, `hook:<item>:<entered seq>:<hook>`, and the action
+passes it to the connector itself, so a retry gets what the first attempt
+made. Each entry is its own business event: re-entering the state runs it
+again under a new key. Once its state is entered it runs to completion, even
+if the Item has moved on (enrich hooks of a state already left may be
+dropped; actions never are). If it cannot complete, it writes `hook_failed`
+(below).
+
 ## Write path
 
 ```
@@ -225,6 +236,18 @@ client → item service (Go, stateless)
 - Variant D: an enrich hook prefetches a fact (`on_hold`) into a field and a
   CEL guard refuses at once on it; the check is the backstop for a stale or
   missing prefetch. Enrich hooks of a state already left are skipped.
+- **Action hooks** (Step 7). An action that gives up writes `hook_failed`
+  through the internal door (payload: the hook and a reason code,
+  `budget_exhausted`, `key_conflict` or `action_failed`; no field or state
+  change), under its own key `hook_failed:<item>:<entered seq>:<hook>`. Only
+  an action hook may write it. Its write-back's key coming back with a
+  different request means the connector made a second, different thing for
+  one key: a duplicate, recorded as `key_conflict`, never treated as already
+  written (an enrich hook's fallback shares its key, so there it is). An
+  action is complete for an entry once an event names the hook as
+  `originating_hook` and the entry as `causation_id` (its write-back or
+  `hook_failed`); `LoadItem` reports every action not complete, for any
+  entry, not just the current one.
 
 ## Policy
 
@@ -243,8 +266,9 @@ client → item service (Go, stateless)
   `causation_id` or non-zero `hop`, with `ErrInvalid`; `correlation_id` stays
   open to callers, as a claim. The kernel's own actors write through
   `Service.Internal()` (`Update` and `Transition` only):
-  - It serves `Update`, `Transition`, `ResolveHold` (a check settles its hold)
-    and `HookInput` (a hook reads its declared `reads`, nothing else).
+  - It serves `Update`, `Transition`, `ResolveHold` (a check settles its hold),
+    `HookFailed` (an action hook gives up) and `HookInput` (a hook reads its
+    declared `reads`, nothing else).
   - It accepts `system:timer` and `hook:<type>:<hook-id>` only; any other
     `system:` actor is `ErrInvalid` until it is defined. It refuses people,
     agents, an `on_behalf_of` set by the caller and any agent session.
@@ -569,6 +593,20 @@ invoice in the ERP.
 Questions to settle along the way: does the SLA clock pause during a hold? Is
 "requested, not yet applied" a substate or a separate field? How does the UI
 show a hold?
+
+**Outcome (Step 7, decided 2026-11-15).** The leaning is firm: connectors run
+outside the write transaction, always. Checks are holds with a bounded wait
+(the D pattern, prefetch plus guard with the hold as backstop, where the
+deciding fact can be prefetched); side effects are action hooks whose
+idempotency key reaches the connector. A synchronous call before the
+transaction (variant B) is not offered: with a healthy ERP it saved ~100 ms
+at the median, but it put the ERP's latency in every checked write (2 s when
+the ERP hangs) and answered nothing at 5 s of ERP latency, while A and D kept
+writes at ~5 ms and answered everything, late. Across 3,100 forced failures
+per run (late or dropped answers, a stopped or killed worker) the invoice was
+never duplicated; without keys, once per ticket. Numbers and the three
+questions' recommendations: `docs/journal.md`, "Holds and connectors:
+write-up".
 
 ### Settled direction for holds, approvals and agents
 

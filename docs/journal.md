@@ -133,6 +133,33 @@ Ideas noted during the spike, not built yet.
 - The workflow has no `GetVersion` branches, so changing its code breaks the
   replay of running histories. Before the first product: replay tests against
   real recorded histories, and versioned changes. (Step 6)
+- An action hook reads its inputs when it runs, not as they were at its
+  cause: if `f_amount` changes between two runs of the invoice hook, the ERP
+  sees the same key with another request and answers `key_conflict`. Fix: an
+  action hook reads its inputs as of its cause event (`item_event_values`
+  holds them), so retries always send the same request and the invoice bills
+  the approved amount. Ties to "an approval covers exact inputs". For the
+  spike the visible `key_conflict` is enough. (Step 7)
+- An action's write-back can commit while its attempt is reported as timed
+  out; if the budget then runs out, the Item gets both `f_invoice_id` and
+  `hook_failed` (`budget_exhausted`). Rare and visible. Fix when it matters:
+  `HookFailed` for `budget_exhausted` writes nothing when the hook already
+  completed for that entry. (Step 7)
+- Before giving up on an action, reconcile: look the key up in the connector
+  (the ERP knows whether it made the invoice) and write back what it made,
+  instead of `hook_failed`. (Step 7)
+- A timer that comes due while a hold is open should be deferred until the
+  hold resolves, then fire if the Item is still in its state, not be spent
+  as it is today. The SLA clock keeps running during a hold by default; a
+  real SLA object may declare `pause_while: held`. (Step 7 write-up)
+- After a worker dies (SIGKILL), its action attempts are only retried once
+  their attempt timeout (StartToClose) runs out: 21 s with a 20 s timeout in
+  the bench, while a graceful stop reports the attempts and they retry at
+  once. Give long actions a heartbeat timeout (a few seconds) so a dead
+  worker is noticed quickly, without shortening the attempt itself. (Step 7)
+- `StateEntry` finds pending actions by reading the Item's whole event
+  history on every workflow load: O(events). Fine for the spike; keep a
+  per-entry "actions done" marker if Items get long histories. (Step 7)
 
 ## 2026-11-12 — Step 1 (finished)
 
@@ -689,3 +716,153 @@ reruns on a reload (its key makes the write a no-op, but the connector is called
 passes via `go run`.
 
 **Next session:** Step 7 (invoice with an idempotency key, forced timeouts, variants A and B).
+
+## 2026-11-15 — Step 7: invoice action, forced timeouts, variants A and B (finished)
+
+**Built:** a third hook kind, `action` (ticket v4's `create_invoice` on entering approved): one key per
+entry, `hook:<item>:<entered seq>:<hook>`, passed to the ERP as `Idempotency-Key`; never dropped when
+the state is left; `LoadItem` reports actions not done for any entry (from `originating_hook` +
+`causation_id`). `Internal().HookFailed` writes `hook_failed` (`budget_exhausted`, `key_conflict`,
+`action_failed`) under its own key. A write-back whose key comes back with a different result is a
+`key_conflict`, never "already written". Stub ERP invoices (keys, 409 conflicts, late or dropped
+first answers). `WorkerOptions.HookAttemptTimeout`. Bench modes `-invoices` and `-variants`;
+`testdata/ticket_a.v1.yaml` (variant A). Variant B lives on `spike/variant-b` (pushed, never merged).
+
+**Surprises:** Go's `net/http` resends a POST carrying `Idempotency-Key` by itself when a reused
+connection drops before the answer (`Request.isReplayable`), inside the same activity attempt: with
+dropped answers Temporal saw no failure at all. The key made that safe too. A graceful
+`worker.Stop()` reports its cut-off attempts, which retry at once (1.3 s); a SIGKILL is only noticed
+when the attempt times out (21 s with a 20 s StartToClose). The first `-variants` run timed approvals
+behind the relay's backlog of the preparation's own events (464 ms instead of 164 ms at 50 ms);
+the bench now waits for the outbox to drain. Docker Hub rate-limited anonymous pulls (429); the
+images came from `mirror.gcr.io` and were tagged locally.
+
+**Open:** see the write-up below; Later has the action-input, heartbeat and reconcile items.
+
+**Next session:** the design.md proposals were approved on 2026-11-15 (the outcome is recorded
+under Steps 6–7). Decide whether the spike's follow-up ends here.
+
+### Numbers: invoices under forced failures (`go run ./cmd/bench -invoices`)
+
+Runs 2 and 3 (run 1 had no "no client resend" row and no retries column; its rows matched).
+Duplicates are counted on the ERP side. "Temporal retries": tickets whose invoice action succeeded
+on a second or later Temporal attempt, from each workflow's history.
+
+| Run | Tickets | Keys | Forced failures | Temporal retries | Duplicates | hook_failed | All invoiced after |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| late answers (1 s; attempt timeout 200 ms) | 1,000 | yes | 1,000 late | 1,000 / 1,000 | 0 / 0 | 0 | 159.0 / 158.9 s |
+| dropped answers, client resend on | 1,000 | yes | 1,000 dropped | 0 / 0 | 0 / 0 | 0 | 154.9 / 155.9 s |
+| dropped answers, no client resend | 1,000 | yes | 1,000 dropped | 1,000 / 1,000 | 0 / 0 | 0 | 158.5 / 156.8 s |
+| control: late answers, no keys | 100 | no | 100 late | 100 / 100 | **100 / 100** | 0 | 15.8 / 15.8 s |
+| `worker.Stop()` mid-activity (answers after 15 s) | 50 | yes | 50 late | 50 / 50 | 0 / 0 | 0 | 8.7 / 9.0 s |
+| `cmd/worker` SIGKILL mid-activity | 50 | yes | 50 late | 50 / 50 | 0 / 0 | 0 | 28.0 / 28.1 s |
+
+Which retry layer ran: the late-answer, no-resend, control and both stop runs were retried by
+Temporal (a new attempt, same key); dropped answers with the client's resend on were retried by
+`net/http` inside one attempt (same key, same header). Both layers send the same key, which is
+the point: 3,100 forced failures per run (1,000 late, 2,000 dropped, 100 stopped or killed
+mid-activity) gave no duplicate in either run, while the same run without keys gave one per ticket. After the stops:
+all invoiced 1.3 s after `worker.Stop()`, 21.0 / 20.9 s after the SIGKILL.
+
+### Numbers: A, B and D (`go run ./cmd/bench -variants`, from `spike/variant-b`)
+
+4 vCPU; relay polling 50 ms; 40 approvals per case, 8 concurrent callers; p50 / p95 ms of time to
+a definitive answer, run 1 / run 2. "Within" = definitive on the first call (B: within its 2 s ERP
+timeout). The 20% stale mix applies to D only (A and B have no prefetch); its numbers match D at 20%
+on hold, with every stale customer caught by the hold (8 / 8 `denied_check`).
+
+| Latency | Wait | Mix | A p50 | A p95 | B p50 | B p95 | D p50 | D p95 | Within (A / B / D) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 50 ms | 3 s | 0% on hold | 207 / 161 | 212 / 214 | 62 / 62 | 66 / 64 | 160 / 166 | 208 / 259 | 100 / 100 / 100% |
+| 50 ms | 3 s | 20% on hold | 160 / 159 | 212 / 212 | 57 / 59 | 62 / 64 | 158 / 161 | 211 / 216 | 100 / 100 / 100% |
+| 50 ms | 5 s | 0% on hold | 165 / 160 | 215 / 212 | 60 / 59 | 68 / 63 | 167 / 165 | 260 / 261 | 100 / 100 / 100% |
+| 50 ms | 5 s | 20% on hold | 163 / 164 | 261 / 215 | 58 / 56 | 65 / 62 | 158 / 163 | 217 / 259 | 100 / 100 / 100% |
+| 500 ms | 3 s | 0% on hold | 617 / 619 | 667 / 625 | 509 / 509 | 514 / 515 | 616 / 571 | 673 / 675 | 100 / 100 / 100% |
+| 500 ms | 3 s | 20% on hold | 576 / 579 | 620 / 671 | 507 / 506 | 511 / 510 | 618 / 621 | 625 / 684 | 100 / 100 / 100% |
+| 500 ms | 5 s | 0% on hold | 618 / 618 | 682 / 670 | 510 / 509 | 515 / 514 | 616 / 615 | 624 / 674 | 100 / 100 / 100% |
+| 500 ms | 5 s | 20% on hold | 622 / 621 | 675 / 670 | 506 / 506 | 513 / 510 | 621 / 619 | 675 / 672 | 100 / 100 / 100% |
+| 5 s | 3 s | 0% on hold | 5,111 / 5,109 | 5,165 / 5,162 | 2,001 † | 2,002 † | 5,109 / 5,111 | 5,159 / 5,163 | 0 / 0 / 0% |
+| 5 s | 3 s | 20% on hold | 5,103 / 5,107 | 5,154 / 5,162 | 2,001 † | 2,002 † | 5,102 / 5,103 | 5,149 / 5,155 | 0 / 0 / **20%** |
+| 5 s | 5 s | 0% on hold | 5,113 / 5,110 | 5,165 / 5,161 | 2,002 † | 2,002 † | 5,109 / 5,110 | 5,163 / 5,159 | 0 / 0 / 0% |
+| 5 s | 5 s | 20% on hold | 5,114 / 5,111 | 5,164 / 5,163 | 2,002 † | 2,002 † | 5,110 / 5,066 | 5,212 / 5,160 | 0 / 0 / **20%** |
+
+† B at 5 s answers nothing: every approval is refused as unavailable after its 2 s timeout, good
+customers included. A and D get every answer right, after the ERP's 5 s plus ~110 ms.
+D's guard refuses the 20% on hold in the request's own transaction; that is its 20% within the wait
+at 5 s (at 50 and 500 ms everyone is within the wait anyway, so the p50 does not move).
+
+Where the held path's time goes at 50 ms (0% on hold, wait 3 s, run 1; p50 / p95 ms):
+
+| Variant | Request | To the ERP | ERP + write | Back to the caller | Total |
+| --- | --- | --- | --- | --- | --- |
+| A | 0.2 / 7.2 | 115.7 / 146.7 | 50.7 / 51.4 | 30.2 / 51.2 | 207.5 / 211.7 |
+| D | 0.4 / 4.2 | 79.9 / 121.2 | 50.5 / 52.2 | 25.3 / 50.4 | 160.0 / 207.7 |
+
+The held path costs ~100–110 ms over B at the median: ~80 ms to reach the ERP (relay poll, 25 ms on
+average at 50 ms; update-with-start, workflow task, activity dispatch, hook input read) and ~25–30 ms
+back (the wait polls every 50 ms). A's row is the bench's first case and carries its warm-up (run 2
+of the same case: 161 ms); D's row is the representative one. `LISTEN/NOTIFY` for the relay and the
+wait (both in Later) would remove most of the two polls, ~50 ms.
+
+Kernel write latency, stubs at 50 ms, p50 / p95 ms (100 writes, 4 writers):
+
+| Variant | Condition | Update | Approval request (wait 0) |
+| --- | --- | --- | --- |
+| A | baseline / ERP down / ERP hanging | 5.1 / 7.3 · 4.9 / 7.7 · 5.0 / 7.8 | 4.8 / 8.2 · 5.6 / 7.6 · 5.6 / 7.8 |
+| D | baseline / ERP down / ERP hanging | 5.0 / 7.7 · 5.1 / 10.8 · 6.4 / 9.9 | 5.5 / 7.3 · 6.3 / 9.3 · 5.3 / 7.1 |
+| B | baseline / ERP down / ERP hanging | 5.7 / 8.3 · 5.2 / 7.7 · 4.8 / 8.6 | **55.6 / 58.6 · 51.7 / 52.3 · 2,001.5 / 2,002.0** |
+
+"ERP down" answers 503 after the stub's 50 ms latency; "hanging" answers after 30 s. B's write path
+holds the ERP's latency, and its timeout when the ERP hangs; A and D do not notice the ERP at all.
+
+## Holds and connectors: write-up (Steps 6–7)
+
+**The question.** The leaning decision of 2026-11-12: connectors run outside the write transaction,
+with holds and a bounded wait. Steps 6–7 built it (D, and A for comparison) and the alternative (B: a
+synchronous call before the transaction, 2 s timeout) and measured both.
+
+**What the numbers say.**
+- *Correctness under failure.* With the key passed to the connector, 3,100 forced failures per run
+  (late, dropped, a stopped or killed worker) made no duplicate invoice, in two runs; without keys, one per
+  ticket. Both retry layers (Temporal's and `net/http`'s own) used the same key. Idempotency at the
+  connector is what makes "outside the transaction" safe; the kernel's own key cannot, because the
+  side effect is not in its transaction.
+- *Latency when the ERP is healthy.* B is faster: ~60 ms vs ~160 ms at 50 ms, ~510 vs ~620 ms at
+  500 ms. The held path's extra ~100 ms is two polls and the workflow hop, not the design; half of
+  it goes with `LISTEN/NOTIFY`. Every variant answered 100% within a 3 s wait up to 500 ms.
+- *When the ERP is slow or down.* B's write path inherits the ERP: every approval takes the ERP's
+  latency inside the write, 2 s when it hangs, and at 5 s latency B answers nothing (100% refused,
+  good customers included). A and D keep kernel writes at ~5 ms whatever the ERP does, and get every
+  answer right, late; the caller gets "pending" and the Item shows the hold.
+- *D vs A.* Identical when nobody is on hold (D's prefetch only helps refusals). D refuses customers
+  known to be on hold in the request's own transaction, so at 5 s latency D answers the 20% on hold
+  within the wait where A answers none. The hold caught every stale prefetch (8 / 8 per run).
+
+**Recommendation: make the leaning firm.** Connectors run outside the write transaction, always:
+checks as holds with a bounded wait, enrich hooks as prefetches, side effects as action hooks whose
+idempotency key reaches the connector. Use the D pattern (prefetch + guard, hold as backstop) for
+checks whose deciding fact can be prefetched; plain holds (A) otherwise. Do not offer B, not even as
+an option for "fast" connectors: its only gain is ~100 ms at the median, which `LISTEN/NOTIFY`
+mostly recovers, and it couples every write's latency and availability to the slowest connector.
+Before the product: `LISTEN/NOTIFY` for the relay and the wait, heartbeats on long actions, action
+inputs read as of the cause, and reconciliation before an action gives up (all in Later).
+
+**Re-entry semantics.** Each entry into approved is a business event, billed once: re-entering it
+bills again (a new key). Right for the spike; for real billing, open: should a second approval of
+the same amount be refused, or reconciled against the ERP by the ticket's identity?
+
+**The three open questions: recommendations, not decisions.**
+1. *Does the SLA clock pause during a hold?* No by default: the customer is waiting whatever the
+   system is doing, and a hold lasts ~0.2–0.6 s at p50 with a healthy connector. But a timer must
+   not be spent by a hold, as it is today: it should fire when the hold resolves (deferred, not
+   lost). Let a real SLA object declare `pause_while: held` for Types where a long external check
+   is the customer's own doing.
+2. *Is "requested, not yet applied" a substate or a separate field?* A separate field, as built
+   (`item_holds` and `Item.Hold`). States are business lifecycle, never plumbing; a substate would
+   double the states, and every guard, timer and view would have to know about it.
+3. *How does the UI show a hold?* Mostly it does not need to: up to 500 ms of connector latency,
+   100% of approvals answer within a 3 s wait, so the user sees the result. When the wait runs out,
+   show the Item in its state with a pending badge from `Item.Hold` ("approval pending: ERP credit
+   check, since 10:42"), keep the escape (cancel) available, and turn the badge into the outcome with
+   its reason code (`customer_on_hold`, `budget_exhausted`) when it resolves. `hook_failed` shows the
+   same way on the Item, with a retry action once reconciliation exists.

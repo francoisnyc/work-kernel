@@ -44,16 +44,22 @@ type Result struct {
 // bad inputs, an unknown customer. Every other error is worth retrying.
 var ErrPermanent = errors.New("hooks: permanent failure")
 
+// ErrKeyConflict is the connector saying that an idempotency key came back
+// with a different request. It is permanent too: errors.Is finds both.
+var ErrKeyConflict = fmt.Errorf("hooks: idempotency key used with a different request (%w)", ErrPermanent)
+
 // permanent wraps a message as ErrPermanent, so errors.Is finds it.
 func permanent(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrPermanent, fmt.Sprintf(format, args...))
 }
 
-// action is one registered action: how many values it reads and writes, and
-// its code.
+// action is one registered action: how many values it reads and writes,
+// whether it changes the outside world, and its code. An action with a side
+// effect gets the hook's idempotency key and must pass it to the connector.
 type action struct {
 	reads, writes int
-	run           func(ctx context.Context, c *Connectors, args []any) (Result, error)
+	sideEffect    bool
+	run           func(ctx context.Context, c *Connectors, key string, args []any) (Result, error)
 }
 
 // catalog is every action a Type may name. A package-level map is fine here:
@@ -62,6 +68,7 @@ var catalog = map[string]action{
 	"crm.get_plan":          {reads: 1, writes: 1, run: getPlan},
 	"erp.get_credit_status": {reads: 1, writes: 1, run: getCreditStatus},
 	"erp.check_credit":      {reads: 2, writes: 1, run: checkCredit},
+	"erp.create_invoice":    {reads: 2, writes: 1, sideEffect: true, run: createInvoice},
 }
 
 // Arity reports how many reads and writes an action takes. ok is false for
@@ -76,6 +83,7 @@ func Arity(name string) (reads, writes int, ok bool) {
 type Connectors struct {
 	crm, erp string
 	http     *http.Client
+	noKeys   bool // the control run: never send the idempotency key
 }
 
 // NewConnectors returns connectors for the CRM and ERP at these base URLs.
@@ -85,8 +93,31 @@ func NewConnectors(crmURL, erpURL string) *Connectors {
 	return &Connectors{crm: crmURL, erp: erpURL, http: &http.Client{}}
 }
 
-// Run calls one action with the values of its hook's reads.
-func (c *Connectors) Run(ctx context.Context, name string, args []any) (Result, error) {
+// WithoutKeys returns connectors that never send an idempotency key. It is
+// the control run of the duplicate test: with it, a retry after a timeout
+// makes a second invoice, which the test must be able to see.
+func (c *Connectors) WithoutKeys() *Connectors {
+	control := *c // a copy: c itself still sends keys
+	control.noKeys = true
+	return &control
+}
+
+// WithoutResend returns connectors that open a new connection for every
+// request. net/http resends a replayable request (a POST with an
+// Idempotency-Key counts) by itself when a reused connection drops before
+// the answer; without reuse it never does, so a dropped answer reaches the
+// caller and the retry is a new Temporal attempt. Bench and tests only.
+func (c *Connectors) WithoutResend() *Connectors {
+	fresh := *c
+	fresh.http = &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+	return &fresh
+}
+
+// Run calls one action with the values of its hook's reads. key is the
+// hook's idempotency key: an action with a side effect refuses to run
+// without one, since a retry could not be told from a new request.
+// Read-only actions ignore it.
+func (c *Connectors) Run(ctx context.Context, name, key string, args []any) (Result, error) {
 	a, ok := catalog[name]
 	if !ok {
 		return Result{}, permanent("unknown action %q", name)
@@ -94,12 +125,18 @@ func (c *Connectors) Run(ctx context.Context, name string, args []any) (Result, 
 	if len(args) != a.reads {
 		return Result{}, permanent("%s takes %d inputs, got %d", name, a.reads, len(args))
 	}
-	return a.run(ctx, c, args)
+	if a.sideEffect && key == "" {
+		return Result{}, permanent("%s has a side effect and needs an idempotency key", name)
+	}
+	if c.noKeys {
+		key = ""
+	}
+	return a.run(ctx, c, key, args)
 }
 
 // --- the actions ---
 
-func getPlan(ctx context.Context, c *Connectors, args []any) (Result, error) {
+func getPlan(ctx context.Context, c *Connectors, _ string, args []any) (Result, error) {
 	customer, err := customerID(args[0])
 	if err != nil {
 		return Result{}, err
@@ -107,13 +144,13 @@ func getPlan(ctx context.Context, c *Connectors, args []any) (Result, error) {
 	var body struct {
 		Plan string `json:"plan"`
 	}
-	if err := c.call(ctx, http.MethodGet, c.crm+"/customers/"+url.PathEscape(customer)+"/plan", nil, &body); err != nil {
+	if err := c.call(ctx, "", http.MethodGet, c.crm+"/customers/"+url.PathEscape(customer)+"/plan", nil, &body); err != nil {
 		return Result{}, err
 	}
 	return Result{Values: []any{body.Plan}}, nil
 }
 
-func getCreditStatus(ctx context.Context, c *Connectors, args []any) (Result, error) {
+func getCreditStatus(ctx context.Context, c *Connectors, _ string, args []any) (Result, error) {
 	customer, err := customerID(args[0])
 	if err != nil {
 		return Result{}, err
@@ -121,13 +158,13 @@ func getCreditStatus(ctx context.Context, c *Connectors, args []any) (Result, er
 	var body struct {
 		OnHold bool `json:"on_hold"`
 	}
-	if err := c.call(ctx, http.MethodGet, c.erp+"/customers/"+url.PathEscape(customer)+"/credit", nil, &body); err != nil {
+	if err := c.call(ctx, "", http.MethodGet, c.erp+"/customers/"+url.PathEscape(customer)+"/credit", nil, &body); err != nil {
 		return Result{}, err
 	}
 	return Result{Values: []any{body.OnHold}}, nil
 }
 
-func checkCredit(ctx context.Context, c *Connectors, args []any) (Result, error) {
+func checkCredit(ctx context.Context, c *Connectors, _ string, args []any) (Result, error) {
 	customer, err := customerID(args[0])
 	if err != nil {
 		return Result{}, err
@@ -142,7 +179,7 @@ func checkCredit(ctx context.Context, c *Connectors, args []any) (Result, error)
 		Reason     string  `json:"reason"`
 		CostCenter string  `json:"cost_center"`
 	}
-	if err := c.call(ctx, http.MethodPost, c.erp+"/credit-checks", req, &body); err != nil {
+	if err := c.call(ctx, "", http.MethodPost, c.erp+"/credit-checks", req, &body); err != nil {
 		return Result{}, err
 	}
 	switch body.Verdict {
@@ -156,11 +193,37 @@ func checkCredit(ctx context.Context, c *Connectors, args []any) (Result, error)
 	return Result{}, permanent("erp.check_credit: unknown verdict %q", body.Verdict)
 }
 
+// createInvoice makes an invoice in the ERP for the customer and amount, and
+// returns its ID. The key goes in the Idempotency-Key header: a retry gets
+// the invoice already made, never a second one.
+func createInvoice(ctx context.Context, c *Connectors, key string, args []any) (Result, error) {
+	customer, err := customerID(args[0])
+	if err != nil {
+		return Result{}, err
+	}
+	amount, ok := asInt(args[1])
+	if !ok {
+		return Result{}, permanent("erp.create_invoice: the amount must be a whole number")
+	}
+	var body struct {
+		InvoiceID string `json:"invoice_id"`
+	}
+	req := map[string]any{"customer_id": customer, "amount": amount}
+	if err := c.call(ctx, key, http.MethodPost, c.erp+"/invoices", req, &body); err != nil {
+		return Result{}, err
+	}
+	if body.InvoiceID == "" {
+		return Result{}, errors.New("erp.create_invoice: the answer names no invoice")
+	}
+	return Result{Values: []any{body.InvoiceID}}, nil
+}
+
 // --- plumbing ---
 
 // call sends one request and decodes the JSON answer. 400 and 404 are
-// permanent; any other failure (network, timeout, 5xx) may be retried.
-func (c *Connectors) call(ctx context.Context, method, target string, in, out any) error {
+// permanent, 409 is a key conflict; any other failure (network, timeout,
+// 5xx) may be retried. A non-empty key is sent as the Idempotency-Key header.
+func (c *Connectors) call(ctx context.Context, key, method, target string, in, out any) error {
 	var body bytes.Buffer
 	if in != nil {
 		if err := json.NewEncoder(&body).Encode(in); err != nil {
@@ -174,12 +237,17 @@ func (c *Connectors) call(ctx context.Context, method, target string, in, out an
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	if key != "" {
+		req.Header.Set("Idempotency-Key", key)
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("%s %s: %w", method, req.URL.Path, err)
 	}
 	defer resp.Body.Close()
 	switch {
+	case resp.StatusCode == http.StatusConflict:
+		return fmt.Errorf("%w: %s %s", ErrKeyConflict, method, req.URL.Path)
 	case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusBadRequest:
 		return permanent("%s %s: %s", method, req.URL.Path, resp.Status)
 	case resp.StatusCode != http.StatusOK:

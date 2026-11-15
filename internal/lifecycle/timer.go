@@ -18,12 +18,12 @@ func TimerFor(t *typedef.Type, state string) (typedef.Timer, bool) {
 // place that rule lives; the relay asks it to choose between starting a
 // workflow and only notifying one that already runs.
 //
-// "Behavior" means a timer or enrich hooks. A hold is opened by an event
+// "Behavior" means a timer, enrich hooks or action hooks. A hold is opened by an event
 // that enters no state; StartsWorkflow covers it. Approvals and link
 // reactions will extend these functions, not their callers.
 func NeedsWorkflow(t *typedef.Type, state string) bool {
 	_, hasTimer := TimerFor(t, state)
-	return hasTimer || len(EnrichHooks(t, state)) > 0
+	return hasTimer || len(EnrichHooks(t, state)) > 0 || len(ActionHooks(t, state)) > 0
 }
 
 // HasListeners reports whether anything listens to the events of Items of
