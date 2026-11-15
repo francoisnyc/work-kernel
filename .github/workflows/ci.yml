@@ -25,9 +25,11 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # Generated code (gen/) is not held to gofmt: "buf generate leaves gen/
+      # unchanged" below guards that directory.
       - name: Check formatting
         run: |
-          unformatted=$(gofmt -l .)
+          unformatted=$(git ls-files '*.go' | grep -v '^gen/' | xargs gofmt -l)
           if [ -n "$unformatted" ]; then
             echo "These files need gofmt:"
             echo "$unformatted"
