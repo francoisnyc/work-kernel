@@ -3,6 +3,7 @@ package itemservice
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -25,6 +26,11 @@ type TransitionRequest struct {
 	// ExpectedItemSeq is the same optional if-match as on UpdateRequest.
 	ExpectedItemSeq int64
 	Attribution     item.Attribution // optional; what caused this write
+	// Wait is how long to wait for a held transition's check, up to the
+	// service's cap (MaxWait). Zero answers at once. It is not part of the
+	// request's identity (the "-" tag keeps it out of the idempotency hash):
+	// a retry with the same key may wait more or less.
+	Wait time.Duration `json:"-"`
 }
 
 // Transition moves an Item to another state if its Type allows it, and
@@ -32,34 +38,51 @@ type TransitionRequest struct {
 // are one write: one row lock, one event. An illegal move or an invalid patch
 // returns ErrRejected with the reason and writes nothing. It is the public
 // door: the kernel's own actors use Internal().Transition.
-func (k *Service) Transition(ctx context.Context, req TransitionRequest) (WriteResult, error) {
+//
+// A transition with a check hook is not made at once: the request is
+// recorded and a hold opens (outcome pending). With Wait, the call waits up
+// to that long for the check, and answers applied, denied or error.
+func (k *Service) Transition(ctx context.Context, req TransitionRequest) (TransitionResult, error) {
 	if err := checkPublic(req.Principal, req.Attribution); err != nil {
-		return WriteResult{}, err
+		return TransitionResult{}, err
 	}
-	return k.transition(ctx, req, nil)
+	if req.Wait < 0 || req.Wait > k.maxWait {
+		return TransitionResult{}, fmt.Errorf("%w: wait must be between 0 and %v", ErrInvalid, k.maxWait)
+	}
+	res, kind, err := k.transition(ctx, req, nil)
+	if err != nil {
+		return TransitionResult{}, err
+	}
+	return k.outcome(ctx, res, kind, req.Wait)
 }
 
-// transition is Transition's body for both doors; kc is as in update.
-func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *kernelCause) (WriteResult, error) {
+// transition is Transition's body for both doors; kc is as in update. It
+// also says whether the write opened a hold, so the caller knows whether
+// there is a hold to read (holdUnknown when the key was already used).
+func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *kernelCause) (WriteResult, holdKind, error) {
 	if req.IdempotencyKey == "" || req.Principal.Actor == "" || req.ToState == "" {
-		return WriteResult{}, fmt.Errorf("%w: idempotency key, actor and target state are required", ErrInvalid)
+		return WriteResult{}, holdUnknown, fmt.Errorf("%w: idempotency key, actor and target state are required", ErrInvalid)
 	}
 	if err := checkPrincipal(req.Principal); err != nil {
-		return WriteResult{}, err
+		return WriteResult{}, holdUnknown, err
 	}
 	if err := checkOptions(req.ExpectedItemSeq, req.Attribution); err != nil {
-		return WriteResult{}, err
+		return WriteResult{}, holdUnknown, err
 	}
 	attr, err := sessionAttribution(req.Principal, req.Attribution)
 	if err != nil {
-		return WriteResult{}, err
+		return WriteResult{}, holdUnknown, err
 	}
 	hash, err := requestHash("transition", req)
 	if err != nil {
-		return WriteResult{}, err
+		return WriteResult{}, holdUnknown, err
 	}
 
-	return k.write(ctx, req.Principal, req.IdempotencyKey, hash, func(tx pgx.Tx) (WriteResult, error) {
+	// Set by the write below when it runs; it stays holdUnknown when the
+	// idempotency record answers instead. A rolled-back attempt that is run
+	// again sets it again.
+	kind := holdUnknown
+	res, err := k.write(ctx, req.Principal, req.IdempotencyKey, hash, func(tx pgx.Tx) (WriteResult, error) {
 		// The decision depends on the current state and fields, so it is made
 		// under the row lock: no other write can slip in between check and write.
 		it, err := lockItem(ctx, tx, req.ItemID)
@@ -88,6 +111,20 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		if err != nil {
 			return WriteResult{}, err
 		}
+		// While a hold is open, only an escape leaves the state, and it
+		// cancels the hold. Everything else, the timer included, is held.
+		hold, err := readOpenHold(ctx, tx, req.ItemID)
+		if err != nil {
+			return WriteResult{}, err
+		}
+		if hold != nil {
+			if err := lifecycle.TransitionDuringHold(ty, hold.rule(), req.ToState); err != nil {
+				return WriteResult{}, heldError(hold, err)
+			}
+		}
+		if err := checkHookWrite(ty, kc, req.Fields); err != nil {
+			return WriteResult{}, err
+		}
 
 		// All lifecycle logic lives in lifecycle.Transition; the item service only
 		// asks and records. Two %w verbs wrap both errors, so callers can match
@@ -105,9 +142,22 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		// The move is legal. Whether this principal may make it is policy's
 		// question, asked second, so ErrForbidden always means "legal, but
 		// not for you".
+		check, checked := lifecycle.CheckFor(ty, it.State, next.State)
+		if checked && kc != nil {
+			// Only ResolveHold applies a checked transition, for a requester:
+			// a kernel actor never makes one on its own authority.
+			return WriteResult{}, fmt.Errorf("%w: %s -> %s is checked by %s; only a requester may ask for it",
+				ErrForbidden, it.State, next.State, check.ID)
+		}
 		if err := authorize(ctx, tx, req.Principal, ty, it.State, next.State); err != nil {
 			return WriteResult{}, err
 		}
+		if checked {
+			kind = holdOpened
+			return requestHold(ctx, tx, ty, req.ItemID, it, check, next.State, req.Principal, recorded, attr,
+				merged, set, cleared)
+		}
+		kind = holdNone
 
 		itemSeq := it.ItemSeq + 1
 		_, err = tx.Exec(ctx,
@@ -126,8 +176,19 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 				payload["cleared_field_ids"] = sortedKeys(cleared)
 			}
 		}
-		return appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, attr, "transition", payload, set)
+		if hold != nil { // an escape: it cancels the hold, in the same event
+			payload["canceled_hold_id"] = hold.id.String()
+		}
+		res, err := appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, attr, "transition", payload, set)
+		if err != nil || hold == nil {
+			return res, err
+		}
+		return res, closeHold(ctx, tx, hold.id, item.HoldCanceled, "", itemSeq)
 	})
+	if err != nil {
+		return WriteResult{}, holdUnknown, err
+	}
+	return res, kind, nil
 }
 
 // authorize checks the transition's `allowed` list against the principal's

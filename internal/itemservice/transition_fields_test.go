@@ -62,7 +62,7 @@ func TestTransition_WithFields_PatchSatisfiesTheGuard(t *testing.T) {
 	k := itemservice.New(pool)
 	id := createTicket(t, k, map[string]any{"f_title": "Printer on fire"})
 
-	// Without the patch this move is rejected: the guard is "f_assignee is set".
+	// Without the patch this move is rejected: the guard is "f_assignee != null".
 	res, err := k.Transition(testCtx(t), itemservice.TransitionRequest{
 		IdempotencyKey: newKey(), Principal: alice, ItemID: id, ToState: "in_progress",
 		Fields: map[string]any{"f_assignee": "user-bob"},

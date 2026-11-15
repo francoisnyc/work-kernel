@@ -37,4 +37,26 @@ type Item struct {
 	State       string
 	Fields      map[string]any // keyed by stable field ID
 	ItemSeq     int64
+	// Hold is the Item's latest hold (open, or how it ended), or nil if the
+	// Item never had one. A hold is visible on the Item.
+	Hold *Hold
 }
+
+// Hold is a request for a checked transition, held while its check runs.
+type Hold struct {
+	ID     uuid.UUID
+	Hook   string // the check hook's ID
+	From   string // the state the Item is held in
+	To     string // the state requested
+	Status string // one of the Hold* constants
+	Reason string // a code, set when denied or error
+}
+
+// The states of a hold. Only HoldOpen holds the Item.
+const (
+	HoldOpen     = "open"
+	HoldAllowed  = "allowed"  // the requested transition was applied
+	HoldDenied   = "denied"   // the check said no, or the requester no longer may
+	HoldError    = "error"    // the check could not answer
+	HoldCanceled = "canceled" // an escape left the state
+)

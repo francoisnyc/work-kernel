@@ -109,6 +109,30 @@ Ideas noted during the spike, not built yet.
   hook or connection: settled direction in design.md ("Settled direction for
   holds, approvals and agents"). Build each when a step needs it. (Design
   review, 2026-11-14)
+- A timer write refused as `Invalid` is only logged: it is a kernel bug, and
+  the timer is then dropped for that state entry. Add an alert or a counter on
+  Invalid timer writes. (Step 6)
+- Type migration must re-arm timers for the new version: a running workflow
+  carries its timer table in the Snapshot, so after a migration it must reload
+  the table (and `TimerDone`) for the Item's new version. (Step 6)
+- A timer that comes due while a hold is open is refused as "held" and spent:
+  it does not fire again after the hold resolves. Revisit with real SLA
+  objects, together with the open question: does the SLA clock pause during a
+  hold? (Step 6)
+- Once hooks are real, every hook must be declared, including on Types that
+  declare none today. For the spike, a Type without a `hooks` section still
+  accepts writes from any hook of its own Type (part 1's tests rely on it).
+  (Step 6)
+- A hook can run again for the same cause: after a reload, an enrich hook
+  that wrote nothing is rerun, and a check retried after a timeout calls out
+  again. Harmless for read-only actions. Any action with side effects must
+  pass an idempotency key to the connector itself; Step 7's invoice test
+  proves it. (Step 6)
+- The bounded `wait` on `Transition` polls `item_holds` every ~50 ms. Use
+  `LISTEN/NOTIFY` to wake waiters instead. (Step 6)
+- The workflow has no `GetVersion` branches, so changing its code breaks the
+  replay of running histories. Before the first product: replay tests against
+  real recorded histories, and versioned changes. (Step 6)
 
 ## 2026-11-12 — Step 1 (finished)
 
@@ -638,3 +662,30 @@ no-outbox checks for the listener-less `intake` Type; `Hop: 1` on one FireTimer 
 on_enter prefetch + CEL guard, wider `HasListeners`. Answers given ahead:
 "corrects" = `allowed` with a field patch applied with the move, recorded as
 supplied by the hook, never a new target state; `cel-go` is approved.
+
+## 2026-11-14 — Step 6, part 2: hooks, holds, bounded wait, variant D (built)
+
+**Built:** ticket v3 (triage, two enrich hooks, approve checked by `erp_check`, cancel as escape). CEL guards
+(`cel.dev/cel-go`, the renamed `cel-go`) replace the spike parser. Hooks are declared in the Type and checked at
+load, including each action's arity (`internal/hooks`). `item_holds`; `ResolveHold` re-checks the requester
+(access, guards, `allowed`). Frozen reads, escapes, `ErrHeld`. `Transition.Wait` (polls the hold every 50 ms).
+`HookInput`. Hook activities run as `workflow.Go` coroutines bounded by a budget. Stub CRM/ERP (`internal/connstub`);
+`go run ./cmd/bench -holds`.
+
+**Numbers (4 vCPU, `-holds`):** time to a definitive answer, 60 approvals at 4 concurrent callers, wait 3 s:
+p50/p95 111/163 ms at 50 ms stub latency, 568/619 ms at 500 ms; 100% answered within the wait. Write
+latency p50/p95 (update; hold request): baseline 5.6/8.7 and 5.8/10.5 ms; stubs down 4.5/6.9 and 5.6/9.0; worker
+stopped 4.2/5.5 and 4.4/5.9. Unchanged, as the design wants.
+
+**Surprises:** `cel-go` moved to `cel.dev/cel-go` at v0.32. Nullable typed variables make `f_x != null` and type
+errors at load work with no custom code. The new hook workflow tests delivered their trigger a minute after
+a start in a quiet state, which Update-With-Start never does, so the run ended at once (fixed, approved; a
+test now covers a request reaching a running workflow). Temporal's test environment turns `MaximumAttempts: 0`
+into 10; hooks now say "unlimited" as `math.MaxInt32`. A ScheduleToClose budget gives up up to one retry
+interval early: Temporal schedules no retry that would start after it.
+
+**Open:** which hooks ran is inferred from `causation_id` = the entering event, so a hook that wrote nothing
+reruns on a reload (its key makes the write a no-op, but the connector is called again; see Later). `buf lint`
+passes via `go run`.
+
+**Next session:** Step 7 (invoice with an idempotency key, forced timeouts, variants A and B).

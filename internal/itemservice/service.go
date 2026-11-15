@@ -89,6 +89,7 @@ type Service struct {
 	pool         *pgxpool.Pool
 	types        *typedef.Cache // nil when Options.CacheTypes is false
 	writeTimeout time.Duration
+	maxWait      time.Duration // the longest Transition.Wait accepted
 }
 
 // DefaultWriteTimeout bounds every statement of a write. A write that waits
@@ -106,6 +107,9 @@ type Options struct {
 	// WriteTimeout is the statement timeout on the write path; zero means
 	// DefaultWriteTimeout. There is no "no timeout".
 	WriteTimeout time.Duration
+	// MaxWait caps TransitionRequest.Wait; zero means MaxWait (5 s). Tests
+	// set a short cap so they can test it without waiting 5 s.
+	MaxWait time.Duration
 }
 
 // New returns a Service that uses the given connection pool, with the Type
@@ -116,9 +120,12 @@ func New(pool *pgxpool.Pool) *Service {
 
 // NewWithOptions returns a Service with the given options.
 func NewWithOptions(pool *pgxpool.Pool, opts Options) *Service {
-	k := &Service{pool: pool, writeTimeout: opts.WriteTimeout}
+	k := &Service{pool: pool, writeTimeout: opts.WriteTimeout, maxWait: opts.MaxWait}
 	if k.writeTimeout <= 0 {
 		k.writeTimeout = DefaultWriteTimeout
+	}
+	if k.maxWait <= 0 {
+		k.maxWait = MaxWait
 	}
 	if opts.CacheTypes {
 		k.types = &typedef.Cache{}
@@ -272,14 +279,23 @@ func (k *Service) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item
 	var (
 		visible     bool
 		policyScope *uuid.UUID
+		hold        struct { // the latest hold; all null when there is none
+			id                             *uuid.UUID
+			hook, from, to, status, reason *string
+		}
 	)
 	err := k.pool.QueryRow(ctx,
 		`select i.type_id, i.type_version, i.container_id, i.scope_id, i.state, i.fields, i.item_seq,
-		        s.policy_scope_id, `+policy.VisibleCondition+`
+		        s.policy_scope_id, `+policy.VisibleCondition+`,
+		        h.id, h.hook, h.from_state, h.to_state, h.status, coalesce(h.reason, '')
 		 from items i join scopes s on s.id = i.scope_id
+		 left join lateral (
+		     select id, hook, from_state, to_state, status, reason from item_holds
+		     where item_id = i.id order by requested_seq desc limit 1
+		 ) h on true
 		 where i.id = @id and i.namespace_id = @ns`, args,
 	).Scan(&it.TypeID, &it.TypeVersion, &it.ContainerID, &it.ScopeID, &it.State, &it.Fields, &it.ItemSeq,
-		&policyScope, &visible)
+		&policyScope, &visible, &hold.id, &hold.hook, &hold.from, &hold.to, &hold.status, &hold.reason)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return item.Item{}, ErrNotFound
 	}
@@ -288,6 +304,10 @@ func (k *Service) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item
 	}
 	if !visible {
 		return item.Item{}, ErrNotFound
+	}
+	if hold.id != nil {
+		it.Hold = &item.Hold{ID: *hold.id, Hook: *hold.hook, From: *hold.from, To: *hold.to,
+			Status: *hold.status, Reason: *hold.reason}
 	}
 	// The scope was found readable above; Project is still the one door out.
 	it, ok := policy.Project(p, []uuid.UUID{*it.ScopeID}, it)
@@ -315,6 +335,22 @@ type StateEntry struct {
 	EnteredAt     time.Time // when that event was written
 	CorrelationID string    // of that event; empty if not set
 	Hop           int       // of that event
+
+	// HooksRun are the hooks that already wrote for this entry: events whose
+	// cause is the entering event. OpenHold is the Item's open hold, if any.
+	HooksRun []string
+	OpenHold *HoldEntry
+}
+
+// HoldEntry is an open hold, as the workflow needs it: opaque IDs, state
+// names and the request's attribution.
+type HoldEntry struct {
+	ID            uuid.UUID
+	Hook          string
+	From, To      string
+	RequestedSeq  int64
+	CorrelationID string
+	Hop           int
 }
 
 // StateEntry reads an Item's state and the event that entered it, in one
@@ -341,6 +377,33 @@ func (k *Service) StateEntry(ctx context.Context, id uuid.UUID) (StateEntry, err
 	}
 	if err != nil {
 		return StateEntry{}, fmt.Errorf("read state entry: %w", err)
+	}
+
+	// A hook's write names the hook as actor, hook:<type>:<hook-id>.
+	rows, err := k.pool.Query(ctx,
+		`select distinct split_part(actor, ':', 3) from item_events
+		 where item_id = $1 and causation_id = $2 and actor like 'hook:%'
+		 order by 1`, id, fmt.Sprintf("%s:%d", id, se.EnteredSeq))
+	if err != nil {
+		return StateEntry{}, fmt.Errorf("read hooks run: %w", err)
+	}
+	// CollectRows reads every row with the given function, then closes them.
+	se.HooksRun, err = pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return StateEntry{}, fmt.Errorf("read hooks run: %w", err)
+	}
+
+	h := HoldEntry{}
+	err = k.pool.QueryRow(ctx,
+		`select h.id, h.hook, h.from_state, h.to_state, h.requested_seq, coalesce(e.correlation_id, ''), e.hop
+		 from item_holds h join item_events e on e.item_id = h.item_id and e.item_seq = h.requested_seq
+		 where h.item_id = $1 and h.status = 'open'`, id,
+	).Scan(&h.ID, &h.Hook, &h.From, &h.To, &h.RequestedSeq, &h.CorrelationID, &h.Hop)
+	switch {
+	case err == nil:
+		se.OpenHold = &h
+	case !errors.Is(err, pgx.ErrNoRows):
+		return StateEntry{}, fmt.Errorf("read open hold: %w", err)
 	}
 	return se, nil
 }

@@ -3,11 +3,14 @@ package itemservice
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/francoisnyc/work-kernel/internal/item"
+	"github.com/francoisnyc/work-kernel/internal/lifecycle"
 )
 
 // UpdateRequest changes field values on an Item. Fields is a patch: a value
@@ -108,6 +111,23 @@ func (k *Service) update(ctx context.Context, req UpdateRequest, kc *kernelCause
 		}
 		if err := ty.CheckFields(req.Fields, true); err != nil {
 			return WriteResult{}, fmt.Errorf("%w: %v", ErrRejected, err)
+		}
+		if err := checkHookWrite(ty, kc, req.Fields); err != nil {
+			return WriteResult{}, err
+		}
+		// While a hold is open, the fields its check reads are frozen: the
+		// check's answer is about the values it read.
+		if len(req.Fields) > 0 {
+			hold, err := readOpenHold(ctx, tx, req.ItemID)
+			if err != nil {
+				return WriteResult{}, err
+			}
+			if hold != nil {
+				ids := slices.Sorted(maps.Keys(req.Fields))
+				if err := lifecycle.UpdateDuringHold(ty, hold.rule(), ids); err != nil {
+					return WriteResult{}, heldError(hold, err)
+				}
+			}
 		}
 		if len(req.Fields) > 0 {
 			if err := checkAgentWrite(ctx, tx, req.Principal, it.ScopeID); err != nil {

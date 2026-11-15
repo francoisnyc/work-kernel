@@ -26,7 +26,7 @@ states:
   - {id: published, category: done}
   - {id: dropped, category: canceled}
 transitions:
-  - {from: draft, to: review, guard: 'f_owner is set'}
+  - {from: draft, to: review, guard: 'f_owner != null'}
   - {from: review, to: draft}
   - from: review
     to: published
@@ -94,8 +94,8 @@ func TestTransition_Illegal_IsRejectedWithAReason(t *testing.T) {
 		{"unknown target state", "draft", nil, "limbo", lifecycle.NoTransition, "limbo"},
 		{"unknown current state", "limbo", nil, "draft", lifecycle.NoTransition, "limbo"},
 		{"same state", "draft", nil, "draft", lifecycle.NoTransition, "draft"},
-		{"'is set' guard fails", "draft", nil, "review", lifecycle.GuardFailed, "f_owner is set"},
-		{"'is set' fails on null", "draft", fields{"f_owner": nil}, "review", lifecycle.GuardFailed, "f_owner is set"},
+		{"'is set' guard fails", "draft", nil, "review", lifecycle.GuardFailed, "f_owner != null"},
+		{"'is set' fails on null", "draft", fields{"f_owner": nil}, "review", lifecycle.GuardFailed, "f_owner != null"},
 		{"== fails on another value", "review",
 			fields{"f_owner": "user-1", "f_approved": false, "f_score": 3}, "published", lifecycle.GuardFailed, "f_approved"},
 		{"== fails when the field is unset", "review",

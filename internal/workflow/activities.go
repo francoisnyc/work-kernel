@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +14,7 @@ import (
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 
+	"github.com/francoisnyc/work-kernel/internal/hooks"
 	"github.com/francoisnyc/work-kernel/internal/item"
 	"github.com/francoisnyc/work-kernel/internal/itemservice"
 	"github.com/francoisnyc/work-kernel/internal/lifecycle"
@@ -24,7 +26,9 @@ const timerActor = "system:timer"
 // Activities is the I/O side of the workflow: ordinary Go, run by the worker,
 // retried by Temporal when it fails. Its methods are the activities.
 type Activities struct {
-	Items *itemservice.Service
+	Items      *itemservice.Service
+	Connectors *hooks.Connectors // the outside world the hooks call; nil when no Type has hooks
+	HookBudget time.Duration     // zero means DefaultHookBudget
 }
 
 // LoadItem reads what a new run needs to know about its Item: where it is,
@@ -48,17 +52,44 @@ func (a *Activities) LoadItem(ctx context.Context, itemID string) (Snapshot, err
 		return Snapshot{}, err
 	}
 	timers := map[string]TimerSpec{}
+	enrich := map[string][]HookSpec{}
 	for _, s := range ty.States {
 		if timer, ok := lifecycle.TimerFor(ty, s.ID); ok {
 			timers[s.ID] = TimerSpec{After: timer.Duration, To: timer.To}
 		}
+		for _, h := range lifecycle.EnrichHooks(ty, s.ID) {
+			enrich[s.ID] = append(enrich[s.ID], HookSpec{ID: h.ID, HasFallback: len(h.Fallback) > 0})
+		}
 	}
-	return Snapshot{
+	checks := map[string]string{}
+	for _, tr := range ty.Transitions {
+		if h, ok := lifecycle.CheckFor(ty, tr.From, tr.To); ok {
+			checks[tr.From+"->"+tr.To] = h.ID
+		}
+	}
+	// The current entry's enrich hooks that have not written yet. A hook
+	// that ran and wrote nothing (no fallback) runs again; its key makes any
+	// second write a no-op.
+	var pending []string
+	for _, h := range enrich[se.State] {
+		if !slices.Contains(se.HooksRun, h.ID) {
+			pending = append(pending, h.ID)
+		}
+	}
+	snap := Snapshot{
 		TypeID: se.TypeID, TypeVersion: se.TypeVersion, Timers: timers,
 		State: se.State, LastAppliedSeq: se.ItemSeq,
 		EnteredSeq: se.EnteredSeq, EnteredAt: se.EnteredAt,
 		CorrelationID: se.CorrelationID, Hop: se.Hop,
-	}, nil
+		Enrich: enrich, Checks: checks, HookBudget: a.HookBudget, PendingEnrich: pending,
+	}
+	if h := se.OpenHold; h != nil {
+		snap.Hold = &OpenHold{
+			ID: h.ID.String(), Hook: h.Hook, From: h.From, RequestedTo: h.To,
+			RequestedSeq: h.RequestedSeq, CorrelationID: h.CorrelationID, Hop: h.Hop,
+		}
+	}
+	return snap, nil
 }
 
 // FireTimer makes a timer's move through the item service's normal write path, so
@@ -90,6 +121,10 @@ func (a *Activities) FireTimer(ctx context.Context, in FireTimerInput) error {
 	switch {
 	case errors.Is(err, itemservice.ErrNotFound):
 		return temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeNotFound, err)
+	case errors.Is(err, itemservice.ErrHeld):
+		// Checked before ErrStale, which it also is: for a timer, held is
+		// final, where stale means "an event is on its way".
+		return temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeHeld, err)
 	case errors.Is(err, itemservice.ErrStale):
 		return temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeStale, err)
 	case errors.Is(err, itemservice.ErrRejected):
@@ -111,6 +146,11 @@ type WorkerOptions struct {
 	// event into that window. It must be the same on every worker of a task
 	// queue, because the pause is part of the workflow's recorded history.
 	CloseDelay time.Duration
+	// Connectors are what the hook actions call (the CRM and the ERP).
+	Connectors *hooks.Connectors
+	// HookBudget bounds each hook (ScheduleToClose); zero means
+	// DefaultHookBudget (15 min). Tests and the bench set it short.
+	HookBudget time.Duration
 }
 
 // NewWorker returns a worker, not yet started, that runs Item workflows and
@@ -124,8 +164,12 @@ func NewWorker(c client.Client, taskQueue string, k *itemservice.Service, opts W
 	w.RegisterWorkflowWithOptions(run, workflow.RegisterOptions{Name: Name})
 
 	// Registered by name, because the workflow calls them by name.
-	a := &Activities{Items: k}
+	a := &Activities{Items: k, Connectors: opts.Connectors, HookBudget: opts.HookBudget}
 	w.RegisterActivityWithOptions(a.LoadItem, activity.RegisterOptions{Name: ActivityLoadItem})
 	w.RegisterActivityWithOptions(a.FireTimer, activity.RegisterOptions{Name: ActivityFireTimer})
+	w.RegisterActivityWithOptions(a.RunEnrich, activity.RegisterOptions{Name: ActivityRunEnrich})
+	w.RegisterActivityWithOptions(a.EnrichFallback, activity.RegisterOptions{Name: ActivityEnrichFallback})
+	w.RegisterActivityWithOptions(a.RunCheck, activity.RegisterOptions{Name: ActivityRunCheck})
+	w.RegisterActivityWithOptions(a.ResolveHold, activity.RegisterOptions{Name: ActivityResolveHold})
 	return w
 }

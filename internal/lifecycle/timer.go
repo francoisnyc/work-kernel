@@ -18,11 +18,12 @@ func TimerFor(t *typedef.Type, state string) (typedef.Timer, bool) {
 // place that rule lives; the relay asks it to choose between starting a
 // workflow and only notifying one that already runs.
 //
-// Today "behavior" means a timer. Holds, approvals and link reactions will
-// extend this function, not its callers.
+// "Behavior" means a timer or enrich hooks. A hold is opened by an event
+// that enters no state; StartsWorkflow covers it. Approvals and link
+// reactions will extend these functions, not their callers.
 func NeedsWorkflow(t *typedef.Type, state string) bool {
 	_, hasTimer := TimerFor(t, state)
-	return hasTimer
+	return hasTimer || len(EnrichHooks(t, state)) > 0
 }
 
 // HasListeners reports whether anything listens to the events of Items of
@@ -32,12 +33,17 @@ func NeedsWorkflow(t *typedef.Type, state string) bool {
 // behavior, a workflow may be running, and it must hear every event.
 //
 // Today the only listener is the workflow, so this is "some state has a
-// timer". Hooks, link reactions and subscriptions will widen it. Whatever
-// they need must be added here, or their events are silently never sent.
+// timer, or the Type has hooks" (a check hook needs the workflow too, though
+// it is entered by no state). Link reactions and subscriptions will widen
+// it. Whatever they need must be added here, or their events are silently
+// never sent.
 //
 // Two readers do not need the outbox and are not counted: Watch reads
 // item_events directly, and search is a column of the Item's own row.
 func HasListeners(t *typedef.Type) bool {
+	if len(t.Hooks) > 0 {
+		return true
+	}
 	for _, s := range t.States {
 		if NeedsWorkflow(t, s.ID) {
 			return true

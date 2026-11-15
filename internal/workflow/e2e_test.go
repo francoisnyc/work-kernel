@@ -51,7 +51,7 @@ transitions:
   - {from: running, to: queued}
   - {from: running, to: finished}
   - {from: queued, to: review}
-  - {from: review, to: published, guard: 'f_owner is set'}
+  - {from: review, to: published, guard: 'f_owner != null'}
 `
 
 func registerJobType(ctx context.Context) error {
@@ -152,7 +152,7 @@ func (s *stack) move(id uuid.UUID, to string) itemservice.WriteResult {
 	if err != nil {
 		s.t.Fatalf("transition to %s: %v", to, err)
 	}
-	return res
+	return res.WriteResult
 }
 
 func (s *stack) setNote(id uuid.UUID, note string) itemservice.WriteResult {

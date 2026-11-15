@@ -43,6 +43,7 @@ func main() {
 	// flag is the standard library's command-line parser.
 	explain := flag.Bool("explain", false, "print query plans for the unstable reads instead of benchmarking")
 	narrowing := flag.Bool("narrowing", false, "measure what narrowing a container costs in scope_access rows")
+	holds := flag.Bool("holds", false, "measure Step 6: answers to held approvals (variant D) and write latency")
 	flag.Parse()
 	run := run
 	if *explain {
@@ -50,6 +51,9 @@ func main() {
 	}
 	if *narrowing {
 		run = func() error { return narrowingMode(context.Background()) }
+	}
+	if *holds {
+		run = func() error { return holdsMode(context.Background()) }
 	}
 	if err := run(); err != nil {
 		log.Fatal(err)

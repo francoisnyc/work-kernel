@@ -5,6 +5,7 @@ syntax = "proto3";
 // Requests for later steps hold only what the design already states.
 package kernel.v1;
 
+import "google/protobuf/duration.proto";
 import "google/protobuf/struct.proto";
 
 option go_package = "github.com/francoisnyc/work-kernel/gen/kernel/v1;kernelv1";
@@ -41,6 +42,26 @@ message Item {
   string state = 6;
   google.protobuf.Struct fields = 7; // keyed by stable field ID
   int64 item_seq = 8;
+  Hold hold = 9; // the latest hold, if the Item ever had one
+}
+
+// A request for a checked transition, held while its check runs.
+message Hold {
+  string id = 1;
+  string hook = 2;       // the check hook's ID
+  string from_state = 3; // the state the Item is held in
+  string to_state = 4;   // the state requested
+  HoldStatus status = 5;
+  string reason = 6;     // a code, set when denied or error
+}
+
+enum HoldStatus {
+  HOLD_STATUS_UNSPECIFIED = 0;
+  HOLD_STATUS_OPEN = 1;
+  HOLD_STATUS_ALLOWED = 2;
+  HOLD_STATUS_DENIED = 3;
+  HOLD_STATUS_ERROR = 4;
+  HOLD_STATUS_CANCELED = 5;
 }
 
 message CreateRequest {
@@ -79,9 +100,26 @@ message TransitionRequest {
   google.protobuf.Struct fields = 5;
   // Optional if-match, as on UpdateRequest.
   int64 expected_item_seq = 6;
+  // How long to wait for a held transition's check: 0 (the default) answers
+  // at once; at most 5 s. Not part of the request's identity: a retry with
+  // the same key may wait more or less, and gets the hold's current outcome.
+  google.protobuf.Duration wait = 7;
 }
 message TransitionResponse {
+  // For a held transition: the resolving event once there is one, else the
+  // request's.
   WriteResult result = 1;
+  TransitionOutcome outcome = 2;
+  string hold_id = 3; // set when the transition was held
+  string reason = 4;  // a code, for denied and error
+}
+
+enum TransitionOutcome {
+  TRANSITION_OUTCOME_UNSPECIFIED = 0;
+  TRANSITION_OUTCOME_APPLIED = 1; // the Item moved
+  TRANSITION_OUTCOME_DENIED = 2;  // the check, or a re-check of the requester, said no
+  TRANSITION_OUTCOME_PENDING = 3; // the hold is still open; ask again with the same key
+  TRANSITION_OUTCOME_ERROR = 4;   // the check could not answer; ask again to retry
 }
 
 message LinkRequest {
