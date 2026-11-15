@@ -835,6 +835,12 @@ func TestHookInput_OnlyTheDeclaredReads(t *testing.T) {
 		})
 		assertInvalid(t, "HookInput as "+name, err)
 	}
+	// The cause must be an event of this Item, as for a kernel write: a
+	// well-formed causation_id naming an event that does not exist is invalid.
+	_, err = k.Internal().HookInput(testCtx(t), itemservice.HookInputRequest{
+		Principal: erpCheckV3, ItemID: id, Attribution: v3Cause(erpCheckV3, id, 99),
+	})
+	assertInvalid(t, "HookInput caused by an event that does not exist", err)
 }
 
 // A declared hook writes only the fields in its `writes`. On a Type that
