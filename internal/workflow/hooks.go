@@ -70,7 +70,7 @@ func (a *Activities) run(ctx context.Context, c hookCall) (hooks.Result, error) 
 	for i, f := range c.hook.Reads {
 		args[i] = values[f] // nil when unset; the action refuses it
 	}
-	res, err := a.Connectors.Run(ctx, c.hook.Action, args)
+	res, err := a.Connectors.Run(ctx, c.hook.Action, "", args)
 	if errors.Is(err, hooks.ErrPermanent) {
 		return hooks.Result{}, temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeHookFailed, err)
 	}
