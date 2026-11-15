@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -54,6 +55,58 @@ const (
 		     join scope_access a on a.scope_id = s.policy_scope_id and a.principal = @actor
 		 ) v
 		 order by id desc
+		 limit @limit`
+)
+
+// Step 0, part 2: the new reads, copied from page (Search and List) and
+// ListEvents in internal/itemservice, with the visibility condition spelled
+// out. A page reads one row more than it returns, to know there is a next.
+const (
+	explainItemCols = `m.id, m.type_id, m.type_version, m.container_id, m.scope_id, m.state, m.fields, m.item_seq,
+		        m.created_at, m.created_by, coalesce(m.created_on_behalf_of, ''), s.policy_scope_id`
+	explainListChildren = `select ` + explainItemCols + `
+		 from items m join scopes s on s.id = m.scope_id
+		 where m.namespace_id = @ns and m.container_id = @parent and ` + explainVisible + `
+		 order by m.created_at desc, m.id desc
+		 limit @limit`
+	explainListTop = `select ` + explainItemCols + `
+		 from items m join scopes s on s.id = m.scope_id
+		 where m.namespace_id = @ns and m.container_id is null and ` + explainVisible + `
+		 order by m.created_at desc, m.id desc
+		 limit @limit`
+	explainFilterTypeState = `select ` + explainItemCols + `
+		 from items m join scopes s on s.id = m.scope_id
+		 where m.namespace_id = @ns and m.type_id = any(@f_types) and m.state = any(@f_states)
+		   and ` + explainVisible + `
+		 order by m.created_at desc, m.id desc
+		 limit @limit`
+	explainFilterCategory = `select ` + explainItemCols + `
+		 from items m join scopes s on s.id = m.scope_id
+		 where m.namespace_id = @ns and (m.type_id, m.type_version, m.state) in
+		     (select * from unnest(@f_cat_types::text[], @f_cat_versions::int[], @f_cat_states::text[]))
+		   and ` + explainVisible + `
+		 order by m.created_at desc, m.id desc
+		 limit @limit`
+	// One Type and one state are compared with "=" (oneOrAny in the filter).
+	explainFilterOneTypeState = `select ` + explainItemCols + `
+		 from items m join scopes s on s.id = m.scope_id
+		 where m.namespace_id = @ns and m.type_id = @f_type and m.state = @f_state
+		   and ` + explainVisible + `
+		 order by m.created_at desc, m.id desc
+		 limit @limit`
+	explainListPage2 = `select ` + explainItemCols + `
+		 from items m join scopes s on s.id = m.scope_id
+		 where m.namespace_id = @ns and m.container_id = @parent
+		   and (m.created_at, m.id) < (@after_at, @after_id) and ` + explainVisible + `
+		 order by m.created_at desc, m.id desc
+		 limit @limit`
+	explainEvents = `select e.item_seq, e.commit_seq, e.op, e.created_at, e.actor, coalesce(e.on_behalf_of, ''),
+		        coalesce(e.originating_hook, ''), coalesce(e.causation_id, ''), coalesce(e.correlation_id, ''),
+		        e.hop, coalesce(e.payload, '{}'), v.field_values
+		 from item_events e
+		 left join item_event_values v on v.item_id = e.item_id and v.item_seq = e.item_seq
+		 where e.item_id = @id and e.item_seq > 0
+		 order by e.item_seq
 		 limit @limit`
 )
 
@@ -124,6 +177,7 @@ func explainMode(ctx context.Context) error {
 	fmt.Println("# EXPLAIN (ANALYZE, BUFFERS)")
 	fmt.Println()
 	machine(ctx, pool)
+	explainChannel = chans[0]
 	if err := explainAll(ctx, pool, "Before ANALYZE", heavy, light, narrowed, term); err != nil {
 		return err
 	}
@@ -132,6 +186,9 @@ func explainMode(ctx context.Context) error {
 	}
 	return explainAll(ctx, pool, "After ANALYZE", heavy, light, narrowed, term)
 }
+
+// explainChannel is a channel of ~1,900 messages, for the list plans.
+var explainChannel uuid.UUID
 
 func explainAll(ctx context.Context, pool *pgxpool.Pool, title string,
 	heavy, light item.Principal, narrowed uuid.UUID, term string) error {
@@ -159,6 +216,25 @@ func explainAll(ctx context.Context, pool *pgxpool.Pool, title string,
 		{"Search, common word, user-light, flattened (before Step A)", explainSearchFlat, args(light, pgx.NamedArgs{"q": "alpha"})},
 		{"Search, rare word, user-light, flattened (before Step A)", explainSearchFlat, args(light, pgx.NamedArgs{"q": term})},
 		{"Search, common word, user-light, UNION ALL", explainSearchUnion, args(light, pgx.NamedArgs{"q": "alpha"})},
+		// Step 0, part 2.
+		{"ListItems, a channel's children (~1,900), user-light", explainListChildren,
+			args(light, pgx.NamedArgs{"parent": explainChannel, "limit": 51})},
+		{"ListItems, a channel's children, page 2 (keyset)", explainListPage2,
+			args(light, pgx.NamedArgs{"parent": explainChannel, "limit": 51,
+				"after_at": time.Now().Add(-time.Hour), "after_id": uuid.Max})},
+		{"ListItems, the top level, user-light", explainListTop, args(light, pgx.NamedArgs{"limit": 51})},
+		{"SearchItems, filter only: Type message, state default (~30,000), user-light", explainFilterOneTypeState,
+			args(light, pgx.NamedArgs{"f_type": "message", "f_state": "default", "limit": 51})},
+		{"SearchItems, filter only: Type message, state default, as = any (before)", explainFilterTypeState,
+			args(light, pgx.NamedArgs{"f_types": []string{"message"}, "f_states": []string{"default"}, "limit": 51})},
+		{"SearchItems, filter only: Type ticket, state open (1,001 hidden), user-light", explainFilterOneTypeState,
+			args(light, pgx.NamedArgs{"f_type": "ticket", "f_state": "open", "limit": 51})},
+		{"SearchItems, filter only: Types message or channel, two states", explainFilterTypeState,
+			args(light, pgx.NamedArgs{"f_types": []string{"message", "channel"}, "f_states": []string{"default", "open"}, "limit": 51})},
+		{"SearchItems, filter only: category todo, user-light", explainFilterCategory,
+			args(light, pgx.NamedArgs{"f_cat_types": []string{"ticket"}, "f_cat_versions": []int32{1},
+				"f_cat_states": []string{"open"}, "limit": 51})},
+		{"ListItemEvents, one Item", explainEvents, args(light, pgx.NamedArgs{"id": narrowed, "limit": 51})},
 	}
 	for _, s := range steps {
 		// Run once first, as the bench does, so the plan reflects a warm cache.

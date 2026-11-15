@@ -68,14 +68,11 @@ func (k *Service) resolveFilter(ctx context.Context, f Filter) (sqlFilter, error
 			return out, &InvalidError{Path: "filter.types", Reason: "unknown Type"}
 		}
 	}
-	if len(f.TypeIDs) > 0 {
-		out.conds = append(out.conds, "m.type_id = any(@f_types)")
-		out.args["f_types"] = f.TypeIDs
-	}
-	if len(f.States) > 0 {
-		out.conds = append(out.conds, "m.state = any(@f_states)")
-		out.args["f_states"] = f.States
-	}
+	// One value is "=", not "= any(...)": Postgres 17 then walks
+	// items_namespace_type_state in (created_at, id) order and stops at the
+	// page, instead of sorting every match (Step 0, part 2, EXPLAIN).
+	out.conds = append(out.conds, oneOrAny("m.type_id", "f_types", f.TypeIDs, out.args)...)
+	out.conds = append(out.conds, oneOrAny("m.state", "f_states", f.States, out.args)...)
 
 	// A category is a set of (type, version, state), read in every version
 	// of every Type: the same state may be active in v1 and waiting in v2.
@@ -222,4 +219,18 @@ func fieldConds(f typedef.Field, ff FieldFilter, i int, args pgx.NamedArgs) ([]s
 		conds = append(conds, fmt.Sprintf("%s %s @%s%s", read, b.op, arg, cast))
 	}
 	return []string{"(" + strings.Join(conds, " and ") + ")"}, nil
+}
+
+// oneOrAny is the condition that column is one of values: "=" for one
+// value, "= any" for more, nothing for none.
+func oneOrAny(column, arg string, values []string, args pgx.NamedArgs) []string {
+	switch len(values) {
+	case 0:
+		return nil
+	case 1:
+		args[arg] = values[0]
+		return []string{column + " = @" + arg}
+	}
+	args[arg] = values
+	return []string{column + " = any(@" + arg + ")"}
 }
