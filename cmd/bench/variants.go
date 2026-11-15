@@ -266,6 +266,11 @@ func (b *variantBench) measure(ctx context.Context, v variant, m mix, wait time.
 	}); err != nil {
 		return caseResult{}, err
 	}
+	// Time the approvals on a quiet relay, not behind the preparation's
+	// own events (the relay delivers one Item at a time).
+	if err := b.drained(ctx); err != nil {
+		return caseResult{}, err
+	}
 
 	res := caseResult{count: map[string]int{}}
 	outcomes := make([]string, variantTickets)
@@ -297,6 +302,15 @@ func (b *variantBench) measure(ctx context.Context, v variant, m mix, wait time.
 		}
 	}
 	return res, nil
+}
+
+// drained waits until the relay has delivered every outbox row.
+func (b *variantBench) drained(ctx context.Context) error {
+	return waitFor(ctx, 5*time.Minute, func() (bool, error) {
+		var n int
+		err := b.pool.QueryRow(ctx, `select count(*) from outbox where delivered_at is null`).Scan(&n)
+		return n == 0, err
+	})
 }
 
 // ticket creates a ticket of the variant's Type for a new customer and
@@ -410,6 +424,9 @@ func (b *variantBench) writeLatency(ctx context.Context, variants []variant) err
 				ids[i] = id
 				return err
 			}); err != nil {
+				return err
+			}
+			if err := b.drained(ctx); err != nil {
 				return err
 			}
 			c.before()
