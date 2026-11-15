@@ -55,8 +55,9 @@ func (a *Activities) prepare(ctx context.Context, in HookInput) (hookCall, error
 	}, nil
 }
 
-// run reads the hook's inputs and calls its action.
-func (a *Activities) run(ctx context.Context, c hookCall) (hooks.Result, error) {
+// run reads the hook's inputs and calls its action. key is passed to the
+// connector by actions with a side effect; read-only actions get "".
+func (a *Activities) run(ctx context.Context, c hookCall, key string) (hooks.Result, error) {
 	if a.Connectors == nil {
 		return hooks.Result{}, temporal.NewNonRetryableApplicationError("no connectors configured", ErrTypeHookFailed, nil)
 	}
@@ -70,7 +71,10 @@ func (a *Activities) run(ctx context.Context, c hookCall) (hooks.Result, error) 
 	for i, f := range c.hook.Reads {
 		args[i] = values[f] // nil when unset; the action refuses it
 	}
-	res, err := a.Connectors.Run(ctx, c.hook.Action, "", args)
+	res, err := a.Connectors.Run(ctx, c.hook.Action, key, args)
+	if errors.Is(err, hooks.ErrKeyConflict) { // before ErrPermanent, which it also is
+		return hooks.Result{}, temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeKeyConflict, err)
+	}
 	if errors.Is(err, hooks.ErrPermanent) {
 		return hooks.Result{}, temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeHookFailed, err)
 	}
@@ -94,7 +98,7 @@ func (a *Activities) RunEnrich(ctx context.Context, in HookInput) error {
 	if err != nil {
 		return err
 	}
-	res, err := a.run(ctx, c)
+	res, err := a.run(ctx, c, "")
 	if err != nil {
 		return err
 	}
@@ -125,6 +129,53 @@ func (a *Activities) writeFields(ctx context.Context, c hookCall, key string, fi
 	return kernelError(err)
 }
 
+// RunAction runs an action hook: it passes the hook's key to the connector,
+// so a retry gets what the first attempt made, and writes back the result
+// under the same key.
+//
+// The write-back's key coming back with a different request means the
+// connector made a second, different thing for one key: a duplicate. It is
+// a non-retryable key conflict, never "already written". (An enrich hook
+// treats the same case as already written: its fallback shares its key.)
+func (a *Activities) RunAction(ctx context.Context, in HookInput) error {
+	c, err := a.prepare(ctx, in)
+	if err != nil {
+		return err
+	}
+	res, err := a.run(ctx, c, in.IdempotencyKey)
+	if err != nil {
+		return err
+	}
+	_, err = a.Items.Internal().Update(ctx, itemservice.UpdateRequest{
+		IdempotencyKey: in.IdempotencyKey, Principal: c.principal, ItemID: c.id,
+		Fields: writes(c.hook, res.Values), Attribution: c.attr,
+	})
+	if errors.Is(err, itemservice.ErrIdempotencyKeyReuse) {
+		return temporal.NewNonRetryableApplicationError(
+			fmt.Sprintf("%s ran again for key %s and got a different result", in.HookID, in.IdempotencyKey),
+			ErrTypeKeyConflict, err)
+	}
+	return kernelError(err)
+}
+
+// HookFailed records on the Item that an action hook gave up. Its key is its
+// own (hook_failed:<item>:<entry>:<hook>), not the hook's: after a key
+// conflict the hook's key is already taken by its first write-back.
+func (a *Activities) HookFailed(ctx context.Context, in HookFailedInput) error {
+	c, err := a.prepare(ctx, in.Hook)
+	if err != nil {
+		return err
+	}
+	_, err = a.Items.Internal().HookFailed(ctx, itemservice.HookFailedRequest{
+		IdempotencyKey: fmt.Sprintf("hook_failed:%s:%d:%s", in.Hook.ItemID, in.Hook.CauseSeq, in.Hook.HookID),
+		Principal:      c.principal, ItemID: c.id, Reason: in.Reason, Attribution: c.attr,
+	})
+	if errors.Is(err, itemservice.ErrIdempotencyKeyReuse) {
+		return nil // already recorded for this entry
+	}
+	return kernelError(err)
+}
+
 // verdicts maps an action's answer onto the item service's.
 var verdicts = map[hooks.Verdict]itemservice.Verdict{
 	hooks.Allow:   itemservice.VerdictAllow,
@@ -138,7 +189,7 @@ func (a *Activities) RunCheck(ctx context.Context, in HookInput) error {
 	if err != nil {
 		return err
 	}
-	res, err := a.run(ctx, c)
+	res, err := a.run(ctx, c, "")
 	if err != nil {
 		return err
 	}
