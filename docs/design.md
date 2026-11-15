@@ -594,6 +594,20 @@ Questions to settle along the way: does the SLA clock pause during a hold? Is
 "requested, not yet applied" a substate or a separate field? How does the UI
 show a hold?
 
+**Outcome (Step 7; proposed, for review).** The leaning is firm: connectors run
+outside the write transaction, always. Checks are holds with a bounded wait
+(the D pattern, prefetch plus guard with the hold as backstop, where the
+deciding fact can be prefetched); side effects are action hooks whose
+idempotency key reaches the connector. A synchronous call before the
+transaction (variant B) is not offered: with a healthy ERP it saved ~100 ms
+at the median, but it put the ERP's latency in every checked write (2 s when
+the ERP hangs) and answered nothing at 5 s of ERP latency, while A and D kept
+writes at ~5 ms and answered everything, late. Across 3,100 forced failures
+per run (late or dropped answers, a stopped or killed worker) the invoice was
+never duplicated; without keys, once per ticket. Numbers and the three
+questions' recommendations: `docs/journal.md`, "Holds and connectors:
+write-up".
+
 ### Settled direction for holds, approvals and agents
 
 Recorded so Steps 6–7 do not paint us into a corner. Build only what the
