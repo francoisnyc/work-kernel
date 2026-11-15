@@ -133,6 +133,24 @@ Ideas noted during the spike, not built yet.
 - The workflow has no `GetVersion` branches, so changing its code breaks the
   replay of running histories. Before the first product: replay tests against
   real recorded histories, and versioned changes. (Step 6)
+- An action hook reads its inputs when it runs, not as they were at its
+  cause: if `f_amount` changes between two runs of the invoice hook, the ERP
+  sees the same key with another request and answers `key_conflict`. Fix: an
+  action hook reads its inputs as of its cause event (`item_event_values`
+  holds them), so retries always send the same request and the invoice bills
+  the approved amount. Ties to "an approval covers exact inputs". For the
+  spike the visible `key_conflict` is enough. (Step 7)
+- An action's write-back can commit while its attempt is reported as timed
+  out; if the budget then runs out, the Item gets both `f_invoice_id` and
+  `hook_failed` (`budget_exhausted`). Rare and visible. Fix when it matters:
+  `HookFailed` for `budget_exhausted` writes nothing when the hook already
+  completed for that entry. (Step 7)
+- Before giving up on an action, reconcile: look the key up in the connector
+  (the ERP knows whether it made the invoice) and write back what it made,
+  instead of `hook_failed`. (Step 7)
+- `StateEntry` finds pending actions by reading the Item's whole event
+  history on every workflow load: O(events). Fine for the spike; keep a
+  per-entry "actions done" marker if Items get long histories. (Step 7)
 
 ## 2026-11-12 — Step 1 (finished)
 
