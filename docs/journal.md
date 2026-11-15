@@ -6,6 +6,8 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
+- Rename the repo and Go module to Pli once the name checks pass (domains,
+  GitHub organization, trademark). The CLI is already `pli`. (2026-11-15)
 - `idempotency` rows never expire. Add a retention period and a cleanup job.
 - The idempotency request hash is built from the Go request struct, so adding a
   field changes the hash of stored keys and an old retry is rejected as a reuse.
