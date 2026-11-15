@@ -528,3 +528,64 @@ func TestAgentScopes_ApprovalTakesAnIdempotencyKey(t *testing.T) {
 		t.Errorf("idempotency rows for the key = %d, want 1", n)
 	}
 }
+
+// Approving an Item approves its audience: everyone who reads the scope its
+// content lands in. NEEDS_APPROVAL says whether that scope is open (the
+// whole namespace reads it) or narrowed.
+func TestAgentScopes_NeedsApprovalNamesTheAudience(t *testing.T) {
+	w := newCapWorld(t)
+	agent := scoped(t, w.k, w.user, []uuid.UUID{uuid.Nil}, allPowers...)
+	both := &itemservice.Narrow{Readers: []string{w.user.Actor, agent.Actor}}
+	private := createAs(t, w.k, w.user, "private", both, &w.a).ItemID
+	restricted := createAs(t, w.k, w.user, "restricted room", both, nil).ItemID
+	assertVisible(t, w.k, agent, private) // a narrowing read
+
+	create := func(container *uuid.UUID) *itemservice.NeedsApprovalError {
+		t.Helper()
+		_, err := w.k.Create(testCtx(t), itemservice.CreateRequest{
+			IdempotencyKey: newKey(), Principal: agent, TypeID: "ticket", TypeVersion: 1, ContainerID: container,
+		})
+		var na *itemservice.NeedsApprovalError
+		if !errors.As(err, &na) {
+			t.Fatalf("create: error = %v, want NEEDS_APPROVAL", err)
+		}
+		return na
+	}
+	if na := create(&w.b); !na.Open {
+		t.Errorf("into an open container: %+v, want Open (the whole namespace)", na)
+	}
+	if na := create(nil); !na.Open {
+		t.Errorf("at the top level: %+v, want Open", na)
+	}
+	if na := create(&restricted); na.Open {
+		t.Errorf("into a narrowed container: %+v, want not Open", na)
+	}
+}
+
+// ApprovalAudience checks an approval like ApproveWiden and says who would
+// see the content, recording nothing.
+func TestAgentScopes_ApprovalAudience(t *testing.T) {
+	w := newCapWorld(t)
+	agent := scoped(t, w.k, w.user, []uuid.UUID{uuid.Nil}, allPowers...)
+	restricted := createAs(t, w.k, w.user, "restricted room",
+		&itemservice.Narrow{Readers: []string{w.user.Actor, agent.Actor}}, nil).ItemID
+	audience := func(scope *uuid.UUID, session string) (itemservice.Audience, error) {
+		return w.k.ApprovalAudience(testCtx(t), itemservice.ApproveWidenRequest{
+			Principal: w.user, Session: session, ScopeItem: scope,
+		})
+	}
+	for name, c := range map[string]struct {
+		scope *uuid.UUID
+		open  bool
+	}{"open container": {&w.b, true}, "the namespace": {nil, true}, "narrowed container": {&restricted, false}} {
+		a, err := audience(c.scope, agent.AgentSession)
+		if err != nil || a.Open != c.open {
+			t.Errorf("%s: %+v, %v; want Open %v", name, a, err, c.open)
+		}
+	}
+	_, err := audience(&w.b, "ses_"+uuid.NewString())
+	assertNotFound(t, "unknown session", err)
+	if n := count(t, `select count(*) from agent_session_approvals where session = $1`, agent.AgentSession); n != 0 {
+		t.Errorf("approvals recorded = %d, want 0", n)
+	}
+}

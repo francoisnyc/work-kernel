@@ -360,3 +360,58 @@ func TestAgentSession_ApproveWidenTakesARequestID(t *testing.T) {
 	}
 	apiError(t, "same request_id, other scope", approve(id, other), connect.CodeAlreadyExists, "IDEMPOTENCY_KEY_REUSED")
 }
+
+// NEEDS_APPROVAL names the audience the approval would open the content to:
+// "namespace" for an open scope, "restricted" for a narrowed one. A
+// validate_only ApproveWiden says the same and records nothing; a real one
+// answers it too.
+func TestAgentSession_NeedsApprovalNamesTheAudience(t *testing.T) {
+	ctx := testCtx(t)
+	private := createNarrowed(t, "ana", "user:ana", "agent:triage-bot")
+	open := create(t, "ana", ticketV1, nil).Item.Name
+	room := createNarrowed(t, "ana", "user:ana", "agent:triage-bot")
+	session := startSession(t, "bot", "user:ana", []string{"namespaces/acme"}, "read", "create")
+	bot := asAgent("bot", session)
+	if _, err := bot.GetItem(ctx, connect.NewRequest(&kernelv1.GetItemRequest{Name: private})); err != nil {
+		t.Fatalf("the bot reads the private Item: %v", err)
+	}
+	createIn := func(container string) error {
+		_, err := bot.CreateItem(ctx, connect.NewRequest(&kernelv1.CreateItemRequest{
+			Parent: "namespaces/acme", RequestId: newID(), Type: ticketV1, Container: container,
+		}))
+		return err
+	}
+	audienceOf := func(what string, err error, scope, audience string) {
+		t.Helper()
+		ce := apiError(t, what, err, connect.CodePermissionDenied, "NEEDS_APPROVAL")
+		if md := errorInfo(t, ce).GetMetadata(); md["scope"] != scope || md["audience"] != audience {
+			t.Errorf("%s: metadata %v, want scope %s, audience %s", what, md, scope, audience)
+		}
+	}
+	audienceOf("into an open container", createIn(open), open, "namespace")
+	audienceOf("at the top level", createIn(""), "namespaces/acme", "namespace")
+	audienceOf("into a narrowed container", createIn(room), room, "restricted")
+
+	approve := func(scope string, validateOnly bool) (*kernelv1.ApproveWidenResponse, error) {
+		res, err := as("ana").ApproveWiden(ctx, connect.NewRequest(&kernelv1.ApproveWidenRequest{
+			Parent: "namespaces/acme", Session: session, Scope: scope, RequestId: newID(), ValidateOnly: validateOnly,
+		}))
+		if err != nil {
+			return nil, err
+		}
+		return res.Msg, nil
+	}
+	if res, err := approve(open, true); err != nil || res.Audience != "namespace" {
+		t.Errorf("validate_only, open: %v, %v; want audience namespace", res, err)
+	}
+	if res, err := approve(room, true); err != nil || res.Audience != "restricted" {
+		t.Errorf("validate_only, narrowed: %v, %v; want audience restricted", res, err)
+	}
+	audienceOf("after validate_only, nothing is approved", createIn(open), open, "namespace")
+	if res, err := approve(open, false); err != nil || res.Audience != "namespace" {
+		t.Errorf("approve, open: %v, %v; want audience namespace", res, err)
+	}
+	if err := createIn(open); err != nil {
+		t.Errorf("create after approval: %v", err)
+	}
+}

@@ -153,10 +153,43 @@ func TestPli_NeedsApprovalAndApprove(t *testing.T) {
 	}
 	// The approver is whoever --as names: the user, never the agent.
 	fails(t, "bot", "INVALID_ARGUMENT INVALID_REQUEST", "agent", "approve", session, sub)
-	ok(t, "ana", "agent", "approve", session, sub)
+	// The audience is named before anything is approved; a script must say
+	// --yes, and without it nothing is approved.
+	if !strings.Contains(r.stderr, "audience: namespace") {
+		t.Errorf("stderr %q does not name the audience", r.stderr)
+	}
+	r = pli(t, "ana", "agent", "approve", session, sub)
+	if r.code != 2 || !strings.Contains(r.stderr,
+		"Content from this agent session will become visible to everyone in namespace acme") ||
+		!strings.Contains(r.stderr, "--yes") {
+		t.Fatalf("approve without --yes: exit %d, stderr %q; want exit 2, the audience and --yes", r.code, r.stderr)
+	}
+	fails(t, "bot", "PERMISSION_DENIED NEEDS_APPROVAL", "item", "create", "--type", "ticket@1", "--in", sub)
+	r = pli(t, "ana", "agent", "approve", session, sub, "--yes")
+	if r.code != 0 || !strings.Contains(r.stderr, "everyone in namespace acme") {
+		t.Fatalf("approve --yes: exit %d, stderr %q; want success, naming the audience", r.code, r.stderr)
+	}
 	ok(t, "bot", "item", "create", "--type", "ticket@1", "--in", sub)
 	// Outside the session's container nothing exists, approval or not.
 	fails(t, "bot", "NOT_FOUND NOT_FOUND", "item", "create", "--type", "ticket@1")
+}
+
+// A narrowed scope's audience is its readers, named by the Item.
+func TestPli_ApproveARestrictedAudience(t *testing.T) {
+	room := create(t, "ana", "--type", "channel@1", "--set", "f_name=war-room", "--narrow", "user:ana,agent:triage-bot")
+	private := create(t, "ana", "--type", "ticket@1", "--in", room, "--narrow", "user:ana,agent:triage-bot")
+	session := ok(t, "bot", "agent", "start", "--for", "user:ana", "--scopes", room,
+		"--powers", "read,create")["session"].(map[string]any)["id"].(string)
+	ok(t, "bot", "item", "get", private)
+	r := fails(t, "bot", "PERMISSION_DENIED NEEDS_APPROVAL", "item", "create", "--type", "ticket@1", "--in", room)
+	if !strings.Contains(r.stderr, "audience: restricted") {
+		t.Errorf("stderr %q does not say the audience is restricted", r.stderr)
+	}
+	r = pli(t, "ana", "agent", "approve", session, room, "--yes")
+	if r.code != 0 || !strings.Contains(r.stderr, "Content from this agent session will become visible to the readers of "+room) {
+		t.Fatalf("approve: exit %d, stderr %q; want the readers of %s named", r.code, r.stderr, room)
+	}
+	ok(t, "bot", "item", "create", "--type", "ticket@1", "--in", room)
 }
 
 // Usage errors for the new commands exit 2 and send nothing.
