@@ -200,6 +200,11 @@ client → item service (Go, stateless)
   row lock the requester is checked (visibility, guards, required fields,
   `allowed`); then one transaction writes a `transition_requested` event
   (payload `from`, `requested_to`, `hold_id`; no `to`) and an `item_holds` row.
+- A field patch sent with a held transition is written at once, with the
+  request, and stays if the move is denied or fails. This differs from an
+  unchecked transition, where the patch and the move are one write and stand
+  or fall together. The guards are checked against the patched fields at the
+  request and again at resolution.
 - While the hold is open, the fields the check reads are frozen, and only a
   declared escape leaves the state (it cancels the hold). Anything else is
   `ErrHeld`, an `ErrStale`, naming the hold. A timer refused as held is spent.
