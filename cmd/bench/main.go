@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"runtime"
 	"slices"
@@ -26,6 +27,7 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
+	tlog "go.temporal.io/sdk/log"
 
 	"github.com/francoisnyc/work-kernel/internal/item"
 	"github.com/francoisnyc/work-kernel/internal/itemservice"
@@ -44,6 +46,8 @@ func main() {
 	explain := flag.Bool("explain", false, "print query plans for the unstable reads instead of benchmarking")
 	narrowing := flag.Bool("narrowing", false, "measure what narrowing a container costs in scope_access rows")
 	holds := flag.Bool("holds", false, "measure Step 6: answers to held approvals (variant D) and write latency")
+	invoices := flag.Bool("invoices", false, "measure Step 7: the invoice action under forced timeouts and worker kills")
+	variants := flag.Bool("variants", false, "measure Step 7: time to an answer for variants A, D (and B on its branch)")
 	flag.Parse()
 	run := run
 	if *explain {
@@ -54,6 +58,12 @@ func main() {
 	}
 	if *holds {
 		run = func() error { return holdsMode(context.Background()) }
+	}
+	if *invoices {
+		run = func() error { return invoicesMode(context.Background()) }
+	}
+	if *variants {
+		run = func() error { return variantsMode(context.Background()) }
 	}
 	if err := run(); err != nil {
 		log.Fatal(err)
@@ -102,6 +112,15 @@ func run() error {
 
 func registerFile(ctx context.Context, pool *pgxpool.Pool, name string) error {
 	data, err := os.ReadFile("types/" + name)
+	if err != nil {
+		return err
+	}
+	return registerYAML(ctx, pool, data)
+}
+
+// registerPath registers a Type file given by its path from the repo root.
+func registerPath(ctx context.Context, pool *pgxpool.Pool, path string) error {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
@@ -642,6 +661,13 @@ func benchTicket() ([]byte, error) {
 }
 
 func startTemporal(ctx context.Context) (client.Client, func(), error) {
+	c, _, stop, err := startTemporalAt(ctx)
+	return c, stop, err
+}
+
+// startTemporalAt is startTemporal that also returns the server's host:port,
+// for a worker run as its own process.
+func startTemporalAt(ctx context.Context) (client.Client, string, func(), error) {
 	server, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: testcontainers.ContainerRequest{
 			Image:        temporalImage,
@@ -652,22 +678,25 @@ func startTemporal(ctx context.Context) (client.Client, func(), error) {
 		Started: true,
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("start temporal: %w", err)
+		return nil, "", nil, fmt.Errorf("start temporal: %w", err)
 	}
 	stop := func() { _ = testcontainers.TerminateContainer(server) }
 	hostPort, err := server.PortEndpoint(ctx, "7233/tcp", "")
 	if err != nil {
 		stop()
-		return nil, nil, err
+		return nil, "", nil, err
 	}
 	for attempt := 0; ; attempt++ {
-		c, err := client.Dial(client.Options{HostPort: hostPort})
+		// Warnings and errors only: the SDK's debug lines would drown the
+		// report and cost time while measuring.
+		quiet := tlog.NewStructuredLogger(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})))
+		c, err := client.Dial(client.Options{HostPort: hostPort, Logger: quiet})
 		if err == nil {
-			return c, func() { c.Close(); stop() }, nil
+			return c, hostPort, func() { c.Close(); stop() }, nil
 		}
 		if attempt == 30 {
 			stop()
-			return nil, nil, fmt.Errorf("connect to temporal: %w", err)
+			return nil, "", nil, fmt.Errorf("connect to temporal: %w", err)
 		}
 		time.Sleep(time.Second)
 	}

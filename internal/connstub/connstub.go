@@ -64,6 +64,15 @@ type Server struct {
 	dropFirst   bool
 	late        int
 	dropped     int
+
+	arrivals map[string][]Arrival // customer -> requests, as they arrived
+}
+
+// Arrival is when one request for a customer reached the stub, before any
+// latency. The bench uses it to split an approval's time into its legs.
+type Arrival struct {
+	Path string
+	At   time.Time
 }
 
 // invoiceRec is what one key made: the request, to spot a conflict, and the
@@ -113,6 +122,7 @@ func newServer() *Server {
 	return &Server{
 		customers: map[string]Customer{},
 		invoices:  map[string][]string{}, byKey: map[string]invoiceRec{}, seen: map[string]bool{},
+		arrivals:  map[string][]Arrival{},
 	}
 }
 
@@ -245,6 +255,13 @@ func (s *Server) InvoiceCount() int {
 	return s.lastInvoice
 }
 
+// Arrivals returns when each request for a customer arrived, in order.
+func (s *Server) Arrivals(customer string) []Arrival {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]Arrival(nil), s.arrivals[customer]...)
+}
+
 // LateAnswers counts delayed first answers whose client had given up.
 func (s *Server) LateAnswers() int {
 	s.mu.Lock()
@@ -264,6 +281,7 @@ func (s *Server) DroppedAnswers() int {
 // (with the amount, for a credit check or an invoice).
 func (s *Server) wrap(serve func(w http.ResponseWriter, r *http.Request, id string, c Customer, amount int64)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		arrived := time.Now()
 		s.mu.Lock()
 		s.calls++
 		latency, outage, errorRate := s.latency, s.outage, s.errorRate
@@ -301,6 +319,7 @@ func (s *Server) wrap(serve func(w http.ResponseWriter, r *http.Request, id stri
 		}
 		s.mu.Lock()
 		c, ok := s.customers[id]
+		s.arrivals[id] = append(s.arrivals[id], Arrival{Path: r.URL.Path, At: arrived})
 		s.mu.Unlock()
 		if !ok {
 			http.Error(w, "no such customer", http.StatusNotFound)

@@ -52,6 +52,12 @@ func run() error {
 			return err
 		}
 	}
+	if a := os.Getenv("HOOK_ATTEMPT_TIMEOUT"); a != "" {
+		// Bench only: one hook attempt's StartToClose, to force timeouts.
+		if opts.HookAttemptTimeout, err = time.ParseDuration(a); err != nil {
+			return err
+		}
+	}
 	w := workflow.NewWorker(c, env("TASK_QUEUE", "items"), itemservice.New(pool), opts)
 	// Run blocks until SIGINT or SIGTERM, then stops the worker cleanly.
 	return w.Run(worker.InterruptCh())
