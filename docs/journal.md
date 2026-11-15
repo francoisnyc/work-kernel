@@ -148,6 +148,11 @@ Ideas noted during the spike, not built yet.
 - Before giving up on an action, reconcile: look the key up in the connector
   (the ERP knows whether it made the invoice) and write back what it made,
   instead of `hook_failed`. (Step 7)
+- After a worker dies (SIGKILL), its action attempts are only retried once
+  their attempt timeout (StartToClose) runs out: 21 s with a 20 s timeout in
+  the bench, while a graceful stop reports the attempts and they retry at
+  once. Give long actions a heartbeat timeout (a few seconds) so a dead
+  worker is noticed quickly, without shortening the attempt itself. (Step 7)
 - `StateEntry` finds pending actions by reading the Item's whole event
   history on every workflow load: O(events). Fine for the spike; keep a
   per-entry "actions done" marker if Items get long histories. (Step 7)
