@@ -3,6 +3,7 @@ package workflow
 import (
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"go.temporal.io/sdk/temporal"
@@ -191,8 +192,15 @@ var activityOptions = workflow.ActivityOptions{
 
 // hookOptions bound a hook: retried like any activity, but only within its
 // budget (ScheduleToClose counts every attempt and every pause).
+//
+// The budget is the only bound, so attempts are unlimited. That is said as
+// math.MaxInt32 rather than 0: Temporal's test environment turns 0 into 10
+// attempts, which would end a hook before its budget in unit tests.
 func hookOptions(budget time.Duration) workflow.ActivityOptions {
 	opts := activityOptions
+	retry := *activityOptions.RetryPolicy // a copy: the shared policy stays as it is
+	retry.MaximumAttempts = math.MaxInt32
+	opts.RetryPolicy = &retry
 	opts.ScheduleToCloseTimeout = budget
 	opts.StartToCloseTimeout = min(30*time.Second, budget)
 	return opts
