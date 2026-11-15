@@ -103,7 +103,7 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		// A transition with fields puts content into the Item's scope; a
 		// plain transition does not.
 		if len(req.Fields) > 0 {
-			if err := checkAgentWrite(ctx, tx, req.Principal, it.ScopeID); err != nil {
+			if err := checkAgentWrite(ctx, tx, req.Principal, it.ScopeID, &req.ItemID); err != nil {
 				return WriteResult{}, err
 			}
 		}

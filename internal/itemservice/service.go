@@ -219,7 +219,7 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 		if err := checkWritePower(ctx, tx, req.Principal); err != nil {
 			return WriteResult{}, err
 		}
-		if err := checkAgentWrite(ctx, tx, req.Principal, target); err != nil {
+		if err := checkAgentWrite(ctx, tx, req.Principal, target, req.ContainerID); err != nil {
 			return WriteResult{}, err
 		}
 

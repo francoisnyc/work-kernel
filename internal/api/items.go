@@ -9,6 +9,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	kernelv1 "github.com/francoisnyc/work-kernel/gen/kernel/v1"
 	"github.com/francoisnyc/work-kernel/internal/item"
@@ -72,11 +73,20 @@ func (s *server) view(ctx context.Context, p item.Principal, it item.Item) (*ker
 	}
 	name := itemName(p.Namespace, it.ID)
 	out := &kernelv1.Item{
-		Name:   name,
-		Type:   typeName(p.Namespace, it.TypeID, it.TypeVersion),
-		State:  it.State,
-		Fields: fields,
-		Etag:   strconv.FormatInt(it.ItemSeq, 10),
+		Name:              name,
+		Type:              typeName(p.Namespace, it.TypeID, it.TypeVersion),
+		State:             it.State,
+		Fields:            fields,
+		Etag:              strconv.FormatInt(it.ItemSeq, 10),
+		Creator:           it.CreatedBy,
+		CreatorOnBehalfOf: it.CreatedOnBehalfOf,
+	}
+	if !it.CreatedAt.IsZero() {
+		out.CreateTime = timestamppb.New(it.CreatedAt)
+	}
+	// The category is the Type version's, for the state the Item is in.
+	if st, ok := ty.State(it.State); ok {
+		out.Category = categories[st.Category]
 	}
 	if it.ContainerID != nil {
 		out.Container = itemName(p.Namespace, *it.ContainerID)
@@ -169,7 +179,7 @@ func (s *server) CreateItem(ctx context.Context, req *connect.Request[kernelv1.C
 	}
 	res, err := s.k.Create(ctx, kreq)
 	if err != nil {
-		return nil, errorWith(err, "", "narrow.principals")
+		return nil, errorWith(err, "", "narrow.principals", p.Namespace)
 	}
 	it, err := s.current(ctx, p, res.ItemID)
 	if err != nil {
@@ -243,7 +253,7 @@ func (s *server) UpdateItem(ctx context.Context, req *connect.Request[kernelv1.U
 	}
 	res, err := s.k.Update(ctx, kreq)
 	if err != nil {
-		return nil, errorWith(err, m.Name, "policy.narrow.principals")
+		return nil, errorWith(err, m.Name, "policy.narrow.principals", p.Namespace)
 	}
 	it, err := s.current(ctx, p, id)
 	if err != nil {
@@ -314,25 +324,42 @@ func (s *server) SearchItems(ctx context.Context, req *connect.Request[kernelv1.
 	if cerr := parentNamespace(p, m.Parent); cerr != nil {
 		return nil, cerr
 	}
-	if strings.TrimSpace(m.Query) == "" {
-		return nil, badField("query", "required: words to find")
+	filter, cerr := s.filterIn(ctx, p, m.Filter)
+	if cerr != nil {
+		return nil, cerr
+	}
+	if strings.TrimSpace(m.Query) == "" && filter.empty() {
+		return nil, badField("query", "required: words, a filter or both")
 	}
 	if m.MinSeq < 0 {
 		return nil, badField("min_seq", "cannot be negative")
 	}
+	if m.PageSize < 0 {
+		return nil, badField("page_size", "cannot be negative")
+	}
 	res, err := s.k.Search(ctx, itemservice.SearchRequest{
 		Principal: p, Query: m.Query, MinSeq: m.MinSeq, Wait: s.searchWait,
+		Filter: filter.Filter, Limit: int(m.PageSize), PageToken: m.PageToken,
 	})
 	if err != nil {
-		return nil, errorFor(err, "")
+		return nil, errorIn(err, p.Namespace, "")
 	}
-	out := &kernelv1.SearchItemsResponse{Items: make([]*kernelv1.Item, 0, len(res.Items))}
-	for _, it := range res.Items {
+	items, err := s.views(ctx, p, res.Items)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&kernelv1.SearchItemsResponse{Items: items, NextPageToken: res.NextPageToken}), nil
+}
+
+// views is a page of Items for the wire.
+func (s *server) views(ctx context.Context, p item.Principal, its []item.Item) ([]*kernelv1.Item, error) {
+	out := make([]*kernelv1.Item, 0, len(its))
+	for _, it := range its {
 		v, err := s.view(ctx, p, it)
 		if err != nil {
 			return nil, errorFor(err, "")
 		}
-		out.Items = append(out.Items, v)
+		out = append(out, v)
 	}
-	return connect.NewResponse(out), nil
+	return out, nil
 }

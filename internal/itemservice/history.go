@@ -27,6 +27,9 @@ type ListEventsRequest struct {
 type ListEventsResult struct {
 	Events        []Event
 	NextPageToken string
+	// The Item's Type version, which reads its field values.
+	TypeID      string
+	TypeVersion int
 }
 
 // Event is one accepted operation as a principal may see it: the event's
@@ -137,7 +140,7 @@ func (k *Service) ListEvents(ctx context.Context, req ListEventsRequest) (ListEv
 	if err != nil {
 		return ListEventsResult{}, fmt.Errorf("read history: %w", err)
 	}
-	res := ListEventsResult{}
+	res := ListEventsResult{TypeID: it.TypeID, TypeVersion: it.TypeVersion}
 	if len(found) > limit {
 		found = found[:limit]
 		res.NextPageToken = encodeToken(pageToken{Request: key, Seq: found[len(found)-1].e.ItemSeq})

@@ -609,7 +609,7 @@ func (k *Service) move(ctx context.Context, tx pgx.Tx, p item.Principal, id uuid
 			return uuid.Nil, fmt.Errorf("%w: an Item cannot move into itself or anything below it", ErrInvalid)
 		}
 	}
-	if err := checkAgentWrite(ctx, tx, p, target); err != nil {
+	if err := checkAgentWrite(ctx, tx, p, target, to); err != nil {
 		return uuid.Nil, err
 	}
 

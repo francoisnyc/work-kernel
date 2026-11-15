@@ -64,15 +64,13 @@ const maxWait = itemservice.MaxWait
 
 // server implements kernelv1connect.ItemServiceHandler.
 type server struct {
-	// Embedding the generated "unimplemented" handler answers every
-	// operation not written yet with CodeUnimplemented (Step 0, part 2 stubs).
-	kernelv1connect.UnimplementedItemServiceHandler
 	k          Kernel
+	grants     []devtoken.Grant
 	searchWait time.Duration
 }
 
 // NewHandler returns the path to mount the API under and its handler.
 func NewHandler(k Kernel, opts Options) (string, http.Handler) {
-	s := &server{k: k, searchWait: opts.SearchWait}
-	return kernelv1connect.NewItemServiceHandler(s, connect.WithInterceptors(newAuth(opts.Tokens)))
+	s := &server{k: k, searchWait: opts.SearchWait, grants: opts.Grants}
+	return kernelv1connect.NewItemServiceHandler(s, connect.WithInterceptors(newAuth(opts.Tokens, k)))
 }

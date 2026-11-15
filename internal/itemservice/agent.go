@@ -24,8 +24,9 @@ var ErrNeedsApproval = errors.New("itemservice: needs approval")
 // NeedsApprovalError carries the scope the agent's write would land in.
 type NeedsApprovalError struct {
 	Scope uuid.UUID
-	// ScopeItem is the Item whose scope node Scope is; nil for the
-	// namespace's root scope. The API names the scope by it.
+	// ScopeItem is the Item the write lands at (the Item written, the
+	// container created in, a move's destination); nil for the top level.
+	// The API names the scope by it; approving it approves Scope.
 	ScopeItem *uuid.UUID
 }
 
@@ -118,7 +119,11 @@ type execer interface {
 // checkAgentWrite applies the agent write rule to a write that lands in the
 // target scope: it must be at or below every narrowing scope the session
 // read, unless the session's user approved that target.
-func checkAgentWrite(ctx context.Context, tx pgx.Tx, p item.Principal, target uuid.UUID) error {
+//
+// at is the Item the write lands at, as the caller named it: the Item
+// written, the container created in, the destination of a move; nil for the
+// top level. A refusal names it, and approving it approves target.
+func checkAgentWrite(ctx context.Context, tx pgx.Tx, p item.Principal, target uuid.UUID, at *uuid.UUID) error {
 	if !item.IsKind(p.Actor, item.KindAgent) {
 		return nil
 	}
@@ -139,13 +144,13 @@ func checkAgentWrite(ctx context.Context, tx pgx.Tx, p item.Principal, target uu
 	if outside == 0 {
 		return nil
 	}
-	return needsApproval(ctx, tx, p, target)
+	return needsApproval(ctx, tx, p, target, at)
 }
 
 // checkAgentWiden applies the rule to a policy change that widens readers:
 // what it exposes may be what the session read, so any recorded read makes
 // it need approval.
-func checkAgentWiden(ctx context.Context, tx pgx.Tx, p item.Principal, target uuid.UUID) error {
+func checkAgentWiden(ctx context.Context, tx pgx.Tx, p item.Principal, target uuid.UUID, at *uuid.UUID) error {
 	if !item.IsKind(p.Actor, item.KindAgent) {
 		return nil
 	}
@@ -158,13 +163,13 @@ func checkAgentWiden(ctx context.Context, tx pgx.Tx, p item.Principal, target uu
 	if !read {
 		return nil
 	}
-	return needsApproval(ctx, tx, p, target)
+	return needsApproval(ctx, tx, p, target, at)
 }
 
 // needsApproval returns nil if the session's user approved the target scope,
 // and a *NeedsApprovalError otherwise. An approval by anyone else is on
 // record but does not count.
-func needsApproval(ctx context.Context, tx pgx.Tx, p item.Principal, target uuid.UUID) error {
+func needsApproval(ctx context.Context, tx pgx.Tx, p item.Principal, target uuid.UUID, at *uuid.UUID) error {
 	var approved bool
 	err := tx.QueryRow(ctx,
 		`select exists (select 1 from agent_session_approvals
@@ -176,12 +181,7 @@ func needsApproval(ctx context.Context, tx pgx.Tx, p item.Principal, target uuid
 	if approved {
 		return nil
 	}
-	// The API names a scope by the Item it belongs to; the root has none.
-	var owner *uuid.UUID
-	if err := tx.QueryRow(ctx, `select item_id from scopes where id = $1`, target).Scan(&owner); err != nil {
-		return fmt.Errorf("read the scope's Item: %w", err)
-	}
-	return &NeedsApprovalError{Scope: target, ScopeItem: owner}
+	return &NeedsApprovalError{Scope: target, ScopeItem: at}
 }
 
 // ApproveWidenRequest is a user approving one wider scope for one agent
@@ -245,9 +245,11 @@ func (k *Service) ApproveWiden(ctx context.Context, req ApproveWidenRequest) err
 	return err
 }
 
-// approvedScope is the scope an approval names: Scope itself; else the node
-// of ScopeItem (an Item of the namespace that has one, else ErrNotFound);
-// else the namespace's root scope.
+// approvedScope is the scope an approval names: Scope itself; else the scope
+// content written at ScopeItem lands in (its own node if it has one, else
+// the scope it inherits; ErrNotFound if it is not an Item of the
+// namespace), which is the target a NEEDS_APPROVAL naming that Item was
+// refused for; else the namespace's root scope.
 func approvedScope(ctx context.Context, tx pgx.Tx, ns string, req ApproveWidenRequest) (uuid.UUID, error) {
 	if req.Scope != uuid.Nil {
 		return req.Scope, nil
@@ -255,16 +257,7 @@ func approvedScope(ctx context.Context, tx pgx.Tx, ns string, req ApproveWidenRe
 	if req.ScopeItem == nil {
 		return rootScope(ctx, tx, ns)
 	}
-	var scope uuid.UUID
-	err := tx.QueryRow(ctx, `select id from scopes where item_id = $1 and namespace_id = $2`,
-		*req.ScopeItem, ns).Scan(&scope)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return uuid.Nil, ErrNotFound
-	}
-	if err != nil {
-		return uuid.Nil, fmt.Errorf("read the Item's scope: %w", err)
-	}
-	return scope, nil
+	return landingScope(ctx, tx, ns, req.ScopeItem)
 }
 
 // sessionAttribution puts the principal's agent session on the event's
