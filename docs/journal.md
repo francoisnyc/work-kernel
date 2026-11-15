@@ -123,6 +123,11 @@ Ideas noted during the spike, not built yet.
   declare none today. For the spike, a Type without a `hooks` section still
   accepts writes from any hook of its own Type (part 1's tests rely on it).
   (Step 6)
+- A hook can run again for the same cause: after a reload, an enrich hook
+  that wrote nothing is rerun, and a check retried after a timeout calls out
+  again. Harmless for read-only actions. Any action with side effects must
+  pass an idempotency key to the connector itself; Step 7's invoice test
+  proves it. (Step 6)
 - The bounded `wait` on `Transition` polls `item_holds` every ~50 ms. Use
   `LISTEN/NOTIFY` to wake waiters instead. (Step 6)
 - The workflow has no `GetVersion` branches, so changing its code breaks the
@@ -658,7 +663,7 @@ on_enter prefetch + CEL guard, wider `HasListeners`. Answers given ahead:
 "corrects" = `allowed` with a field patch applied with the move, recorded as
 supplied by the hook, never a new target state; `cel-go` is approved.
 
-## 2026-11-14 — Step 6, part 2: hooks, holds, bounded wait, variant D (built; two test fixes await approval)
+## 2026-11-14 — Step 6, part 2: hooks, holds, bounded wait, variant D (built)
 
 **Built:** ticket v3 (triage, two enrich hooks, approve checked by `erp_check`, cancel as escape). CEL guards
 (`cel.dev/cel-go`, the renamed `cel-go`) replace the spike parser. Hooks are declared in the Type and checked at
@@ -674,12 +679,13 @@ stopped 4.2/5.5 and 4.4/5.9. Unchanged, as the design wants.
 
 **Surprises:** `cel-go` moved to `cel.dev/cel-go` at v0.32. Nullable typed variables make `f_x != null` and type
 errors at load work with no custom code. The new hook workflow tests delivered their trigger a minute after
-a start in a quiet state, which Update-With-Start never does, so the run ended at once. The fix rewrites
-approved tests and waits for approval. `Transition` returning `TransitionResult` trips the Project source test
-(its allowlist names `WriteResult` only), and that fix waits for approval too.
+a start in a quiet state, which Update-With-Start never does, so the run ended at once (fixed, approved; a
+test now covers a request reaching a running workflow). Temporal's test environment turns `MaximumAttempts: 0`
+into 10; hooks now say "unlimited" as `math.MaxInt32`. A ScheduleToClose budget gives up up to one retry
+interval early: Temporal schedules no retry that would start after it.
 
 **Open:** which hooks ran is inferred from `causation_id` = the entering event, so a hook that wrote nothing
-reruns on a reload (its key makes the write a no-op, but the connector is called again). `buf` is not installed
-here, so the proto change is not linted.
+reruns on a reload (its key makes the write a no-op, but the connector is called again; see Later). `buf lint`
+passes via `go run`.
 
-**Next session:** approve or reject the two test fixes, then open the PR. Then Step 7.
+**Next session:** Step 7 (invoice with an idempotency key, forced timeouts, variants A and B).
