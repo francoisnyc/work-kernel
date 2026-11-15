@@ -13,6 +13,7 @@ require (
 	go.temporal.io/api v1.64.3
 	go.temporal.io/sdk v1.51.0
 	go.yaml.in/yaml/v3 v3.0.6
+	golang.org/x/term v0.48.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261110000943-09e21b237f2c
 	google.golang.org/protobuf v1.36.12
 )

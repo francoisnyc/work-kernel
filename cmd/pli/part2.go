@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"connectrpc.com/connect"
+	"golang.org/x/term"
 
 	kernelv1 "github.com/francoisnyc/work-kernel/gen/kernel/v1"
 )
@@ -292,15 +293,9 @@ func (c *cli) agentApprove(ctx context.Context, args []string) error {
 	return c.print(res.Msg)
 }
 
-// interactive reports whether stdin is a terminal, where pli may ask. A
-// terminal is a character device; so is /dev/null, which a script's stdin
-// often is, so that one does not count. (golang.org/x/term would ask the
-// terminal itself; not worth a dependency for one prompt.)
+// interactive reports whether stdin is a terminal, where pli may ask.
+// term.IsTerminal asks the terminal driver itself, so a pipe, a file or
+// /dev/null (a script, CI) never counts.
 func interactive() bool {
-	fi, err := os.Stdin.Stat()
-	if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
-		return false
-	}
-	null, err := os.Stat(os.DevNull)
-	return err == nil && !os.SameFile(fi, null)
+	return term.IsTerminal(int(os.Stdin.Fd()))
 }
