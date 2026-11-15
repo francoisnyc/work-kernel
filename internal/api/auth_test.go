@@ -70,7 +70,7 @@ func calls(c kernelv1connect.ItemServiceClient, item string) map[string]func(con
 			return err
 		},
 		"ApproveWiden": func(ctx context.Context) error {
-			_, err := c.ApproveWiden(ctx, connect.NewRequest(&kernelv1.ApproveWidenRequest{
+			_, err := c.ApproveWiden(ctx, connect.NewRequest(&kernelv1.ApproveWidenRequest{RequestId: newID(),
 				Parent: "namespaces/acme", Session: "ses_x", Scope: "namespaces/acme",
 			}))
 			return err

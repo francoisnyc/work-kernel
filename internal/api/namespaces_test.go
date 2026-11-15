@@ -171,11 +171,11 @@ func TestNamespaces_NewOperations(t *testing.T) {
 			Parent: "namespaces/globex", Filter: &kernelv1.ItemFilter{States: []string{"open"}},
 		}))
 		notFound(t, who+" SearchItems in globex with a filter", err)
-		_, err = c.ApproveWiden(ctx, connect.NewRequest(&kernelv1.ApproveWidenRequest{
+		_, err = c.ApproveWiden(ctx, connect.NewRequest(&kernelv1.ApproveWidenRequest{RequestId: newID(),
 			Parent: "namespaces/acme", Session: theirSession, Scope: "namespaces/acme",
 		}))
 		notFound(t, who+" ApproveWiden of a globex session", err)
-		_, err = c.ApproveWiden(ctx, connect.NewRequest(&kernelv1.ApproveWidenRequest{
+		_, err = c.ApproveWiden(ctx, connect.NewRequest(&kernelv1.ApproveWidenRequest{RequestId: newID(),
 			Parent: "namespaces/globex", Session: theirSession, Scope: "namespaces/globex",
 		}))
 		notFound(t, who+" ApproveWiden in globex", err)

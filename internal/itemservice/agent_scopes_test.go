@@ -91,7 +91,7 @@ func TestAgentScopes_SessionIsStored(t *testing.T) {
 	ns := newNamespace(t, w.k)
 	user := in(person("ns-user"), ns)
 	container := createIn(t, w.k, user, nil, nil)
-	agent := scoped(t, w.k, user, []uuid.UUID{container}, item.PowerRead, item.PowerComment, "transition:approve")
+	agent := scoped(t, w.k, user, []uuid.UUID{container}, item.PowerRead, item.PowerComment, "transition:approved")
 
 	s, err := w.k.AgentSession(testCtx(t), item.Principal{Actor: agent.Actor, AgentSession: agent.AgentSession, Namespace: ns})
 	if err != nil {
@@ -104,7 +104,7 @@ func TestAgentScopes_SessionIsStored(t *testing.T) {
 		t.Errorf("scopes = %v, want [%s]", s.Scopes, container)
 	}
 	// Every power is stored, even those v1 does not enforce yet.
-	want := []string{item.PowerRead, item.PowerComment, "transition:approve"}
+	want := []string{item.PowerRead, item.PowerComment, "transition:approved"}
 	if got := slices.Sorted(slices.Values(s.Powers)); !slices.Equal(got, slices.Sorted(slices.Values(want))) {
 		t.Errorf("powers = %v, want %v", s.Powers, want)
 	}
@@ -133,6 +133,9 @@ func TestAgentScopes_StartRefusesMalformedRequests(t *testing.T) {
 		{"unknown power", func(r *itemservice.StartAgentSessionRequest) { r.Powers = []string{"read", "launch_missiles"} }, "powers"},
 		{"transition without an id", func(r *itemservice.StartAgentSessionRequest) { r.Powers = []string{"transition:"} }, "powers"},
 		{"power in capitals", func(r *itemservice.StartAgentSessionRequest) { r.Powers = []string{"READ"} }, "powers"},
+		// transition:<state> names the target state; its format is checked,
+		// not the state (a session spans Types).
+		{"transition to a malformed state", func(r *itemservice.StartAgentSessionRequest) { r.Powers = []string{"transition:In Progress"} }, "powers"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -147,7 +150,7 @@ func TestAgentScopes_StartRefusesMalformedRequests(t *testing.T) {
 	}
 	// Every known power is accepted.
 	r := base()
-	r.Powers = append(slices.Clone(allPowers), "transition:resolve")
+	r.Powers = append(slices.Clone(allPowers), "transition:resolved")
 	if _, err := w.k.StartAgentSession(testCtx(t), r); err != nil {
 		t.Errorf("every known power: %v", err)
 	}
@@ -193,10 +196,10 @@ func TestAgentScopes_SessionFitsInsideTheGrant(t *testing.T) {
 		{"a sibling scope", []uuid.UUID{w.b}, []string{item.PowerRead}, grantA, false},
 		{"the whole namespace", []uuid.UUID{uuid.Nil}, []string{item.PowerRead}, grantA, false},
 		{"a power not granted", []uuid.UUID{w.a}, []string{item.PowerMove}, grantA, false},
-		{"a specific transition, only * granted", []uuid.UUID{w.a}, []string{"transition:resolve"},
+		{"a specific transition, only * granted", []uuid.UUID{w.a}, []string{"transition:resolved"},
 			&itemservice.Grant{Scopes: []uuid.UUID{w.a}, Powers: []string{item.PowerTransitionAll}}, true},
 		{"all transitions, one granted", []uuid.UUID{w.a}, []string{item.PowerTransitionAll},
-			&itemservice.Grant{Scopes: []uuid.UUID{w.a}, Powers: []string{"transition:resolve"}}, false},
+			&itemservice.Grant{Scopes: []uuid.UUID{w.a}, Powers: []string{"transition:resolved"}}, false},
 		{"no grant", []uuid.UUID{w.a}, []string{item.PowerRead}, nil, false},
 	}
 	for _, c := range cases {
@@ -460,7 +463,7 @@ func TestAgentScopes_NeedsApprovalNamesTheScopeItem(t *testing.T) {
 	}
 
 	// The user approves B by its Item, as the API will; the retry works.
-	if err := w.k.ApproveWiden(testCtx(t), itemservice.ApproveWidenRequest{
+	if err := w.k.ApproveWiden(testCtx(t), itemservice.ApproveWidenRequest{IdempotencyKey: newKey(),
 		Principal: w.user, Session: agent.AgentSession, ScopeItem: &w.b,
 	}); err != nil {
 		t.Fatalf("ApproveWiden by the scope's Item: %v", err)
@@ -480,15 +483,47 @@ func TestAgentScopes_ApprovalStaysInTheSessionsNamespace(t *testing.T) {
 	ns := newNamespace(t, w.k)
 	sameNameElsewhere := in(w.user, ns)
 
-	err := w.k.ApproveWiden(testCtx(t), itemservice.ApproveWidenRequest{
+	err := w.k.ApproveWiden(testCtx(t), itemservice.ApproveWidenRequest{IdempotencyKey: newKey(),
 		Principal: sameNameElsewhere, Session: agent.AgentSession, ScopeItem: &w.b,
 	})
 	assertNotFound(t, "approver in another namespace", err)
-	err = w.k.ApproveWiden(testCtx(t), itemservice.ApproveWidenRequest{
+	err = w.k.ApproveWiden(testCtx(t), itemservice.ApproveWidenRequest{IdempotencyKey: newKey(),
 		Principal: w.user, Session: "ses_" + uuid.NewString(), ScopeItem: &w.b,
 	})
 	assertNotFound(t, "unknown session", err)
 	if n := count(t, `select count(*) from agent_session_approvals where session = $1`, agent.AgentSession); n != 0 {
 		t.Errorf("approvals recorded = %d, want 0", n)
+	}
+}
+
+// ApproveWiden is a write like any other: it takes a required idempotency
+// key; the same key and request again records nothing more; the same key
+// with another request is ErrIdempotencyKeyReuse.
+func TestAgentScopes_ApprovalTakesAnIdempotencyKey(t *testing.T) {
+	w := newCapWorld(t)
+	agent := scoped(t, w.k, w.user, []uuid.UUID{uuid.Nil}, allPowers...)
+	approve := func(key string, scope *uuid.UUID) error {
+		return w.k.ApproveWiden(testCtx(t), itemservice.ApproveWidenRequest{
+			IdempotencyKey: key, Principal: w.user, Session: agent.AgentSession, ScopeItem: scope,
+		})
+	}
+	if err := approve("", &w.b); !errors.Is(err, itemservice.ErrInvalid) {
+		t.Errorf("no key: error = %v, want ErrInvalid", err)
+	}
+	key := newKey()
+	if err := approve(key, &w.b); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if err := approve(key, &w.b); err != nil {
+		t.Errorf("replay: %v", err)
+	}
+	if err := approve(key, &w.a); !errors.Is(err, itemservice.ErrIdempotencyKeyReuse) {
+		t.Errorf("same key, other scope: error = %v, want ErrIdempotencyKeyReuse", err)
+	}
+	if n := count(t, `select count(*) from agent_session_approvals where session = $1`, agent.AgentSession); n != 1 {
+		t.Errorf("approvals recorded = %d, want 1", n)
+	}
+	if n := count(t, `select count(*) from idempotency where actor = $1 and key = $2`, w.user.Actor, key); n != 1 {
+		t.Errorf("idempotency rows for the key = %d, want 1", n)
 	}
 }

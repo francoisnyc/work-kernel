@@ -386,9 +386,10 @@ message StartAgentSessionRequest {
   // name (the container and everything below it) or namespaces/{ns} (the
   // whole namespace). Within the agent's grant.
   repeated string scopes = 3;
-  // Required: read, create, edit_fields, transition:<id> or transition:*,
-  // move, comment, outbound. read is always implied. Within the agent's
-  // grant. v1 enforces read versus any write power.
+  // Required: read, create, edit_fields, transition:<state> (may move Items
+  // into that state) or transition:* (any), move, comment, outbound. read is
+  // always implied. Within the agent's grant. v1 enforces read versus any
+  // write power.
   repeated string powers = 4;
 }
 
@@ -415,6 +416,10 @@ message ApproveWidenRequest {
   // The scope from the NEEDS_APPROVAL error's "scope" metadata: a
   // container's name, or namespaces/{ns}.
   string scope = 3;
+  // Required, as on every write: the same request_id with the same request
+  // answers as the first time and records nothing more; with a different
+  // request it is ALREADY_EXISTS.
+  string request_id = 4;
 }
 
 message ApproveWidenResponse {}

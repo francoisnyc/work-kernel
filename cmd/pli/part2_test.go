@@ -137,20 +137,26 @@ func TestPli_AgentSession(t *testing.T) {
 }
 
 // A NEEDS_APPROVAL prints the scope; the user approves it with agent approve,
-// and the agent's retry works.
+// and the agent's retry works. As in the scenario script, the session covers
+// one container (capability mode), inside a grant for the whole namespace.
 func TestPli_NeedsApprovalAndApprove(t *testing.T) {
-	private := create(t, "ana", "--type", "ticket@1", "--narrow", "user:ana,agent:triage-bot")
-	open := create(t, "ana", "--type", "ticket@1")
-	session := ok(t, "bot", "agent", "start", "--for", "user:ana", "--scopes", "namespace",
+	box := create(t, "ana", "--type", "channel@1", "--set", "f_name=support")
+	private := create(t, "ana", "--type", "ticket@1", "--in", box, "--narrow", "user:ana,agent:triage-bot")
+	sub := create(t, "ana", "--type", "ticket@1", "--in", box)
+	session := ok(t, "bot", "agent", "start", "--for", "user:ana", "--scopes", box,
 		"--powers", "read,create")["session"].(map[string]any)["id"].(string)
 	ok(t, "bot", "item", "get", private)
 
-	r := fails(t, "bot", "PERMISSION_DENIED NEEDS_APPROVAL", "item", "create", "--type", "ticket@1", "--in", open)
-	if !strings.Contains(r.stderr, "scope: "+open) {
-		t.Fatalf("stderr %q does not name the scope %s", r.stderr, open)
+	r := fails(t, "bot", "PERMISSION_DENIED NEEDS_APPROVAL", "item", "create", "--type", "ticket@1", "--in", sub)
+	if !strings.Contains(r.stderr, "scope: "+sub) {
+		t.Fatalf("stderr %q does not name the scope %s", r.stderr, sub)
 	}
-	ok(t, "ana", "agent", "approve", session, open)
-	ok(t, "bot", "item", "create", "--type", "ticket@1", "--in", open)
+	// The approver is whoever --as names: the user, never the agent.
+	fails(t, "bot", "INVALID_ARGUMENT INVALID_REQUEST", "agent", "approve", session, sub)
+	ok(t, "ana", "agent", "approve", session, sub)
+	ok(t, "bot", "item", "create", "--type", "ticket@1", "--in", sub)
+	// Outside the session's container nothing exists, approval or not.
+	fails(t, "bot", "NOT_FOUND NOT_FOUND", "item", "create", "--type", "ticket@1")
 }
 
 // Usage errors for the new commands exit 2 and send nothing.
@@ -163,6 +169,8 @@ func TestPli_Part2UsageErrors(t *testing.T) {
 		{"agent start without scopes", []string{"--as", "bot", "agent", "start", "--powers", "read"}, "--scopes"},
 		{"agent start without powers", []string{"--as", "bot", "agent", "start", "--scopes", "namespace"}, "--powers"},
 		{"agent approve with one argument", []string{"--as", "ana", "agent", "approve", "ses_x"}, "approve"},
+		// Its help says the approver comes from --as.
+		{"agent approve's help", []string{"--as", "ana", "agent", "approve"}, "run it --as the user"},
 		{"--where without an operator", []string{"--as", "ana", "item", "search", "--where", "f_priority"}, "--where"},
 		{"unknown category", []string{"--as", "ana", "item", "search", "--category", "urgent"}, "urgent"},
 		{"history without an Item", []string{"--as", "ana", "item", "history"}, "history"},

@@ -225,9 +225,11 @@ func needsApproval(ctx context.Context, tx pgx.Tx, p item.Principal, target uuid
 // ApproveWidenRequest is a user approving one wider scope for one agent
 // session.
 type ApproveWidenRequest struct {
-	Principal item.Principal // the approving user
-	Session   string
-	Scope     uuid.UUID
+	// IdempotencyKey is required, as on every write.
+	IdempotencyKey string
+	Principal      item.Principal // the approving user
+	Session        string
+	Scope          uuid.UUID
 	// ScopeItem names the scope by its Item when Scope is zero (the API
 	// passes what NEEDS_APPROVAL named); nil with a zero Scope is the
 	// namespace's root scope.

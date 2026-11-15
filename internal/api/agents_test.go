@@ -62,7 +62,7 @@ func headerError(t *testing.T, what string, err error) {
 func TestAgentSession_Start(t *testing.T) {
 	box := create(t, "ana", ticketV1, nil).Item.Name
 	res, err := asAgent("bot", "").StartAgentSession(testCtx(t), connect.NewRequest(&kernelv1.StartAgentSessionRequest{
-		Parent: "namespaces/acme", ActingFor: "user:ana", Scopes: []string{box}, Powers: []string{"read", "transition:approve"},
+		Parent: "namespaces/acme", ActingFor: "user:ana", Scopes: []string{box}, Powers: []string{"read", "transition:approved"},
 	}))
 	if err != nil {
 		t.Fatalf("StartAgentSession: %v", err)
@@ -70,7 +70,7 @@ func TestAgentSession_Start(t *testing.T) {
 	s := res.Msg.Session
 	if s.Id == "" || s.Name != "namespaces/acme/agentSessions/"+s.Id || s.Agent != "agent:triage-bot" ||
 		s.ActingFor != "user:ana" || !slices.Equal(s.Scopes, []string{box}) ||
-		!slices.Equal(s.Powers, []string{"read", "transition:approve"}) {
+		!slices.Equal(s.Powers, []string{"read", "transition:approved"}) {
 		t.Errorf("session = %v", s)
 	}
 }
@@ -300,7 +300,7 @@ func TestAgentSession_NeedsApprovalAndApproveWiden(t *testing.T) {
 	needsApproval("create at the top level", err, "namespaces/acme")
 
 	approve := func(who, parent, scope string) error {
-		_, err := as(who).ApproveWiden(ctx, connect.NewRequest(&kernelv1.ApproveWidenRequest{
+		_, err := as(who).ApproveWiden(ctx, connect.NewRequest(&kernelv1.ApproveWidenRequest{RequestId: newID(),
 			Parent: parent, Session: session, Scope: scope,
 		}))
 		return err
@@ -310,12 +310,12 @@ func TestAgentSession_NeedsApprovalAndApproveWiden(t *testing.T) {
 	notFound(t, "approval from globex", approve("bea", "namespaces/globex", open))
 	notFound(t, "approval naming acme from globex", approve("bea", "namespaces/acme", open))
 	notFound(t, "approval of an unknown session", func() error {
-		_, err := as("ana").ApproveWiden(ctx, connect.NewRequest(&kernelv1.ApproveWidenRequest{
+		_, err := as("ana").ApproveWiden(ctx, connect.NewRequest(&kernelv1.ApproveWidenRequest{RequestId: newID(),
 			Parent: "namespaces/acme", Session: "ses_made-up", Scope: open,
 		}))
 		return err
 	}())
-	_, err = asAgent("bot", session).ApproveWiden(ctx, connect.NewRequest(&kernelv1.ApproveWidenRequest{
+	_, err = asAgent("bot", session).ApproveWiden(ctx, connect.NewRequest(&kernelv1.ApproveWidenRequest{RequestId: newID(),
 		Parent: "namespaces/acme", Session: session, Scope: open,
 	}))
 	malformed(t, "an agent approving", err)
@@ -335,4 +335,28 @@ func TestAgentSession_NeedsApprovalAndApproveWiden(t *testing.T) {
 	})); err != nil {
 		t.Errorf("create at the top level after approval: %v", err)
 	}
+}
+
+// ApproveWiden requires a request_id like every write; a replay answers the
+// same; the key with another request is ALREADY_EXISTS.
+func TestAgentSession_ApproveWidenTakesARequestID(t *testing.T) {
+	ctx := testCtx(t)
+	open := create(t, "ana", ticketV1, nil).Item.Name
+	other := create(t, "ana", ticketV1, nil).Item.Name
+	session := startSession(t, "bot", "user:ana", []string{"namespaces/acme"}, "read")
+	approve := func(id, scope string) error {
+		_, err := as("ana").ApproveWiden(ctx, connect.NewRequest(&kernelv1.ApproveWidenRequest{
+			Parent: "namespaces/acme", Session: session, Scope: scope, RequestId: id,
+		}))
+		return err
+	}
+	invalid(t, "no request_id", approve("", open), "request_id")
+	id := newID()
+	if err := approve(id, open); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if err := approve(id, open); err != nil {
+		t.Errorf("replay: %v", err)
+	}
+	apiError(t, "same request_id, other scope", approve(id, other), connect.CodeAlreadyExists, "IDEMPOTENCY_KEY_REUSED")
 }

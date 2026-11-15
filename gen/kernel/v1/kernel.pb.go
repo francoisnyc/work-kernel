@@ -2144,9 +2144,10 @@ type StartAgentSessionRequest struct {
 	// name (the container and everything below it) or namespaces/{ns} (the
 	// whole namespace). Within the agent's grant.
 	Scopes []string `protobuf:"bytes,3,rep,name=scopes,proto3" json:"scopes,omitempty"`
-	// Required: read, create, edit_fields, transition:<id> or transition:*,
-	// move, comment, outbound. read is always implied. Within the agent's
-	// grant. v1 enforces read versus any write power.
+	// Required: read, create, edit_fields, transition:<state> (may move Items
+	// into that state) or transition:* (any), move, comment, outbound. read is
+	// always implied. Within the agent's grant. v1 enforces read versus any
+	// write power.
 	Powers        []string `protobuf:"bytes,4,rep,name=powers,proto3" json:"powers,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2348,7 +2349,11 @@ type ApproveWidenRequest struct {
 	Session string `protobuf:"bytes,2,opt,name=session,proto3" json:"session,omitempty"`
 	// The scope from the NEEDS_APPROVAL error's "scope" metadata: a
 	// container's name, or namespaces/{ns}.
-	Scope         string `protobuf:"bytes,3,opt,name=scope,proto3" json:"scope,omitempty"`
+	Scope string `protobuf:"bytes,3,opt,name=scope,proto3" json:"scope,omitempty"`
+	// Required, as on every write: the same request_id with the same request
+	// answers as the first time and records nothing more; with a different
+	// request it is ALREADY_EXISTS.
+	RequestId     string `protobuf:"bytes,4,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2400,6 +2405,13 @@ func (x *ApproveWidenRequest) GetSession() string {
 func (x *ApproveWidenRequest) GetScope() string {
 	if x != nil {
 		return x.Scope
+	}
+	return ""
+}
+
+func (x *ApproveWidenRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
 	}
 	return ""
 }
@@ -3102,11 +3114,13 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\n" +
 	"acting_for\x18\x04 \x01(\tR\tactingFor\x12\x16\n" +
 	"\x06scopes\x18\x05 \x03(\tR\x06scopes\x12\x16\n" +
-	"\x06powers\x18\x06 \x03(\tR\x06powers\"]\n" +
+	"\x06powers\x18\x06 \x03(\tR\x06powers\"|\n" +
 	"\x13ApproveWidenRequest\x12\x16\n" +
 	"\x06parent\x18\x01 \x01(\tR\x06parent\x12\x18\n" +
 	"\asession\x18\x02 \x01(\tR\asession\x12\x14\n" +
-	"\x05scope\x18\x03 \x01(\tR\x05scope\"\x16\n" +
+	"\x05scope\x18\x03 \x01(\tR\x05scope\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x04 \x01(\tR\trequestId\"\x16\n" +
 	"\x14ApproveWidenResponse\"\xff\x01\n" +
 	"\x04Type\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x17\n" +

@@ -11,7 +11,7 @@ const (
 	PowerComment       = "comment" // reserved: stored only; will mean "create comment Items"
 	PowerOutbound      = "outbound"
 	PowerTransitionAll = "transition:*"
-	powerTransition    = "transition:" // transition:<id>
+	powerTransition    = "transition:" // transition:<state>: may move Items into that state
 )
 
 // KnownPower reports whether p is a power of the vocabulary above.
