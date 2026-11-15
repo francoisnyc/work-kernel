@@ -371,10 +371,18 @@ func AsInt(v any) (int64, bool) {
 	return n, true
 }
 
+// FieldError says which field value a Type refuses, and why. The reason
+// names the field ID and never repeats a value, which may be personal data.
+type FieldError struct {
+	Field  string
+	Reason string
+}
+
+func (e *FieldError) Error() string { return e.Reason }
+
 // CheckFields validates values against the Type's schema. A nil value means
 // "clear this field" and is accepted only when allowNull is true (updates).
-// Error messages name field IDs and never repeat a value, which may be
-// personal data.
+// The error is a *FieldError naming the first bad field.
 func (t *Type) CheckFields(values map[string]any, allowNull bool) error {
 	ids := make([]string, 0, len(values))
 	for id := range values {
@@ -383,34 +391,37 @@ func (t *Type) CheckFields(values map[string]any, allowNull bool) error {
 	sort.Strings(ids) // map order is random; sort so the first error is stable
 
 	for _, id := range ids {
+		fail := func(format string, args ...any) error {
+			return &FieldError{Field: id, Reason: fmt.Sprintf(format, args...)}
+		}
 		f, ok := t.Field(id)
 		if !ok {
-			return fmt.Errorf("field %s is not declared by type %s v%d", id, t.ID, t.Version)
+			return fail("field %s is not declared by type %s v%d", id, t.ID, t.Version)
 		}
 		v := values[id]
 		if v == nil {
 			if !allowNull {
-				return fmt.Errorf("field %s: null is not a value", id)
+				return fail("field %s: null is not a value", id)
 			}
 			continue
 		}
 		switch f.Type {
 		case String:
 			if _, ok := v.(string); !ok {
-				return fmt.Errorf("field %s: want a string", id)
+				return fail("field %s: want a string", id)
 			}
 		case Int:
 			if _, ok := AsInt(v); !ok {
-				return fmt.Errorf("field %s: want a whole number between -(2^53-1) and 2^53-1", id)
+				return fail("field %s: want a whole number between -(2^53-1) and 2^53-1", id)
 			}
 		case Bool:
 			if _, ok := v.(bool); !ok {
-				return fmt.Errorf("field %s: want true or false", id)
+				return fail("field %s: want true or false", id)
 			}
 		case Enum:
 			s, ok := v.(string)
 			if !ok || !slices.Contains(f.Options, s) {
-				return fmt.Errorf("field %s: want one of %s", id, strings.Join(f.Options, ", "))
+				return fail("field %s: want one of %s", id, strings.Join(f.Options, ", "))
 			}
 		}
 	}

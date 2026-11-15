@@ -273,10 +273,15 @@ func TestSchema_ScopesOpenAndScopeAccess(t *testing.T) {
 	if n != 1 {
 		t.Error("table scope_access with a primary key does not exist")
 	}
-	// The root scope is open and has no access rows.
-	root := count(t, `select count(*) from scopes where parent_id is null and policy_scope_id is null`)
+	// Each namespace's root scope is open and has no access rows. Other tests
+	// make namespaces besides "default" (Step 0, part 1), so count per namespace.
+	root := count(t, `select count(*) from scopes where parent_id is null and policy_scope_id is null
+	                  and namespace_id = 'default'`)
 	if root != 1 {
-		t.Errorf("open root scopes = %d, want 1", root)
+		t.Errorf("open root scopes in default = %d, want 1", root)
+	}
+	if closed := count(t, `select count(*) from scopes where parent_id is null and policy_scope_id is not null`); closed != 0 {
+		t.Errorf("root scopes that are not open = %d, want 0", closed)
 	}
 }
 

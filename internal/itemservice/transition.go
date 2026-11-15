@@ -85,7 +85,7 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 	res, err := k.write(ctx, req.Principal, req.IdempotencyKey, hash, func(tx pgx.Tx) (WriteResult, error) {
 		// The decision depends on the current state and fields, so it is made
 		// under the row lock: no other write can slip in between check and write.
-		it, err := lockItem(ctx, tx, req.ItemID)
+		it, err := lockItem(ctx, tx, nsOf(req.Principal), req.ItemID)
 		if err != nil {
 			return WriteResult{}, err
 		}
@@ -127,17 +127,18 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		}
 
 		// All lifecycle logic lives in lifecycle.Transition; the item service only
-		// asks and records. Two %w verbs wrap both errors, so callers can match
-		// ErrRejected with errors.Is and read the *lifecycle.Rejection with errors.As.
+		// asks and records. Its refusal becomes a *RejectedError with the
+		// rule's code, which still matches ErrRejected (errors.Is) and holds the
+		// *lifecycle.Rejection (errors.As).
 		//
 		// The guards are checked against the fields as the patch leaves them.
 		if err := ty.CheckFields(req.Fields, true); err != nil {
-			return WriteResult{}, fmt.Errorf("%w: %v", ErrRejected, err)
+			return WriteResult{}, fieldsInvalid(err)
 		}
 		merged, set, cleared := applyPatch(it.Fields, req.Fields)
 		next, err := lifecycle.Transition(ty, it.State, merged, req.ToState)
 		if err != nil {
-			return WriteResult{}, fmt.Errorf("%w: %w", ErrRejected, err)
+			return WriteResult{}, fromLifecycle(err)
 		}
 		// The move is legal. Whether this principal may make it is policy's
 		// question, asked second, so ErrForbidden always means "legal, but
@@ -204,7 +205,7 @@ func authorize(ctx context.Context, tx pgx.Tx, p item.Principal, ty *typedef.Typ
 			continue
 		}
 		// Roles are read on every write, inside its transaction: no cache.
-		roles, err := policy.Roles(ctx, tx, defaultNamespace, who)
+		roles, err := policy.Roles(ctx, tx, nsOf(p), who)
 		if err != nil {
 			return err
 		}

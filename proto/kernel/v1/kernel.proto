@@ -1,8 +1,20 @@
 syntax = "proto3";
 
-// First cut of the kernel API, from docs/design.md.
-// Step 1 implements Create and Get as Go functions only; no server yet.
-// Requests for later steps hold only what the design already states.
+// Public API of the Work kernel, version 1. See "Public API (v1)" in
+// docs/design.md: this file is that section as a contract.
+//
+// - Who is calling comes from the bearer token, never from a request field.
+//   No request carries a principal or an on_behalf_of.
+// - Names carry the namespace: namespaces/{ns}/items/{item},
+//   namespaces/{ns}/types/{type}/versions/{n}. A name in a namespace the
+//   caller is not in answers NOT_FOUND, like a hidden Item.
+// - Every write takes a required request_id (the idempotency key) and returns
+//   the Item after the write, with item_seq and commit_seq.
+// - Errors carry a standard code and a google.rpc.ErrorInfo with a stable
+//   reason (domain "pli.dev"); see the error table in docs/design.md.
+//
+// kernel.v1 only grows. Paging, filters, ListItems, ListItemEvents and the
+// agent calls arrive in Step 0, part 2; links in Step 1.
 package kernel.v1;
 
 import "google/protobuf/duration.proto";
@@ -11,150 +23,267 @@ import "google/protobuf/struct.proto";
 option go_package = "github.com/francoisnyc/work-kernel/gen/kernel/v1;kernelv1";
 
 service ItemService {
-  rpc Create(CreateRequest) returns (CreateResponse);
-  rpc Update(UpdateRequest) returns (UpdateResponse);
-  rpc Transition(TransitionRequest) returns (TransitionResponse);
-  rpc Link(LinkRequest) returns (LinkResponse);
-  rpc Archive(ArchiveRequest) returns (ArchiveResponse);
-  rpc Get(GetRequest) returns (GetResponse);
-  // Search waits until min_seq is visible before answering.
-  rpc Search(SearchRequest) returns (SearchResponse);
+  // Create an Item of a Type version, optionally in a container and narrowed.
+  rpc CreateItem(CreateItemRequest) returns (CreateItemResponse);
+  // One Item as the caller sees it. Hidden and missing are the same answer.
+  rpc GetItem(GetItemRequest) returns (GetItemResponse);
+  // A field patch, a readers change or a move.
+  rpc UpdateItem(UpdateItemRequest) returns (UpdateItemResponse);
+  // Move the Item to another state, optionally with a field patch and a wait.
+  rpc TransitionItem(TransitionItemRequest) returns (TransitionItemResponse);
+  // Items whose string fields contain all the words, among those the caller
+  // can see.
+  rpc SearchItems(SearchItemsRequest) returns (SearchItemsResponse);
+  // One Type version. Types are read-only: they load from files at start.
+  rpc GetType(GetTypeRequest) returns (GetTypeResponse);
+  // Every Type version the server knows.
+  rpc ListTypes(ListTypesRequest) returns (ListTypesResponse);
 }
 
-// Who is acting. Opaque IDs only.
-message Principal {
-  string actor = 1;
-  string on_behalf_of = 2; // empty when the actor acts for itself
-}
-
-message WriteResult {
-  string item_id = 1;
-  int64 commit_seq = 2;
-  int64 item_seq = 3;
-}
-
+// An Item as the caller may see it.
 message Item {
-  string id = 1;
-  string type_id = 2;
-  int32 type_version = 3;
-  string container_id = 4;
-  string scope_id = 5;
-  string state = 6;
-  google.protobuf.Struct fields = 7; // keyed by stable field ID
-  int64 item_seq = 8;
-  Hold hold = 9; // the latest hold, if the Item ever had one
-}
-
-// A request for a checked transition, held while its check runs.
-message Hold {
-  string id = 1;
-  string hook = 2;       // the check hook's ID
-  string from_state = 3; // the state the Item is held in
-  string to_state = 4;   // the state requested
-  HoldStatus status = 5;
-  string reason = 6;     // a code, set when denied or error
-}
-
-enum HoldStatus {
-  HOLD_STATUS_UNSPECIFIED = 0;
-  HOLD_STATUS_OPEN = 1;
-  HOLD_STATUS_ALLOWED = 2;
-  HOLD_STATUS_DENIED = 3;
-  HOLD_STATUS_ERROR = 4;
-  HOLD_STATUS_CANCELED = 5;
-}
-
-message CreateRequest {
-  string idempotency_key = 1;
-  Principal principal = 2;
-  string type_id = 3;
-  int32 type_version = 4;
-  string state = 5; // initial state; chosen by the Type from Step 2 on
-  google.protobuf.Struct fields = 6;
-  string container_id = 7;
-}
-message CreateResponse {
-  WriteResult result = 1;
-}
-
-message UpdateRequest {
-  string idempotency_key = 1;
-  Principal principal = 2;
-  string item_id = 3;
-  google.protobuf.Struct fields = 4;
-  // Optional if-match: write only if the Item is still at this item_seq.
-  // Zero means no check. A mismatch is "stale": re-read and retry.
-  int64 expected_item_seq = 5;
-}
-message UpdateResponse {
-  WriteResult result = 1;
-}
-
-message TransitionRequest {
-  string idempotency_key = 1;
-  Principal principal = 2;
-  string item_id = 3;
-  string to_state = 4;
-  // Optional patch, applied before the guards are checked; recorded with the
-  // transition as one event. Same meaning as UpdateRequest.fields.
+  // namespaces/{ns}/items/{item}. Flat: a move never renames an Item.
+  string name = 1;
+  // namespaces/{ns}/types/{type}/versions/{n}: the version the Item was
+  // created with, pinned for its life.
+  string type = 2;
+  // The containing Item's name; empty at the top level.
+  string container = 3;
+  // The current lifecycle state.
+  string state = 4;
+  // Field values keyed by stable field ID, as plain JSON: strings, numbers,
+  // booleans; an int is a string (int64 does not fit a JSON number); an enum
+  // is its option's name. Unset fields are absent.
   google.protobuf.Struct fields = 5;
-  // Optional if-match, as on UpdateRequest.
-  int64 expected_item_seq = 6;
-  // How long to wait for a held transition's check: 0 (the default) answers
-  // at once; at most 5 s. Not part of the request's identity: a retry with
-  // the same key may wait more or less, and gets the hold's current outcome.
-  google.protobuf.Duration wait = 7;
+  // Opaque. Send it back on a write to refuse the write if the Item moved on.
+  string etag = 6;
+  // The open hold, if any: a checked transition waiting for its check.
+  Hold hold = 7;
 }
-message TransitionResponse {
+
+// A requested transition, held while its check runs.
+message Hold {
+  // namespaces/{ns}/items/{item}/holds/{hold}
+  string name = 1;
+  // The check hook's ID in the Item's Type.
+  string check = 2;
+  // The state the Item is held in.
+  string from_state = 3;
+  // The state requested.
+  string requested_state = 4;
+}
+
+// A list of principals, as typed IDs (user:ana, agent:bot).
+message Readers {
+  repeated string principals = 1;
+}
+
+message CreateItemRequest {
+  // namespaces/{ns}: the caller's namespace.
+  string parent = 1;
+  // Required. The same request_id with the same request returns the stored
+  // result; with a different request it is ALREADY_EXISTS.
+  string request_id = 2;
+  // Required. namespaces/{ns}/types/{type}/versions/{n}.
+  string type = 3;
+  // Optional: the containing Item's name.
+  string container = 4;
+  // Optional initial values; null is not a value here.
+  google.protobuf.Struct fields = 5;
+  // Optional: give the Item its own scope, readable only by these readers
+  // (who can also read the container). Must include the caller.
+  Readers narrow = 6;
+}
+
+message CreateItemResponse {
+  Item item = 1;
+  int64 item_seq = 2;
+  int64 commit_seq = 3;
+}
+
+message GetItemRequest {
+  // namespaces/{ns}/items/{item}
+  string name = 1;
+}
+
+message GetItemResponse {
+  Item item = 1;
+}
+
+message UpdateItemRequest {
+  // namespaces/{ns}/items/{item}
+  string name = 1;
+  // Required; see CreateItemRequest.request_id.
+  string request_id = 2;
+  // Optional if-match: refuse with ABORTED / STALE unless the Item is still
+  // at this etag.
+  string etag = 3;
+  // A patch: changes only the fields it names; null clears a field.
+  google.protobuf.Struct fields = 4;
+  // A change of who may read the Item.
+  PolicyChange policy = 5;
+  // A change of the Item's container.
+  Move move = 6;
+  // At least one of fields, policy and move; not policy and move together.
+}
+
+// Narrow the Item to these readers, or drop its own scope and inherit its
+// container's readers again. Exactly one.
+message PolicyChange {
+  oneof change {
+    Readers narrow = 1;
+    bool inherit = 2;
+  }
+}
+
+message Move {
+  // The new container's name; empty moves the Item to the top level.
+  string container = 1;
+  // Required when the move lets more people see anything in the moved
+  // subtree; without it such a move is INVALID_ARGUMENT.
+  bool confirm_widen = 2;
+}
+
+message UpdateItemResponse {
+  Item item = 1;
+  int64 item_seq = 2;
+  int64 commit_seq = 3;
+}
+
+message TransitionItemRequest {
+  // namespaces/{ns}/items/{item}
+  string name = 1;
+  // Required; see CreateItemRequest.request_id.
+  string request_id = 2;
+  // Optional if-match, as on UpdateItemRequest.
+  string etag = 3;
+  // Required: the state to move to.
+  string to_state = 4;
+  // Optional patch, as on UpdateItemRequest. Guards see the patched fields.
+  google.protobuf.Struct fields = 5;
+  // For a checked transition: how long to wait for the check, 0 (the
+  // default) to 5 s. Not part of the request's identity: a retry with the
+  // same request_id may wait more or less, and reports the current outcome.
+  google.protobuf.Duration wait = 6;
+}
+
+message TransitionItemResponse {
+  Item item = 1;
   // For a held transition: the resolving event once there is one, else the
   // request's.
-  WriteResult result = 1;
-  TransitionOutcome outcome = 2;
-  string hold_id = 3; // set when the transition was held
-  string reason = 4;  // a code, for denied and error
+  int64 item_seq = 2;
+  int64 commit_seq = 3;
+  TransitionOutcome outcome = 4;
+  // DENIED and ERROR: a code in UPPER_SNAKE, e.g. CUSTOMER_ON_HOLD.
+  string reason = 5;
+  // The hold's name, when the transition was held.
+  string hold = 6;
 }
 
 enum TransitionOutcome {
   TRANSITION_OUTCOME_UNSPECIFIED = 0;
-  TRANSITION_OUTCOME_APPLIED = 1; // the Item moved
-  TRANSITION_OUTCOME_DENIED = 2;  // the check, or a re-check of the requester, said no
-  TRANSITION_OUTCOME_PENDING = 3; // the hold is still open; ask again with the same key
-  TRANSITION_OUTCOME_ERROR = 4;   // the check could not answer; ask again to retry
+  // The Item moved.
+  TRANSITION_OUTCOME_APPLIED = 1;
+  // The check, or a re-check of the requester, said no. A successful call.
+  TRANSITION_OUTCOME_DENIED = 2;
+  // The hold is still open; ask again with the same request_id.
+  TRANSITION_OUTCOME_PENDING = 3;
+  // The check could not answer; ask again to retry.
+  TRANSITION_OUTCOME_ERROR = 4;
 }
 
-message LinkRequest {
-  string idempotency_key = 1;
-  Principal principal = 2;
-  string item_id = 3;
-  string target_item_id = 4;
-  string link_type = 5;
-}
-message LinkResponse {
-  WriteResult result = 1;
-}
-
-message ArchiveRequest {
-  string idempotency_key = 1;
-  Principal principal = 2;
-  string item_id = 3;
-}
-message ArchiveResponse {
-  WriteResult result = 1;
-}
-
-message GetRequest {
-  Principal principal = 1;
-  string item_id = 2;
-}
-message GetResponse {
-  Item item = 1;
-}
-
-message SearchRequest {
-  Principal principal = 1;
+message SearchItemsRequest {
+  // namespaces/{ns}
+  string parent = 1;
+  // Required: words; an Item must contain all of them.
   string query = 2;
+  // Optional read-your-writes: answer only once the write with this
+  // commit_seq is visible; UNAVAILABLE / NOT_CAUGHT_UP after 2 s.
   int64 min_seq = 3;
 }
-message SearchResponse {
+
+message SearchItemsResponse {
+  // Newest first, at most 50.
   repeated Item items = 1;
+}
+
+// One version of a Type definition.
+message Type {
+  // namespaces/{ns}/types/{type}/versions/{n}
+  string name = 1;
+  string type_id = 2;
+  int32 version = 3;
+  string initial_state = 4;
+  repeated Field fields = 5;
+  repeated State states = 6;
+  repeated Transition transitions = 7;
+}
+
+message Field {
+  string id = 1;
+  FieldType type = 2;
+  // Enum fields only: the allowed names.
+  repeated string options = 3;
+}
+
+enum FieldType {
+  FIELD_TYPE_UNSPECIFIED = 0;
+  FIELD_TYPE_STRING = 1;
+  FIELD_TYPE_INT = 2;
+  FIELD_TYPE_BOOL = 3;
+  FIELD_TYPE_ENUM = 4;
+}
+
+message State {
+  string id = 1;
+  StateCategory category = 2;
+}
+
+enum StateCategory {
+  STATE_CATEGORY_UNSPECIFIED = 0;
+  STATE_CATEGORY_TRIAGE = 1;
+  STATE_CATEGORY_BACKLOG = 2;
+  STATE_CATEGORY_TODO = 3;
+  STATE_CATEGORY_ACTIVE = 4;
+  STATE_CATEGORY_WAITING = 5;
+  STATE_CATEGORY_DONE = 6;
+  STATE_CATEGORY_CANCELED = 7;
+  // Not work: work views leave it out.
+  STATE_CATEGORY_NONE = 8;
+}
+
+message Transition {
+  string from_state = 1;
+  string to_state = 2;
+  // A CEL expression over the fields; empty when there is none.
+  string guard = 3;
+  // Field IDs that must be set.
+  repeated string required = 4;
+  // Who may make the move: role:<name> or principal:<id>. Empty: anyone who
+  // can see the Item.
+  repeated string allowed = 5;
+  // May leave a state while a hold is open on it (it cancels the hold).
+  bool escape = 6;
+  // A check runs before the move is applied: the transition is held, and
+  // TransitionItemRequest.wait matters.
+  bool checked = 7;
+}
+
+message GetTypeRequest {
+  // namespaces/{ns}/types/{type}/versions/{n}
+  string name = 1;
+}
+
+message GetTypeResponse {
+  Type type = 1;
+}
+
+message ListTypesRequest {
+  // namespaces/{ns}
+  string parent = 1;
+}
+
+message ListTypesResponse {
+  // Ordered by type ID, then version.
+  repeated Type types = 1;
 }

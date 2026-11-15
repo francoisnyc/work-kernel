@@ -4,7 +4,7 @@ BUF   := go run github.com/bufbuild/buf/cmd/buf@v1.75.0
 
 DATABASE_URL ?= postgres://kernel:kernel@localhost:5432/kernel?sslmode=disable
 
-.PHONY: up down migrate gen test vet bench
+.PHONY: up down migrate gen lint test vet bench
 
 up: ## start Postgres and the Temporal dev server
 	docker compose up -d --wait
@@ -15,8 +15,11 @@ down: ## stop everything
 migrate: ## apply migrations
 	$(GOOSE) -dir migrations postgres "$(DATABASE_URL)" up
 
-gen: ## regenerate Protobuf code into gen/
+gen: ## regenerate Protobuf code into gen/ (committed; CI checks it is current)
 	$(BUF) generate
+
+lint: ## lint the proto
+	$(BUF) lint
 
 vet:
 	go vet ./...

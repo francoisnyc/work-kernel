@@ -31,21 +31,21 @@ type PolicyPatch struct {
 // would be no way back.)
 func checkReaders(readers []string, p item.Principal) ([]string, error) {
 	if len(readers) == 0 {
-		return nil, fmt.Errorf("%w: a narrowed Item needs at least one reader", ErrInvalid)
+		return nil, readersInvalid("a narrowed Item needs at least one reader")
 	}
 	if slices.Contains(readers, "") {
-		return nil, fmt.Errorf("%w: a reader ID is empty", ErrInvalid)
+		return nil, readersInvalid("a reader ID is empty")
 	}
 	// Readers are users or agents. group: is reserved until groups exist,
 	// and system: principals read nothing through scopes.
 	for _, r := range readers {
 		if !item.IsKind(r, item.KindUser, item.KindAgent) {
-			return nil, fmt.Errorf("%w: reader %q must be user:<id> or agent:<id>", ErrInvalid, r)
+			return nil, readersInvalid("reader %q must be user:<id> or agent:<id>", r)
 		}
 	}
 	if !slices.Contains(readers, p.Actor) ||
 		(p.OnBehalfOf != "" && !slices.Contains(readers, p.OnBehalfOf)) {
-		return nil, fmt.Errorf("%w: this would hide the Item from you", ErrInvalid)
+		return nil, readersInvalid("this would hide the Item from you")
 	}
 	// Clone first: sorting in place would reorder the caller's slice.
 	sorted := slices.Clone(readers)
@@ -57,12 +57,12 @@ func checkReaders(readers []string, p item.Principal) ([]string, error) {
 func checkPolicyPatch(patch *PolicyPatch, p item.Principal) ([]string, error) {
 	if patch.Inherit {
 		if len(patch.Readers) > 0 {
-			return nil, fmt.Errorf("%w: a policy patch sets readers or inherit, not both", ErrInvalid)
+			return nil, readersInvalid("a policy patch sets readers or inherit, not both")
 		}
 		return nil, nil
 	}
 	if len(patch.Readers) == 0 {
-		return nil, fmt.Errorf("%w: a policy patch sets readers or inherit", ErrInvalid)
+		return nil, readersInvalid("a policy patch sets readers or inherit")
 	}
 	return checkReaders(patch.Readers, p)
 }
@@ -80,10 +80,13 @@ func checkVisible(ctx context.Context, tx pgx.Tx, p item.Principal, scopeID uuid
 	return nil
 }
 
-func rootScope(ctx context.Context, tx pgx.Tx) (uuid.UUID, error) {
+func rootScope(ctx context.Context, tx pgx.Tx, ns string) (uuid.UUID, error) {
 	var id uuid.UUID
 	err := tx.QueryRow(ctx,
-		`select id from scopes where namespace_id = $1 and parent_id is null`, defaultNamespace).Scan(&id)
+		`select id from scopes where namespace_id = $1 and parent_id is null`, ns).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, fmt.Errorf("%w: namespace %q does not exist", ErrInvalid, ns)
+	}
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("read root scope: %w", err)
 	}
@@ -99,9 +102,9 @@ func rootScope(ctx context.Context, tx pgx.Tx) (uuid.UUID, error) {
 // so children of one channel do not queue behind each other. Only the path
 // that creates the node locks the container FOR UPDATE; the unique index on
 // scopes.item_id backs that up.
-func childScope(ctx context.Context, tx pgx.Tx, containerID *uuid.UUID) (uuid.UUID, error) {
+func childScope(ctx context.Context, tx pgx.Tx, ns string, containerID *uuid.UUID) (uuid.UUID, error) {
 	if containerID == nil {
-		return rootScope(ctx, tx)
+		return rootScope(ctx, tx, ns)
 	}
 	// read returns the container's scope and whether that scope is a node
 	// belonging to the container. With a lock, it locks the container row in
@@ -114,7 +117,7 @@ func childScope(ctx context.Context, tx pgx.Tx, containerID *uuid.UUID) (uuid.UU
 		if lock != "" {
 			var one int
 			err = tx.QueryRow(ctx, `select 1 from items where id = $1 and namespace_id = $2 `+lock,
-				*containerID, defaultNamespace).Scan(&one)
+				*containerID, ns).Scan(&one)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return uuid.Nil, false, ErrNotFound
 			}
@@ -126,7 +129,7 @@ func childScope(ctx context.Context, tx pgx.Tx, containerID *uuid.UUID) (uuid.UU
 			`select i.scope_id, s.item_id is not distinct from i.id
 			 from items i join scopes s on s.id = i.scope_id
 			 where i.id = $1 and i.namespace_id = $2`,
-			*containerID, defaultNamespace).Scan(&scope, &owns)
+			*containerID, ns).Scan(&scope, &owns)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return uuid.Nil, false, ErrNotFound
 		}
@@ -180,13 +183,13 @@ func childScope(ctx context.Context, tx pgx.Tx, containerID *uuid.UUID) (uuid.UU
 // landingScope is the scope a child of the container lands under as things
 // stand: the container's current scope, or the root with no container. A
 // missing container is ErrNotFound.
-func landingScope(ctx context.Context, tx pgx.Tx, containerID *uuid.UUID) (uuid.UUID, error) {
+func landingScope(ctx context.Context, tx pgx.Tx, ns string, containerID *uuid.UUID) (uuid.UUID, error) {
 	if containerID == nil {
-		return rootScope(ctx, tx)
+		return rootScope(ctx, tx, ns)
 	}
 	var scope uuid.UUID
 	err := tx.QueryRow(ctx, `select scope_id from items where id = $1 and namespace_id = $2`,
-		*containerID, defaultNamespace).Scan(&scope)
+		*containerID, ns).Scan(&scope)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return uuid.Nil, ErrNotFound
 	}
@@ -203,10 +206,12 @@ func insertNode(ctx context.Context, tx pgx.Tx, parent, owner uuid.UUID, narrows
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("new scope id: %w", err)
 	}
-	// policy_scope_id starts null; recomputeAccess sets it.
+	// policy_scope_id starts null; recomputeAccess sets it. A node is in
+	// its parent's namespace.
 	_, err = tx.Exec(ctx,
-		`insert into scopes (id, namespace_id, parent_id, narrows, item_id) values ($1, $2, $3, $4, $5)`,
-		id, defaultNamespace, parent, narrows, owner)
+		`insert into scopes (id, namespace_id, parent_id, narrows, item_id)
+		 select $1, namespace_id, $2, $3, $4 from scopes where id = $2`,
+		id, parent, narrows, owner)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("insert scope: %w", err)
 	}
@@ -552,10 +557,10 @@ func removeNode(ctx context.Context, tx pgx.Tx, node uuid.UUID) error {
 
 // lockForMove takes the namespace-wide move lock, then the moved Item's row
 // and the destination's, in ID order.
-func lockForMove(ctx context.Context, tx pgx.Tx, id uuid.UUID, to *uuid.UUID) error {
+func lockForMove(ctx context.Context, tx pgx.Tx, ns string, id uuid.UUID, to *uuid.UUID) error {
 	// An advisory lock is a named lock with no row behind it; the _xact_
 	// form is released when the transaction ends.
-	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtext('move:' || $1))`, defaultNamespace); err != nil {
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtext('move:' || $1))`, ns); err != nil {
 		return fmt.Errorf("take the move lock: %w", err)
 	}
 	ids := []uuid.UUID{id}
@@ -563,7 +568,7 @@ func lockForMove(ctx context.Context, tx pgx.Tx, id uuid.UUID, to *uuid.UUID) er
 		ids = append(ids, *to)
 	}
 	_, err := tx.Exec(ctx,
-		`select id from items where id = any($1) and namespace_id = $2 order by id for update`, ids, defaultNamespace)
+		`select id from items where id = any($1) and namespace_id = $2 order by id for update`, ids, ns)
 	if err != nil {
 		return fmt.Errorf("lock Items for the move: %w", err)
 	}
@@ -576,7 +581,7 @@ func lockForMove(ctx context.Context, tx pgx.Tx, id uuid.UUID, to *uuid.UUID) er
 // (ErrInvalid). If the Item has a node of its own, the node moves with it
 // and the pointers below are recomputed; no descendant Item row changes.
 func (k *Service) move(ctx context.Context, tx pgx.Tx, p item.Principal, id uuid.UUID, to *uuid.UUID) (uuid.UUID, error) {
-	target, err := landingScope(ctx, tx, to)
+	target, err := landingScope(ctx, tx, nsOf(p), to)
 	if err != nil {
 		return uuid.Nil, err
 	}
@@ -603,7 +608,7 @@ func (k *Service) move(ctx context.Context, tx pgx.Tx, p item.Principal, id uuid
 		return uuid.Nil, err
 	}
 
-	parent, err := childScope(ctx, tx, to)
+	parent, err := childScope(ctx, tx, nsOf(p), to)
 	if err != nil {
 		return uuid.Nil, err
 	}

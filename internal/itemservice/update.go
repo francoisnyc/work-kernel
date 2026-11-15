@@ -86,12 +86,12 @@ func (k *Service) update(ctx context.Context, req UpdateRequest, kc *kernelCause
 			// Moves take one namespace-wide lock: row locks alone cannot stop
 			// moves on disjoint pairs from closing a cycle between them. Then
 			// the Item rows involved, in ID order, so crossing moves queue.
-			if err := lockForMove(ctx, tx, req.ItemID, req.Move.To); err != nil {
+			if err := lockForMove(ctx, tx, nsOf(req.Principal), req.ItemID, req.Move.To); err != nil {
 				return WriteResult{}, err
 			}
 		}
 		// Validation needs the Item's Type, so it runs after the row is locked.
-		it, err := lockItem(ctx, tx, req.ItemID)
+		it, err := lockItem(ctx, tx, nsOf(req.Principal), req.ItemID)
 		if err != nil {
 			return WriteResult{}, err
 		}
@@ -110,7 +110,7 @@ func (k *Service) update(ctx context.Context, req UpdateRequest, kc *kernelCause
 			return WriteResult{}, err
 		}
 		if err := ty.CheckFields(req.Fields, true); err != nil {
-			return WriteResult{}, fmt.Errorf("%w: %v", ErrRejected, err)
+			return WriteResult{}, fieldsInvalid(err)
 		}
 		if err := checkHookWrite(ty, kc, req.Fields); err != nil {
 			return WriteResult{}, err
@@ -163,7 +163,8 @@ func (k *Service) update(ctx context.Context, req UpdateRequest, kc *kernelCause
 			}
 			if widens(before, after) {
 				if req.Move != nil && !req.Move.ConfirmWiden {
-					return WriteResult{}, fmt.Errorf("%w: this move lets more people see the Item; confirm it with ConfirmWiden", ErrInvalid)
+					return WriteResult{}, rejected(CodeWidenNotConfirmed,
+						"this move lets more people see the Item; confirm it with ConfirmWiden")
 				}
 				if req.Policy != nil {
 					if err := checkAgentWiden(ctx, tx, req.Principal, it.ScopeID); err != nil {

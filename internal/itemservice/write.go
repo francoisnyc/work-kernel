@@ -57,12 +57,12 @@ func (k *Service) write(ctx context.Context, p item.Principal, key, hash string,
 			`insert into idempotency (namespace_id, actor, key, request_hash, result)
 			 values ($1, $2, $3, $4, '{}')
 			 on conflict (namespace_id, actor, key) do nothing`,
-			defaultNamespace, p.Actor, key, hash)
+			nsOf(p), p.Actor, key, hash)
 		if err != nil {
 			return fmt.Errorf("claim idempotency key: %w", err)
 		}
 		if tag.RowsAffected() == 0 {
-			res, err = storedResult(ctx, tx, p.Actor, key, hash)
+			res, err = storedResult(ctx, tx, nsOf(p), p.Actor, key, hash)
 			return err
 		}
 
@@ -72,7 +72,7 @@ func (k *Service) write(ctx context.Context, p item.Principal, key, hash string,
 		}
 		_, err = tx.Exec(ctx,
 			`update idempotency set result = $4 where namespace_id = $1 and actor = $2 and key = $3`,
-			defaultNamespace, p.Actor, key, res)
+			nsOf(p), p.Actor, key, res)
 		if err != nil {
 			return fmt.Errorf("store idempotency result: %w", err)
 		}
@@ -96,7 +96,7 @@ func (k *Service) write(ctx context.Context, p item.Principal, key, hash string,
 
 // storedResult returns the result recorded for an actor's idempotency key, or
 // ErrIdempotencyKeyReuse if the key was used with a different request.
-func storedResult(ctx context.Context, tx pgx.Tx, actor, key, hash string) (WriteResult, error) {
+func storedResult(ctx context.Context, tx pgx.Tx, ns, actor, key, hash string) (WriteResult, error) {
 	var (
 		storedHash string
 		res        WriteResult
@@ -104,7 +104,7 @@ func storedResult(ctx context.Context, tx pgx.Tx, actor, key, hash string) (Writ
 	err := tx.QueryRow(ctx,
 		`select request_hash, result from idempotency
 		 where namespace_id = $1 and actor = $2 and key = $3`,
-		defaultNamespace, actor, key,
+		ns, actor, key,
 	).Scan(&storedHash, &res)
 	if err != nil {
 		return WriteResult{}, fmt.Errorf("read idempotency record: %w", err)
@@ -128,13 +128,13 @@ type lockedItem struct {
 
 // lockItem reads the Item row and locks it until the transaction ends. Two
 // writes to one Item therefore run one after the other, which is what keeps
-// item_seq free of gaps.
-func lockItem(ctx context.Context, tx pgx.Tx, id uuid.UUID) (lockedItem, error) {
+// item_seq free of gaps. An Item of another namespace is ErrNotFound.
+func lockItem(ctx context.Context, tx pgx.Tx, ns string, id uuid.UUID) (lockedItem, error) {
 	var it lockedItem
 	err := tx.QueryRow(ctx,
 		`select type_id, type_version, container_id, scope_id, state, fields, item_seq
 		 from items where id = $1 and namespace_id = $2 for update`,
-		id, defaultNamespace,
+		id, ns,
 	).Scan(&it.TypeID, &it.TypeVersion, &it.ContainerID, &it.ScopeID, &it.State, &it.Fields, &it.ItemSeq)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return lockedItem{}, ErrNotFound

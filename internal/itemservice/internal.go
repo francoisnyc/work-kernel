@@ -48,6 +48,9 @@ func (in *Internal) Update(ctx context.Context, req UpdateRequest) (WriteResult,
 	if err != nil {
 		return WriteResult{}, err
 	}
+	if req.Principal, err = in.k.inItemsNamespace(ctx, req.Principal, req.ItemID); err != nil {
+		return WriteResult{}, err
+	}
 	return in.k.update(ctx, req, kc)
 }
 
@@ -57,8 +60,26 @@ func (in *Internal) Transition(ctx context.Context, req TransitionRequest) (Writ
 	if err != nil {
 		return WriteResult{}, err
 	}
+	if req.Principal, err = in.k.inItemsNamespace(ctx, req.Principal, req.ItemID); err != nil {
+		return WriteResult{}, err
+	}
 	res, _, err := in.k.transition(ctx, req, kc) // a kernel actor never opens a hold
 	return res, err
+}
+
+// inItemsNamespace returns the kernel actor p placed in the namespace of the
+// Item it acts on. A timer or a hook belongs to no namespace: it acts where
+// its Item is, and the internal door finds the Item by ID alone. A missing
+// Item is ErrNotFound.
+func (k *Service) inItemsNamespace(ctx context.Context, p item.Principal, id uuid.UUID) (item.Principal, error) {
+	err := k.pool.QueryRow(ctx, `select namespace_id from items where id = $1`, id).Scan(&p.Namespace)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return p, ErrNotFound
+	}
+	if err != nil {
+		return p, fmt.Errorf("read the Item's namespace: %w", err)
+	}
+	return p, nil
 }
 
 // kernelCause is what a kernel write's attribution says, once checked: the
@@ -126,7 +147,7 @@ func checkKernel(p item.Principal, itemID uuid.UUID, a item.Attribution) (*kerne
 		return invalid("a kernel write is at least one hop from its cause")
 	}
 	if a.Hop > MaxHop {
-		return nil, fmt.Errorf("%w: hop limit: hop %d is deeper than %d", ErrRejected, a.Hop, MaxHop)
+		return nil, rejected(CodeHopLimit, "hop limit: hop %d is deeper than %d", a.Hop, MaxHop)
 	}
 	return kc, nil
 }

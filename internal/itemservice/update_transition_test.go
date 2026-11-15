@@ -185,15 +185,17 @@ func TestCreate_InANonInitialState_IsRejected(t *testing.T) {
 	}
 }
 
-func TestCreate_InvalidFields_AreRejected(t *testing.T) {
+// An undeclared field is a malformed request: ErrInvalid, not ErrRejected
+// (Step 0, part 1).
+func TestCreate_InvalidFields_AreInvalid(t *testing.T) {
 	ctx := testCtx(t)
 	k := itemservice.New(pool)
 	req := newRequest()
 	req.Fields = map[string]any{"f_title": "ok", "f_ghost": "not in the Type"}
 
 	_, err := k.Create(ctx, req)
-	if !errors.Is(err, itemservice.ErrRejected) {
-		t.Fatalf("Create error = %v, want ErrRejected", err)
+	if !errors.Is(err, itemservice.ErrInvalid) || errors.Is(err, itemservice.ErrRejected) {
+		t.Fatalf("Create error = %v, want ErrInvalid and not ErrRejected", err)
 	}
 	if !strings.Contains(err.Error(), "f_ghost") {
 		t.Errorf("error %q does not name the field", err)
@@ -293,7 +295,9 @@ func TestUpdate_MergesFieldsAndRecordsTheEvent(t *testing.T) {
 	}
 }
 
-func TestUpdate_InvalidFields_AreRejected(t *testing.T) {
+// Field errors are malformed requests: ErrInvalid, not ErrRejected (Step 0,
+// part 1).
+func TestUpdate_InvalidFields_AreInvalid(t *testing.T) {
 	cases := []struct {
 		name   string
 		fields map[string]any
@@ -318,8 +322,8 @@ func TestUpdate_InvalidFields_AreRejected(t *testing.T) {
 			_, err := k.Update(testCtx(t), itemservice.UpdateRequest{
 				IdempotencyKey: newKey(), Principal: alice, ItemID: id, Fields: c.fields,
 			})
-			if !errors.Is(err, itemservice.ErrRejected) {
-				t.Fatalf("Update error = %v, want ErrRejected", err)
+			if !errors.Is(err, itemservice.ErrInvalid) || errors.Is(err, itemservice.ErrRejected) {
+				t.Fatalf("Update error = %v, want ErrInvalid and not ErrRejected", err)
 			}
 			if !strings.Contains(err.Error(), c.want) {
 				t.Errorf("error %q does not name %s", err, c.want)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 
 	"github.com/jackc/pgx/v5"
 
@@ -71,4 +72,62 @@ func readType(ctx context.Context, q querier, id string, version int) (*typedef.
 		return nil, fmt.Errorf("read type: %w", err)
 	}
 	return typedef.FromJSON(def)
+}
+
+// ListTypes returns every registered Type version, parsed, ordered by Type ID
+// and then version. Types are global for now (docs/journal.md, Later: Types
+// per namespace) and readable by anyone in a namespace: a definition holds no
+// Item data, so this read is exempt from policy.Project.
+func (k *Service) ListTypes(ctx context.Context) ([]*typedef.Type, error) {
+	rows, err := k.pool.Query(ctx, `select id, version from types order by id, version`)
+	if err != nil {
+		return nil, fmt.Errorf("list types: %w", err)
+	}
+	// CollectRows reads every row and closes them, like a try-with-resources.
+	type key struct {
+		id      string
+		version int
+	}
+	keys, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (key, error) {
+		var kk key
+		err := r.Scan(&kk.id, &kk.version)
+		return kk, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list types: %w", err)
+	}
+	types := make([]*typedef.Type, 0, len(keys))
+	for _, kk := range keys {
+		t, err := k.loadType(ctx, k.pool, kk.id, kk.version)
+		if err != nil {
+			return nil, err
+		}
+		types = append(types, t)
+	}
+	return types, nil
+}
+
+// namespaceName is what a namespace may be called: lower-case letters,
+// digits and dashes, starting with a letter or digit. It ends up in resource
+// names (namespaces/{ns}/items/...).
+var namespaceName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+
+// ValidNamespace reports whether ns is a well-formed namespace name.
+func ValidNamespace(ns string) bool { return namespaceName.MatchString(ns) }
+
+// EnsureNamespace makes the namespace exist: it gets its one root scope, the
+// scope every principal of the namespace reads. Doing it again does nothing.
+func (k *Service) EnsureNamespace(ctx context.Context, ns string) error {
+	if !ValidNamespace(ns) {
+		return fmt.Errorf("%w: namespace %q must be lower-case letters, digits and dashes", ErrInvalid, ns)
+	}
+	// The partial unique index scopes_root allows one parentless scope per
+	// namespace; ON CONFLICT names it by its columns and predicate.
+	_, err := k.pool.Exec(ctx,
+		`insert into scopes (id, namespace_id, parent_id, narrows) values (gen_random_uuid(), $1, null, false)
+		 on conflict (namespace_id) where parent_id is null do nothing`, ns)
+	if err != nil {
+		return fmt.Errorf("ensure namespace %s: %w", ns, err)
+	}
+	return nil
 }

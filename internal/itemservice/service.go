@@ -50,9 +50,16 @@ var (
 	ErrIdempotencyKeyReuse = errors.New("itemservice: idempotency key reused with a different request")
 )
 
-// defaultNamespace is the only namespace in the spike. The column exists so
-// multi-tenancy can arrive later without a schema change.
+// defaultNamespace is the namespace of a principal that names none.
 const defaultNamespace = "default"
+
+// nsOf returns the namespace a principal acts in.
+func nsOf(p item.Principal) string {
+	if p.Namespace == "" {
+		return defaultNamespace
+	}
+	return p.Namespace
+}
 
 // CreateRequest asks for a new Item.
 type CreateRequest struct {
@@ -171,11 +178,11 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 	}
 	// The Type chooses the initial state; a request may name it but not another.
 	if req.State != "" && req.State != ty.InitialState {
-		return WriteResult{}, fmt.Errorf("%w: type %s v%d starts in state %q, not %q",
-			ErrRejected, ty.ID, ty.Version, ty.InitialState, req.State)
+		return WriteResult{}, rejected(CodeNotInitialState, "type %s v%d starts in state %q, not %q",
+			ty.ID, ty.Version, ty.InitialState, req.State)
 	}
 	if err := ty.CheckFields(req.Fields, false); err != nil {
-		return WriteResult{}, fmt.Errorf("%w: %v", ErrRejected, err)
+		return WriteResult{}, fieldsInvalid(err)
 	}
 	fields := req.Fields
 	if fields == nil {
@@ -192,11 +199,12 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 		// principal cannot see does not exist for them.
 		// The scope the new Item lands under, before childScope may give the
 		// container a node: the target of the agent write rule.
-		target, err := landingScope(ctx, tx, req.ContainerID)
+		ns := nsOf(req.Principal)
+		target, err := landingScope(ctx, tx, ns, req.ContainerID)
 		if err != nil {
 			return WriteResult{}, err
 		}
-		scopeID, err := childScope(ctx, tx, req.ContainerID)
+		scopeID, err := childScope(ctx, tx, ns, req.ContainerID)
 		if err != nil {
 			return WriteResult{}, err
 		}
@@ -213,7 +221,7 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 		_, err = tx.Exec(ctx,
 			`insert into items (id, namespace_id, type_id, type_version, container_id, scope_id, state, fields, item_seq)
 			 values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-			id, defaultNamespace, ty.ID, ty.Version, req.ContainerID, scopeID, ty.InitialState, fields, itemSeq)
+			id, ns, ty.ID, ty.Version, req.ContainerID, scopeID, ty.InitialState, fields, itemSeq)
 		if err != nil {
 			return WriteResult{}, fmt.Errorf("insert item: %w", err)
 		}
@@ -274,7 +282,7 @@ func (k *Service) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item
 	// so the two always agree. Nothing is cached: a change of readers takes
 	// effect on the very next read.
 	args := policy.VisibleArgs(p)
-	args["id"], args["ns"] = id, defaultNamespace
+	args["id"], args["ns"] = id, nsOf(p)
 	it := item.Item{ID: id}
 	var (
 		visible     bool
@@ -373,7 +381,7 @@ func (k *Service) StateEntry(ctx context.Context, id uuid.UUID) (StateEntry, err
 		     order by item_seq desc
 		     limit 1
 		 ) e on true
-		 where i.id = $1 and i.namespace_id = $2`, id, defaultNamespace,
+		 where i.id = $1`, id, // the workflow's read: by ID, in any namespace
 	).Scan(&se.TypeID, &se.TypeVersion, &se.State, &se.ItemSeq,
 		&se.EnteredSeq, &se.EnteredAt, &se.CorrelationID, &se.Hop)
 	if errors.Is(err, pgx.ErrNoRows) {

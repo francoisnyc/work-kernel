@@ -34,6 +34,25 @@ jobs:
             exit 1
           fi
 
+      # buf needs a newer Go patch release than go.mod names; "auto" lets the
+      # go command fetch it.
+      - name: Lint the proto
+        env:
+          GOTOOLCHAIN: auto
+        run: make lint
+
+      - name: Generated code is current
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          make gen
+          if [ -n "$(git status --porcelain -- gen/)" ]; then
+            echo "gen/ is out of date: run make gen and commit the result"
+            git status --porcelain -- gen/
+            git diff -- gen/ | head -50
+            exit 1
+          fi
+
       - name: Vet
         run: go vet ./...
 

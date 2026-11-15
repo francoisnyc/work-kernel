@@ -21,11 +21,13 @@ import (
 // projectExempt lists the exported reads that do not reach a principal.
 var projectExempt = map[string]string{
 	"StateEntry": "feeds the workflow, not a principal: state names and opaque IDs only",
-	"Type":       "feeds the workflow and the relay, not a principal: a Type definition holds no Item data",
+	"Type":       "feeds the workflow and the relay, and GetType: Types are readable by anyone in the namespace; a Type definition holds no Item data",
 	// Step A2: returns a new session ID only.
 	"StartAgentSession": "returns the minted session ID, no Item data",
 	// Step 6: the kernel's write door.
 	"Internal": "returns the kernel's write door; its methods return WriteResult and error only, no Item data",
+	// Step 0, part 1: the public API reads Types.
+	"ListTypes": "Types are readable by anyone in the namespace: a Type definition holds no Item data",
 }
 
 // noItemData are the result types that carry no Item data. A

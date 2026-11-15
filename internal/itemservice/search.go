@@ -78,7 +78,7 @@ func (k *Service) Search(ctx context.Context, req SearchRequest) (SearchResult, 
 	// the limit, so an Item the principal cannot see never leaves the database.
 	// UUIDv7 IDs sort by creation time, so "id desc" is newest first.
 	args := policy.VisibleArgs(req.Principal)
-	args["ns"], args["q"], args["limit"] = defaultNamespace, req.Query, limit
+	args["ns"], args["q"], args["limit"] = nsOf(req.Principal), req.Query, limit
 	rows, err := k.pool.Query(ctx,
 		`with matches as materialized (
 		     select id, type_id, type_version, container_id, scope_id, state, fields, item_seq

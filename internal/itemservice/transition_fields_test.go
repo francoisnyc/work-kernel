@@ -147,8 +147,10 @@ func TestTransition_WithFields_SetsAndClears(t *testing.T) {
 	}
 }
 
-// Guards see the fields as they are after the patch. A rejection applies
-// nothing: not the move, and not the patch either.
+// Guards see the fields as they are after the patch. A refusal applies
+// nothing: not the move, and not the patch either. A rule saying no is
+// ErrRejected; a malformed patch (an undeclared field, a wrong value type) is
+// ErrInvalid (Step 0, part 1).
 func TestTransition_WithFields_Rejected_WritesNothing(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -156,22 +158,23 @@ func TestTransition_WithFields_Rejected_WritesNothing(t *testing.T) {
 		to           string
 		patch        map[string]any
 		wantInReason string
+		want         error
 	}{
 		{"guard still fails after the patch",
 			map[string]any{"f_title": "old"}, "in_progress",
-			map[string]any{"f_title": "new"}, "f_assignee"},
+			map[string]any{"f_title": "new"}, "f_assignee", itemservice.ErrRejected},
 		{"patch clears the field the guard needs",
 			map[string]any{"f_assignee": "user-bob"}, "in_progress",
-			map[string]any{"f_assignee": nil}, "f_assignee"},
+			map[string]any{"f_assignee": nil}, "f_assignee", itemservice.ErrRejected},
 		{"no such transition, valid patch",
 			map[string]any{"f_title": "old"}, "resolved",
-			map[string]any{"f_resolution": "fixed"}, "resolved"},
+			map[string]any{"f_resolution": "fixed"}, "resolved", itemservice.ErrRejected},
 		{"undeclared field, legal move",
 			map[string]any{"f_assignee": "user-bob"}, "in_progress",
-			map[string]any{"f_ghost": "x"}, "f_ghost"},
+			map[string]any{"f_ghost": "x"}, "f_ghost", itemservice.ErrInvalid},
 		{"wrong value type, legal move",
 			map[string]any{"f_assignee": "user-bob"}, "in_progress",
-			map[string]any{"f_priority": "high"}, "f_priority"},
+			map[string]any{"f_priority": "high"}, "f_priority", itemservice.ErrInvalid},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -181,8 +184,8 @@ func TestTransition_WithFields_Rejected_WritesNothing(t *testing.T) {
 			_, err := k.Transition(testCtx(t), itemservice.TransitionRequest{
 				IdempotencyKey: newKey(), Principal: alice, ItemID: id, ToState: c.to, Fields: c.patch,
 			})
-			if !errors.Is(err, itemservice.ErrRejected) {
-				t.Fatalf("Transition error = %v, want ErrRejected", err)
+			if !errors.Is(err, c.want) {
+				t.Fatalf("Transition error = %v, want %v", err, c.want)
 			}
 			if !strings.Contains(err.Error(), c.wantInReason) {
 				t.Errorf("error %q does not mention %q", err, c.wantInReason)
