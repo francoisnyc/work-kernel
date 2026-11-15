@@ -63,7 +63,8 @@ type capWorld struct {
 func newCapWorld(t *testing.T) capWorld {
 	t.Helper()
 	k := itemservice.New(pool)
-	user := person("scoped-user")
+	// In the default namespace, named: List and ListEvents refuse none.
+	user := in(person("scoped-user"), "default")
 	w := capWorld{k: k, user: user}
 	w.a = createAs(t, k, user, "container A", nil, nil).ItemID
 	w.b = createAs(t, k, user, "container B", nil, nil).ItemID

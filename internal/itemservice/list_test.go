@@ -185,10 +185,13 @@ func (w filterWorld) search(t *testing.T, f itemservice.Filter) []uuid.UUID {
 // writes by others do not change it.
 func TestCreated_ItemCarriesCreateTimeAndCreator(t *testing.T) {
 	k := itemservice.New(pool)
-	ana, bob := person("ana"), person("bob")
+	ns := newNamespace(t, k)
+	ana, bob := in(person("ana"), ns), in(person("bob"), ns)
 	before := time.Now()
 	id := createAs(t, k, ana, "made by ana "+word(), nil, nil).ItemID
-	if err := agentUpdate(t, k, bob, id); err != nil {
+	if _, err := k.Update(testCtx(t), itemservice.UpdateRequest{
+		IdempotencyKey: newKey(), Principal: bob, ItemID: id, Fields: map[string]any{"f_priority": 4},
+	}); err != nil {
 		t.Fatalf("bob updates: %v", err)
 	}
 
@@ -278,19 +281,26 @@ func TestCreated_MigrationBackfillsFromEventOne(t *testing.T) {
 
 	plain, byAgent := uuid.New(), uuid.New()
 	first := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
-	seed := []string{
-		`insert into items (id, namespace_id, type_id, type_version, scope_id, state, item_seq)
-		 select $1, 'default', 'ticket', 1, id, 'open', 2 from scopes where namespace_id = 'default' and parent_id is null`,
-		`insert into items (id, namespace_id, type_id, type_version, scope_id, state, item_seq)
-		 select $2, 'default', 'ticket', 1, id, 'open', 1 from scopes where namespace_id = 'default' and parent_id is null`,
-		`insert into item_events (item_id, item_seq, actor, op, created_at) values ($1, 1, 'user:ana', 'create', $3)`,
-		`insert into item_events (item_id, item_seq, actor, op, created_at) values ($1, 2, 'user:bob', 'update', $3::timestamptz + interval '1 day')`,
-		`insert into item_events (item_id, item_seq, actor, on_behalf_of, agent_session, op, created_at)
-		 values ($2, 1, 'agent:bot', 'user:tom', 'ses_x', 'create', $3)`,
+	seed := []struct {
+		q    string
+		args []any
+	}{
+		{`insert into items (id, namespace_id, type_id, type_version, scope_id, state, item_seq)
+		  select $1, 'default', 'ticket', 1, id, 'open', 2 from scopes where namespace_id = 'default' and parent_id is null`,
+			[]any{plain}},
+		{`insert into items (id, namespace_id, type_id, type_version, scope_id, state, item_seq)
+		  select $1, 'default', 'ticket', 1, id, 'open', 1 from scopes where namespace_id = 'default' and parent_id is null`,
+			[]any{byAgent}},
+		{`insert into item_events (item_id, item_seq, actor, op, created_at) values ($1, 1, 'user:ana', 'create', $2)`,
+			[]any{plain, first}},
+		{`insert into item_events (item_id, item_seq, actor, op, created_at) values ($1, 2, 'user:bob', 'update', $2)`,
+			[]any{plain, first.Add(24 * time.Hour)}},
+		{`insert into item_events (item_id, item_seq, actor, on_behalf_of, agent_session, op, created_at)
+		  values ($1, 1, 'agent:bot', 'user:tom', 'ses_x', 'create', $2)`, []any{byAgent, first}},
 	}
-	for _, q := range seed {
-		if _, err := db.ExecContext(ctx, q, plain, byAgent, first); err != nil {
-			t.Fatalf("seed %q: %v", q, err)
+	for _, sd := range seed {
+		if _, err := db.ExecContext(ctx, sd.q, sd.args...); err != nil {
+			t.Fatalf("seed %q: %v", sd.q, err)
 		}
 	}
 	if _, err := provider.Up(ctx); err != nil {
@@ -329,7 +339,7 @@ func TestCreated_MigrationBackfillsFromEventOne(t *testing.T) {
 // List gives a container's direct children, not grandchildren, newest first.
 func TestList_DirectChildrenOnly(t *testing.T) {
 	k := itemservice.New(pool)
-	ana := person("ana")
+	ana := in(person("ana"), newNamespace(t, k))
 	box := createAs(t, k, ana, "box", nil, nil).ItemID
 	c1 := createAs(t, k, ana, "child 1", nil, &box).ItemID
 	c2 := createAs(t, k, ana, "child 2", nil, &box).ItemID
@@ -373,7 +383,8 @@ func TestList_TopLevel(t *testing.T) {
 // see is simply not listed.
 func TestList_Visibility(t *testing.T) {
 	k := itemservice.New(pool)
-	ana, bob := person("ana"), person("bob")
+	ns := newNamespace(t, k)
+	ana, bob := in(person("ana"), ns), in(person("bob"), ns)
 	box := createAs(t, k, ana, "box", nil, nil).ItemID
 	shared := createAs(t, k, ana, "shared", nil, &box).ItemID
 	createAs(t, k, ana, "ana only", &itemservice.Narrow{Readers: readers(ana)}, &box)
@@ -435,7 +446,9 @@ func TestList_Filters(t *testing.T) {
 // An agent's List records the narrowing scopes of what it read, like Search.
 func TestList_AgentReadsAreRecorded(t *testing.T) {
 	w := newAgentWorld(t)
-	if _, err := w.k.List(testCtx(t), itemservice.ListRequest{Principal: w.agent, ContainerID: &w.space}); err != nil {
+	// The Step A2 world is in the default namespace; List needs it named.
+	agent := in(w.agent, "default")
+	if _, err := w.k.List(testCtx(t), itemservice.ListRequest{Principal: agent, ContainerID: &w.space}); err != nil {
 		t.Fatalf("List as the agent: %v", err)
 	}
 	if got := recordedReads(t, w.agent.AgentSession); len(got) == 0 {

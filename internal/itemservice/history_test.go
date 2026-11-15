@@ -269,7 +269,9 @@ func TestHistory_Paging(t *testing.T) {
 // An agent reading a narrowed Item's history records that scope.
 func TestHistory_AgentReadsAreRecorded(t *testing.T) {
 	w := newAgentWorld(t)
-	if _, err := w.k.ListEvents(testCtx(t), itemservice.ListEventsRequest{Principal: w.agent, ItemID: w.inSpace}); err != nil {
+	// The Step A2 world is in the default namespace; ListEvents needs it named.
+	agent := in(w.agent, "default")
+	if _, err := w.k.ListEvents(testCtx(t), itemservice.ListEventsRequest{Principal: agent, ItemID: w.inSpace}); err != nil {
 		t.Fatalf("ListEvents as the agent: %v", err)
 	}
 	if got := recordedReads(t, w.agent.AgentSession); !slices.Contains(got, scopeOf(t, w.inSpace)) {
