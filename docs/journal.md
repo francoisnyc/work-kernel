@@ -194,17 +194,6 @@ Ideas noted during the spike, not built yet.
   move out of the session's scopes should deny it. (Step 0, part 2)
 - Agent sessions never expire. Add an expiry (and a way to end one) before
   real agents. (Step 0, part 2)
-- `pli agent approve` tells a terminal from a script by stdin being a
-  character device other than /dev/null, to avoid a dependency for one
-  prompt. golang.org/x/term asks the terminal itself, if this misfires.
-  (Step 0, part 2)
-- design.md does not yet say: transition powers name the target state
-  (`transition:<state>`); ApproveWiden takes a request_id and validate_only;
-  NEEDS_APPROVAL names the Item the write lands at plus its audience
-  (namespace or restricted), and approving an Item approves the scope its
-  content lands in; a session's scope may be the whole namespace; grants
-  are resolved by the API and checked by the kernel; the fixed-message rule.
-  Proposed for design.md, not written without asking. (Step 0, part 2)
 
 ## 2026-11-12 — Step 1 (finished)
 
@@ -982,12 +971,14 @@ narrowed tickets; Xeon 2.1 GHz, 4 CPUs; Postgres 17.12). Fresh / analyzed:
 container with no children has no scope node: content created in it lands in the scope it inherits,
 so NEEDS_APPROVAL now names the Item written at, not the scope's owner, and approving an Item approves
 its landing scope (its audience, which the review then asked to show). /dev/null is a character
-device, so "is stdin a terminal" needs more than the mode bit. Eight of the new tests were wrong
+device, so "is stdin a terminal" needs more than the mode bit (now golang.org/x/term). Eight of the new tests were wrong
 (no namespace on the new reads, a stale search word, seed arguments, a whole-struct compare); fixed
 with approval. No data race under -race.
 
-**Open:** Later has eight new items, among them the multi-value filter sort, sessions not expiring,
-and the design.md text for this part's decisions (not written without asking).
+**Open:** Later has six new items, among them the multi-value filter sort and sessions not
+expiring. After review: design.md now records this part's decisions (capability mode, approvals and
+their audience, fixed messages); pli asks golang.org/x/term whether stdin is a terminal (the first
+direct dependency added in this part, approved); CI's gofmt check skips the generated gen/.
 
 **Next session:** Step 0, part 3: `docker compose up` for the whole stack, `buf breaking`, the README
 and the scenario script. The script's agent session must start on one container inside a
