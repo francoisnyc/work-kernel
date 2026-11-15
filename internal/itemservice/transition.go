@@ -2,12 +2,15 @@ package itemservice
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/francoisnyc/work-kernel/internal/hooks"
 	"github.com/francoisnyc/work-kernel/internal/item"
 	"github.com/francoisnyc/work-kernel/internal/lifecycle"
 	"github.com/francoisnyc/work-kernel/internal/policy"
@@ -49,11 +52,78 @@ func (k *Service) Transition(ctx context.Context, req TransitionRequest) (Transi
 	if req.Wait < 0 || req.Wait > k.maxWait {
 		return TransitionResult{}, fmt.Errorf("%w: wait must be between 0 and %v", ErrInvalid, k.maxWait)
 	}
+	if k.syncChecks != nil {
+		var err error
+		if ctx, req, err = k.syncCheck(ctx, req); err != nil {
+			return TransitionResult{}, err
+		}
+	}
 	res, kind, err := k.transition(ctx, req, nil)
 	if err != nil {
 		return TransitionResult{}, err
 	}
 	return k.outcome(ctx, res, kind, req.Wait)
+}
+
+// ErrUnavailable is variant B's answer when its synchronous check could not
+// answer in time (or failed): the transition is refused.
+var ErrUnavailable = errors.New("itemservice: check unavailable")
+
+type syncCheckedKey struct{}
+
+// syncCheck is variant B: before the write transaction, read the Item and,
+// if the transition has a check, call the check's action synchronously with
+// a timeout. A deny is ErrRejected; a timeout or error is ErrUnavailable;
+// allow (or correct, whose values join the patch) lets the write go on,
+// marked in the context so that it opens no hold. The fields may change
+// between this read and the write: B cannot freeze them.
+func (k *Service) syncCheck(ctx context.Context, req TransitionRequest) (context.Context, TransitionRequest, error) {
+	var typeID, state string
+	var version int
+	var fields map[string]any
+	err := k.pool.QueryRow(ctx,
+		`select type_id, type_version, state, fields from items where id = $1 and namespace_id = $2`,
+		req.ItemID, defaultNamespace).Scan(&typeID, &version, &state, &fields)
+	if err != nil {
+		return ctx, req, nil // let the write report it (not found, and so on)
+	}
+	ty, err := k.loadType(ctx, k.pool, typeID, version)
+	if err != nil {
+		return ctx, req, err
+	}
+	check, ok := lifecycle.CheckFor(ty, state, req.ToState)
+	if !ok {
+		return ctx, req, nil
+	}
+	args := make([]any, len(check.Reads))
+	for i, f := range check.Reads {
+		args[i] = fields[f]
+		if v, ok := req.Fields[f]; ok {
+			args[i] = v
+		}
+	}
+	cctx, cancel := context.WithTimeout(ctx, k.syncCheckTimeout)
+	defer cancel()
+	res, err := k.syncChecks.Run(cctx, check.Action, "", args)
+	if err != nil {
+		return ctx, req, fmt.Errorf("%w: %s: %v", ErrUnavailable, check.ID, err)
+	}
+	switch res.Verdict {
+	case hooks.Deny:
+		return ctx, req, fmt.Errorf("%w: %s denied: %s", ErrRejected, check.ID, res.Reason)
+	case hooks.Correct:
+		patch := maps.Clone(req.Fields)
+		if patch == nil {
+			patch = map[string]any{}
+		}
+		for i, f := range check.Writes {
+			if i < len(res.Values) {
+				patch[f] = res.Values[i]
+			}
+		}
+		req.Fields = patch
+	}
+	return context.WithValue(ctx, syncCheckedKey{}, true), req, nil
 }
 
 // transition is Transition's body for both doors; kc is as in update. It
@@ -152,7 +222,7 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		if err := authorize(ctx, tx, req.Principal, ty, it.State, next.State); err != nil {
 			return WriteResult{}, err
 		}
-		if checked {
+		if checked && ctx.Value(syncCheckedKey{}) == nil {
 			kind = holdOpened
 			return requestHold(ctx, tx, ty, req.ItemID, it, check, next.State, req.Principal, recorded, attr,
 				merged, set, cleared)

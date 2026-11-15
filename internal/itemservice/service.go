@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/francoisnyc/work-kernel/internal/hooks"
 	"github.com/francoisnyc/work-kernel/internal/item"
 	"github.com/francoisnyc/work-kernel/internal/policy"
 	"github.com/francoisnyc/work-kernel/internal/typedef"
@@ -90,6 +91,11 @@ type Service struct {
 	types        *typedef.Cache // nil when Options.CacheTypes is false
 	writeTimeout time.Duration
 	maxWait      time.Duration // the longest Transition.Wait accepted
+
+	// Variant B (spike/variant-b only, never merged): checks run as a
+	// synchronous call before the write transaction, not as a hold.
+	syncChecks       *hooks.Connectors
+	syncCheckTimeout time.Duration
 }
 
 // DefaultWriteTimeout bounds every statement of a write. A write that waits
@@ -110,6 +116,11 @@ type Options struct {
 	// MaxWait caps TransitionRequest.Wait; zero means MaxWait (5 s). Tests
 	// set a short cap so they can test it without waiting 5 s.
 	MaxWait time.Duration
+	// SyncChecks turns on variant B: a checked transition calls its check's
+	// action synchronously before the transaction, bounded by
+	// SyncCheckTimeout (default 2 s), instead of opening a hold.
+	SyncChecks       *hooks.Connectors
+	SyncCheckTimeout time.Duration
 }
 
 // New returns a Service that uses the given connection pool, with the Type
@@ -120,7 +131,11 @@ func New(pool *pgxpool.Pool) *Service {
 
 // NewWithOptions returns a Service with the given options.
 func NewWithOptions(pool *pgxpool.Pool, opts Options) *Service {
-	k := &Service{pool: pool, writeTimeout: opts.WriteTimeout, maxWait: opts.MaxWait}
+	k := &Service{pool: pool, writeTimeout: opts.WriteTimeout, maxWait: opts.MaxWait,
+		syncChecks: opts.SyncChecks, syncCheckTimeout: opts.SyncCheckTimeout}
+	if k.syncCheckTimeout <= 0 {
+		k.syncCheckTimeout = 2 * time.Second
+	}
 	if k.writeTimeout <= 0 {
 		k.writeTimeout = DefaultWriteTimeout
 	}
