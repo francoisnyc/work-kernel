@@ -148,6 +148,10 @@ Ideas noted during the spike, not built yet.
 - Before giving up on an action, reconcile: look the key up in the connector
   (the ERP knows whether it made the invoice) and write back what it made,
   instead of `hook_failed`. (Step 7)
+- A timer that comes due while a hold is open should be deferred until the
+  hold resolves, then fire if the Item is still in its state, not be spent
+  as it is today. The SLA clock keeps running during a hold by default; a
+  real SLA object may declare `pause_while: held`. (Step 7 write-up)
 - After a worker dies (SIGKILL), its action attempts are only retried once
   their attempt timeout (StartToClose) runs out: 21 s with a 20 s timeout in
   the bench, while a graceful stop reports the attempts and they retry at
@@ -735,8 +739,8 @@ images came from `mirror.gcr.io` and were tagged locally.
 
 **Open:** see the write-up below; Later has the action-input, heartbeat and reconcile items.
 
-**Next session:** review the design.md proposal (two commits marked "proposal"), then decide
-whether the spike's follow-up ends here.
+**Next session:** the design.md proposals were approved on 2026-11-15 (the outcome is recorded
+under Steps 6–7). Decide whether the spike's follow-up ends here.
 
 ### Numbers: invoices under forced failures (`go run ./cmd/bench -invoices`)
 

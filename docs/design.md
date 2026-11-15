@@ -594,7 +594,7 @@ Questions to settle along the way: does the SLA clock pause during a hold? Is
 "requested, not yet applied" a substate or a separate field? How does the UI
 show a hold?
 
-**Outcome (Step 7; proposed, for review).** The leaning is firm: connectors run
+**Outcome (Step 7, decided 2026-11-15).** The leaning is firm: connectors run
 outside the write transaction, always. Checks are holds with a bounded wait
 (the D pattern, prefetch plus guard with the hold as backstop, where the
 deciding fact can be prefetched); side effects are action hooks whose
