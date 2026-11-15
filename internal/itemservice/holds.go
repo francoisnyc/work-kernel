@@ -404,6 +404,16 @@ func (in *Internal) HookInput(ctx context.Context, req HookInputRequest) (map[st
 		return nil, fmt.Errorf("%w: %s ran for %s v%d, on an Item of %s v%d",
 			ErrInvalid, req.Principal.Actor, kc.typeID, kc.typeVersion, it.TypeID, it.TypeVersion)
 	}
+	// The cause must be an event of this Item, as admit requires of a write.
+	var causeExists bool
+	if err := k.pool.QueryRow(ctx,
+		`select exists (select 1 from item_events where item_id = $1 and item_seq = $2)`,
+		req.ItemID, kc.causeSeq).Scan(&causeExists); err != nil {
+		return nil, fmt.Errorf("read cause: %w", err)
+	}
+	if !causeExists {
+		return nil, fmt.Errorf("%w: hook input: the cause is not an event of this Item", ErrInvalid)
+	}
 	ty, err := k.loadType(ctx, k.pool, it.TypeID, it.TypeVersion)
 	if err != nil {
 		return nil, err
@@ -438,11 +448,24 @@ type heldRequest struct {
 	resolvedCS  *int64 // commit_seq of the resolving event
 }
 
-// outcome turns a Transition's write into its answer. A write that is not
-// a request was applied. A request is answered from its hold, waiting up to
-// `wait` for it to resolve. A retry with the same key reaches here with the
-// stored result, so it too gets the hold's current outcome.
-func (k *Service) outcome(ctx context.Context, res WriteResult, wait time.Duration) (TransitionResult, error) {
+// holdKind says whether a transition's write opened a hold.
+type holdKind int
+
+const (
+	holdUnknown holdKind = iota // a retry answered from the idempotency record: the write did not run here
+	holdNone                    // the move had no check: it was applied, and no hold can exist
+	holdOpened                  // the move was checked: the write opened a hold
+)
+
+// outcome turns a Transition's write into its answer. A move without a
+// check was applied, and costs no read. A request is answered from its
+// hold, waiting up to `wait` for it to resolve. A retry with the same key
+// reaches here with the stored result, which does not say whether it was a
+// request, so it reads the hold too, and gets the hold's current outcome.
+func (k *Service) outcome(ctx context.Context, res WriteResult, kind holdKind, wait time.Duration) (TransitionResult, error) {
+	if kind == holdNone {
+		return TransitionResult{WriteResult: res, Outcome: OutcomeApplied}, nil
+	}
 	deadline := time.Now().Add(wait)
 	for {
 		h, err := k.holdRequestedAt(ctx, res.ItemID, res.ItemSeq)

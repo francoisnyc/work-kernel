@@ -49,34 +49,40 @@ func (k *Service) Transition(ctx context.Context, req TransitionRequest) (Transi
 	if req.Wait < 0 || req.Wait > k.maxWait {
 		return TransitionResult{}, fmt.Errorf("%w: wait must be between 0 and %v", ErrInvalid, k.maxWait)
 	}
-	res, err := k.transition(ctx, req, nil)
+	res, kind, err := k.transition(ctx, req, nil)
 	if err != nil {
 		return TransitionResult{}, err
 	}
-	return k.outcome(ctx, res, req.Wait)
+	return k.outcome(ctx, res, kind, req.Wait)
 }
 
-// transition is Transition's body for both doors; kc is as in update.
-func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *kernelCause) (WriteResult, error) {
+// transition is Transition's body for both doors; kc is as in update. It
+// also says whether the write opened a hold, so the caller knows whether
+// there is a hold to read (holdUnknown when the key was already used).
+func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *kernelCause) (WriteResult, holdKind, error) {
 	if req.IdempotencyKey == "" || req.Principal.Actor == "" || req.ToState == "" {
-		return WriteResult{}, fmt.Errorf("%w: idempotency key, actor and target state are required", ErrInvalid)
+		return WriteResult{}, holdUnknown, fmt.Errorf("%w: idempotency key, actor and target state are required", ErrInvalid)
 	}
 	if err := checkPrincipal(req.Principal); err != nil {
-		return WriteResult{}, err
+		return WriteResult{}, holdUnknown, err
 	}
 	if err := checkOptions(req.ExpectedItemSeq, req.Attribution); err != nil {
-		return WriteResult{}, err
+		return WriteResult{}, holdUnknown, err
 	}
 	attr, err := sessionAttribution(req.Principal, req.Attribution)
 	if err != nil {
-		return WriteResult{}, err
+		return WriteResult{}, holdUnknown, err
 	}
 	hash, err := requestHash("transition", req)
 	if err != nil {
-		return WriteResult{}, err
+		return WriteResult{}, holdUnknown, err
 	}
 
-	return k.write(ctx, req.Principal, req.IdempotencyKey, hash, func(tx pgx.Tx) (WriteResult, error) {
+	// Set by the write below when it runs; it stays holdUnknown when the
+	// idempotency record answers instead. A rolled-back attempt that is run
+	// again sets it again.
+	kind := holdUnknown
+	res, err := k.write(ctx, req.Principal, req.IdempotencyKey, hash, func(tx pgx.Tx) (WriteResult, error) {
 		// The decision depends on the current state and fields, so it is made
 		// under the row lock: no other write can slip in between check and write.
 		it, err := lockItem(ctx, tx, req.ItemID)
@@ -147,9 +153,11 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 			return WriteResult{}, err
 		}
 		if checked {
+			kind = holdOpened
 			return requestHold(ctx, tx, ty, req.ItemID, it, check, next.State, req.Principal, recorded, attr,
 				merged, set, cleared)
 		}
+		kind = holdNone
 
 		itemSeq := it.ItemSeq + 1
 		_, err = tx.Exec(ctx,
@@ -177,6 +185,10 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		}
 		return res, closeHold(ctx, tx, hold.id, item.HoldCanceled, "", itemSeq)
 	})
+	if err != nil {
+		return WriteResult{}, holdUnknown, err
+	}
+	return res, kind, nil
 }
 
 // authorize checks the transition's `allowed` list against the principal's

@@ -57,7 +57,8 @@ func (in *Internal) Transition(ctx context.Context, req TransitionRequest) (Writ
 	if err != nil {
 		return WriteResult{}, err
 	}
-	return in.k.transition(ctx, req, kc)
+	res, _, err := in.k.transition(ctx, req, kc) // a kernel actor never opens a hold
+	return res, err
 }
 
 // kernelCause is what a kernel write's attribution says, once checked: the
