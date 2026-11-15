@@ -122,7 +122,7 @@ func newServer() *Server {
 	return &Server{
 		customers: map[string]Customer{},
 		invoices:  map[string][]string{}, byKey: map[string]invoiceRec{}, seen: map[string]bool{},
-		arrivals:  map[string][]Arrival{},
+		arrivals: map[string][]Arrival{},
 	}
 }
 
