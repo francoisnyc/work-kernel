@@ -19,6 +19,11 @@ const (
 	// HookCheck runs on a transition: asking for the transition opens a
 	// hold, and the check allows, denies, corrects or errors.
 	HookCheck HookKind = "check"
+	// HookAction runs on entering a state, like enrich, but changes the
+	// outside world (an invoice in the ERP). It gets an idempotency key,
+	// has no fallback, writes back what it made, and once its state is
+	// entered it runs to completion, even if the Item has moved on.
+	HookAction HookKind = "action"
 )
 
 // HookOn says where a hook attaches.
@@ -91,8 +96,8 @@ func (t *Type) checkHooks() error {
 			if _, ok := t.State(h.State); !ok {
 				return fail("unknown state %q", h.State)
 			}
-			if h.Kind != HookEnrich {
-				return fail("a hook on entering a state must be kind enrich, not %q: a check belongs on a transition", h.Kind)
+			if h.Kind != HookEnrich && h.Kind != HookAction {
+				return fail("a hook on entering a state must be kind enrich or action, not %q: a check belongs on a transition", h.Kind)
 			}
 		case OnTransition:
 			tr, ok := t.Transition(h.From, h.To)
@@ -100,7 +105,7 @@ func (t *Type) checkHooks() error {
 				return fail("there is no transition %s -> %s", h.From, h.To)
 			}
 			if h.Kind != HookCheck {
-				return fail("a hook on a transition must be kind check, not %q: enrich belongs on entering a state", h.Kind)
+				return fail("a hook on a transition must be kind check, not %q: enrich and action belong on entering a state", h.Kind)
 			}
 			name := h.From + " -> " + h.To
 			if other, dup := checked[name]; dup {
@@ -136,9 +141,12 @@ func (t *Type) checkHooks() error {
 		if h.Kind == HookEnrich && len(h.Writes) == 0 {
 			return fail("an enrich hook writes at least one field")
 		}
+		if h.Kind == HookAction && len(h.Writes) == 0 {
+			return fail("an action hook writes at least one field: what it made records that it ran")
+		}
 		if len(h.Fallback) > 0 {
 			if h.Kind != HookEnrich {
-				return fail("only an enrich hook has a fallback")
+				return fail("only an enrich hook has a fallback: there is no default for a side effect")
 			}
 			for id := range h.Fallback {
 				if !slices.Contains(h.Writes, id) {

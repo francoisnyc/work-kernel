@@ -15,6 +15,7 @@ const (
 	OpTransitionRequested = "transition_requested" // a checked transition was asked for: a hold opens
 	OpTransitionDenied    = "transition_denied"    // the check said no, or the requester no longer may
 	OpTransitionFailed    = "transition_failed"    // the check could not answer (budget ran out, failed for good)
+	OpHookFailed          = "hook_failed"          // an action hook gave up (budget ran out, key conflict, failed for good)
 )
 
 // Held is the Rejection code for a write an open hold refuses.
@@ -38,12 +39,24 @@ func StartsWorkflow(t *typedef.Type, ev Event) bool {
 	return ev.Entered != "" && NeedsWorkflow(t, ev.Entered)
 }
 
-// EnrichHooks returns the hooks that run on entering a state, in the order
-// the Type declares them.
+// EnrichHooks returns the enrich hooks that run on entering a state, in the
+// order the Type declares them. Those of a state already left may be
+// dropped: the check is the backstop.
 func EnrichHooks(t *typedef.Type, state string) []typedef.Hook {
+	return enterHooks(t, state, typedef.HookEnrich)
+}
+
+// ActionHooks returns the action hooks that run on entering a state, in the
+// order the Type declares them. They are never dropped: once the state is
+// entered, each runs to completion.
+func ActionHooks(t *typedef.Type, state string) []typedef.Hook {
+	return enterHooks(t, state, typedef.HookAction)
+}
+
+func enterHooks(t *typedef.Type, state string, kind typedef.HookKind) []typedef.Hook {
 	var out []typedef.Hook
 	for _, h := range t.Hooks {
-		if h.On == typedef.OnEnter && h.State == state {
+		if h.On == typedef.OnEnter && h.State == state && h.Kind == kind {
 			out = append(out, h)
 		}
 	}
