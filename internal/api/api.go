@@ -38,6 +38,7 @@ type Kernel interface {
 	StartAgentSession(context.Context, itemservice.StartAgentSessionRequest) (string, error)
 	AgentSession(context.Context, item.Principal) (itemservice.AgentSession, error)
 	ApproveWiden(context.Context, itemservice.ApproveWidenRequest) error
+	ApprovalAudience(context.Context, itemservice.ApproveWidenRequest) (itemservice.Audience, error)
 	Type(ctx context.Context, id string, version int) (*typedef.Type, error)
 	ListTypes(context.Context) ([]*typedef.Type, error)
 }

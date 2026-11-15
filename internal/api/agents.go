@@ -101,7 +101,7 @@ func (s *server) ApproveWiden(ctx context.Context, req *connect.Request[kernelv1
 	if cerr := parentNamespace(p, m.Parent); cerr != nil {
 		return nil, cerr
 	}
-	if m.RequestId == "" {
+	if m.RequestId == "" && !m.ValidateOnly {
 		return nil, badField("request_id", "required")
 	}
 	if m.Session == "" {
@@ -115,11 +115,19 @@ func (s *server) ApproveWiden(ctx context.Context, req *connect.Request[kernelv1
 	if scope != uuid.Nil {
 		scopeItem = &scope
 	}
-	err := s.k.ApproveWiden(ctx, itemservice.ApproveWidenRequest{
+	kreq := itemservice.ApproveWidenRequest{
 		IdempotencyKey: m.RequestId, Principal: p, Session: m.Session, ScopeItem: scopeItem,
-	})
+	}
+	// Approving an Item approves its audience: the answer says who that is,
+	// and validate_only asks only that.
+	aud, err := s.k.ApprovalAudience(ctx, kreq)
 	if err != nil {
 		return nil, errorIn(err, p.Namespace, "")
 	}
-	return connect.NewResponse(&kernelv1.ApproveWidenResponse{}), nil
+	if !m.ValidateOnly {
+		if err := s.k.ApproveWiden(ctx, kreq); err != nil {
+			return nil, errorIn(err, p.Namespace, "")
+		}
+	}
+	return connect.NewResponse(&kernelv1.ApproveWidenResponse{Audience: audience(aud.Open)}), nil
 }

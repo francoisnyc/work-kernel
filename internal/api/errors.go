@@ -99,6 +99,15 @@ func notFound() *connect.Error {
 	return apiError(connect.CodeNotFound, "NOT_FOUND", nil)
 }
 
+// audience is who an approval would open an agent session's content to:
+// everyone in the namespace (an open scope) or the scope's readers.
+func audience(open bool) string {
+	if open {
+		return "namespace"
+	}
+	return "restricted"
+}
+
 // errorFor maps a kernel error to the error table in docs/design.md. itemName
 // is the Item the request named, if any: a HELD error names its hold under it,
 // and a NEEDS_APPROVAL names its scope in the item's namespace.
@@ -159,7 +168,7 @@ func errorWith(err error, item, readersPath, ns string) *connect.Error {
 			if approval.ScopeItem != nil {
 				scope = itemName(ns, *approval.ScopeItem)
 			}
-			md = map[string]string{"scope": scope}
+			md = map[string]string{"scope": scope, "audience": audience(approval.Open)}
 		}
 		return apiError(connect.CodePermissionDenied, "NEEDS_APPROVAL", md)
 	case errors.Is(err, itemservice.ErrForbidden):

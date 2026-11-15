@@ -420,9 +420,17 @@ message ApproveWidenRequest {
   // answers as the first time and records nothing more; with a different
   // request it is ALREADY_EXISTS.
   string request_id = 4;
+  // Check the approval and answer its audience, recording nothing
+  // (AIP-163). request_id is not needed then.
+  bool validate_only = 5;
 }
 
-message ApproveWidenResponse {}
+message ApproveWidenResponse {
+  // Who the approval lets see the agent session's content: "namespace"
+  // (everyone in the namespace: the scope is open) or "restricted" (the
+  // readers of the scope's Item).
+  string audience = 1;
+}
 
 // One version of a Type definition.
 message Type {

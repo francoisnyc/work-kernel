@@ -13,7 +13,7 @@
 //	  type get TYPE
 //	  type list
 //	  agent start [--for USER] --scopes S,S --powers P,P
-//	  agent approve SESSION SCOPE [--request-id ID]  (run it --as the user who approves)
+//	  agent approve SESSION SCOPE [--yes] [--request-id ID]  (run it --as the user who approves)
 //
 //	FILTERS: [--type TYPE]... [--state S]... [--category C]... [--where F=V|F>V|F>=V|F<V|F<=V]...
 //	PAGING:  [--page-size N] [--page-token T]
@@ -34,7 +34,9 @@
 // pli/sessions); every later command --as that name sends it in the
 // Pli-Agent-Session header. --session ID sends another. "agent approve" is
 // run --as the user the agent acts for: the approver is whoever the token
-// says, never a flag.
+// says, never a flag. It first says who will see the agent's content
+// (everyone in the namespace, or the readers of the scope's Item) and needs
+// --yes to go on from a script.
 //
 // Each response is printed as JSON (protobuf's JSON mapping, with the proto
 // field names). An API error goes to stderr as "error: CODE REASON: message"
@@ -96,7 +98,7 @@ const usage = `usage: pli [--server URL] [--tokens FILE] --as NAME [--session ID
   type get TYPE
   type list
   agent start [--for USER] --scopes S,S --powers P,P
-  agent approve SESSION SCOPE [--request-id ID]  (run it --as the user who approves)
+  agent approve SESSION SCOPE [--yes] [--request-id ID]  (run it --as the user who approves)
 
 FILTERS: [--type TYPE]... [--state S]... [--category C]... [--where F=V|F>V|F>=V|F<V|F<=V]...
 PAGING:  [--page-size N] [--page-token T]`
@@ -114,6 +116,7 @@ type cli struct {
 	ns     string
 	as     string // the --as name, under which an agent session is saved
 	stdout io.Writer
+	stderr io.Writer // what pli says besides the response
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -160,6 +163,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		ns:     tok.Namespace,
 		as:     *as,
 		stdout: stdout,
+		stderr: stderr,
 	}
 	commands := map[string]func(context.Context, []string) error{
 		"item create":     c.itemCreate,

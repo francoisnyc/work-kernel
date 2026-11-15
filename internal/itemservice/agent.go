@@ -28,6 +28,10 @@ type NeedsApprovalError struct {
 	// container created in, a move's destination); nil for the top level.
 	// The API names the scope by it; approving it approves Scope.
 	ScopeItem *uuid.UUID
+	// Open: Scope is open, read by everyone in the namespace, so approving
+	// it shows the session's content to all of them. Else it is narrowed,
+	// read by its readers only.
+	Open bool
 }
 
 // ErrSessionInvalid means an agent's session does not exist, belongs to
@@ -181,7 +185,11 @@ func needsApproval(ctx context.Context, tx pgx.Tx, p item.Principal, target uuid
 	if approved {
 		return nil
 	}
-	return &NeedsApprovalError{Scope: target, ScopeItem: at}
+	open, err := scopeOpen(ctx, tx, target)
+	if err != nil {
+		return err
+	}
+	return &NeedsApprovalError{Scope: target, ScopeItem: at, Open: open}
 }
 
 // ApproveWidenRequest is a user approving one wider scope for one agent
@@ -216,22 +224,9 @@ func (k *Service) ApproveWiden(ctx context.Context, req ApproveWidenRequest) err
 	if err != nil {
 		return err
 	}
-	ns := nsOf(req.Principal)
 	_, err = k.write(ctx, req.Principal, req.IdempotencyKey, hash, func(tx pgx.Tx) (WriteResult, error) {
-		var exists bool
-		if err := tx.QueryRow(ctx,
-			`select exists (select 1 from agent_sessions where session = $1 and namespace_id = $2)`,
-			req.Session, ns).Scan(&exists); err != nil {
-			return WriteResult{}, fmt.Errorf("read agent session: %w", err)
-		}
-		if !exists {
-			return WriteResult{}, ErrNotFound
-		}
-		scope, err := approvedScope(ctx, tx, ns, req)
+		scope, err := checkApproval(ctx, tx, req)
 		if err != nil {
-			return WriteResult{}, err
-		}
-		if err := checkVisible(ctx, tx, req.Principal, scope); err != nil {
 			return WriteResult{}, err
 		}
 		_, err = tx.Exec(ctx,
@@ -243,6 +238,67 @@ func (k *Service) ApproveWiden(ctx context.Context, req ApproveWidenRequest) err
 		return WriteResult{}, nil
 	})
 	return err
+}
+
+// Audience is who an approval would let see an agent session's content.
+type Audience struct {
+	// Open: everyone in the namespace (the scope is open); else only the
+	// readers of the scope's Item.
+	Open bool
+}
+
+// ApprovalAudience checks an approval as ApproveWiden would (a user, a
+// session of the approver's namespace, a scope the approver sees) and says
+// who it would let see the session's content. It records nothing, so it
+// needs no idempotency key: the API's validate_only, and what pli shows
+// before it approves.
+func (k *Service) ApprovalAudience(ctx context.Context, req ApproveWidenRequest) (Audience, error) {
+	if !item.IsKind(req.Principal.Actor, item.KindUser) || req.Principal.AgentSession != "" ||
+		req.Principal.OnBehalfOf != "" || req.Session == "" {
+		return Audience{}, fmt.Errorf("%w: an approval is given by a user, for an agent session", ErrInvalid)
+	}
+	var a Audience
+	err := pgx.BeginFunc(ctx, k.pool, func(tx pgx.Tx) error {
+		scope, err := checkApproval(ctx, tx, req)
+		if err != nil {
+			return err
+		}
+		a.Open, err = scopeOpen(ctx, tx, scope)
+		return err
+	})
+	return a, err
+}
+
+// checkApproval is what an approval needs: the session in the approver's
+// namespace (else ErrNotFound), and the scope it names, visible to the
+// approver. It returns that scope.
+func checkApproval(ctx context.Context, tx pgx.Tx, req ApproveWidenRequest) (uuid.UUID, error) {
+	ns := nsOf(req.Principal)
+	var exists bool
+	if err := tx.QueryRow(ctx,
+		`select exists (select 1 from agent_sessions where session = $1 and namespace_id = $2)`,
+		req.Session, ns).Scan(&exists); err != nil {
+		return uuid.Nil, fmt.Errorf("read agent session: %w", err)
+	}
+	if !exists {
+		return uuid.Nil, ErrNotFound
+	}
+	scope, err := approvedScope(ctx, tx, ns, req)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return scope, checkVisible(ctx, tx, req.Principal, scope)
+}
+
+// scopeOpen reports whether everyone in the namespace reads the scope: no
+// narrowing scope at or above it.
+func scopeOpen(ctx context.Context, tx pgx.Tx, scope uuid.UUID) (bool, error) {
+	var open bool
+	err := tx.QueryRow(ctx, `select policy_scope_id is null from scopes where id = $1`, scope).Scan(&open)
+	if err != nil {
+		return false, fmt.Errorf("read scope: %w", err)
+	}
+	return open, nil
 }
 
 // approvedScope is the scope an approval names: Scope itself; else the scope

@@ -2353,7 +2353,10 @@ type ApproveWidenRequest struct {
 	// Required, as on every write: the same request_id with the same request
 	// answers as the first time and records nothing more; with a different
 	// request it is ALREADY_EXISTS.
-	RequestId     string `protobuf:"bytes,4,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	RequestId string `protobuf:"bytes,4,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// Check the approval and answer its audience, recording nothing
+	// (AIP-163). request_id is not needed then.
+	ValidateOnly  bool `protobuf:"varint,5,opt,name=validate_only,json=validateOnly,proto3" json:"validate_only,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2416,8 +2419,19 @@ func (x *ApproveWidenRequest) GetRequestId() string {
 	return ""
 }
 
+func (x *ApproveWidenRequest) GetValidateOnly() bool {
+	if x != nil {
+		return x.ValidateOnly
+	}
+	return false
+}
+
 type ApproveWidenResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Who the approval lets see the agent session's content: "namespace"
+	// (everyone in the namespace: the scope is open) or "restricted" (the
+	// readers of the scope's Item).
+	Audience      string `protobuf:"bytes,1,opt,name=audience,proto3" json:"audience,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2450,6 +2464,13 @@ func (x *ApproveWidenResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ApproveWidenResponse.ProtoReflect.Descriptor instead.
 func (*ApproveWidenResponse) Descriptor() ([]byte, []int) {
 	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *ApproveWidenResponse) GetAudience() string {
+	if x != nil {
+		return x.Audience
+	}
+	return ""
 }
 
 // One version of a Type definition.
@@ -3114,14 +3135,16 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\n" +
 	"acting_for\x18\x04 \x01(\tR\tactingFor\x12\x16\n" +
 	"\x06scopes\x18\x05 \x03(\tR\x06scopes\x12\x16\n" +
-	"\x06powers\x18\x06 \x03(\tR\x06powers\"|\n" +
+	"\x06powers\x18\x06 \x03(\tR\x06powers\"\xa1\x01\n" +
 	"\x13ApproveWidenRequest\x12\x16\n" +
 	"\x06parent\x18\x01 \x01(\tR\x06parent\x12\x18\n" +
 	"\asession\x18\x02 \x01(\tR\asession\x12\x14\n" +
 	"\x05scope\x18\x03 \x01(\tR\x05scope\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x04 \x01(\tR\trequestId\"\x16\n" +
-	"\x14ApproveWidenResponse\"\xff\x01\n" +
+	"request_id\x18\x04 \x01(\tR\trequestId\x12#\n" +
+	"\rvalidate_only\x18\x05 \x01(\bR\fvalidateOnly\"2\n" +
+	"\x14ApproveWidenResponse\x12\x1a\n" +
+	"\baudience\x18\x01 \x01(\tR\baudience\"\xff\x01\n" +
 	"\x04Type\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x17\n" +
 	"\atype_id\x18\x02 \x01(\tR\x06typeId\x12\x18\n" +

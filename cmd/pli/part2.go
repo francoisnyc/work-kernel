@@ -3,8 +3,10 @@ package main
 // Step 0, part 2: listing, history, filters, paging and agent sessions.
 
 import (
+	"bufio"
 	"context"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -244,9 +246,14 @@ func (c *cli) agentStart(ctx context.Context, args []string) error {
 	return c.print(res.Msg)
 }
 
+// agentApprove approves one scope for an agent session. Approving an Item
+// approves its audience, so pli first asks the server who that is
+// (validate_only), says it, and goes on only with --yes, or a "y" typed at a
+// terminal.
 func (c *cli) agentApprove(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("agent approve", flag.ContinueOnError)
 	requestID := fs.String("request-id", newRequestID(), "idempotency key")
+	yes := fs.Bool("yes", false, "approve without asking (required when not at a terminal)")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -255,11 +262,45 @@ func (c *cli) agentApprove(ctx context.Context, args []string) error {
 		return usagef("want SESSION SCOPE (the scope a NEEDS_APPROVAL named); " +
 			"run it --as the user who approves: the approver is whoever the token says")
 	}
-	res, err := c.c.ApproveWiden(ctx, connect.NewRequest(&kernelv1.ApproveWidenRequest{
-		Parent: "namespaces/" + c.ns, Session: pos[0], Scope: c.scopeRef(pos[1]), RequestId: *requestID,
-	}))
+	req := &kernelv1.ApproveWidenRequest{
+		Parent: "namespaces/" + c.ns, Session: pos[0], Scope: c.scopeRef(pos[1]), ValidateOnly: true,
+	}
+	check, err := c.c.ApproveWiden(ctx, connect.NewRequest(req))
+	if err != nil {
+		return err
+	}
+	who := "everyone in namespace " + c.ns
+	if check.Msg.Audience != "namespace" {
+		who = "the readers of " + req.Scope
+	}
+	fmt.Fprintf(c.stderr, "Content from this agent session will become visible to %s.\n", who)
+	if !*yes {
+		if !interactive() {
+			return usagef("not approved: pass --yes to approve from a script")
+		}
+		fmt.Fprint(c.stderr, "Approve? [y/N] ")
+		answer, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+		if a := strings.ToLower(strings.TrimSpace(answer)); a != "y" && a != "yes" {
+			return usagef("not approved")
+		}
+	}
+	req.ValidateOnly, req.RequestId = false, *requestID
+	res, err := c.c.ApproveWiden(ctx, connect.NewRequest(req))
 	if err != nil {
 		return err
 	}
 	return c.print(res.Msg)
+}
+
+// interactive reports whether stdin is a terminal, where pli may ask. A
+// terminal is a character device; so is /dev/null, which a script's stdin
+// often is, so that one does not count. (golang.org/x/term would ask the
+// terminal itself; not worth a dependency for one prompt.)
+func interactive() bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+		return false
+	}
+	null, err := os.Stat(os.DevNull)
+	return err == nil && !os.SameFile(fi, null)
 }
