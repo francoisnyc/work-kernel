@@ -25,6 +25,10 @@ const (
 type Rejection struct {
 	Code   Code
 	Reason string
+	// The move refused and, for MissingFields, the fields not set: the same
+	// facts as Reason, as data a caller can act on.
+	From, To string
+	Missing  []string
 }
 
 func (r *Rejection) Error() string { return r.Reason }
@@ -45,7 +49,7 @@ func Transition(t *typedef.Type, current string, fields map[string]any, to strin
 	tr, ok := t.Transition(current, to)
 	if !ok {
 		return Result{}, &Rejection{
-			Code:   NoTransition,
+			Code: NoTransition, From: current, To: to,
 			Reason: fmt.Sprintf("type %s v%d has no transition from %q to %q", t.ID, t.Version, current, to),
 		}
 	}
@@ -59,14 +63,14 @@ func Transition(t *typedef.Type, current string, fields map[string]any, to strin
 	if len(missing) > 0 {
 		slices.Sort(missing)
 		return Result{}, &Rejection{
-			Code:   MissingFields,
+			Code: MissingFields, From: current, To: to, Missing: missing,
 			Reason: fmt.Sprintf("transition from %q to %q needs these fields set: %s", current, to, strings.Join(missing, ", ")),
 		}
 	}
 
 	if !guardHolds(t, tr, fields) {
 		return Result{}, &Rejection{
-			Code:   GuardFailed,
+			Code: GuardFailed, From: current, To: to,
 			Reason: fmt.Sprintf("transition from %q to %q: guard not satisfied: %s", current, to, tr.Guard),
 		}
 	}

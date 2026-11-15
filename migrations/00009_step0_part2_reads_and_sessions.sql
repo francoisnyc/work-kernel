@@ -23,7 +23,6 @@ alter table items
 create index items_namespace_type_state on items (namespace_id, type_id, state, created_at desc, id desc);
 create index items_container_created on items (container_id, created_at desc, id desc);
 create index items_top_level on items (namespace_id, created_at desc, id desc) where container_id is null;
-drop index items_container; -- the index above serves every query it served
 
 -- Sessions belong to one namespace and carry their capabilities: the
 -- container Items they may touch (the nil UUID is the whole namespace) and
@@ -35,7 +34,6 @@ alter table agent_sessions
 
 -- +goose Down
 alter table agent_sessions drop column powers, drop column scopes, drop column namespace_id;
-create index items_container on items (container_id);
 drop index items_top_level;
 drop index items_container_created;
 drop index items_namespace_type_state;

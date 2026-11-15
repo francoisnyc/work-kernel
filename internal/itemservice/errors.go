@@ -3,6 +3,7 @@ package itemservice
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -60,7 +61,14 @@ func rejected(code, format string, args ...any) error {
 func fromLifecycle(err error) error {
 	var rej *lifecycle.Rejection
 	if errors.As(err, &rej) {
-		return &RejectedError{Code: string(rej.Code), Reason: rej.Reason, cause: rej}
+		md := map[string]string{}
+		if rej.From != "" || rej.To != "" {
+			md["from_state"], md["to_state"] = rej.From, rej.To
+		}
+		if len(rej.Missing) > 0 {
+			md["fields"] = strings.Join(rej.Missing, ",")
+		}
+		return &RejectedError{Code: string(rej.Code), Reason: rej.Reason, Metadata: md, cause: rej}
 	}
 	return err
 }

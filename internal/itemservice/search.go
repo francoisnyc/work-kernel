@@ -19,8 +19,6 @@ const (
 	defaultSearchWait = 2 * time.Second
 	// catchUpPoll is how often Search looks at the commit counter while it waits.
 	catchUpPoll = 20 * time.Millisecond
-	// defaultSearchLimit applies when a request names no limit.
-	defaultSearchLimit = 50
 )
 
 // SearchRequest asks for the Items whose string field values match Query.
@@ -57,8 +55,8 @@ type SearchResult struct {
 // Today search reads the same Postgres the writes go to, so the wait ends at
 // once. The contract is here so it still holds when search has its own index.
 func (k *Service) Search(ctx context.Context, req SearchRequest) (SearchResult, error) {
-	if req.Principal.Actor == "" || strings.TrimSpace(req.Query) == "" {
-		return SearchResult{}, fmt.Errorf("%w: actor and query are required", ErrInvalid)
+	if req.Principal.Actor == "" || (strings.TrimSpace(req.Query) == "" && req.Filter.empty()) {
+		return SearchResult{}, fmt.Errorf("%w: actor and words or a filter are required", ErrInvalid)
 	}
 	if err := checkPublicPrincipal(req.Principal); err != nil {
 		return SearchResult{}, err
@@ -66,72 +64,51 @@ func (k *Service) Search(ctx context.Context, req SearchRequest) (SearchResult, 
 	if err := checkSession(ctx, k.pool, req.Principal); err != nil {
 		return SearchResult{}, err
 	}
-	if req.MinSeq < 0 || req.Wait < 0 || req.Limit < 0 {
-		return SearchResult{}, fmt.Errorf("%w: min_seq, wait and limit cannot be negative", ErrInvalid)
+	if req.MinSeq < 0 || req.Wait < 0 {
+		return SearchResult{}, fmt.Errorf("%w: min_seq and wait cannot be negative", ErrInvalid)
 	}
-	limit := req.Limit
-	if limit == 0 {
-		limit = defaultSearchLimit
+	limit, err := pageSize(req.Limit)
+	if err != nil {
+		return SearchResult{}, err
+	}
+	filter, err := k.resolveFilter(ctx, req.Filter)
+	if err != nil {
+		return SearchResult{}, err
+	}
+	key := requestKey("search", req.Principal, struct {
+		Query  string
+		Filter Filter
+	}{strings.TrimSpace(req.Query), req.Filter})
+	after, err := decodeToken(req.PageToken, key)
+	if err != nil {
+		return SearchResult{}, err
 	}
 	if err := k.waitForCommit(ctx, req.MinSeq, req.Wait); err != nil {
 		return SearchResult{}, err
 	}
-
-	// The text match runs first, in a MATERIALIZED step the planner cannot
-	// fold into the rest. Without it, Postgres walks Items newest-first and
-	// throws away non-matches, which grows with the size of the scope
-	// (Step A, EXPLAIN). The visibility filter is part of the query, before
-	// the limit, so an Item the principal cannot see never leaves the database.
-	// UUIDv7 IDs sort by creation time, so "id desc" is newest first.
-	args := policy.VisibleArgs(req.Principal)
-	args["ns"], args["q"], args["limit"] = nsOf(req.Principal), req.Query, limit
-	rows, err := k.pool.Query(ctx,
-		`with matches as materialized (
-		     select id, type_id, type_version, container_id, scope_id, state, fields, item_seq
-		     from items
-		     where namespace_id = @ns and search @@ plainto_tsquery('simple', @q)
-		 )
-		 select m.id, m.type_id, m.type_version, m.container_id, m.scope_id, m.state, m.fields, m.item_seq,
-		        s.policy_scope_id
-		 from matches m join scopes s on s.id = m.scope_id
-		 where `+policy.VisibleCondition+`
-		 order by m.id desc
-		 limit @limit`, args)
-	if err != nil {
-		return SearchResult{}, fmt.Errorf("search: %w", err)
-	}
-	// Each row carries the Item and the narrowing scope it is read through.
-	type hit struct {
-		it          item.Item
-		policyScope *uuid.UUID
-	}
-	found, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (hit, error) {
-		var h hit
-		err := row.Scan(&h.it.ID, &h.it.TypeID, &h.it.TypeVersion, &h.it.ContainerID, &h.it.ScopeID,
-			&h.it.State, &h.it.Fields, &h.it.ItemSeq, &h.policyScope)
-		return h, err
+	found, next, err := k.page(ctx, itemQuery{
+		p: req.Principal, words: strings.TrimSpace(req.Query), filter: filter, limit: limit, after: after, key: key,
 	})
 	if err != nil {
-		return SearchResult{}, fmt.Errorf("search: %w", err)
+		return SearchResult{}, err
 	}
-
 	// Every outbound path goes through Project. The query has already
 	// checked each Item's scope, so this drops nothing today; it is where
 	// field-level redaction will happen. Any count or total is taken from
-	// what Project returns, never before it.
-	res := SearchResult{Items: make([]item.Item, 0, len(found))}
+	// what Project returns, never before it. An agent's read of every
+	// result is recorded for the write rule.
+	items := make([]item.Item, 0, len(found))
 	var read []*uuid.UUID
 	for _, h := range found {
 		if projected, ok := policy.Project(req.Principal, []uuid.UUID{*h.it.ScopeID}, h.it); ok {
-			res.Items = append(res.Items, projected)
+			items = append(items, projected)
 			read = append(read, h.policyScope)
 		}
 	}
-	// An agent's read of every result is recorded for the write rule.
 	if err := recordReads(ctx, k.pool, req.Principal, read); err != nil {
 		return SearchResult{}, err
 	}
-	return res, nil
+	return SearchResult{Items: items, NextPageToken: next}, nil
 }
 
 // waitForCommit returns once the write named by minSeq is visible and every
