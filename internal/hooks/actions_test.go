@@ -42,7 +42,7 @@ func ctx(t *testing.T) context.Context {
 
 func TestGetPlan(t *testing.T) {
 	w := newWorld(t)
-	res, err := w.c.Run(ctx(t), "crm.get_plan", []any{"cust-1"})
+	res, err := w.c.Run(ctx(t), "crm.get_plan", "", []any{"cust-1"})
 	if err != nil || !reflect.DeepEqual(res.Values, []any{"enterprise"}) {
 		t.Errorf("crm.get_plan = %+v, %v; want [enterprise]", res, err)
 	}
@@ -50,12 +50,12 @@ func TestGetPlan(t *testing.T) {
 
 func TestGetCreditStatus(t *testing.T) {
 	w := newWorld(t)
-	res, err := w.c.Run(ctx(t), "erp.get_credit_status", []any{"cust-1"})
+	res, err := w.c.Run(ctx(t), "erp.get_credit_status", "", []any{"cust-1"})
 	if err != nil || !reflect.DeepEqual(res.Values, []any{false}) {
 		t.Errorf("erp.get_credit_status = %+v, %v; want [false]", res, err)
 	}
 	w.erp.SetCustomer("cust-1", connstub.Customer{OnHold: true, CreditLimit: 1000})
-	res, err = w.c.Run(ctx(t), "erp.get_credit_status", []any{"cust-1"})
+	res, err = w.c.Run(ctx(t), "erp.get_credit_status", "", []any{"cust-1"})
 	if err != nil || !reflect.DeepEqual(res.Values, []any{true}) {
 		t.Errorf("erp.get_credit_status after the flip = %+v, %v; want [true]", res, err)
 	}
@@ -83,7 +83,7 @@ func TestCheckCredit(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			w.erp.SetCustomer("cust-1", c.customer)
-			got, err := w.c.Run(ctx(t), "erp.check_credit", []any{"cust-1", c.amount})
+			got, err := w.c.Run(ctx(t), "erp.check_credit", "", []any{"cust-1", c.amount})
 			if err != nil || !reflect.DeepEqual(got, c.want) {
 				t.Errorf("erp.check_credit = %+v, %v; want %+v", got, err, c.want)
 			}
@@ -98,19 +98,19 @@ func TestFailures_PermanentOrRetryable(t *testing.T) {
 	w := newWorld(t)
 	for name, run := range map[string]func() error{
 		"unknown action": func() error {
-			_, err := w.c.Run(ctx(t), "crm.delete_everything", []any{"cust-1"})
+			_, err := w.c.Run(ctx(t), "crm.delete_everything", "", []any{"cust-1"})
 			return err
 		},
 		"missing input": func() error {
-			_, err := w.c.Run(ctx(t), "crm.get_plan", []any{nil})
+			_, err := w.c.Run(ctx(t), "crm.get_plan", "", []any{nil})
 			return err
 		},
 		"wrong number of inputs": func() error {
-			_, err := w.c.Run(ctx(t), "erp.check_credit", []any{"cust-1"})
+			_, err := w.c.Run(ctx(t), "erp.check_credit", "", []any{"cust-1"})
 			return err
 		},
 		"unknown customer": func() error {
-			_, err := w.c.Run(ctx(t), "crm.get_plan", []any{"nobody"})
+			_, err := w.c.Run(ctx(t), "crm.get_plan", "", []any{"nobody"})
 			return err
 		},
 	} {
@@ -120,7 +120,7 @@ func TestFailures_PermanentOrRetryable(t *testing.T) {
 	}
 
 	w.crm.SetOutage(true)
-	_, err := w.c.Run(ctx(t), "crm.get_plan", []any{"cust-1"})
+	_, err := w.c.Run(ctx(t), "crm.get_plan", "", []any{"cust-1"})
 	if err == nil || errors.Is(err, hooks.ErrPermanent) {
 		t.Errorf("during an outage: error = %v, want a retryable error", err)
 	}
@@ -130,7 +130,7 @@ func TestFailures_PermanentOrRetryable(t *testing.T) {
 	short, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	_, err = w.c.Run(short, "erp.get_credit_status", []any{"cust-1"})
+	_, err = w.c.Run(short, "erp.get_credit_status", "", []any{"cust-1"})
 	if err == nil || errors.Is(err, hooks.ErrPermanent) {
 		t.Errorf("past the deadline: error = %v, want a retryable error", err)
 	}
