@@ -211,6 +211,14 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 		if err := checkVisible(ctx, tx, req.Principal, scopeID); err != nil {
 			return WriteResult{}, err
 		}
+		// An agent session creates only inside its scopes (at the top level
+		// only if it covers the whole namespace), and only with a write power.
+		if err := checkInSession(ctx, tx, req.Principal, req.ContainerID); err != nil {
+			return WriteResult{}, err
+		}
+		if err := checkWritePower(ctx, tx, req.Principal); err != nil {
+			return WriteResult{}, err
+		}
 		if err := checkAgentWrite(ctx, tx, req.Principal, target); err != nil {
 			return WriteResult{}, err
 		}
@@ -219,9 +227,11 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 		// separate SELECT ... FOR UPDATE is needed for create.
 		const itemSeq = 1
 		_, err = tx.Exec(ctx,
-			`insert into items (id, namespace_id, type_id, type_version, container_id, scope_id, state, fields, item_seq)
-			 values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-			id, ns, ty.ID, ty.Version, req.ContainerID, scopeID, ty.InitialState, fields, itemSeq)
+			`insert into items (id, namespace_id, type_id, type_version, container_id, scope_id, state, fields, item_seq,
+			                    created_at, created_by, created_on_behalf_of)
+			 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), $10, nullif($11, ''))`,
+			id, ns, ty.ID, ty.Version, req.ContainerID, scopeID, ty.InitialState, fields, itemSeq,
+			req.Principal.Actor, req.Principal.OnBehalfOf)
 		if err != nil {
 			return WriteResult{}, fmt.Errorf("insert item: %w", err)
 		}
@@ -275,7 +285,8 @@ func (k *Service) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item
 	if err := checkPublicPrincipal(p); err != nil {
 		return item.Item{}, err
 	}
-	if err := checkSession(ctx, k.pool, p); err != nil {
+	c, err := loadCaps(ctx, k.pool, p)
+	if err != nil {
 		return item.Item{}, err
 	}
 	// One statement reads the Item and decides visibility from its scope,
@@ -292,8 +303,9 @@ func (k *Service) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item
 			hook, from, to, status, reason *string
 		}
 	)
-	err := k.pool.QueryRow(ctx,
+	err = k.pool.QueryRow(ctx,
 		`select i.type_id, i.type_version, i.container_id, i.scope_id, i.state, i.fields, i.item_seq,
+		        i.created_at, i.created_by, coalesce(i.created_on_behalf_of, ''),
 		        s.policy_scope_id, `+policy.VisibleCondition+`,
 		        h.id, h.hook, h.from_state, h.to_state, h.status, coalesce(h.reason, '')
 		 from items i join scopes s on s.id = i.scope_id
@@ -303,6 +315,7 @@ func (k *Service) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item
 		 ) h on true
 		 where i.id = @id and i.namespace_id = @ns`, args,
 	).Scan(&it.TypeID, &it.TypeVersion, &it.ContainerID, &it.ScopeID, &it.State, &it.Fields, &it.ItemSeq,
+		&it.CreatedAt, &it.CreatedBy, &it.CreatedOnBehalfOf,
 		&policyScope, &visible, &hold.id, &hold.hook, &hold.from, &hold.to, &hold.status, &hold.reason)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return item.Item{}, ErrNotFound
@@ -312,6 +325,16 @@ func (k *Service) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item
 	}
 	if !visible {
 		return item.Item{}, ErrNotFound
+	}
+	// Outside an agent session's scopes the Item does not exist for it.
+	if c != nil {
+		in, err := inScopes(ctx, k.pool, c.scopes, &id)
+		if err != nil {
+			return item.Item{}, err
+		}
+		if !in {
+			return item.Item{}, ErrNotFound
+		}
 	}
 	if hold.id != nil {
 		it.Hold = &item.Hold{ID: *hold.id, Hook: *hold.hook, From: *hold.from, To: *hold.to,

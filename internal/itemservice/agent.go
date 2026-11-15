@@ -69,17 +69,6 @@ type AgentSession struct {
 	Powers     []string
 }
 
-// AgentSession returns the session p names (p.AgentSession) if it exists in
-// p's namespace and belongs to the agent p.Actor; otherwise
-// ErrSessionInvalid. The API calls it to learn the user the agent acts for.
-func (k *Service) AgentSession(ctx context.Context, p item.Principal) (AgentSession, error) {
-	return AgentSession{}, errNotBuilt
-}
-
-// errNotBuilt marks the stubs of Step 0, part 2 that the failing tests
-// compile against.
-var errNotBuilt = errors.New("itemservice: not built yet (Step 0, part 2)")
-
 func (e *NeedsApprovalError) Error() string {
 	return fmt.Sprintf("%v: the write lands in scope %s, wider than what this agent session read", ErrNeedsApproval, e.Scope)
 }
@@ -88,44 +77,12 @@ func (e *NeedsApprovalError) Error() string {
 // subclass matches a catch of its parent.
 func (e *NeedsApprovalError) Unwrap() error { return ErrNeedsApproval }
 
-// StartAgentSession mints a session for an agent acting for a user (or for
-// itself, with no on_behalf_of). Every read and write by that agent must
-// carry the session, so an agent cannot escape the write rule with a fresh
-// session it made up.
-func (k *Service) StartAgentSession(ctx context.Context, req StartAgentSessionRequest) (string, error) {
-	p := req.Principal
-	if !item.IsKind(p.Actor, item.KindAgent) || p.AgentSession != "" ||
-		(p.OnBehalfOf != "" && !item.IsKind(p.OnBehalfOf, item.KindUser)) {
-		return "", fmt.Errorf("%w: a session is started by an agent:, acting for a user: or for itself, "+
-			"and the session ID is minted here", ErrInvalid)
-	}
-	session := "ses_" + uuid.NewString()
-	_, err := k.pool.Exec(ctx,
-		`insert into agent_sessions (session, agent, on_behalf_of) values ($1, $2, nullif($3, ''))`,
-		session, p.Actor, p.OnBehalfOf)
-	if err != nil {
-		return "", fmt.Errorf("start agent session: %w", err)
-	}
-	return session, nil
-}
-
-// checkSession refuses an agent principal whose session does not exist or
-// belongs to another agent or another user. Non-agents have no session.
+// checkSession refuses an agent principal whose session does not exist, or
+// belongs to another agent, another user or another namespace
+// (ErrSessionInvalid). Non-agents have no session.
 func checkSession(ctx context.Context, q policy.Querier, p item.Principal) error {
-	if !item.IsKind(p.Actor, item.KindAgent) {
-		return nil
-	}
-	var agent, onBehalfOf string
-	err := q.QueryRow(ctx,
-		`select agent, coalesce(on_behalf_of, '') from agent_sessions where session = $1`, p.AgentSession,
-	).Scan(&agent, &onBehalfOf)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && (agent != p.Actor || onBehalfOf != p.OnBehalfOf)) {
-		return fmt.Errorf("%w: unknown agent session, or not this agent's for this user", ErrInvalid)
-	}
-	if err != nil {
-		return fmt.Errorf("read agent session: %w", err)
-	}
-	return nil
+	_, err := loadCaps(ctx, q, p)
+	return err
 }
 
 // recordReads notes the narrowing scopes an agent read. Open scopes (a nil
@@ -219,7 +176,12 @@ func needsApproval(ctx context.Context, tx pgx.Tx, p item.Principal, target uuid
 	if approved {
 		return nil
 	}
-	return &NeedsApprovalError{Scope: target}
+	// The API names a scope by the Item it belongs to; the root has none.
+	var owner *uuid.UUID
+	if err := tx.QueryRow(ctx, `select item_id from scopes where id = $1`, target).Scan(&owner); err != nil {
+		return fmt.Errorf("read the scope's Item: %w", err)
+	}
+	return &NeedsApprovalError{Scope: target, ScopeItem: owner}
 }
 
 // ApproveWidenRequest is a user approving one wider scope for one agent
@@ -240,31 +202,69 @@ type ApproveWidenRequest struct {
 // one scope. It is a separate act by the human, not a flag the agent could
 // set on its own request. It counts only when the approver is the user the
 // agent acts for; the approver must be able to see the scope.
+//
+// It is a write like any other: the idempotency key is required, the same
+// key and request again records nothing more, and the key with another
+// request is ErrIdempotencyKeyReuse. A session that does not exist, or is in
+// another namespace than the approver's, is ErrNotFound.
 func (k *Service) ApproveWiden(ctx context.Context, req ApproveWidenRequest) error {
-	if !item.IsKind(req.Principal.Actor, item.KindUser) || req.Principal.AgentSession != "" ||
-		req.Principal.OnBehalfOf != "" || req.Session == "" {
-		return fmt.Errorf("%w: an approval is given by a user, for an agent session", ErrInvalid)
+	if req.IdempotencyKey == "" || !item.IsKind(req.Principal.Actor, item.KindUser) ||
+		req.Principal.AgentSession != "" || req.Principal.OnBehalfOf != "" || req.Session == "" {
+		return fmt.Errorf("%w: an approval is given by a user, for an agent session, with an idempotency key", ErrInvalid)
 	}
-	return pgx.BeginFunc(ctx, k.pool, func(tx pgx.Tx) error {
+	hash, err := requestHash("approve_widen", req)
+	if err != nil {
+		return err
+	}
+	ns := nsOf(req.Principal)
+	_, err = k.write(ctx, req.Principal, req.IdempotencyKey, hash, func(tx pgx.Tx) (WriteResult, error) {
 		var exists bool
-		if err := tx.QueryRow(ctx, `select exists (select 1 from agent_sessions where session = $1)`,
-			req.Session).Scan(&exists); err != nil {
-			return fmt.Errorf("read agent session: %w", err)
+		if err := tx.QueryRow(ctx,
+			`select exists (select 1 from agent_sessions where session = $1 and namespace_id = $2)`,
+			req.Session, ns).Scan(&exists); err != nil {
+			return WriteResult{}, fmt.Errorf("read agent session: %w", err)
 		}
 		if !exists {
-			return fmt.Errorf("%w: unknown agent session", ErrInvalid)
+			return WriteResult{}, ErrNotFound
 		}
-		if err := checkVisible(ctx, tx, req.Principal, req.Scope); err != nil {
-			return err
-		}
-		_, err := tx.Exec(ctx,
-			`insert into agent_session_approvals (session, scope_id, approved_by) values ($1, $2, $3)
-			 on conflict do nothing`, req.Session, req.Scope, req.Principal.Actor)
+		scope, err := approvedScope(ctx, tx, ns, req)
 		if err != nil {
-			return fmt.Errorf("record approval: %w", err)
+			return WriteResult{}, err
 		}
-		return nil
+		if err := checkVisible(ctx, tx, req.Principal, scope); err != nil {
+			return WriteResult{}, err
+		}
+		_, err = tx.Exec(ctx,
+			`insert into agent_session_approvals (session, scope_id, approved_by) values ($1, $2, $3)
+			 on conflict do nothing`, req.Session, scope, req.Principal.Actor)
+		if err != nil {
+			return WriteResult{}, fmt.Errorf("record approval: %w", err)
+		}
+		return WriteResult{}, nil
 	})
+	return err
+}
+
+// approvedScope is the scope an approval names: Scope itself; else the node
+// of ScopeItem (an Item of the namespace that has one, else ErrNotFound);
+// else the namespace's root scope.
+func approvedScope(ctx context.Context, tx pgx.Tx, ns string, req ApproveWidenRequest) (uuid.UUID, error) {
+	if req.Scope != uuid.Nil {
+		return req.Scope, nil
+	}
+	if req.ScopeItem == nil {
+		return rootScope(ctx, tx, ns)
+	}
+	var scope uuid.UUID
+	err := tx.QueryRow(ctx, `select id from scopes where item_id = $1 and namespace_id = $2`,
+		*req.ScopeItem, ns).Scan(&scope)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, ErrNotFound
+	}
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("read the Item's scope: %w", err)
+	}
+	return scope, nil
 }
 
 // sessionAttribution puts the principal's agent session on the event's
