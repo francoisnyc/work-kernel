@@ -11,9 +11,23 @@
 //	  item update ITEM [--set ID=VALUE]... [--readers P,P | --inherit]
 //	                   [--move-to ITEM | --move-to-top] [--confirm-widen] [--etag E] [--request-id ID]
 //	  item transition ITEM --to STATE [--set ID=VALUE]... [--wait D] [--etag E] [--request-id ID]
-//	  item search WORDS... [--min-seq N]
-//	  type get TYPE
-//	  type list
+//	  item search [WORDS...] [--min-seq N] [FILTERS] [PAGING]
+//	  item list [ITEM] [FILTERS] [PAGING]          (no ITEM: the top level)
+//	  item history ITEM [PAGING]
+//	  agent start [--for USER] --scopes S,S --powers P,P
+//	  agent approve SESSION SCOPE
+//
+//	FILTERS: [--type TYPE]... [--state S]... [--category C]... [--where F=V | F>V | F>=V | F<V | F<=V]...
+//	PAGING:  [--page-size N] [--page-token T]
+//
+// (Step 0, part 2.) In a filter, TYPE is a Type's name or ID without a
+// version and C a category's name (active, done). A scope is an ITEM or
+// "namespace". agent start saves the session's ID for the --as name in pli's
+// config directory; later commands as that name send it; --session ID
+// overrides it.
+//
+//	type get TYPE
+//	type list
 //
 // ITEM is an Item's name or its bare ID (in the caller's namespace). TYPE is
 // a Type version's name or "ticket@3". A --set value is read as JSON when it
@@ -51,6 +65,11 @@ var (
 const tokensYAML = `tokens:
   - {name: ana, token: dev-ana, principal: "user:ana", namespace: acme}
   - {name: bob, token: dev-bob, principal: "user:bob", namespace: acme}
+  - {name: bot, token: dev-bot, principal: "agent:triage-bot", namespace: acme}
+grants:
+  - {agent: "agent:triage-bot", user: "user:ana", namespace: acme, scopes: [namespaces/acme],
+     powers: [read, create, edit_fields, "transition:*", move]}
+  - {agent: "agent:triage-bot", user: "user:bob", namespace: acme, scopes: [namespaces/acme], powers: [read]}
 `
 
 func TestMain(m *testing.M) { os.Exit(runTests(m)) }
@@ -89,19 +108,27 @@ func runTests(m *testing.M) int {
 		log.Printf("tokens: %v", err)
 		return 1
 	}
+	grants, err := devtoken.ParseGrants([]byte(tokensYAML))
+	if err != nil {
+		log.Printf("grants: %v", err)
+		return 1
+	}
 	dir, err := os.MkdirTemp("", "pli")
 	if err != nil {
 		log.Print(err)
 		return 1
 	}
 	defer os.RemoveAll(dir)
+	// pli keeps agent sessions in its config directory (Step 0, part 2);
+	// on Linux os.UserConfigDir is $XDG_CONFIG_HOME.
+	os.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "config"))
 	tokensPath = filepath.Join(dir, "dev-tokens.yaml")
 	if err := os.WriteFile(tokensPath, []byte(tokensYAML), 0o600); err != nil {
 		log.Print(err)
 		return 1
 	}
 
-	path, handler := api.NewHandler(k, api.Options{Tokens: toks})
+	path, handler := api.NewHandler(k, api.Options{Tokens: toks, Grants: grants})
 	mux := http.NewServeMux()
 	mux.Handle(path, handler)
 	srv = httptest.NewServer(mux)

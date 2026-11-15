@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -66,6 +67,15 @@ func TestErrorFor_TheTable(t *testing.T) {
 		{"idempotency key reuse", itemservice.ErrIdempotencyKeyReuse, connect.CodeAlreadyExists, "IDEMPOTENCY_KEY_REUSED"},
 		{"not caught up", itemservice.ErrNotCaughtUp, connect.CodeUnavailable, "NOT_CAUGHT_UP"},
 		{"anything else", errors.New("pq: relation items_secret does not exist"), connect.CodeInternal, "INTERNAL"},
+		// Step 0, part 2.
+		{"no transition", &itemservice.RejectedError{Code: "no_transition"}, connect.CodeFailedPrecondition, "NO_TRANSITION"},
+		{"widen not confirmed", &itemservice.RejectedError{Code: "widen_not_confirmed"},
+			connect.CodeFailedPrecondition, "WIDEN_NOT_CONFIRMED"},
+		{"session invalid", fmt.Errorf("get: %w", itemservice.ErrSessionInvalid), connect.CodeUnauthenticated, "SESSION_INVALID"},
+		// A rejection without a code is a bug in the kernel, not the caller's
+		// problem: INTERNAL, never a made-up REJECTED.
+		{"bare rejection", fmt.Errorf("%w: something", itemservice.ErrRejected), connect.CodeInternal, "INTERNAL"},
+		{"rejection without a code", &itemservice.RejectedError{Reason: "no code"}, connect.CodeInternal, "INTERNAL"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -76,6 +86,10 @@ func TestErrorFor_TheTable(t *testing.T) {
 			ei, _ := info(t, ce)
 			if ei.Reason != c.reason || ei.Domain != ErrorDomain {
 				t.Errorf("ErrorInfo = %s/%s, want %s/%s", ei.Domain, ei.Reason, ErrorDomain, c.reason)
+			}
+			// Step 0, part 2: one fixed message per reason.
+			if want, ok := ReasonMessage(c.reason); !ok || ce.Message() != want {
+				t.Errorf("message = %q, want the fixed message of %s (%q, known %v)", ce.Message(), c.reason, want, ok)
 			}
 		})
 	}
@@ -119,12 +133,57 @@ func TestErrorFor_NothingLeaks(t *testing.T) {
 	}
 }
 
-// A rule's refusal keeps its reason text (field IDs and states, never
-// values): the caller needs it to fix the Item.
-func TestErrorFor_RejectionKeepsItsReason(t *testing.T) {
-	ce := errorFor(&itemservice.RejectedError{Code: "missing_fields", Reason: "f_resolution is required"}, "")
-	if !strings.Contains(ce.Message(), "f_resolution") {
-		t.Errorf("message %q drops the reason", ce.Message())
+// Step 0, part 2 (PR #18 review), replacing part 1's "a rule's refusal
+// keeps its reason text": the message is the reason's fixed one, and what the
+// caller needs to fix the Item travels as metadata (field IDs and states,
+// never values).
+func TestErrorFor_RejectionDetailsGoInMetadata(t *testing.T) {
+	ce := errorFor(&itemservice.RejectedError{
+		Code: "missing_fields", Reason: "f_resolution is required", Metadata: map[string]string{"fields": "f_resolution"},
+	}, "")
+	if strings.Contains(ce.Message(), "f_resolution") {
+		t.Errorf("message %q carries the details; they belong in metadata", ce.Message())
+	}
+	if ei, _ := info(t, ce); ei.Metadata["fields"] != "f_resolution" {
+		t.Errorf("metadata = %v, want fields = f_resolution", ei.Metadata)
+	}
+	guard := errorFor(&itemservice.RejectedError{
+		Code: "guard_failed", Metadata: map[string]string{"from_state": "open", "to_state": "in_progress"},
+	}, "")
+	if ei, _ := info(t, guard); ei.Metadata["from_state"] != "open" || ei.Metadata["to_state"] != "in_progress" {
+		t.Errorf("guard metadata = %v, want from_state open, to_state in_progress", ei.Metadata)
+	}
+}
+
+// idLike matches what must never be in a message: a UUID, a typed principal,
+// a resource name, a session ID, a hold.
+var idLike = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}|\b(user|agent|group|system|hook):|namespaces/|ses_|holds/`)
+
+// Every reason the API can answer has one fixed message, and no message
+// contains an ID. Every rejection code of the kernel is a known reason.
+func TestReasonMessage_EveryReasonFixedAndFreeOfIDs(t *testing.T) {
+	reasons := []string{
+		"UNAUTHENTICATED", "SESSION_INVALID", "INVALID_REQUEST", "NOT_FOUND", "NOT_ALLOWED", "NEEDS_APPROVAL",
+		"STALE", "HELD", "IDEMPOTENCY_KEY_REUSED", "NOT_CAUGHT_UP", "CANCELED", "DEADLINE_EXCEEDED", "INTERNAL",
+	}
+	for _, code := range []string{
+		itemservice.CodeNoTransition, itemservice.CodeMissingFields, itemservice.CodeGuardFailed,
+		itemservice.CodeNotInitialState, itemservice.CodeHopLimit, itemservice.CodeWidenNotConfirmed,
+	} {
+		reasons = append(reasons, strings.ToUpper(code))
+	}
+	for _, r := range reasons {
+		msg, ok := ReasonMessage(r)
+		if !ok || msg == "" {
+			t.Errorf("%s has no fixed message", r)
+			continue
+		}
+		if idLike.MatchString(msg) {
+			t.Errorf("%s's message %q contains something like an ID", r, msg)
+		}
+	}
+	if _, ok := ReasonMessage("REJECTED"); ok {
+		t.Error("REJECTED is still a reason; an uncoded rejection is INTERNAL")
 	}
 }
 

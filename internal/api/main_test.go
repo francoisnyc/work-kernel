@@ -50,6 +50,30 @@ var tokens = []devtoken.Token{
 	{Name: "sam-globex", Token: "tok-sam-globex", Principal: "user:sam", Namespace: "globex"},
 }
 
+// Step 0, part 2: agents. Their tokens are kept apart from tokens because an
+// agent calls with a session header, which the part 1 tests that loop over
+// tokens do not send. bot and bot-globex are one agent ID in two
+// namespaces; helper is another agent in acme.
+var agentTokens = []devtoken.Token{
+	{Name: "bot", Token: "tok-bot", Principal: "agent:triage-bot", Namespace: "acme"},
+	{Name: "helper", Token: "tok-helper", Principal: "agent:helper", Namespace: "acme"},
+	{Name: "bot-globex", Token: "tok-bot-globex", Principal: "agent:triage-bot", Namespace: "globex"},
+}
+
+// What each user granted each agent (dev config). ana lets the bot do
+// anything in acme; bob lets it read only. Nobody granted helper anything
+// for bob, and the bot acting for itself has no grant.
+var grants = []devtoken.Grant{
+	{Agent: "agent:triage-bot", User: "user:ana", Namespace: "acme", Scopes: []string{"namespaces/acme"},
+		Powers: []string{"read", "create", "edit_fields", "transition:*", "move", "comment", "outbound"}},
+	{Agent: "agent:triage-bot", User: "user:bob", Namespace: "acme", Scopes: []string{"namespaces/acme"},
+		Powers: []string{"read"}},
+	{Agent: "agent:helper", User: "user:ana", Namespace: "acme", Scopes: []string{"namespaces/acme"},
+		Powers: []string{"read", "edit_fields"}},
+	{Agent: "agent:triage-bot", User: "user:bea", Namespace: "globex", Scopes: []string{"namespaces/globex"},
+		Powers: []string{"read", "edit_fields"}},
+}
+
 // searchWait is the server's min_seq wait in these tests (2 s in production).
 const searchWait = 300 * time.Millisecond
 
@@ -93,7 +117,8 @@ func run(m *testing.M) int {
 	}
 
 	watched = &watchedKernel{Kernel: k}
-	path, handler := api.NewHandler(watched, api.Options{Tokens: tokens, SearchWait: searchWait})
+	all := append(slices.Clone(tokens), agentTokens...)
+	path, handler := api.NewHandler(watched, api.Options{Tokens: all, Grants: grants, SearchWait: searchWait})
 	mux := http.NewServeMux()
 	mux.Handle(path, handler)
 	srv = httptest.NewUnstartedServer(mux)
@@ -140,6 +165,29 @@ func as(name string, opts ...connect.ClientOption) kernelv1connect.ItemServiceCl
 		panic("no token named " + name)
 	}
 	return withToken(tokens[i].Token, opts...)
+}
+
+// asAgent returns a client that calls as the named agent, sending session in
+// the Pli-Agent-Session header when it is not empty.
+func asAgent(name, session string) kernelv1connect.ItemServiceClient {
+	i := slices.IndexFunc(agentTokens, func(tk devtoken.Token) bool { return tk.Name == name })
+	if i < 0 {
+		panic("no agent token named " + name)
+	}
+	return withToken(agentTokens[i].Token, sessionHeader(session))
+}
+
+// sessionHeader sends an agent session ID on every call; "" sends none.
+func sessionHeader(session string) connect.Option {
+	return connect.WithInterceptors(connect.UnaryInterceptorFunc(
+		func(next connect.UnaryFunc) connect.UnaryFunc {
+			return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+				if session != "" {
+					req.Header().Set(api.AgentSessionHeader, session)
+				}
+				return next(ctx, req)
+			}
+		}))
 }
 
 func withToken(token string, opts ...connect.ClientOption) kernelv1connect.ItemServiceClient {

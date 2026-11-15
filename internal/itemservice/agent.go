@@ -24,7 +24,61 @@ var ErrNeedsApproval = errors.New("itemservice: needs approval")
 // NeedsApprovalError carries the scope the agent's write would land in.
 type NeedsApprovalError struct {
 	Scope uuid.UUID
+	// ScopeItem is the Item whose scope node Scope is; nil for the
+	// namespace's root scope. The API names the scope by it.
+	ScopeItem *uuid.UUID
 }
+
+// ErrSessionInvalid means an agent's session does not exist, belongs to
+// another agent or user, or to another namespace. It is an ErrInvalid in the
+// kernel; the API answers it as a bad credential (UNAUTHENTICATED).
+var ErrSessionInvalid = fmt.Errorf("%w: unknown agent session, or not this agent's", ErrInvalid)
+
+// StartAgentSessionRequest asks for a session in capability mode.
+type StartAgentSessionRequest struct {
+	// The agent, with OnBehalfOf the user it acts for (or empty), in a
+	// namespace. The session ID is minted here, never chosen.
+	Principal item.Principal
+	// Scopes the session may read and write: container Items (each with
+	// everything below it, checked at each request) or uuid.Nil for the
+	// whole namespace. Required; each must be visible to the agent and its
+	// user, else ErrNotFound.
+	Scopes []uuid.UUID
+	// Powers, from the item.Power* vocabulary; read is implied. Required;
+	// an unknown power is ErrInvalid.
+	Powers []string
+	// Grant is what the agent's user granted it (dev config for now); the
+	// session's scopes and powers must fit inside it, else ErrForbidden. A
+	// nil Grant grants nothing.
+	Grant *Grant
+}
+
+// Grant is what a user let an agent do: scopes (as in a session) and powers.
+type Grant struct {
+	Scopes []uuid.UUID
+	Powers []string
+}
+
+// AgentSession is a stored session.
+type AgentSession struct {
+	ID         string
+	Agent      string
+	OnBehalfOf string
+	Namespace  string
+	Scopes     []uuid.UUID
+	Powers     []string
+}
+
+// AgentSession returns the session p names (p.AgentSession) if it exists in
+// p's namespace and belongs to the agent p.Actor; otherwise
+// ErrSessionInvalid. The API calls it to learn the user the agent acts for.
+func (k *Service) AgentSession(ctx context.Context, p item.Principal) (AgentSession, error) {
+	return AgentSession{}, errNotBuilt
+}
+
+// errNotBuilt marks the stubs of Step 0, part 2 that the failing tests
+// compile against.
+var errNotBuilt = errors.New("itemservice: not built yet (Step 0, part 2)")
 
 func (e *NeedsApprovalError) Error() string {
 	return fmt.Sprintf("%v: the write lands in scope %s, wider than what this agent session read", ErrNeedsApproval, e.Scope)
@@ -38,7 +92,8 @@ func (e *NeedsApprovalError) Unwrap() error { return ErrNeedsApproval }
 // itself, with no on_behalf_of). Every read and write by that agent must
 // carry the session, so an agent cannot escape the write rule with a fresh
 // session it made up.
-func (k *Service) StartAgentSession(ctx context.Context, p item.Principal) (string, error) {
+func (k *Service) StartAgentSession(ctx context.Context, req StartAgentSessionRequest) (string, error) {
+	p := req.Principal
 	if !item.IsKind(p.Actor, item.KindAgent) || p.AgentSession != "" ||
 		(p.OnBehalfOf != "" && !item.IsKind(p.OnBehalfOf, item.KindUser)) {
 		return "", fmt.Errorf("%w: a session is started by an agent:, acting for a user: or for itself, "+
@@ -173,6 +228,10 @@ type ApproveWidenRequest struct {
 	Principal item.Principal // the approving user
 	Session   string
 	Scope     uuid.UUID
+	// ScopeItem names the scope by its Item when Scope is zero (the API
+	// passes what NEEDS_APPROVAL named); nil with a zero Scope is the
+	// namespace's root scope.
+	ScopeItem *uuid.UUID
 }
 
 // ApproveWiden records a user's approval for an agent session to write into

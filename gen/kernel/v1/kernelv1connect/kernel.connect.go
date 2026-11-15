@@ -15,8 +15,17 @@
 //   - Errors carry a standard code and a google.rpc.ErrorInfo with a stable
 //     reason (domain "pli.dev"); see the error table in docs/design.md.
 //
-// kernel.v1 only grows. Paging, filters, ListItems, ListItemEvents and the
-// agent calls arrive in Step 0, part 2; links in Step 1.
+//   - Reads page: page_size (default 50, max 500; more is read as 500),
+//     page_token from the previous page's next_page_token, no offsets and no
+//     totals. A page_token is bound to its request, caller and namespace:
+//     sent with any other request it is INVALID_ARGUMENT.
+//   - An agent calls with its own token and the session's ID in the
+//     Pli-Agent-Session header (StartAgentSession mints it). The header with a
+//     user's token, or an agent's token without it, is INVALID_ARGUMENT; an
+//     unknown session, or another agent's or another namespace's, is
+//     UNAUTHENTICATED / SESSION_INVALID.
+//
+// kernel.v1 only grows. Links arrive in Step 1.
 package kernelv1connect
 
 import (
@@ -59,10 +68,21 @@ const (
 	ItemServiceTransitionItemProcedure = "/kernel.v1.ItemService/TransitionItem"
 	// ItemServiceSearchItemsProcedure is the fully-qualified name of the ItemService's SearchItems RPC.
 	ItemServiceSearchItemsProcedure = "/kernel.v1.ItemService/SearchItems"
+	// ItemServiceListItemsProcedure is the fully-qualified name of the ItemService's ListItems RPC.
+	ItemServiceListItemsProcedure = "/kernel.v1.ItemService/ListItems"
+	// ItemServiceListItemEventsProcedure is the fully-qualified name of the ItemService's
+	// ListItemEvents RPC.
+	ItemServiceListItemEventsProcedure = "/kernel.v1.ItemService/ListItemEvents"
 	// ItemServiceGetTypeProcedure is the fully-qualified name of the ItemService's GetType RPC.
 	ItemServiceGetTypeProcedure = "/kernel.v1.ItemService/GetType"
 	// ItemServiceListTypesProcedure is the fully-qualified name of the ItemService's ListTypes RPC.
 	ItemServiceListTypesProcedure = "/kernel.v1.ItemService/ListTypes"
+	// ItemServiceStartAgentSessionProcedure is the fully-qualified name of the ItemService's
+	// StartAgentSession RPC.
+	ItemServiceStartAgentSessionProcedure = "/kernel.v1.ItemService/StartAgentSession"
+	// ItemServiceApproveWidenProcedure is the fully-qualified name of the ItemService's ApproveWiden
+	// RPC.
+	ItemServiceApproveWidenProcedure = "/kernel.v1.ItemService/ApproveWiden"
 )
 
 // ItemServiceClient is a client for the kernel.v1.ItemService service.
@@ -75,13 +95,25 @@ type ItemServiceClient interface {
 	UpdateItem(context.Context, *connect.Request[v1.UpdateItemRequest]) (*connect.Response[v1.UpdateItemResponse], error)
 	// Move the Item to another state, optionally with a field patch and a wait.
 	TransitionItem(context.Context, *connect.Request[v1.TransitionItemRequest]) (*connect.Response[v1.TransitionItemResponse], error)
-	// Items whose string fields contain all the words, among those the caller
-	// can see.
+	// Items whose string fields contain all the words and that match the
+	// filter, among those the caller can see. Words, a filter or both.
 	SearchItems(context.Context, *connect.Request[v1.SearchItemsRequest]) (*connect.Response[v1.SearchItemsResponse], error)
+	// A container's direct children (or the top-level Items), with the same
+	// filters as SearchItems.
+	ListItems(context.Context, *connect.Request[v1.ListItemsRequest]) (*connect.Response[v1.ListItemsResponse], error)
+	// An Item's history, oldest first, as the caller may see it.
+	ListItemEvents(context.Context, *connect.Request[v1.ListItemEventsRequest]) (*connect.Response[v1.ListItemEventsResponse], error)
 	// One Type version. Types are read-only: they load from files at start.
 	GetType(context.Context, *connect.Request[v1.GetTypeRequest]) (*connect.Response[v1.GetTypeResponse], error)
 	// Every Type version the server knows.
 	ListTypes(context.Context, *connect.Request[v1.ListTypesRequest]) (*connect.Response[v1.ListTypesResponse], error)
+	// Called with an agent's token: mint a session in capability mode, with
+	// the scopes it may touch and the powers it may use. Later calls carry its
+	// ID in the Pli-Agent-Session header.
+	StartAgentSession(context.Context, *connect.Request[v1.StartAgentSessionRequest]) (*connect.Response[v1.StartAgentSessionResponse], error)
+	// Called with a user's token: approve one wider scope for an agent session
+	// acting for that user (the answer to NEEDS_APPROVAL).
+	ApproveWiden(context.Context, *connect.Request[v1.ApproveWidenRequest]) (*connect.Response[v1.ApproveWidenResponse], error)
 }
 
 // NewItemServiceClient constructs a client for the kernel.v1.ItemService service. By default, it
@@ -125,6 +157,18 @@ func NewItemServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(itemServiceMethods.ByName("SearchItems")),
 			connect.WithClientOptions(opts...),
 		),
+		listItems: connect.NewClient[v1.ListItemsRequest, v1.ListItemsResponse](
+			httpClient,
+			baseURL+ItemServiceListItemsProcedure,
+			connect.WithSchema(itemServiceMethods.ByName("ListItems")),
+			connect.WithClientOptions(opts...),
+		),
+		listItemEvents: connect.NewClient[v1.ListItemEventsRequest, v1.ListItemEventsResponse](
+			httpClient,
+			baseURL+ItemServiceListItemEventsProcedure,
+			connect.WithSchema(itemServiceMethods.ByName("ListItemEvents")),
+			connect.WithClientOptions(opts...),
+		),
 		getType: connect.NewClient[v1.GetTypeRequest, v1.GetTypeResponse](
 			httpClient,
 			baseURL+ItemServiceGetTypeProcedure,
@@ -137,18 +181,34 @@ func NewItemServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(itemServiceMethods.ByName("ListTypes")),
 			connect.WithClientOptions(opts...),
 		),
+		startAgentSession: connect.NewClient[v1.StartAgentSessionRequest, v1.StartAgentSessionResponse](
+			httpClient,
+			baseURL+ItemServiceStartAgentSessionProcedure,
+			connect.WithSchema(itemServiceMethods.ByName("StartAgentSession")),
+			connect.WithClientOptions(opts...),
+		),
+		approveWiden: connect.NewClient[v1.ApproveWidenRequest, v1.ApproveWidenResponse](
+			httpClient,
+			baseURL+ItemServiceApproveWidenProcedure,
+			connect.WithSchema(itemServiceMethods.ByName("ApproveWiden")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // itemServiceClient implements ItemServiceClient.
 type itemServiceClient struct {
-	createItem     *connect.Client[v1.CreateItemRequest, v1.CreateItemResponse]
-	getItem        *connect.Client[v1.GetItemRequest, v1.GetItemResponse]
-	updateItem     *connect.Client[v1.UpdateItemRequest, v1.UpdateItemResponse]
-	transitionItem *connect.Client[v1.TransitionItemRequest, v1.TransitionItemResponse]
-	searchItems    *connect.Client[v1.SearchItemsRequest, v1.SearchItemsResponse]
-	getType        *connect.Client[v1.GetTypeRequest, v1.GetTypeResponse]
-	listTypes      *connect.Client[v1.ListTypesRequest, v1.ListTypesResponse]
+	createItem        *connect.Client[v1.CreateItemRequest, v1.CreateItemResponse]
+	getItem           *connect.Client[v1.GetItemRequest, v1.GetItemResponse]
+	updateItem        *connect.Client[v1.UpdateItemRequest, v1.UpdateItemResponse]
+	transitionItem    *connect.Client[v1.TransitionItemRequest, v1.TransitionItemResponse]
+	searchItems       *connect.Client[v1.SearchItemsRequest, v1.SearchItemsResponse]
+	listItems         *connect.Client[v1.ListItemsRequest, v1.ListItemsResponse]
+	listItemEvents    *connect.Client[v1.ListItemEventsRequest, v1.ListItemEventsResponse]
+	getType           *connect.Client[v1.GetTypeRequest, v1.GetTypeResponse]
+	listTypes         *connect.Client[v1.ListTypesRequest, v1.ListTypesResponse]
+	startAgentSession *connect.Client[v1.StartAgentSessionRequest, v1.StartAgentSessionResponse]
+	approveWiden      *connect.Client[v1.ApproveWidenRequest, v1.ApproveWidenResponse]
 }
 
 // CreateItem calls kernel.v1.ItemService.CreateItem.
@@ -176,6 +236,16 @@ func (c *itemServiceClient) SearchItems(ctx context.Context, req *connect.Reques
 	return c.searchItems.CallUnary(ctx, req)
 }
 
+// ListItems calls kernel.v1.ItemService.ListItems.
+func (c *itemServiceClient) ListItems(ctx context.Context, req *connect.Request[v1.ListItemsRequest]) (*connect.Response[v1.ListItemsResponse], error) {
+	return c.listItems.CallUnary(ctx, req)
+}
+
+// ListItemEvents calls kernel.v1.ItemService.ListItemEvents.
+func (c *itemServiceClient) ListItemEvents(ctx context.Context, req *connect.Request[v1.ListItemEventsRequest]) (*connect.Response[v1.ListItemEventsResponse], error) {
+	return c.listItemEvents.CallUnary(ctx, req)
+}
+
 // GetType calls kernel.v1.ItemService.GetType.
 func (c *itemServiceClient) GetType(ctx context.Context, req *connect.Request[v1.GetTypeRequest]) (*connect.Response[v1.GetTypeResponse], error) {
 	return c.getType.CallUnary(ctx, req)
@@ -184,6 +254,16 @@ func (c *itemServiceClient) GetType(ctx context.Context, req *connect.Request[v1
 // ListTypes calls kernel.v1.ItemService.ListTypes.
 func (c *itemServiceClient) ListTypes(ctx context.Context, req *connect.Request[v1.ListTypesRequest]) (*connect.Response[v1.ListTypesResponse], error) {
 	return c.listTypes.CallUnary(ctx, req)
+}
+
+// StartAgentSession calls kernel.v1.ItemService.StartAgentSession.
+func (c *itemServiceClient) StartAgentSession(ctx context.Context, req *connect.Request[v1.StartAgentSessionRequest]) (*connect.Response[v1.StartAgentSessionResponse], error) {
+	return c.startAgentSession.CallUnary(ctx, req)
+}
+
+// ApproveWiden calls kernel.v1.ItemService.ApproveWiden.
+func (c *itemServiceClient) ApproveWiden(ctx context.Context, req *connect.Request[v1.ApproveWidenRequest]) (*connect.Response[v1.ApproveWidenResponse], error) {
+	return c.approveWiden.CallUnary(ctx, req)
 }
 
 // ItemServiceHandler is an implementation of the kernel.v1.ItemService service.
@@ -196,13 +276,25 @@ type ItemServiceHandler interface {
 	UpdateItem(context.Context, *connect.Request[v1.UpdateItemRequest]) (*connect.Response[v1.UpdateItemResponse], error)
 	// Move the Item to another state, optionally with a field patch and a wait.
 	TransitionItem(context.Context, *connect.Request[v1.TransitionItemRequest]) (*connect.Response[v1.TransitionItemResponse], error)
-	// Items whose string fields contain all the words, among those the caller
-	// can see.
+	// Items whose string fields contain all the words and that match the
+	// filter, among those the caller can see. Words, a filter or both.
 	SearchItems(context.Context, *connect.Request[v1.SearchItemsRequest]) (*connect.Response[v1.SearchItemsResponse], error)
+	// A container's direct children (or the top-level Items), with the same
+	// filters as SearchItems.
+	ListItems(context.Context, *connect.Request[v1.ListItemsRequest]) (*connect.Response[v1.ListItemsResponse], error)
+	// An Item's history, oldest first, as the caller may see it.
+	ListItemEvents(context.Context, *connect.Request[v1.ListItemEventsRequest]) (*connect.Response[v1.ListItemEventsResponse], error)
 	// One Type version. Types are read-only: they load from files at start.
 	GetType(context.Context, *connect.Request[v1.GetTypeRequest]) (*connect.Response[v1.GetTypeResponse], error)
 	// Every Type version the server knows.
 	ListTypes(context.Context, *connect.Request[v1.ListTypesRequest]) (*connect.Response[v1.ListTypesResponse], error)
+	// Called with an agent's token: mint a session in capability mode, with
+	// the scopes it may touch and the powers it may use. Later calls carry its
+	// ID in the Pli-Agent-Session header.
+	StartAgentSession(context.Context, *connect.Request[v1.StartAgentSessionRequest]) (*connect.Response[v1.StartAgentSessionResponse], error)
+	// Called with a user's token: approve one wider scope for an agent session
+	// acting for that user (the answer to NEEDS_APPROVAL).
+	ApproveWiden(context.Context, *connect.Request[v1.ApproveWidenRequest]) (*connect.Response[v1.ApproveWidenResponse], error)
 }
 
 // NewItemServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -242,6 +334,18 @@ func NewItemServiceHandler(svc ItemServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(itemServiceMethods.ByName("SearchItems")),
 		connect.WithHandlerOptions(opts...),
 	)
+	itemServiceListItemsHandler := connect.NewUnaryHandler(
+		ItemServiceListItemsProcedure,
+		svc.ListItems,
+		connect.WithSchema(itemServiceMethods.ByName("ListItems")),
+		connect.WithHandlerOptions(opts...),
+	)
+	itemServiceListItemEventsHandler := connect.NewUnaryHandler(
+		ItemServiceListItemEventsProcedure,
+		svc.ListItemEvents,
+		connect.WithSchema(itemServiceMethods.ByName("ListItemEvents")),
+		connect.WithHandlerOptions(opts...),
+	)
 	itemServiceGetTypeHandler := connect.NewUnaryHandler(
 		ItemServiceGetTypeProcedure,
 		svc.GetType,
@@ -252,6 +356,18 @@ func NewItemServiceHandler(svc ItemServiceHandler, opts ...connect.HandlerOption
 		ItemServiceListTypesProcedure,
 		svc.ListTypes,
 		connect.WithSchema(itemServiceMethods.ByName("ListTypes")),
+		connect.WithHandlerOptions(opts...),
+	)
+	itemServiceStartAgentSessionHandler := connect.NewUnaryHandler(
+		ItemServiceStartAgentSessionProcedure,
+		svc.StartAgentSession,
+		connect.WithSchema(itemServiceMethods.ByName("StartAgentSession")),
+		connect.WithHandlerOptions(opts...),
+	)
+	itemServiceApproveWidenHandler := connect.NewUnaryHandler(
+		ItemServiceApproveWidenProcedure,
+		svc.ApproveWiden,
+		connect.WithSchema(itemServiceMethods.ByName("ApproveWiden")),
 		connect.WithHandlerOptions(opts...),
 	)
 	return "/kernel.v1.ItemService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -266,10 +382,18 @@ func NewItemServiceHandler(svc ItemServiceHandler, opts ...connect.HandlerOption
 			itemServiceTransitionItemHandler.ServeHTTP(w, r)
 		case ItemServiceSearchItemsProcedure:
 			itemServiceSearchItemsHandler.ServeHTTP(w, r)
+		case ItemServiceListItemsProcedure:
+			itemServiceListItemsHandler.ServeHTTP(w, r)
+		case ItemServiceListItemEventsProcedure:
+			itemServiceListItemEventsHandler.ServeHTTP(w, r)
 		case ItemServiceGetTypeProcedure:
 			itemServiceGetTypeHandler.ServeHTTP(w, r)
 		case ItemServiceListTypesProcedure:
 			itemServiceListTypesHandler.ServeHTTP(w, r)
+		case ItemServiceStartAgentSessionProcedure:
+			itemServiceStartAgentSessionHandler.ServeHTTP(w, r)
+		case ItemServiceApproveWidenProcedure:
+			itemServiceApproveWidenHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -299,10 +423,26 @@ func (UnimplementedItemServiceHandler) SearchItems(context.Context, *connect.Req
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kernel.v1.ItemService.SearchItems is not implemented"))
 }
 
+func (UnimplementedItemServiceHandler) ListItems(context.Context, *connect.Request[v1.ListItemsRequest]) (*connect.Response[v1.ListItemsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kernel.v1.ItemService.ListItems is not implemented"))
+}
+
+func (UnimplementedItemServiceHandler) ListItemEvents(context.Context, *connect.Request[v1.ListItemEventsRequest]) (*connect.Response[v1.ListItemEventsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kernel.v1.ItemService.ListItemEvents is not implemented"))
+}
+
 func (UnimplementedItemServiceHandler) GetType(context.Context, *connect.Request[v1.GetTypeRequest]) (*connect.Response[v1.GetTypeResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kernel.v1.ItemService.GetType is not implemented"))
 }
 
 func (UnimplementedItemServiceHandler) ListTypes(context.Context, *connect.Request[v1.ListTypesRequest]) (*connect.Response[v1.ListTypesResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kernel.v1.ItemService.ListTypes is not implemented"))
+}
+
+func (UnimplementedItemServiceHandler) StartAgentSession(context.Context, *connect.Request[v1.StartAgentSessionRequest]) (*connect.Response[v1.StartAgentSessionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kernel.v1.ItemService.StartAgentSession is not implemented"))
+}
+
+func (UnimplementedItemServiceHandler) ApproveWiden(context.Context, *connect.Request[v1.ApproveWidenRequest]) (*connect.Response[v1.ApproveWidenResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kernel.v1.ItemService.ApproveWiden is not implemented"))
 }

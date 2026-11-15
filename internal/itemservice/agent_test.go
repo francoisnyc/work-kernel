@@ -29,9 +29,13 @@ func agentFor(t *testing.T, k *itemservice.Service, user item.Principal) item.Pr
 // withSession starts a session for the agent (and the user it acts for) and
 // returns the principal carrying it. Sessions are minted by the server, never
 // chosen by the caller.
+//
+// Step 0, part 2: a session now names its scopes and powers. These Step A2
+// tests are about the write rule, not capability mode, so their sessions
+// cover the whole namespace with every write power (wholeNamespace).
 func withSession(t *testing.T, k *itemservice.Service, p item.Principal) item.Principal {
 	t.Helper()
-	session, err := k.StartAgentSession(testCtx(t), p)
+	session, err := k.StartAgentSession(testCtx(t), wholeNamespace(p))
 	if err != nil {
 		t.Fatalf("StartAgentSession(%+v): %v", p, err)
 	}
@@ -172,7 +176,7 @@ func TestAgent_StartAgentSession_Rules(t *testing.T) {
 		{Actor: "agent:" + uuid.NewString(), OnBehalfOf: "agent:" + uuid.NewString()},
 		{Actor: "agent:" + uuid.NewString(), OnBehalfOf: "user:" + uuid.NewString(), AgentSession: "chosen-by-caller"},
 	} {
-		if _, err := k.StartAgentSession(testCtx(t), p); !errors.Is(err, itemservice.ErrInvalid) {
+		if _, err := k.StartAgentSession(testCtx(t), wholeNamespace(p)); !errors.Is(err, itemservice.ErrInvalid) {
 			t.Errorf("StartAgentSession(%+v): error = %v, want ErrInvalid", p, err)
 		}
 	}

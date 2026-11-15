@@ -27,6 +27,29 @@ type Token struct {
 
 type file struct {
 	Tokens []Token `yaml:"tokens"`
+	Grants []Grant `yaml:"grants"`
+}
+
+// Grant is what a user let an agent do, in one namespace: the scopes a
+// session may cover (namespaces/{ns} for all of it, or container names) and
+// the powers it may hold. A grant with no user is for the agent acting for
+// itself.
+type Grant struct {
+	Agent     string   `yaml:"agent"`     // agent:<id>
+	User      string   `yaml:"user"`      // user:<id>, or empty
+	Namespace string   `yaml:"namespace"` // the namespace of both
+	Scopes    []string `yaml:"scopes"`
+	Powers    []string `yaml:"powers"`
+}
+
+// LoadGrants reads a dev-token file's grants.
+func LoadGrants(path string) ([]Grant, error) {
+	return nil, errors.New("dev tokens: grants not built yet (Step 0, part 2)")
+}
+
+// ParseGrants reads and checks the grants of a dev-token file.
+func ParseGrants(data []byte) ([]Grant, error) {
+	return nil, errors.New("dev tokens: grants not built yet (Step 0, part 2)")
 }
 
 // namespaceName matches itemservice.ValidNamespace. It is repeated here so

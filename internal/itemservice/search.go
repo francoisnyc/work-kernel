@@ -34,13 +34,19 @@ type SearchRequest struct {
 	// time.Duration is a count of nanoseconds with units in its type, so
 	// callers write 500*time.Millisecond.
 	Wait  time.Duration
-	Limit int // zero means the default (50)
+	Limit int // the page size: zero means 50; more than 500 is read as 500
+	// Filter narrows the search; a filter alone (no words) is a search.
+	Filter Filter
+	// PageToken is the previous page's NextPageToken, sent with the same
+	// request; with any other request, caller or namespace it is ErrInvalid.
+	PageToken string
 }
 
 // SearchResult holds the matching Items, newest first, as the principal may
 // see them.
 type SearchResult struct {
-	Items []item.Item
+	Items         []item.Item
+	NextPageToken string // empty on the last page
 }
 
 // Search returns the Items that match the query and that the principal can

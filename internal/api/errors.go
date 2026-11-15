@@ -18,6 +18,13 @@ import (
 // Step 0, part 3 sets the buf breaking baseline.
 const ErrorDomain = "pli.dev"
 
+// ReasonMessage returns the one fixed message of an ErrorInfo reason, and
+// whether the reason is known. Every error the API returns carries exactly
+// this message: dynamic values go in ErrorInfo metadata, never in a message.
+func ReasonMessage(reason string) (string, bool) {
+	return "", false // not built yet: Step 0, part 2
+}
+
 // notFoundMessage is the one message of every NOT_FOUND, whatever the
 // kernel's error said: hidden and missing must read the same.
 const notFoundMessage = "not found"

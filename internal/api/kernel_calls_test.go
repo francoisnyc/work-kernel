@@ -93,6 +93,31 @@ func (w *watchedKernel) Search(ctx context.Context, r itemservice.SearchRequest)
 	return w.Kernel.Search(ctx, r)
 }
 
+func (w *watchedKernel) List(ctx context.Context, r itemservice.ListRequest) (itemservice.ListResult, error) {
+	w.record("List", r.Principal)
+	return w.Kernel.List(ctx, r)
+}
+
+func (w *watchedKernel) ListEvents(ctx context.Context, r itemservice.ListEventsRequest) (itemservice.ListEventsResult, error) {
+	w.record("ListEvents", r.Principal)
+	return w.Kernel.ListEvents(ctx, r)
+}
+
+func (w *watchedKernel) StartAgentSession(ctx context.Context, r itemservice.StartAgentSessionRequest) (string, error) {
+	w.record("StartAgentSession", r.Principal)
+	return w.Kernel.StartAgentSession(ctx, r)
+}
+
+func (w *watchedKernel) AgentSession(ctx context.Context, p item.Principal) (itemservice.AgentSession, error) {
+	w.record("AgentSession", p)
+	return w.Kernel.AgentSession(ctx, p)
+}
+
+func (w *watchedKernel) ApproveWiden(ctx context.Context, r itemservice.ApproveWidenRequest) error {
+	w.record("ApproveWiden", r.Principal)
+	return w.Kernel.ApproveWiden(ctx, r)
+}
+
 // Every operation, for callers in both namespaces (sam in each): every
 // kernel call carries exactly the token's principal and namespace.
 func TestKernelCalls_CarryTheTokensNamespace(t *testing.T) {
@@ -161,5 +186,56 @@ func TestKernelCalls_NeverWithoutANamespace(t *testing.T) {
 	}
 	for _, c := range watched.withoutNamespace() {
 		t.Errorf("%s reached the kernel as %s with no namespace", c.op, c.p.Actor)
+	}
+}
+
+// Step 0, part 2: the new reads carry the token's namespace too, for a user
+// in each namespace.
+func TestKernelCalls_NewReadsCarryTheTokensNamespace(t *testing.T) {
+	for _, name := range []string{"ana", "bea"} {
+		t.Run(name, func(t *testing.T) {
+			i := slices.IndexFunc(tokens, func(tk devtoken.Token) bool { return tk.Name == name })
+			tok := tokens[i]
+			ctx := testCtx(t)
+			c := as(name)
+			parent := "namespaces/" + tok.Namespace
+			res, err := c.CreateItem(ctx, connect.NewRequest(&kernelv1.CreateItemRequest{
+				Parent: parent, RequestId: newID(), Type: parent + "/types/ticket/versions/1",
+			}))
+			if err != nil {
+				t.Fatalf("CreateItem: %v", err)
+			}
+			start := watched.count()
+			if _, err := c.ListItems(ctx, connect.NewRequest(&kernelv1.ListItemsRequest{Parent: res.Msg.Item.Name})); err != nil {
+				t.Fatalf("ListItems: %v", err)
+			}
+			if _, err := c.ListItemEvents(ctx, connect.NewRequest(&kernelv1.ListItemEventsRequest{Parent: res.Msg.Item.Name})); err != nil {
+				t.Fatalf("ListItemEvents: %v", err)
+			}
+			assertCalls(t, tok, watched.since(start), "List", "ListEvents")
+		})
+	}
+}
+
+// An agent's calls reach the kernel as the agent, in its namespace, with its
+// session and the user the session acts for, taken from the session, never
+// from the request.
+func TestKernelCalls_AgentCallsCarryTheSessionsUser(t *testing.T) {
+	ctx := testCtx(t)
+	session := startSession(t, "bot", "user:ana", []string{"namespaces/acme"}, "read", "edit_fields")
+	it := create(t, "ana", ticketV1, nil).Item
+	start := watched.count()
+	if _, err := asAgent("bot", session).GetItem(ctx, connect.NewRequest(&kernelv1.GetItemRequest{Name: it.Name})); err != nil {
+		t.Fatalf("GetItem as the bot: %v", err)
+	}
+	var got []kernelCall
+	for _, c := range watched.since(start) {
+		if c.op == "Get" {
+			got = append(got, c)
+		}
+	}
+	want := item.Principal{Actor: "agent:triage-bot", OnBehalfOf: "user:ana", AgentSession: session, Namespace: "acme"}
+	if len(got) != 1 || got[0].p != want {
+		t.Errorf("Get calls = %+v, want one as %+v", got, want)
 	}
 }

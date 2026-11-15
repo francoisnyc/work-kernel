@@ -38,14 +38,15 @@ func TestContract_NoRequestNamesAPrincipal(t *testing.T) {
 }
 
 // The internal door never goes over the network: the service has exactly the
-// public operations of part 1.
+// public operations of parts 1 and 2.
 func TestContract_OnlyPublicOperations(t *testing.T) {
 	methods := kernelv1.File_kernel_v1_kernel_proto.Services().ByName("ItemService").Methods()
 	var got []string
 	for i := 0; i < methods.Len(); i++ {
 		got = append(got, string(methods.Get(i).Name()))
 	}
-	want := []string{"CreateItem", "GetItem", "UpdateItem", "TransitionItem", "SearchItems", "GetType", "ListTypes"}
+	want := []string{"CreateItem", "GetItem", "UpdateItem", "TransitionItem", "SearchItems",
+		"ListItems", "ListItemEvents", "GetType", "ListTypes", "StartAgentSession", "ApproveWiden"} // part 2 added five
 	if !slices.Equal(got, want) {
 		t.Errorf("ItemService methods = %v, want %v", got, want)
 	}

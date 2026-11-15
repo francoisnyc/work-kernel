@@ -142,3 +142,46 @@ func TestNamespaces_RequestIDsDoNotCross(t *testing.T) {
 		t.Errorf("one request_id in two namespaces made one Item")
 	}
 }
+
+// Step 0, part 2: the new operations leak nothing across namespaces either.
+// A caller in acme gets NOT_FOUND for globex's Items, sessions and scopes.
+func TestNamespaces_NewOperations(t *testing.T) {
+	ctx := testCtx(t)
+	res, err := as("bea").CreateItem(ctx, connect.NewRequest(&kernelv1.CreateItemRequest{
+		Parent: "namespaces/globex", RequestId: newID(), Type: "namespaces/globex/types/ticket/versions/1",
+	}))
+	if err != nil {
+		t.Fatalf("bea creates in globex: %v", err)
+	}
+	theirs := res.Msg.Item.Name
+	disguised := "namespaces/acme/items/" + itemID(t, theirs).String()
+	theirSession := startSession(t, "bot-globex", "user:bea", []string{"namespaces/globex"}, "read")
+
+	for _, who := range []string{"ana", "sam-acme"} {
+		c := as(who)
+		for _, name := range []string{theirs, disguised} {
+			_, err := c.ListItems(ctx, connect.NewRequest(&kernelv1.ListItemsRequest{Parent: name}))
+			notFound(t, who+" ListItems "+name, err)
+			_, err = c.ListItemEvents(ctx, connect.NewRequest(&kernelv1.ListItemEventsRequest{Parent: name}))
+			notFound(t, who+" ListItemEvents "+name, err)
+		}
+		_, err := c.ListItems(ctx, connect.NewRequest(&kernelv1.ListItemsRequest{Parent: "namespaces/globex"}))
+		notFound(t, who+" ListItems of globex's top level", err)
+		_, err = c.SearchItems(ctx, connect.NewRequest(&kernelv1.SearchItemsRequest{
+			Parent: "namespaces/globex", Filter: &kernelv1.ItemFilter{States: []string{"open"}},
+		}))
+		notFound(t, who+" SearchItems in globex with a filter", err)
+		_, err = c.ApproveWiden(ctx, connect.NewRequest(&kernelv1.ApproveWidenRequest{
+			Parent: "namespaces/acme", Session: theirSession, Scope: "namespaces/acme",
+		}))
+		notFound(t, who+" ApproveWiden of a globex session", err)
+		_, err = c.ApproveWiden(ctx, connect.NewRequest(&kernelv1.ApproveWidenRequest{
+			Parent: "namespaces/globex", Session: theirSession, Scope: "namespaces/globex",
+		}))
+		notFound(t, who+" ApproveWiden in globex", err)
+	}
+	_, err = asAgent("bot", "").StartAgentSession(ctx, connect.NewRequest(&kernelv1.StartAgentSessionRequest{
+		Parent: "namespaces/acme", ActingFor: "user:ana", Scopes: []string{disguised}, Powers: []string{"read"},
+	}))
+	notFound(t, "a session scoped to a globex container", err)
+}
