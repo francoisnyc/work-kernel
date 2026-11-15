@@ -13,7 +13,7 @@
 //   - Every write takes a required request_id (the idempotency key) and returns
 //     the Item after the write, with item_seq and commit_seq.
 //   - Errors carry a standard code and a google.rpc.ErrorInfo with a stable
-//     reason (domain "kernel.work"); see the error table in docs/design.md.
+//     reason (domain "pli.dev"); see the error table in docs/design.md.
 //
 // kernel.v1 only grows. Paging, filters, ListItems, ListItemEvents and the
 // agent calls arrive in Step 0, part 2; links in Step 1.

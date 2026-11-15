@@ -35,6 +35,9 @@ var (
 	pool *pgxpool.Pool
 	k    *itemservice.Service
 	srv  *httptest.Server
+	// watched is the kernel as the API sees it: k, with every call recorded
+	// (kernel_calls_test.go).
+	watched *watchedKernel
 )
 
 // The two namespaces of these tests and who is in them. sam is one principal
@@ -89,7 +92,8 @@ func run(m *testing.M) int {
 		return 1
 	}
 
-	path, handler := api.NewHandler(k, api.Options{Tokens: tokens, SearchWait: searchWait})
+	watched = &watchedKernel{Kernel: k}
+	path, handler := api.NewHandler(watched, api.Options{Tokens: tokens, SearchWait: searchWait})
 	mux := http.NewServeMux()
 	mux.Handle(path, handler)
 	srv = httptest.NewUnstartedServer(mux)
@@ -97,7 +101,16 @@ func run(m *testing.M) int {
 	srv.StartTLS()
 	defer srv.Close()
 
-	return m.Run()
+	code := m.Run()
+	// Whatever the tests did, no call may have reached the kernel without a
+	// namespace: in the kernel, that silently means "default".
+	if bad := watched.withoutNamespace(); len(bad) > 0 {
+		for _, c := range bad {
+			log.Printf("%s reached the kernel as %s with no namespace", c.op, c.p.Actor)
+		}
+		return 1
+	}
+	return code
 }
 
 func testCtx(t *testing.T) context.Context {

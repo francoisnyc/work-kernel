@@ -151,6 +151,12 @@ func TestCreateItem_InAContainer_Narrowed(t *testing.T) {
 		t.Errorf("item %s in %q, want a flat name in container %s", it.Name, it.Container, ch.Name)
 	}
 
+	_, err = as("ana").CreateItem(ctx, connect.NewRequest(&kernelv1.CreateItemRequest{
+		Parent: "namespaces/acme", RequestId: newID(), Type: ticketV1,
+		Narrow: &kernelv1.Readers{Principals: []string{"user:bob"}},
+	}))
+	invalid(t, "narrowed without the caller", err, "narrow.principals")
+
 	_, hidden := as("bob").GetItem(ctx, connect.NewRequest(&kernelv1.GetItemRequest{Name: it.Name}))
 	_, missing := as("bob").GetItem(ctx, connect.NewRequest(&kernelv1.GetItemRequest{
 		Name: "namespaces/acme/items/" + uuid.NewString(),
@@ -248,9 +254,9 @@ func TestUpdateItem_Readers(t *testing.T) {
 	}
 	get(t, "bob", name)
 
-	// The kernel's own checks of a reader list: malformed, no field named.
-	malformed(t, "narrow without the caller", policy(narrow("user:bob")))
-	malformed(t, "untyped reader", policy(narrow("user:ana", "bob")))
+	// A bad reader list names the readers' path in the request.
+	invalid(t, "narrow without the caller", policy(narrow("user:bob")), "policy.narrow.principals")
+	invalid(t, "untyped reader", policy(narrow("user:ana", "bob")), "policy.narrow.principals")
 	invalid(t, "empty policy change", policy(&kernelv1.PolicyChange{}), "policy")
 	invalid(t, "inherit false", policy(&kernelv1.PolicyChange{Change: &kernelv1.PolicyChange_Inherit{}}), "policy")
 }
@@ -315,7 +321,8 @@ func TestUpdateItem_MoveThatWidensNeedsConfirmation(t *testing.T) {
 		}))
 		return err
 	}
-	malformed(t, "widening move without confirm_widen", toTop(false))
+	// Not malformed: valid, but the client must ask the user and resend.
+	apiError(t, "widening move without confirm_widen", toTop(false), connect.CodeFailedPrecondition, "WIDEN_NOT_CONFIRMED")
 	if err := toTop(true); err != nil {
 		t.Fatalf("widening move with confirm_widen: %v", err)
 	}
