@@ -507,9 +507,9 @@ expect "state" "$(j .item.state <<<"$sub")" "submitted"
 expect "the approver, from HR" "$(j .item.fields.f_approver <<<"$sub")" "user:bob"
 
 step "vacation: only the requester submits; the dates and days must make sense (GUARD_FAILED)"
-v0=$(new_leave ana --set f_days=0)
+v0=$(new_leave ana)
 refuse bob "PERMISSION_DENIED NOT_ALLOWED" item transition "$v0" --to submitted
-refuse ana "FAILED_PRECONDITION GUARD_FAILED" item transition "$v0" --to submitted
+refuse ana "FAILED_PRECONDITION GUARD_FAILED" item transition "$v0" --to submitted --set f_days=0
 refuse ana "FAILED_PRECONDITION GUARD_FAILED" item transition "$v0" --to submitted \
 	--set f_days=5 --set f_start=2000-01-03 --set f_end=2000-01-07
 

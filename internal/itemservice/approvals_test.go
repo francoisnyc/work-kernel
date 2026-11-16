@@ -507,6 +507,34 @@ func TestVacation_AgentCreatedRequest_TheCreatorIsItsUser(t *testing.T) {
 	}
 }
 
+// Phase C review: except: [creator] is separation of duties, so it refuses
+// anyone who took part in creating the request. An agent that created a
+// request for ana, acting alone, is not the requester; but even named as
+// the approver it may not approve or reject: NOT_ALLOWED. Acting for bob,
+// it may not either.
+func TestVacation_AgentAloneCannotDecideWhatItCreated(t *testing.T) {
+	w := newVacWorld(t)
+	bot := "agent:" + uuid.NewString()[:8]
+	forAna := withSession(t, w.k, item.Principal{Actor: bot, OnBehalfOf: w.ana.Actor})
+	alone := withSession(t, w.k, item.Principal{Actor: bot})
+	forBob := withSession(t, w.k, item.Principal{Actor: bot, OnBehalfOf: w.bob.Actor})
+	id := w.create(t, forAna, vacTerms())
+
+	_, err := w.move(t, alone, id, "submitted", nil, newKey())
+	assertNotAllowed(t, "the agent alone submits (not the requester)", err)
+	req := w.submit(t, forAna, id)
+	if _, err := w.hr(t, id, req, itemservice.VerdictCorrect, map[string]any{"f_approver": bot}, ""); err != nil {
+		t.Fatalf("HR correct (naming the agent): %v", err)
+	}
+	for _, p := range []item.Principal{alone, forBob} {
+		for _, to := range []string{"approved", "rejected"} {
+			_, err := w.move(t, p, id, to, nil, newKey())
+			assertNotAllowed(t, fmt.Sprintf("%s for %q -> %s", p.Actor, p.OnBehalfOf, to), err)
+		}
+	}
+	assertState(t, w, w.ana, id, "submitted")
+}
+
 // 4: someone who is neither the requester nor the approver: NOT_ALLOWED.
 func TestVacation_ThirdUserIsNotAllowed(t *testing.T) {
 	w := newVacWorld(t)

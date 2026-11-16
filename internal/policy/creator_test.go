@@ -1,11 +1,14 @@
 // Tests for proof-of-concept Step 2, part 1 (Phase B review): identity rules
 // are declared, never written in CEL.
 //
-//   - allowed: [creator] matches the principal whose effective user (its
-//     on_behalf_of if set, else its actor) is the Item's effective creator
-//     (created_on_behalf_of if set, else created_by). It is judged once,
-//     for the principal as a whole. The kernel's own actors never match.
-//   - except: [creator] refuses the creator even if `allowed` lets them in.
+//   - allowed: [creator] matches the requester (IsRequester): the principal
+//     whose effective user (its on_behalf_of if set, else its actor) is the
+//     Item's effective creator (created_on_behalf_of if set, else
+//     created_by). It is judged once, for the principal as a whole.
+//   - except: [creator] refuses anyone who took part in creating the Item
+//     (TookPartInCreation): its actor or its effective user is created_by
+//     or created_on_behalf_of. Separation of duties is conservative.
+//   - The kernel's own actors match neither.
 //   - role:, principal: and field: entries keep the agent rule: the actor
 //     and the user it acts for must both pass.
 //
@@ -22,7 +25,8 @@ import (
 	"github.com/francoisnyc/work-kernel/internal/typedef"
 )
 
-func TestIsCreator(t *testing.T) {
+// Who is the requester (allowed: [creator]).
+func TestIsRequester(t *testing.T) {
 	cases := []struct {
 		name                         string
 		actor, onBehalfOf            string
@@ -44,8 +48,44 @@ func TestIsCreator(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := policy.IsCreator(c.actor, c.onBehalfOf, c.createdBy, c.createdOnBehalfOf); got != c.want {
-				t.Errorf("IsCreator(%q for %q; created by %q for %q) = %v, want %v",
+			if got := policy.IsRequester(c.actor, c.onBehalfOf, c.createdBy, c.createdOnBehalfOf); got != c.want {
+				t.Errorf("IsRequester(%q for %q; created by %q for %q) = %v, want %v",
+					c.actor, c.onBehalfOf, c.createdBy, c.createdOnBehalfOf, got, c.want)
+			}
+		})
+	}
+}
+
+// Who took part in creating the Item (except: [creator]): the actor or its
+// effective user is the creator or the user it created the Item for.
+func TestTookPartInCreation(t *testing.T) {
+	cases := []struct {
+		name                         string
+		actor, onBehalfOf            string
+		createdBy, createdOnBehalfOf string
+		want                         bool
+	}{
+		{"the user who created it", "user:ana", "", "user:ana", "", true},
+		{"another user", "user:bob", "", "user:ana", "", false},
+		{"the user an agent created it for", "user:ana", "", "agent:bot", "user:ana", true},
+		{"an agent acting for the user who created it", "agent:bot", "user:ana", "user:ana", "", true},
+		{"another agent acting for the user an agent created it for", "agent:other", "user:ana", "agent:bot", "user:ana", true},
+		// Unlike IsRequester: the agent that created it took part, whoever
+		// it acts for now, and acting alone.
+		{"the agent that created it for ana, now acting for bob", "agent:bot", "user:bob", "agent:bot", "user:ana", true},
+		{"the agent that created it for ana, acting for itself", "agent:bot", "", "agent:bot", "user:ana", true},
+		{"an agent that created it for itself, acting for itself", "agent:bot", "", "agent:bot", "", true},
+		{"another agent acting for bob", "agent:other", "user:bob", "agent:bot", "user:ana", false},
+		{"bob, on a request an agent created for ana", "user:bob", "", "agent:bot", "user:ana", false},
+		{"the timer, never", "system:timer", "", "system:timer", "", false},
+		{"a hook, never", "hook:t:h", "", "hook:t:h", "", false},
+		{"nobody acting", "", "", "user:ana", "", false},
+		{"no creator recorded", "user:ana", "", "", "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := policy.TookPartInCreation(c.actor, c.onBehalfOf, c.createdBy, c.createdOnBehalfOf); got != c.want {
+				t.Errorf("TookPartInCreation(%q for %q; created by %q for %q) = %v, want %v",
 					c.actor, c.onBehalfOf, c.createdBy, c.createdOnBehalfOf, got, c.want)
 			}
 		})
@@ -95,6 +135,9 @@ func TestMayTransition_DecideExceptCreator(t *testing.T) {
 		{"the requester decides her own request, bob named", "user:ana", "", "user:ana", "", "user:bob", false},
 		{"the user an agent created it for decides it, named approver", "user:ana", "", "agent:bot", "user:ana", "user:ana", false},
 		{"the agent that created it decides it (alone, not named)", "agent:bot", "", "agent:bot", "user:ana", "user:bob", false},
+		// Review: the agent alone is not the requester, but it took part in
+		// creating the request, so except refuses it even when named.
+		{"the agent that created it decides it (alone, named approver)", "agent:bot", "", "agent:bot", "user:ana", "agent:bot", false},
 		{"an agent acting for the requester decides it", "agent:bot", "user:ana", "user:ana", "", "user:ana", false},
 		{"an agent acting for the requester, created by an agent for her", "agent:other", "user:ana", "agent:bot", "user:ana", "user:ana", false},
 		{"the manager decides a request an agent created for its user", "user:bob", "", "agent:bot", "user:ana", "user:bob", true},
@@ -105,6 +148,8 @@ func TestMayTransition_DecideExceptCreator(t *testing.T) {
 		{"same Item: bob, the approver", "user:bob", "", "agent:bot", "user:ana", "user:bob", true},
 		{"same Item: agent:bot for ana is the creator", "agent:bot", "user:ana", "agent:bot", "user:ana", "user:ana", false},
 		{"same Item: agent:bot for bob still fails field:f_approver", "agent:bot", "user:bob", "agent:bot", "user:ana", "user:bob", false},
+		// Even were bot itself named, except refuses it: it took part.
+		{"same Item: agent:bot for bob, bot named approver", "agent:bot", "user:bob", "agent:bot", "user:ana", "agent:bot", false},
 		{"no approver yet: no one", "user:bob", "", "user:ana", "", "", false},
 	})
 }
@@ -156,10 +201,26 @@ func TestMayTransition_CreatorAmongOtherEntries(t *testing.T) {
 	}
 }
 
-// except with no allowed list: anyone but the creator. The kernel's own
-// actors are never the creator, so except never stops them.
+// except with no allowed list: anyone but those who took part in creating
+// the Item. The kernel's own actors never did, so except never stops them.
 func TestMayTransition_ExceptAlone(t *testing.T) {
 	tr := typedef.Transition{From: "a", To: "b", Except: []string{"creator"}}
+	byBot := policy.ItemFacts{CreatedBy: "agent:bot", CreatedOnBehalfOf: "user:ana"}
+	for _, c := range []struct {
+		name string
+		who  policy.Who
+		want bool
+	}{
+		{"agent:bot for bob, on what it created for ana", policy.Who{Actor: "agent:bot", OnBehalfOf: "user:bob"}, false},
+		{"agent:bot alone, on what it created for ana", policy.Who{Actor: "agent:bot"}, false},
+		{"ana, for whom it was created", policy.Who{Actor: "user:ana"}, false},
+		{"bob", policy.Who{Actor: "user:bob"}, true},
+		{"another agent for bob", policy.Who{Actor: "agent:other", OnBehalfOf: "user:bob"}, true},
+	} {
+		if got := policy.MayTransition(tr, c.who, byBot); got != c.want {
+			t.Errorf("MayTransition(except creator, %s) = %v, want %v", c.name, got, c.want)
+		}
+	}
 	it := policy.ItemFacts{CreatedBy: "user:ana"}
 	for _, c := range []struct {
 		who  policy.Who

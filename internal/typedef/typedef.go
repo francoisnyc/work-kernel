@@ -100,10 +100,11 @@ const (
 	// AllowedFieldPrefix names a principal field: the entry matches the
 	// principal the field holds when the transition runs.
 	AllowedFieldPrefix = "field:"
-	// AllowedCreator matches the principal whose user is the user the Item
-	// was created for (see policy.IsCreator). It is judged once for the
-	// principal as a whole, not for its actor and on_behalf_of in turn. It
-	// is the only entry `except` takes for now.
+	// AllowedCreator in `allowed` matches the requester: the principal whose
+	// user is the user the Item was created for (policy.IsRequester), judged
+	// once for the principal as a whole. In `except` it matches anyone who
+	// took part in creating the Item (policy.TookPartInCreation). It is the
+	// only entry `except` takes for now.
 	AllowedCreator = "creator"
 )
 

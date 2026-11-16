@@ -158,12 +158,23 @@ type ItemFacts struct {
 	CreatedBy, CreatedOnBehalfOf string
 }
 
-// IsCreator reports whether the principal is the Item's creator: its
-// effective user (on_behalf_of if set, else the actor) is the Item's
-// effective creator (created_on_behalf_of if set, else created_by). The
-// kernel's own actors (system:, hook:) never are. It is the one place this
-// is computed.
-func IsCreator(actor, onBehalfOf, createdBy, createdOnBehalfOf string) bool {
+// creator means two things, on purpose; these two functions are the only
+// places either is computed.
+//
+//   - In `allowed` it asks "is this the requester?": IsRequester. Narrow, so
+//     that only the person the Item is for (or an agent acting for them)
+//     may act as them.
+//   - In `except` it asks "did this principal take part in creating the
+//     Item?": TookPartInCreation. Wide, because `except` is separation of
+//     duties, and those rules must be conservative: an agent that created a
+//     request for ana must not complete it, whoever it acts for now.
+//
+// The kernel's own actors (system:, hook:) are neither: they create nothing.
+
+// IsRequester reports whether the principal is the requester: its effective
+// user (on_behalf_of if set, else the actor) is the Item's effective
+// creator (created_on_behalf_of if set, else created_by).
+func IsRequester(actor, onBehalfOf, createdBy, createdOnBehalfOf string) bool {
 	if item.IsKind(actor, item.KindSystem, item.KindHook) {
 		return false
 	}
@@ -171,26 +182,43 @@ func IsCreator(actor, onBehalfOf, createdBy, createdOnBehalfOf string) bool {
 	return user != "" && user == creator
 }
 
+// TookPartInCreation reports whether the principal took part in creating
+// the Item: its actor or its effective user is created_by or
+// created_on_behalf_of.
+func TookPartInCreation(actor, onBehalfOf, createdBy, createdOnBehalfOf string) bool {
+	if item.IsKind(actor, item.KindSystem, item.KindHook) {
+		return false
+	}
+	for _, who := range []string{actor, cmp.Or(onBehalfOf, actor)} {
+		if who != "" && (who == createdBy || who == createdOnBehalfOf) {
+			return true
+		}
+	}
+	return false
+}
+
 // MayTransition answers "may this principal make this move?" from the
 // transition's `allowed` and `except`. Whether the move is legal at all is
 // lifecycle's question, asked before.
 //
-//   - except: [creator] refuses the creator, whatever `allowed` says.
+//   - except: [creator] refuses anyone who took part in creating the Item
+//     (TookPartInCreation), whatever `allowed` says.
 //   - An empty `allowed` lets anyone in.
-//   - creator in `allowed` is judged once, for the principal as a whole:
-//     an agent acting for the creator matches.
+//   - creator in `allowed` is the requester (IsRequester), judged once for
+//     the principal as a whole: an agent acting for the requester matches.
 //   - Every other entry (role:, principal:, field:) is judged for the actor
 //     and for the user it acts for, and both must pass: an agent has its
 //     user's rights only where it also has its own.
 func MayTransition(tr typedef.Transition, who Who, it ItemFacts) bool {
-	creator := IsCreator(who.Actor, who.OnBehalfOf, it.CreatedBy, it.CreatedOnBehalfOf)
-	if creator && slices.Contains(tr.Except, typedef.AllowedCreator) {
+	if slices.Contains(tr.Except, typedef.AllowedCreator) &&
+		TookPartInCreation(who.Actor, who.OnBehalfOf, it.CreatedBy, it.CreatedOnBehalfOf) {
 		return false
 	}
 	if len(tr.Allowed) == 0 {
 		return true
 	}
-	if creator && slices.Contains(tr.Allowed, typedef.AllowedCreator) {
+	if slices.Contains(tr.Allowed, typedef.AllowedCreator) &&
+		IsRequester(who.Actor, who.OnBehalfOf, it.CreatedBy, it.CreatedOnBehalfOf) {
 		return true
 	}
 	if !AuthorizeTransitionOn(who.Actor, who.ActorRoles, tr, it.Fields) {
