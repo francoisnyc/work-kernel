@@ -285,6 +285,9 @@ func (t *Type) check() error {
 		default:
 			return fail("field %s: writable_by %q: the only value is kernel", f.ID, f.WritableBy)
 		}
+		if err := f.checkRoles(); err != nil {
+			return fail("%v", err)
+		}
 		switch f.Type {
 		case String, Int, Bool, Principal, Date:
 			if len(f.Options) > 0 {
@@ -338,6 +341,9 @@ func (t *Type) check() error {
 	}
 
 	if err := t.checkLinks(fail); err != nil {
+		return err
+	}
+	if err := t.checkKernelLinks(fail); err != nil {
 		return err
 	}
 	guards, err := newGuardEnv(t)
@@ -453,8 +459,18 @@ func (t *Type) check() error {
 	if err := t.checkHooks(); err != nil {
 		return err
 	}
-	// A field only the kernel writes needs a writer: a hook that writes it.
-	// (Link reactions will count too, when they exist.)
+	// Then what names hooks and fields: reactions, invariants, consents.
+	if err := t.checkReactions(fail); err != nil {
+		return err
+	}
+	if err := t.checkInvariants(fail); err != nil {
+		return err
+	}
+	if err := t.checkAccepts(fail); err != nil {
+		return err
+	}
+	// A field only the kernel writes needs a writer: a hook that writes it,
+	// or another Type's reaction this Type accepts for it.
 	for _, f := range t.Fields {
 		if f.WritableBy != WritableByKernel {
 			continue
