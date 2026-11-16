@@ -22,7 +22,7 @@ import (
 
 // filterOpts are the FILTERS flags, shared by item search and item list.
 type filterOpts struct {
-	types, states, categories, wheres listFlag
+	types, states, categories, wheres, links listFlag
 }
 
 func filterFlags(fs *flag.FlagSet) *filterOpts {
@@ -30,13 +30,14 @@ func filterFlags(fs *flag.FlagSet) *filterOpts {
 	fs.Var(&f.types, "type", "a Type (ticket) or its name, any version; repeatable")
 	fs.Var(&f.states, "state", "a state ID; repeatable")
 	fs.Var(&f.categories, "category", "a state category (active, done); repeatable")
-	fs.Var(&f.wheres, "where", "F=V, F>V, F>=V, F<V or F<=V on a field; repeatable")
+	fs.Var(&f.wheres, "where", "F=V, F>V, F>=V, F<V or F<=V on a field (on a principal field, V may be me); repeatable")
+	fs.Var(&f.links, "linked", "out:NAME=ITEM (Items that link to ITEM) or in:NAME=ITEM (Items ITEM links to, by the inverse name); repeatable")
 	return f
 }
 
 // filter builds the ItemFilter; nil when no flag was given.
 func (f *filterOpts) filter(ns string) (*kernelv1.ItemFilter, error) {
-	if len(f.types)+len(f.states)+len(f.categories)+len(f.wheres) == 0 {
+	if len(f.types)+len(f.states)+len(f.categories)+len(f.wheres)+len(f.links) == 0 {
 		return nil, nil
 	}
 	out := &kernelv1.ItemFilter{States: f.states}
@@ -59,6 +60,13 @@ func (f *filterOpts) filter(ns string) (*kernelv1.ItemFilter, error) {
 			return nil, err
 		}
 		out.Fields = append(out.Fields, ff)
+	}
+	for _, l := range f.links {
+		lf, err := linked(ns, l)
+		if err != nil {
+			return nil, err
+		}
+		out.Links = append(out.Links, lf)
 	}
 	return out, nil
 }

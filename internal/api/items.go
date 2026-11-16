@@ -91,6 +91,10 @@ func (s *server) view(ctx context.Context, p item.Principal, it item.Item) (*ker
 	if it.ContainerID != nil {
 		out.Container = itemName(p.Namespace, *it.ContainerID)
 	}
+	if len(it.Links) > 0 {
+		out.Links = linksOut(p.Namespace, it.Links)
+	}
+	out.LinksTruncated = it.LinksTruncated
 	if h := it.Hold; h != nil && h.Status == item.HoldOpen {
 		out.Hold = &kernelv1.Hold{
 			Name: holdName(name, h.ID), Check: h.Hook, FromState: h.From, RequestedState: h.To,

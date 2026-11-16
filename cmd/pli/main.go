@@ -10,12 +10,15 @@
 //	  item search [WORDS...] [--min-seq N] [FILTERS] [PAGING]
 //	  item list [ITEM] [FILTERS] [PAGING]           (no ITEM: the top level)
 //	  item history ITEM [PAGING]
+//	  item link SRC LINK_TYPE TARGET [--etag E] [--request-id ID]
+//	  item unlink SRC LINK_TYPE TARGET [--etag E] [--request-id ID]
 //	  type get TYPE
 //	  type list
 //	  agent start [--for USER] --scopes S,S --powers P,P
 //	  agent approve SESSION SCOPE [--expect-audience A] [--yes] [--request-id ID]  (run it --as the user who approves)
 //
 //	FILTERS: [--type TYPE]... [--state S]... [--category C]... [--where F=V|F>V|F>=V|F<V|F<=V]...
+//	         [--linked out:NAME=ITEM | in:NAME=ITEM]...
 //	PAGING:  [--page-size N] [--page-token T]
 //
 // --server, --tokens and --as default to PLI_SERVER (http://localhost:8080),
@@ -99,12 +102,15 @@ const usage = `usage: pli [--server URL] [--tokens FILE] --as NAME [--session ID
   item search [WORDS...] [--min-seq N] [FILTERS] [PAGING]
   item list [ITEM] [FILTERS] [PAGING]           (no ITEM: the top level)
   item history ITEM [PAGING]
+  item link SRC LINK_TYPE TARGET [--etag E] [--request-id ID]     (LINK_TYPE: the declared name)
+  item unlink SRC LINK_TYPE TARGET [--etag E] [--request-id ID]
   type get TYPE
   type list
   agent start [--for USER] --scopes S,S --powers P,P
   agent approve SESSION SCOPE [--expect-audience A] [--yes] [--request-id ID]  (run it --as the user who approves)
 
 FILTERS: [--type TYPE]... [--state S]... [--category C]... [--where F=V|F>V|F>=V|F<V|F<=V]...
+         [--linked out:NAME=ITEM | in:NAME=ITEM]...   (on a principal field, --where F=me is the caller)
 PAGING:  [--page-size N] [--page-token T]`
 
 // usageError is a wrong command line: exit 2, nothing sent.
@@ -177,6 +183,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		"item search":     c.itemSearch,
 		"item list":       c.itemList,
 		"item history":    c.itemHistory,
+		"item link":       c.itemLink,
+		"item unlink":     c.itemUnlink,
 		"agent start":     c.agentStart,
 		"agent approve":   c.agentApprove,
 		"type get":        c.typeGet,

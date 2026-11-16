@@ -19,7 +19,8 @@ import (
 type filter struct{ itemservice.Filter }
 
 func (f filter) empty() bool {
-	return len(f.TypeIDs) == 0 && len(f.States) == 0 && len(f.Categories) == 0 && len(f.Fields) == 0
+	return len(f.TypeIDs) == 0 && len(f.States) == 0 && len(f.Categories) == 0 && len(f.Fields) == 0 &&
+		len(f.Links) == 0
 }
 
 // parseTypeID reads a Type's name without a version: namespaces/{ns}/types/{type}.
@@ -101,6 +102,18 @@ func (s *server) filterIn(ctx context.Context, p item.Principal, f *kernelv1.Ite
 			*b.out = v
 		}
 		out.Fields = append(out.Fields, kf)
+	}
+	for i, lf := range f.Links {
+		path := "filter.links[" + strconv.Itoa(i) + "]"
+		id, cerr := inNamespace(p, lf.Item, path+".item")
+		if cerr != nil {
+			return out, cerr
+		}
+		// An unspecified direction reaches the kernel as none: it names the
+		// condition it refuses.
+		out.Links = append(out.Links, itemservice.LinkFilter{
+			LinkType: lf.LinkType, Direction: directionsIn[lf.Direction], ItemID: id,
+		})
 	}
 	return out, nil
 }
@@ -186,6 +199,8 @@ var eventKinds = map[string]kernelv1.ItemEventKind{
 	"transition_denied":    kernelv1.ItemEventKind_ITEM_EVENT_KIND_TRANSITION_DENIED,
 	"transition_failed":    kernelv1.ItemEventKind_ITEM_EVENT_KIND_TRANSITION_FAILED,
 	"hook_failed":          kernelv1.ItemEventKind_ITEM_EVENT_KIND_HOOK_FAILED,
+	"link_added":           kernelv1.ItemEventKind_ITEM_EVENT_KIND_LINK_ADDED,
+	"link_removed":         kernelv1.ItemEventKind_ITEM_EVENT_KIND_LINK_REMOVED,
 }
 
 func (s *server) ListItemEvents(ctx context.Context, req *connect.Request[kernelv1.ListItemEventsRequest]) (*connect.Response[kernelv1.ListItemEventsResponse], error) {
@@ -255,5 +270,6 @@ func eventOut(ns, item string, ty *typedef.Type, e itemservice.Event) (*kernelv1
 		return &kernelv1.ItemRef{Name: itemName(ns, r.ID)}
 	}
 	out.Container, out.ContainerFrom, out.ContainerTo = ref(e.Container), ref(e.ContainerFrom), ref(e.ContainerTo)
+	out.LinkType, out.LinkTarget = e.LinkType, ref(e.LinkTarget)
 	return out, nil
 }

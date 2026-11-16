@@ -44,6 +44,10 @@ var messages = map[string]string{
 	"HOP_LIMIT":           "the chain of kernel writes went too deep",
 	"WIDEN_NOT_CONFIRMED": "the move lets more people see; confirm it",
 	"AUDIENCE_CHANGED":    "the approval's audience changed since it was shown",
+	"LINK_CARDINALITY":    "that side of the link type already has its one link",
+	"ALREADY_LINKED":      "the link already exists",
+	"NOT_LINKED":          "there is no such link",
+	"LINK_TARGET_TYPE":    "the link type does not allow a target of that Type",
 }
 
 // ReasonMessage returns the one fixed message of an ErrorInfo reason, and
