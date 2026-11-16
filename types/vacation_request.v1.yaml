@@ -1,0 +1,71 @@
+# The vacation request (proof of concept, Step 2, part 1): a Bonita-style
+# approval as a business state, built from generic kernel primitives. Nothing
+# in the kernel is named "approval".
+#
+#   - draft -> submitted runs the HR check (hr.manager_of): it reads who the
+#     request is for (created_on_behalf_of, else created_by) and either
+#     corrects f_approver to their manager on the way into submitted, or
+#     denies (unknown_employee, no_eligible_approver).
+#   - f_approver is written by the kernel only: the public door refuses it.
+#   - The request's terms and its approver are frozen once submitted, and stay
+#     frozen once approved or rejected, so what was approved is what stands.
+#   - Who may act is declared, never written in CEL. `creator` is the user the
+#     request is for (the creator's on_behalf_of, else the creator), matched
+#     against the acting principal's user (its on_behalf_of, else itself).
+#     Submit, recall and withdraw are the creator's. The manager decides by an
+#     ordinary transition: allowed to whoever f_approver names, except the
+#     creator; an agent acting for the manager does not pass `allowed` (both
+#     it and its user must, and only user:<manager> does).
+#   - Guards keep the data rules: the dates and the days.
+#   - To change a pending request: recall it to draft, edit, submit again.
+id: vacation_request
+version: 1
+initial_state: draft
+
+fields:
+  - {id: f_start,      type: date}
+  - {id: f_end,        type: date}
+  - {id: f_days,       type: int}
+  - {id: f_leave_type, type: enum, options: [annual, unpaid, other]}
+  - {id: f_approver,   type: principal, writable_by: kernel}
+  - {id: f_comment,    type: string}
+
+states:
+  - {id: draft,     category: todo}
+  - id: submitted
+    category: waiting
+    frozen: [f_start, f_end, f_days, f_leave_type, f_approver]
+  - id: approved
+    category: done
+    frozen: [f_start, f_end, f_days, f_leave_type, f_approver]
+  - id: rejected
+    category: canceled
+    frozen: [f_start, f_end, f_days, f_leave_type, f_approver]
+  - {id: withdrawn, category: canceled}
+
+transitions:
+  # Submit: the requester's act; the terms make sense and the leave has not
+  # started.
+  - from: draft
+    to: submitted
+    allowed: [creator]
+    required: [f_start, f_end, f_days, f_leave_type]
+    guard: 'f_end >= f_start && f_start >= today && f_days > 0'
+  # The manager's decision: whoever f_approver names, never the requester.
+  - {from: submitted, to: approved, allowed: ['field:f_approver'], except: [creator]}
+  - {from: submitted, to: rejected, allowed: ['field:f_approver'], except: [creator]}
+  # The requester recalls a pending request to edit it, or withdraws it. A
+  # withdrawal from draft is an escape: it ends an open HR check.
+  - {from: submitted, to: draft,     allowed: [creator]}
+  - {from: submitted, to: withdrawn, allowed: [creator]}
+  - {from: draft,     to: withdrawn, allowed: [creator], escape: true}
+
+hooks:
+  - id: hr_check
+    on: transition
+    from: draft
+    to: submitted
+    kind: check
+    action: hr.manager_of
+    reads: [created_on_behalf_of, created_by]
+    writes: [f_approver]

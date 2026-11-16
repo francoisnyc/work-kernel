@@ -112,6 +112,15 @@ func (t *Type) checkHooks() error {
 				return fail("transition %s already has the check %q", name, other)
 			}
 			checked[name] = h.ID
+			// A check's correction is the transition's patch, applied by
+			// ResolveHold: like any patch of the transition, it may not
+			// write a field the transition's `allowed` names.
+			for _, id := range h.Writes {
+				if slices.Contains(tr.Allowed, AllowedFieldPrefix+id) {
+					return fail("it writes %s, which the transition's allowed names (field:%s): "+
+						"a transition's patch may not choose who may make it", id, id)
+				}
+			}
 			// The hold applies the requester's transition: `allowed` is
 			// checked against the requester. A hook named there could
 			// approve on its own authority.
@@ -128,11 +137,18 @@ func (t *Type) checkHooks() error {
 		if h.Action == "" {
 			return fail("no action")
 		}
-		for _, list := range [][]string{h.Reads, h.Writes} {
-			for _, id := range list {
-				if _, ok := t.Field(id); !ok {
-					return fail("field %q is not declared", id)
-				}
+		// A hook reads fields or the creator attributes; it writes fields only.
+		for _, id := range h.Reads {
+			if _, ok := t.Field(id); !ok && !IsAttribute(id) {
+				return fail("field %q is not declared", id)
+			}
+		}
+		for _, id := range h.Writes {
+			if IsAttribute(id) {
+				return fail("%q is set by the kernel at create: no hook writes it", id)
+			}
+			if _, ok := t.Field(id); !ok {
+				return fail("field %q is not declared", id)
 			}
 		}
 		if h.Kind == HookCheck && len(h.Reads) == 0 {

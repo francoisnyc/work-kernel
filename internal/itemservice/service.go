@@ -96,7 +96,8 @@ type Service struct {
 	pool         *pgxpool.Pool
 	types        *typedef.Cache // nil when Options.CacheTypes is false
 	writeTimeout time.Duration
-	maxWait      time.Duration // the longest Transition.Wait accepted
+	maxWait      time.Duration    // the longest Transition.Wait accepted
+	now          func() time.Time // the clock guards read today from
 }
 
 // DefaultWriteTimeout bounds every statement of a write. A write that waits
@@ -117,6 +118,9 @@ type Options struct {
 	// MaxWait caps TransitionRequest.Wait; zero means MaxWait (5 s). Tests
 	// set a short cap so they can test it without waiting 5 s.
 	MaxWait time.Duration
+	// Now is the clock guards read `today` from (as a UTC date); nil means
+	// time.Now. Tests set a fixed clock.
+	Now func() time.Time
 }
 
 // New returns a Service that uses the given connection pool, with the Type
@@ -127,7 +131,10 @@ func New(pool *pgxpool.Pool) *Service {
 
 // NewWithOptions returns a Service with the given options.
 func NewWithOptions(pool *pgxpool.Pool, opts Options) *Service {
-	k := &Service{pool: pool, writeTimeout: opts.WriteTimeout, maxWait: opts.MaxWait}
+	k := &Service{pool: pool, writeTimeout: opts.WriteTimeout, maxWait: opts.MaxWait, now: opts.Now}
+	if k.now == nil {
+		k.now = time.Now
+	}
 	if k.writeTimeout <= 0 {
 		k.writeTimeout = DefaultWriteTimeout
 	}
@@ -183,6 +190,10 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 	}
 	if err := ty.CheckFields(req.Fields, false); err != nil {
 		return WriteResult{}, fieldsInvalid(err)
+	}
+	// Create is the public door only: a kernel-written field is refused.
+	if err := checkPatch(ty, "", nil, req.Fields, true); err != nil {
+		return WriteResult{}, err
 	}
 	fields := req.Fields
 	if fields == nil {

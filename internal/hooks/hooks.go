@@ -44,6 +44,10 @@ type Result struct {
 // bad inputs, an unknown customer. Every other error is worth retrying.
 var ErrPermanent = errors.New("hooks: permanent failure")
 
+// errNotFound is a 404 from a connector: permanent, and an action may turn
+// it into an answer (HR does not know someone).
+var errNotFound = fmt.Errorf("%w: not found", ErrPermanent)
+
 // ErrKeyConflict is the connector saying that an idempotency key came back
 // with a different request. It is permanent too: errors.Is finds both.
 var ErrKeyConflict = fmt.Errorf("hooks: idempotency key used with a different request (%w)", ErrPermanent)
@@ -69,6 +73,7 @@ var catalog = map[string]action{
 	"erp.get_credit_status": {reads: 1, writes: 1, run: getCreditStatus},
 	"erp.check_credit":      {reads: 2, writes: 1, run: checkCredit},
 	"erp.create_invoice":    {reads: 2, writes: 1, sideEffect: true, run: createInvoice},
+	"hr.manager_of":         {reads: 2, writes: 1, run: managerOf},
 }
 
 // Arity reports how many reads and writes an action takes. ok is false for
@@ -78,10 +83,12 @@ func Arity(name string) (reads, writes int, ok bool) {
 	return a.reads, a.writes, ok
 }
 
-// Connectors calls the CRM and the ERP. In the product each would be a
-// Connection with its own credential; in the spike, a base URL.
+// Connectors calls the CRM, the ERP and the HR directory. In the product
+// each would be a Connection with its own credential; in the spike, a base
+// URL.
 type Connectors struct {
 	crm, erp string
+	hr       string // the HR directory; set with WithHR
 	http     *http.Client
 	noKeys   bool // the control run: never send the idempotency key
 }
@@ -91,6 +98,13 @@ func NewConnectors(crmURL, erpURL string) *Connectors {
 	// No client timeout: every call follows its context's deadline, which
 	// the activity sets.
 	return &Connectors{crm: crmURL, erp: erpURL, http: &http.Client{}}
+}
+
+// WithHR returns connectors that also call the HR directory at this base URL.
+func (c *Connectors) WithHR(hrURL string) *Connectors {
+	withHR := *c
+	withHR.hr = hrURL
+	return &withHR
 }
 
 // WithoutKeys returns connectors that never send an idempotency key. It is
@@ -218,6 +232,52 @@ func createInvoice(ctx context.Context, c *Connectors, key string, args []any) (
 	return Result{Values: []any{body.InvoiceID}}, nil
 }
 
+// managerOf is the HR check. It reads who the request was created for and
+// who created it (created_on_behalf_of, created_by): the requester is the
+// first if set, else the second. It answers correct with the requester's
+// manager (for the hook's one write, the approver), or deny:
+// unknown_employee when HR does not know the requester (an agent acting for
+// itself included), no_eligible_approver when the requester manages
+// themselves. The manager is HR's data; who may approve stays the Type's
+// rule (except: [creator]).
+func managerOf(ctx context.Context, c *Connectors, _ string, args []any) (Result, error) {
+	if c.hr == "" {
+		return Result{}, permanent("hr.manager_of: no HR directory is configured")
+	}
+	onBehalfOf, ok := args[0].(string)
+	if args[0] != nil && !ok {
+		return Result{}, permanent("hr.manager_of: created_on_behalf_of must be a principal ID")
+	}
+	createdBy, ok := args[1].(string)
+	if args[1] != nil && !ok {
+		return Result{}, permanent("hr.manager_of: created_by must be a principal ID")
+	}
+	requester := onBehalfOf
+	if requester == "" {
+		requester = createdBy
+	}
+	if requester == "" {
+		return Result{}, permanent("hr.manager_of: no requester")
+	}
+	var body struct {
+		Manager string `json:"manager"`
+	}
+	err := c.call(ctx, "", http.MethodGet, c.hr+"/employees/"+url.PathEscape(requester)+"/manager", nil, &body)
+	if errors.Is(err, errNotFound) {
+		return Result{Verdict: Deny, Reason: "unknown_employee"}, nil
+	}
+	if err != nil {
+		return Result{}, err
+	}
+	if body.Manager == "" {
+		return Result{}, errors.New("hr.manager_of: the answer names no manager")
+	}
+	if body.Manager == requester {
+		return Result{Verdict: Deny, Reason: "no_eligible_approver"}, nil
+	}
+	return Result{Verdict: Correct, Values: []any{body.Manager}}, nil
+}
+
 // --- plumbing ---
 
 // call sends one request and decodes the JSON answer. 400 and 404 are
@@ -248,7 +308,9 @@ func (c *Connectors) call(ctx context.Context, key, method, target string, in, o
 	switch {
 	case resp.StatusCode == http.StatusConflict:
 		return fmt.Errorf("%w: %s %s", ErrKeyConflict, method, req.URL.Path)
-	case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusBadRequest:
+	case resp.StatusCode == http.StatusNotFound:
+		return fmt.Errorf("%w: %s %s", errNotFound, method, req.URL.Path)
+	case resp.StatusCode == http.StatusBadRequest:
 		return permanent("%s %s: %s", method, req.URL.Path, resp.Status)
 	case resp.StatusCode != http.StatusOK:
 		return fmt.Errorf("%s %s: %s", method, req.URL.Path, resp.Status)

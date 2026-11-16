@@ -23,8 +23,9 @@ docker compose up -d --build --wait     # or: make up
 ```
 
 This builds the images and starts Postgres, the Temporal dev server, a one-shot
-migration, the item service (the API), the relay, the worker, and stub CRM and
-ERP servers (`connstub`) for the ticket's hooks. `--wait` returns once every
+migration, the item service (the API), the relay, the worker, and stub CRM,
+ERP and HR directory servers (`connstub`) for the ticket's and the vacation
+request's hooks. `--wait` returns once every
 service is healthy. Two ports are published:
 
 - `http://localhost:8080`: the public API (Connect, gRPC and gRPC-Web).
@@ -38,7 +39,8 @@ service is healthy. Two ports are published:
   the public API on 8080. Its health check asks `/healthz`, which answers 200
   while the database answers (it is outside the API contract).
 - **relay** delivers the outbox (what changed) to Temporal; **worker** runs the
-  Item workflows and their hooks, which call **connstub**'s CRM and ERP and
+  Item workflows and their hooks, which call **connstub**'s CRM, ERP and HR
+  directory (`deploy/hr-directory.json`) and
   write back through the item service. The relay and the worker have no health
   check: they serve no port and nothing waits on them; they start once
   Postgres, Temporal (and, for the worker, connstub) are healthy.
@@ -130,9 +132,11 @@ make scenario      # starts the stack if needed, then runs scripts/scenario.sh
 
 [`scripts/scenario.sh`](scripts/scenario.sh) is the walkthrough made thorough,
 and the proof of concept's end-to-end test (CI runs it on every pull request):
-two users, every refusal of the error table a client can cause (each code and
-reason checked), an agent in capability mode, and every operation across
-namespaces. It drives only `pli`, keeps its saved sessions in a temporary
+users, every refusal of the error table a client can cause (each code and
+reason checked), an agent in capability mode, every operation across
+namespaces, and a vacation request from draft to approved or rejected (the
+approver set by the HR check, the terms frozen, no self-approval, agents
+unable to approve). It drives only `pli`, keeps its saved sessions in a temporary
 `XDG_CONFIG_HOME`, cleans up after itself, and stops at the first wrong
 outcome, naming the step. It can run any number of times on the same stack.
 

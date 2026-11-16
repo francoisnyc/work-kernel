@@ -234,6 +234,57 @@ func (ItemEventKind) EnumDescriptor() ([]byte, []int) {
 	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{2}
 }
 
+// Who may write a field.
+type FieldWriter int32
+
+const (
+	// Anyone who may write the Item, through the public API.
+	FieldWriter_FIELD_WRITER_UNSPECIFIED FieldWriter = 0
+	// Only the kernel (hooks, through the internal door): the public API
+	// refuses it on create, update and a transition's patch
+	// (PERMISSION_DENIED / FIELD_NOT_WRITABLE).
+	FieldWriter_FIELD_WRITER_KERNEL FieldWriter = 1
+)
+
+// Enum value maps for FieldWriter.
+var (
+	FieldWriter_name = map[int32]string{
+		0: "FIELD_WRITER_UNSPECIFIED",
+		1: "FIELD_WRITER_KERNEL",
+	}
+	FieldWriter_value = map[string]int32{
+		"FIELD_WRITER_UNSPECIFIED": 0,
+		"FIELD_WRITER_KERNEL":      1,
+	}
+)
+
+func (x FieldWriter) Enum() *FieldWriter {
+	p := new(FieldWriter)
+	*p = x
+	return p
+}
+
+func (x FieldWriter) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (FieldWriter) Descriptor() protoreflect.EnumDescriptor {
+	return file_kernel_v1_kernel_proto_enumTypes[3].Descriptor()
+}
+
+func (FieldWriter) Type() protoreflect.EnumType {
+	return &file_kernel_v1_kernel_proto_enumTypes[3]
+}
+
+func (x FieldWriter) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use FieldWriter.Descriptor instead.
+func (FieldWriter) EnumDescriptor() ([]byte, []int) {
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{3}
+}
+
 type FieldType int32
 
 const (
@@ -244,6 +295,8 @@ const (
 	FieldType_FIELD_TYPE_ENUM        FieldType = 4
 	// A principal: user:<id> or agent:<id>. It grants nothing.
 	FieldType_FIELD_TYPE_PRINCIPAL FieldType = 5
+	// A calendar date, as an ISO 8601 string: 2026-12-01.
+	FieldType_FIELD_TYPE_DATE FieldType = 6
 )
 
 // Enum value maps for FieldType.
@@ -255,6 +308,7 @@ var (
 		3: "FIELD_TYPE_BOOL",
 		4: "FIELD_TYPE_ENUM",
 		5: "FIELD_TYPE_PRINCIPAL",
+		6: "FIELD_TYPE_DATE",
 	}
 	FieldType_value = map[string]int32{
 		"FIELD_TYPE_UNSPECIFIED": 0,
@@ -263,6 +317,7 @@ var (
 		"FIELD_TYPE_BOOL":        3,
 		"FIELD_TYPE_ENUM":        4,
 		"FIELD_TYPE_PRINCIPAL":   5,
+		"FIELD_TYPE_DATE":        6,
 	}
 )
 
@@ -277,11 +332,11 @@ func (x FieldType) String() string {
 }
 
 func (FieldType) Descriptor() protoreflect.EnumDescriptor {
-	return file_kernel_v1_kernel_proto_enumTypes[3].Descriptor()
+	return file_kernel_v1_kernel_proto_enumTypes[4].Descriptor()
 }
 
 func (FieldType) Type() protoreflect.EnumType {
-	return &file_kernel_v1_kernel_proto_enumTypes[3]
+	return &file_kernel_v1_kernel_proto_enumTypes[4]
 }
 
 func (x FieldType) Number() protoreflect.EnumNumber {
@@ -290,7 +345,7 @@ func (x FieldType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use FieldType.Descriptor instead.
 func (FieldType) EnumDescriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{3}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{4}
 }
 
 type StateCategory int32
@@ -345,11 +400,11 @@ func (x StateCategory) String() string {
 }
 
 func (StateCategory) Descriptor() protoreflect.EnumDescriptor {
-	return file_kernel_v1_kernel_proto_enumTypes[4].Descriptor()
+	return file_kernel_v1_kernel_proto_enumTypes[5].Descriptor()
 }
 
 func (StateCategory) Type() protoreflect.EnumType {
-	return &file_kernel_v1_kernel_proto_enumTypes[4]
+	return &file_kernel_v1_kernel_proto_enumTypes[5]
 }
 
 func (x StateCategory) Number() protoreflect.EnumNumber {
@@ -358,7 +413,7 @@ func (x StateCategory) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use StateCategory.Descriptor instead.
 func (StateCategory) EnumDescriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{4}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{5}
 }
 
 // An Item as the caller may see it.
@@ -2924,7 +2979,9 @@ type Field struct {
 	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Type  FieldType              `protobuf:"varint,2,opt,name=type,proto3,enum=kernel.v1.FieldType" json:"type,omitempty"`
 	// Enum fields only: the allowed names.
-	Options       []string `protobuf:"bytes,3,rep,name=options,proto3" json:"options,omitempty"`
+	Options []string `protobuf:"bytes,3,rep,name=options,proto3" json:"options,omitempty"`
+	// Who may write the field. UNSPECIFIED: anyone who may write the Item.
+	WritableBy    FieldWriter `protobuf:"varint,4,opt,name=writable_by,json=writableBy,proto3,enum=kernel.v1.FieldWriter" json:"writable_by,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2980,10 +3037,21 @@ func (x *Field) GetOptions() []string {
 	return nil
 }
 
+func (x *Field) GetWritableBy() FieldWriter {
+	if x != nil {
+		return x.WritableBy
+	}
+	return FieldWriter_FIELD_WRITER_UNSPECIFIED
+}
+
 type State struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Category      StateCategory          `protobuf:"varint,2,opt,name=category,proto3,enum=kernel.v1.StateCategory" json:"category,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Id       string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Category StateCategory          `protobuf:"varint,2,opt,name=category,proto3,enum=kernel.v1.StateCategory" json:"category,omitempty"`
+	// Field IDs no write may change while an Item is in this state
+	// (FAILED_PRECONDITION / FIELD_FROZEN). The transition entering the state
+	// may set them.
+	Frozen        []string `protobuf:"bytes,3,rep,name=frozen,proto3" json:"frozen,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3032,6 +3100,13 @@ func (x *State) GetCategory() StateCategory {
 	return StateCategory_STATE_CATEGORY_UNSPECIFIED
 }
 
+func (x *State) GetFrozen() []string {
+	if x != nil {
+		return x.Frozen
+	}
+	return nil
+}
+
 type Transition struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	FromState string                 `protobuf:"bytes,1,opt,name=from_state,json=fromState,proto3" json:"from_state,omitempty"`
@@ -3040,14 +3115,19 @@ type Transition struct {
 	Guard string `protobuf:"bytes,3,opt,name=guard,proto3" json:"guard,omitempty"`
 	// Field IDs that must be set.
 	Required []string `protobuf:"bytes,4,rep,name=required,proto3" json:"required,omitempty"`
-	// Who may make the move: role:<name> or principal:<id>. Empty: anyone who
-	// can see the Item.
+	// Who may make the move: role:<name>, principal:<id>, field:<id> (the
+	// principal a principal field holds when the move is made), or creator
+	// (the user the Item was created for, or an agent acting for them).
+	// Empty: anyone who can see the Item.
 	Allowed []string `protobuf:"bytes,5,rep,name=allowed,proto3" json:"allowed,omitempty"`
 	// May leave a state while a hold is open on it (it cancels the hold).
 	Escape bool `protobuf:"varint,6,opt,name=escape,proto3" json:"escape,omitempty"`
 	// A check runs before the move is applied: the transition is held, and
 	// TransitionItemRequest.wait matters.
-	Checked       bool `protobuf:"varint,7,opt,name=checked,proto3" json:"checked,omitempty"`
+	Checked bool `protobuf:"varint,7,opt,name=checked,proto3" json:"checked,omitempty"`
+	// Who may not make the move, even if `allowed` names them: for now only
+	// creator.
+	Except        []string `protobuf:"bytes,8,rep,name=except,proto3" json:"except,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3129,6 +3209,13 @@ func (x *Transition) GetChecked() bool {
 		return x.Checked
 	}
 	return false
+}
+
+func (x *Transition) GetExcept() []string {
+	if x != nil {
+		return x.Except
+	}
+	return nil
 }
 
 type GetTypeRequest struct {
@@ -3808,14 +3895,17 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\ainverse\x18\x02 \x01(\tR\ainverse\x12\x18\n" +
 	"\atargets\x18\x03 \x03(\tR\atargets\x12\x17\n" +
 	"\amax_one\x18\x04 \x01(\bR\x06maxOne\x12&\n" +
-	"\x0finverse_max_one\x18\x05 \x01(\bR\rinverseMaxOne\"[\n" +
+	"\x0finverse_max_one\x18\x05 \x01(\bR\rinverseMaxOne\"\x94\x01\n" +
 	"\x05Field\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12(\n" +
 	"\x04type\x18\x02 \x01(\x0e2\x14.kernel.v1.FieldTypeR\x04type\x12\x18\n" +
-	"\aoptions\x18\x03 \x03(\tR\aoptions\"M\n" +
+	"\aoptions\x18\x03 \x03(\tR\aoptions\x127\n" +
+	"\vwritable_by\x18\x04 \x01(\x0e2\x16.kernel.v1.FieldWriterR\n" +
+	"writableBy\"e\n" +
 	"\x05State\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x124\n" +
-	"\bcategory\x18\x02 \x01(\x0e2\x18.kernel.v1.StateCategoryR\bcategory\"\xc4\x01\n" +
+	"\bcategory\x18\x02 \x01(\x0e2\x18.kernel.v1.StateCategoryR\bcategory\x12\x16\n" +
+	"\x06frozen\x18\x03 \x03(\tR\x06frozen\"\xdc\x01\n" +
 	"\n" +
 	"Transition\x12\x1d\n" +
 	"\n" +
@@ -3825,7 +3915,8 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\brequired\x18\x04 \x03(\tR\brequired\x12\x18\n" +
 	"\aallowed\x18\x05 \x03(\tR\aallowed\x12\x16\n" +
 	"\x06escape\x18\x06 \x01(\bR\x06escape\x12\x18\n" +
-	"\achecked\x18\a \x01(\bR\achecked\"$\n" +
+	"\achecked\x18\a \x01(\bR\achecked\x12\x16\n" +
+	"\x06except\x18\b \x03(\tR\x06except\"$\n" +
 	"\x0eGetTypeRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\"6\n" +
 	"\x0fGetTypeResponse\x12#\n" +
@@ -3878,14 +3969,18 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"!ITEM_EVENT_KIND_TRANSITION_FAILED\x10\x06\x12\x1f\n" +
 	"\x1bITEM_EVENT_KIND_HOOK_FAILED\x10\a\x12\x1e\n" +
 	"\x1aITEM_EVENT_KIND_LINK_ADDED\x10\b\x12 \n" +
-	"\x1cITEM_EVENT_KIND_LINK_REMOVED\x10\t*\x96\x01\n" +
+	"\x1cITEM_EVENT_KIND_LINK_REMOVED\x10\t*D\n" +
+	"\vFieldWriter\x12\x1c\n" +
+	"\x18FIELD_WRITER_UNSPECIFIED\x10\x00\x12\x17\n" +
+	"\x13FIELD_WRITER_KERNEL\x10\x01*\xab\x01\n" +
 	"\tFieldType\x12\x1a\n" +
 	"\x16FIELD_TYPE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11FIELD_TYPE_STRING\x10\x01\x12\x12\n" +
 	"\x0eFIELD_TYPE_INT\x10\x02\x12\x13\n" +
 	"\x0fFIELD_TYPE_BOOL\x10\x03\x12\x13\n" +
 	"\x0fFIELD_TYPE_ENUM\x10\x04\x12\x18\n" +
-	"\x14FIELD_TYPE_PRINCIPAL\x10\x05*\x85\x02\n" +
+	"\x14FIELD_TYPE_PRINCIPAL\x10\x05\x12\x13\n" +
+	"\x0fFIELD_TYPE_DATE\x10\x06*\x85\x02\n" +
 	"\rStateCategory\x12\x1e\n" +
 	"\x1aSTATE_CATEGORY_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15STATE_CATEGORY_TRIAGE\x10\x01\x12\x1a\n" +
@@ -3925,147 +4020,149 @@ func file_kernel_v1_kernel_proto_rawDescGZIP() []byte {
 	return file_kernel_v1_kernel_proto_rawDescData
 }
 
-var file_kernel_v1_kernel_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
+var file_kernel_v1_kernel_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
 var file_kernel_v1_kernel_proto_msgTypes = make([]protoimpl.MessageInfo, 43)
 var file_kernel_v1_kernel_proto_goTypes = []any{
 	(LinkDirection)(0),                // 0: kernel.v1.LinkDirection
 	(TransitionOutcome)(0),            // 1: kernel.v1.TransitionOutcome
 	(ItemEventKind)(0),                // 2: kernel.v1.ItemEventKind
-	(FieldType)(0),                    // 3: kernel.v1.FieldType
-	(StateCategory)(0),                // 4: kernel.v1.StateCategory
-	(*Item)(nil),                      // 5: kernel.v1.Item
-	(*Link)(nil),                      // 6: kernel.v1.Link
-	(*ItemRef)(nil),                   // 7: kernel.v1.ItemRef
-	(*Hold)(nil),                      // 8: kernel.v1.Hold
-	(*Readers)(nil),                   // 9: kernel.v1.Readers
-	(*CreateItemRequest)(nil),         // 10: kernel.v1.CreateItemRequest
-	(*CreateItemResponse)(nil),        // 11: kernel.v1.CreateItemResponse
-	(*GetItemRequest)(nil),            // 12: kernel.v1.GetItemRequest
-	(*GetItemResponse)(nil),           // 13: kernel.v1.GetItemResponse
-	(*UpdateItemRequest)(nil),         // 14: kernel.v1.UpdateItemRequest
-	(*PolicyChange)(nil),              // 15: kernel.v1.PolicyChange
-	(*Move)(nil),                      // 16: kernel.v1.Move
-	(*UpdateItemResponse)(nil),        // 17: kernel.v1.UpdateItemResponse
-	(*TransitionItemRequest)(nil),     // 18: kernel.v1.TransitionItemRequest
-	(*TransitionItemResponse)(nil),    // 19: kernel.v1.TransitionItemResponse
-	(*SearchItemsRequest)(nil),        // 20: kernel.v1.SearchItemsRequest
-	(*SearchItemsResponse)(nil),       // 21: kernel.v1.SearchItemsResponse
-	(*ItemFilter)(nil),                // 22: kernel.v1.ItemFilter
-	(*LinkFilter)(nil),                // 23: kernel.v1.LinkFilter
-	(*FieldFilter)(nil),               // 24: kernel.v1.FieldFilter
-	(*ListItemsRequest)(nil),          // 25: kernel.v1.ListItemsRequest
-	(*ListItemsResponse)(nil),         // 26: kernel.v1.ListItemsResponse
-	(*ListItemEventsRequest)(nil),     // 27: kernel.v1.ListItemEventsRequest
-	(*ListItemEventsResponse)(nil),    // 28: kernel.v1.ListItemEventsResponse
-	(*ItemEvent)(nil),                 // 29: kernel.v1.ItemEvent
-	(*StartAgentSessionRequest)(nil),  // 30: kernel.v1.StartAgentSessionRequest
-	(*StartAgentSessionResponse)(nil), // 31: kernel.v1.StartAgentSessionResponse
-	(*AgentSession)(nil),              // 32: kernel.v1.AgentSession
-	(*ApproveWidenRequest)(nil),       // 33: kernel.v1.ApproveWidenRequest
-	(*ApproveWidenResponse)(nil),      // 34: kernel.v1.ApproveWidenResponse
-	(*Type)(nil),                      // 35: kernel.v1.Type
-	(*LinkType)(nil),                  // 36: kernel.v1.LinkType
-	(*Field)(nil),                     // 37: kernel.v1.Field
-	(*State)(nil),                     // 38: kernel.v1.State
-	(*Transition)(nil),                // 39: kernel.v1.Transition
-	(*GetTypeRequest)(nil),            // 40: kernel.v1.GetTypeRequest
-	(*GetTypeResponse)(nil),           // 41: kernel.v1.GetTypeResponse
-	(*ListTypesRequest)(nil),          // 42: kernel.v1.ListTypesRequest
-	(*ListTypesResponse)(nil),         // 43: kernel.v1.ListTypesResponse
-	(*LinkItemsRequest)(nil),          // 44: kernel.v1.LinkItemsRequest
-	(*LinkItemsResponse)(nil),         // 45: kernel.v1.LinkItemsResponse
-	(*UnlinkItemsRequest)(nil),        // 46: kernel.v1.UnlinkItemsRequest
-	(*UnlinkItemsResponse)(nil),       // 47: kernel.v1.UnlinkItemsResponse
-	(*structpb.Struct)(nil),           // 48: google.protobuf.Struct
-	(*timestamppb.Timestamp)(nil),     // 49: google.protobuf.Timestamp
-	(*durationpb.Duration)(nil),       // 50: google.protobuf.Duration
-	(*structpb.Value)(nil),            // 51: google.protobuf.Value
+	(FieldWriter)(0),                  // 3: kernel.v1.FieldWriter
+	(FieldType)(0),                    // 4: kernel.v1.FieldType
+	(StateCategory)(0),                // 5: kernel.v1.StateCategory
+	(*Item)(nil),                      // 6: kernel.v1.Item
+	(*Link)(nil),                      // 7: kernel.v1.Link
+	(*ItemRef)(nil),                   // 8: kernel.v1.ItemRef
+	(*Hold)(nil),                      // 9: kernel.v1.Hold
+	(*Readers)(nil),                   // 10: kernel.v1.Readers
+	(*CreateItemRequest)(nil),         // 11: kernel.v1.CreateItemRequest
+	(*CreateItemResponse)(nil),        // 12: kernel.v1.CreateItemResponse
+	(*GetItemRequest)(nil),            // 13: kernel.v1.GetItemRequest
+	(*GetItemResponse)(nil),           // 14: kernel.v1.GetItemResponse
+	(*UpdateItemRequest)(nil),         // 15: kernel.v1.UpdateItemRequest
+	(*PolicyChange)(nil),              // 16: kernel.v1.PolicyChange
+	(*Move)(nil),                      // 17: kernel.v1.Move
+	(*UpdateItemResponse)(nil),        // 18: kernel.v1.UpdateItemResponse
+	(*TransitionItemRequest)(nil),     // 19: kernel.v1.TransitionItemRequest
+	(*TransitionItemResponse)(nil),    // 20: kernel.v1.TransitionItemResponse
+	(*SearchItemsRequest)(nil),        // 21: kernel.v1.SearchItemsRequest
+	(*SearchItemsResponse)(nil),       // 22: kernel.v1.SearchItemsResponse
+	(*ItemFilter)(nil),                // 23: kernel.v1.ItemFilter
+	(*LinkFilter)(nil),                // 24: kernel.v1.LinkFilter
+	(*FieldFilter)(nil),               // 25: kernel.v1.FieldFilter
+	(*ListItemsRequest)(nil),          // 26: kernel.v1.ListItemsRequest
+	(*ListItemsResponse)(nil),         // 27: kernel.v1.ListItemsResponse
+	(*ListItemEventsRequest)(nil),     // 28: kernel.v1.ListItemEventsRequest
+	(*ListItemEventsResponse)(nil),    // 29: kernel.v1.ListItemEventsResponse
+	(*ItemEvent)(nil),                 // 30: kernel.v1.ItemEvent
+	(*StartAgentSessionRequest)(nil),  // 31: kernel.v1.StartAgentSessionRequest
+	(*StartAgentSessionResponse)(nil), // 32: kernel.v1.StartAgentSessionResponse
+	(*AgentSession)(nil),              // 33: kernel.v1.AgentSession
+	(*ApproveWidenRequest)(nil),       // 34: kernel.v1.ApproveWidenRequest
+	(*ApproveWidenResponse)(nil),      // 35: kernel.v1.ApproveWidenResponse
+	(*Type)(nil),                      // 36: kernel.v1.Type
+	(*LinkType)(nil),                  // 37: kernel.v1.LinkType
+	(*Field)(nil),                     // 38: kernel.v1.Field
+	(*State)(nil),                     // 39: kernel.v1.State
+	(*Transition)(nil),                // 40: kernel.v1.Transition
+	(*GetTypeRequest)(nil),            // 41: kernel.v1.GetTypeRequest
+	(*GetTypeResponse)(nil),           // 42: kernel.v1.GetTypeResponse
+	(*ListTypesRequest)(nil),          // 43: kernel.v1.ListTypesRequest
+	(*ListTypesResponse)(nil),         // 44: kernel.v1.ListTypesResponse
+	(*LinkItemsRequest)(nil),          // 45: kernel.v1.LinkItemsRequest
+	(*LinkItemsResponse)(nil),         // 46: kernel.v1.LinkItemsResponse
+	(*UnlinkItemsRequest)(nil),        // 47: kernel.v1.UnlinkItemsRequest
+	(*UnlinkItemsResponse)(nil),       // 48: kernel.v1.UnlinkItemsResponse
+	(*structpb.Struct)(nil),           // 49: google.protobuf.Struct
+	(*timestamppb.Timestamp)(nil),     // 50: google.protobuf.Timestamp
+	(*durationpb.Duration)(nil),       // 51: google.protobuf.Duration
+	(*structpb.Value)(nil),            // 52: google.protobuf.Value
 }
 var file_kernel_v1_kernel_proto_depIdxs = []int32{
-	48, // 0: kernel.v1.Item.fields:type_name -> google.protobuf.Struct
-	8,  // 1: kernel.v1.Item.hold:type_name -> kernel.v1.Hold
-	49, // 2: kernel.v1.Item.create_time:type_name -> google.protobuf.Timestamp
-	4,  // 3: kernel.v1.Item.category:type_name -> kernel.v1.StateCategory
-	6,  // 4: kernel.v1.Item.links:type_name -> kernel.v1.Link
+	49, // 0: kernel.v1.Item.fields:type_name -> google.protobuf.Struct
+	9,  // 1: kernel.v1.Item.hold:type_name -> kernel.v1.Hold
+	50, // 2: kernel.v1.Item.create_time:type_name -> google.protobuf.Timestamp
+	5,  // 3: kernel.v1.Item.category:type_name -> kernel.v1.StateCategory
+	7,  // 4: kernel.v1.Item.links:type_name -> kernel.v1.Link
 	0,  // 5: kernel.v1.Link.direction:type_name -> kernel.v1.LinkDirection
-	7,  // 6: kernel.v1.Link.item:type_name -> kernel.v1.ItemRef
-	48, // 7: kernel.v1.CreateItemRequest.fields:type_name -> google.protobuf.Struct
-	9,  // 8: kernel.v1.CreateItemRequest.narrow:type_name -> kernel.v1.Readers
-	5,  // 9: kernel.v1.CreateItemResponse.item:type_name -> kernel.v1.Item
-	5,  // 10: kernel.v1.GetItemResponse.item:type_name -> kernel.v1.Item
-	48, // 11: kernel.v1.UpdateItemRequest.fields:type_name -> google.protobuf.Struct
-	15, // 12: kernel.v1.UpdateItemRequest.policy:type_name -> kernel.v1.PolicyChange
-	16, // 13: kernel.v1.UpdateItemRequest.move:type_name -> kernel.v1.Move
-	9,  // 14: kernel.v1.PolicyChange.narrow:type_name -> kernel.v1.Readers
-	5,  // 15: kernel.v1.UpdateItemResponse.item:type_name -> kernel.v1.Item
-	48, // 16: kernel.v1.TransitionItemRequest.fields:type_name -> google.protobuf.Struct
-	50, // 17: kernel.v1.TransitionItemRequest.wait:type_name -> google.protobuf.Duration
-	5,  // 18: kernel.v1.TransitionItemResponse.item:type_name -> kernel.v1.Item
+	8,  // 6: kernel.v1.Link.item:type_name -> kernel.v1.ItemRef
+	49, // 7: kernel.v1.CreateItemRequest.fields:type_name -> google.protobuf.Struct
+	10, // 8: kernel.v1.CreateItemRequest.narrow:type_name -> kernel.v1.Readers
+	6,  // 9: kernel.v1.CreateItemResponse.item:type_name -> kernel.v1.Item
+	6,  // 10: kernel.v1.GetItemResponse.item:type_name -> kernel.v1.Item
+	49, // 11: kernel.v1.UpdateItemRequest.fields:type_name -> google.protobuf.Struct
+	16, // 12: kernel.v1.UpdateItemRequest.policy:type_name -> kernel.v1.PolicyChange
+	17, // 13: kernel.v1.UpdateItemRequest.move:type_name -> kernel.v1.Move
+	10, // 14: kernel.v1.PolicyChange.narrow:type_name -> kernel.v1.Readers
+	6,  // 15: kernel.v1.UpdateItemResponse.item:type_name -> kernel.v1.Item
+	49, // 16: kernel.v1.TransitionItemRequest.fields:type_name -> google.protobuf.Struct
+	51, // 17: kernel.v1.TransitionItemRequest.wait:type_name -> google.protobuf.Duration
+	6,  // 18: kernel.v1.TransitionItemResponse.item:type_name -> kernel.v1.Item
 	1,  // 19: kernel.v1.TransitionItemResponse.outcome:type_name -> kernel.v1.TransitionOutcome
-	22, // 20: kernel.v1.SearchItemsRequest.filter:type_name -> kernel.v1.ItemFilter
-	5,  // 21: kernel.v1.SearchItemsResponse.items:type_name -> kernel.v1.Item
-	4,  // 22: kernel.v1.ItemFilter.categories:type_name -> kernel.v1.StateCategory
-	24, // 23: kernel.v1.ItemFilter.fields:type_name -> kernel.v1.FieldFilter
-	23, // 24: kernel.v1.ItemFilter.links:type_name -> kernel.v1.LinkFilter
+	23, // 20: kernel.v1.SearchItemsRequest.filter:type_name -> kernel.v1.ItemFilter
+	6,  // 21: kernel.v1.SearchItemsResponse.items:type_name -> kernel.v1.Item
+	5,  // 22: kernel.v1.ItemFilter.categories:type_name -> kernel.v1.StateCategory
+	25, // 23: kernel.v1.ItemFilter.fields:type_name -> kernel.v1.FieldFilter
+	24, // 24: kernel.v1.ItemFilter.links:type_name -> kernel.v1.LinkFilter
 	0,  // 25: kernel.v1.LinkFilter.direction:type_name -> kernel.v1.LinkDirection
-	51, // 26: kernel.v1.FieldFilter.eq:type_name -> google.protobuf.Value
-	51, // 27: kernel.v1.FieldFilter.gt:type_name -> google.protobuf.Value
-	51, // 28: kernel.v1.FieldFilter.gte:type_name -> google.protobuf.Value
-	51, // 29: kernel.v1.FieldFilter.lt:type_name -> google.protobuf.Value
-	51, // 30: kernel.v1.FieldFilter.lte:type_name -> google.protobuf.Value
-	22, // 31: kernel.v1.ListItemsRequest.filter:type_name -> kernel.v1.ItemFilter
-	5,  // 32: kernel.v1.ListItemsResponse.items:type_name -> kernel.v1.Item
-	29, // 33: kernel.v1.ListItemEventsResponse.events:type_name -> kernel.v1.ItemEvent
+	52, // 26: kernel.v1.FieldFilter.eq:type_name -> google.protobuf.Value
+	52, // 27: kernel.v1.FieldFilter.gt:type_name -> google.protobuf.Value
+	52, // 28: kernel.v1.FieldFilter.gte:type_name -> google.protobuf.Value
+	52, // 29: kernel.v1.FieldFilter.lt:type_name -> google.protobuf.Value
+	52, // 30: kernel.v1.FieldFilter.lte:type_name -> google.protobuf.Value
+	23, // 31: kernel.v1.ListItemsRequest.filter:type_name -> kernel.v1.ItemFilter
+	6,  // 32: kernel.v1.ListItemsResponse.items:type_name -> kernel.v1.Item
+	30, // 33: kernel.v1.ListItemEventsResponse.events:type_name -> kernel.v1.ItemEvent
 	2,  // 34: kernel.v1.ItemEvent.kind:type_name -> kernel.v1.ItemEventKind
-	49, // 35: kernel.v1.ItemEvent.create_time:type_name -> google.protobuf.Timestamp
-	48, // 36: kernel.v1.ItemEvent.fields:type_name -> google.protobuf.Struct
-	9,  // 37: kernel.v1.ItemEvent.readers:type_name -> kernel.v1.Readers
-	7,  // 38: kernel.v1.ItemEvent.container:type_name -> kernel.v1.ItemRef
-	7,  // 39: kernel.v1.ItemEvent.container_from:type_name -> kernel.v1.ItemRef
-	7,  // 40: kernel.v1.ItemEvent.container_to:type_name -> kernel.v1.ItemRef
-	7,  // 41: kernel.v1.ItemEvent.link_target:type_name -> kernel.v1.ItemRef
-	32, // 42: kernel.v1.StartAgentSessionResponse.session:type_name -> kernel.v1.AgentSession
-	37, // 43: kernel.v1.Type.fields:type_name -> kernel.v1.Field
-	38, // 44: kernel.v1.Type.states:type_name -> kernel.v1.State
-	39, // 45: kernel.v1.Type.transitions:type_name -> kernel.v1.Transition
-	36, // 46: kernel.v1.Type.link_types:type_name -> kernel.v1.LinkType
-	3,  // 47: kernel.v1.Field.type:type_name -> kernel.v1.FieldType
-	4,  // 48: kernel.v1.State.category:type_name -> kernel.v1.StateCategory
-	35, // 49: kernel.v1.GetTypeResponse.type:type_name -> kernel.v1.Type
-	35, // 50: kernel.v1.ListTypesResponse.types:type_name -> kernel.v1.Type
-	5,  // 51: kernel.v1.LinkItemsResponse.item:type_name -> kernel.v1.Item
-	5,  // 52: kernel.v1.UnlinkItemsResponse.item:type_name -> kernel.v1.Item
-	10, // 53: kernel.v1.ItemService.CreateItem:input_type -> kernel.v1.CreateItemRequest
-	12, // 54: kernel.v1.ItemService.GetItem:input_type -> kernel.v1.GetItemRequest
-	14, // 55: kernel.v1.ItemService.UpdateItem:input_type -> kernel.v1.UpdateItemRequest
-	18, // 56: kernel.v1.ItemService.TransitionItem:input_type -> kernel.v1.TransitionItemRequest
-	20, // 57: kernel.v1.ItemService.SearchItems:input_type -> kernel.v1.SearchItemsRequest
-	25, // 58: kernel.v1.ItemService.ListItems:input_type -> kernel.v1.ListItemsRequest
-	27, // 59: kernel.v1.ItemService.ListItemEvents:input_type -> kernel.v1.ListItemEventsRequest
-	40, // 60: kernel.v1.ItemService.GetType:input_type -> kernel.v1.GetTypeRequest
-	42, // 61: kernel.v1.ItemService.ListTypes:input_type -> kernel.v1.ListTypesRequest
-	30, // 62: kernel.v1.ItemService.StartAgentSession:input_type -> kernel.v1.StartAgentSessionRequest
-	33, // 63: kernel.v1.ItemService.ApproveWiden:input_type -> kernel.v1.ApproveWidenRequest
-	44, // 64: kernel.v1.ItemService.LinkItems:input_type -> kernel.v1.LinkItemsRequest
-	46, // 65: kernel.v1.ItemService.UnlinkItems:input_type -> kernel.v1.UnlinkItemsRequest
-	11, // 66: kernel.v1.ItemService.CreateItem:output_type -> kernel.v1.CreateItemResponse
-	13, // 67: kernel.v1.ItemService.GetItem:output_type -> kernel.v1.GetItemResponse
-	17, // 68: kernel.v1.ItemService.UpdateItem:output_type -> kernel.v1.UpdateItemResponse
-	19, // 69: kernel.v1.ItemService.TransitionItem:output_type -> kernel.v1.TransitionItemResponse
-	21, // 70: kernel.v1.ItemService.SearchItems:output_type -> kernel.v1.SearchItemsResponse
-	26, // 71: kernel.v1.ItemService.ListItems:output_type -> kernel.v1.ListItemsResponse
-	28, // 72: kernel.v1.ItemService.ListItemEvents:output_type -> kernel.v1.ListItemEventsResponse
-	41, // 73: kernel.v1.ItemService.GetType:output_type -> kernel.v1.GetTypeResponse
-	43, // 74: kernel.v1.ItemService.ListTypes:output_type -> kernel.v1.ListTypesResponse
-	31, // 75: kernel.v1.ItemService.StartAgentSession:output_type -> kernel.v1.StartAgentSessionResponse
-	34, // 76: kernel.v1.ItemService.ApproveWiden:output_type -> kernel.v1.ApproveWidenResponse
-	45, // 77: kernel.v1.ItemService.LinkItems:output_type -> kernel.v1.LinkItemsResponse
-	47, // 78: kernel.v1.ItemService.UnlinkItems:output_type -> kernel.v1.UnlinkItemsResponse
-	66, // [66:79] is the sub-list for method output_type
-	53, // [53:66] is the sub-list for method input_type
-	53, // [53:53] is the sub-list for extension type_name
-	53, // [53:53] is the sub-list for extension extendee
-	0,  // [0:53] is the sub-list for field type_name
+	50, // 35: kernel.v1.ItemEvent.create_time:type_name -> google.protobuf.Timestamp
+	49, // 36: kernel.v1.ItemEvent.fields:type_name -> google.protobuf.Struct
+	10, // 37: kernel.v1.ItemEvent.readers:type_name -> kernel.v1.Readers
+	8,  // 38: kernel.v1.ItemEvent.container:type_name -> kernel.v1.ItemRef
+	8,  // 39: kernel.v1.ItemEvent.container_from:type_name -> kernel.v1.ItemRef
+	8,  // 40: kernel.v1.ItemEvent.container_to:type_name -> kernel.v1.ItemRef
+	8,  // 41: kernel.v1.ItemEvent.link_target:type_name -> kernel.v1.ItemRef
+	33, // 42: kernel.v1.StartAgentSessionResponse.session:type_name -> kernel.v1.AgentSession
+	38, // 43: kernel.v1.Type.fields:type_name -> kernel.v1.Field
+	39, // 44: kernel.v1.Type.states:type_name -> kernel.v1.State
+	40, // 45: kernel.v1.Type.transitions:type_name -> kernel.v1.Transition
+	37, // 46: kernel.v1.Type.link_types:type_name -> kernel.v1.LinkType
+	4,  // 47: kernel.v1.Field.type:type_name -> kernel.v1.FieldType
+	3,  // 48: kernel.v1.Field.writable_by:type_name -> kernel.v1.FieldWriter
+	5,  // 49: kernel.v1.State.category:type_name -> kernel.v1.StateCategory
+	36, // 50: kernel.v1.GetTypeResponse.type:type_name -> kernel.v1.Type
+	36, // 51: kernel.v1.ListTypesResponse.types:type_name -> kernel.v1.Type
+	6,  // 52: kernel.v1.LinkItemsResponse.item:type_name -> kernel.v1.Item
+	6,  // 53: kernel.v1.UnlinkItemsResponse.item:type_name -> kernel.v1.Item
+	11, // 54: kernel.v1.ItemService.CreateItem:input_type -> kernel.v1.CreateItemRequest
+	13, // 55: kernel.v1.ItemService.GetItem:input_type -> kernel.v1.GetItemRequest
+	15, // 56: kernel.v1.ItemService.UpdateItem:input_type -> kernel.v1.UpdateItemRequest
+	19, // 57: kernel.v1.ItemService.TransitionItem:input_type -> kernel.v1.TransitionItemRequest
+	21, // 58: kernel.v1.ItemService.SearchItems:input_type -> kernel.v1.SearchItemsRequest
+	26, // 59: kernel.v1.ItemService.ListItems:input_type -> kernel.v1.ListItemsRequest
+	28, // 60: kernel.v1.ItemService.ListItemEvents:input_type -> kernel.v1.ListItemEventsRequest
+	41, // 61: kernel.v1.ItemService.GetType:input_type -> kernel.v1.GetTypeRequest
+	43, // 62: kernel.v1.ItemService.ListTypes:input_type -> kernel.v1.ListTypesRequest
+	31, // 63: kernel.v1.ItemService.StartAgentSession:input_type -> kernel.v1.StartAgentSessionRequest
+	34, // 64: kernel.v1.ItemService.ApproveWiden:input_type -> kernel.v1.ApproveWidenRequest
+	45, // 65: kernel.v1.ItemService.LinkItems:input_type -> kernel.v1.LinkItemsRequest
+	47, // 66: kernel.v1.ItemService.UnlinkItems:input_type -> kernel.v1.UnlinkItemsRequest
+	12, // 67: kernel.v1.ItemService.CreateItem:output_type -> kernel.v1.CreateItemResponse
+	14, // 68: kernel.v1.ItemService.GetItem:output_type -> kernel.v1.GetItemResponse
+	18, // 69: kernel.v1.ItemService.UpdateItem:output_type -> kernel.v1.UpdateItemResponse
+	20, // 70: kernel.v1.ItemService.TransitionItem:output_type -> kernel.v1.TransitionItemResponse
+	22, // 71: kernel.v1.ItemService.SearchItems:output_type -> kernel.v1.SearchItemsResponse
+	27, // 72: kernel.v1.ItemService.ListItems:output_type -> kernel.v1.ListItemsResponse
+	29, // 73: kernel.v1.ItemService.ListItemEvents:output_type -> kernel.v1.ListItemEventsResponse
+	42, // 74: kernel.v1.ItemService.GetType:output_type -> kernel.v1.GetTypeResponse
+	44, // 75: kernel.v1.ItemService.ListTypes:output_type -> kernel.v1.ListTypesResponse
+	32, // 76: kernel.v1.ItemService.StartAgentSession:output_type -> kernel.v1.StartAgentSessionResponse
+	35, // 77: kernel.v1.ItemService.ApproveWiden:output_type -> kernel.v1.ApproveWidenResponse
+	46, // 78: kernel.v1.ItemService.LinkItems:output_type -> kernel.v1.LinkItemsResponse
+	48, // 79: kernel.v1.ItemService.UnlinkItems:output_type -> kernel.v1.UnlinkItemsResponse
+	67, // [67:80] is the sub-list for method output_type
+	54, // [54:67] is the sub-list for method input_type
+	54, // [54:54] is the sub-list for extension type_name
+	54, // [54:54] is the sub-list for extension extendee
+	0,  // [0:54] is the sub-list for field type_name
 }
 
 func init() { file_kernel_v1_kernel_proto_init() }
@@ -4082,7 +4179,7 @@ func file_kernel_v1_kernel_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kernel_v1_kernel_proto_rawDesc), len(file_kernel_v1_kernel_proto_rawDesc)),
-			NumEnums:      5,
+			NumEnums:      6,
 			NumMessages:   43,
 			NumExtensions: 0,
 			NumServices:   1,

@@ -82,19 +82,23 @@ services:
       TEMPORAL_ADDRESS: temporal:7233
       CRM_URL: http://connstub:8081
       ERP_URL: http://connstub:8082
+      HR_URL: http://connstub:8083
     depends_on:
       migrate: {condition: service_completed_successfully}
       temporal: {condition: service_healthy}
       connstub: {condition: service_healthy}
 
   # Stub CRM (8081) and ERP (8082) for the ticket's hooks. The ERP answers
-  # after 1 s, so a held approve stays held long enough to see.
+  # after 1 s, so a held approve stays held long enough to see. The stub HR
+  # directory (8083), for the vacation request's HR check, answers at once.
   connstub:
     build: {context: ., target: connstub}
     command: ["--crm-listen", ":8081", "--erp-listen", ":8082", "--erp-latency", "1s",
-              "--customers", "/etc/connstub/customers.json"]
+              "--customers", "/etc/connstub/customers.json",
+              "--hr-listen", ":8083", "--hr-directory", "/etc/connstub/hr-directory.json"]
     volumes:
       - ./deploy/customers.json:/etc/connstub/customers.json:ro
+      - ./deploy/hr-directory.json:/etc/connstub/hr-directory.json:ro
     healthcheck:
       test: ["CMD", "/connstub", "--probe", "http://localhost:8082/healthz"]
       interval: 2s

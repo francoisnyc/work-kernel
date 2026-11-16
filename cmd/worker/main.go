@@ -41,10 +41,11 @@ func run() error {
 	}
 	defer c.Close()
 
-	// The hooks' connectors: in the spike, base URLs of the CRM and ERP
-	// (stubs from internal/connstub in tests and the bench).
+	// The hooks' connectors: in the spike, base URLs of the CRM, ERP and HR
+	// directory (stubs from internal/connstub in tests and the bench).
 	opts := workflow.WorkerOptions{
-		Connectors: hooks.NewConnectors(env("CRM_URL", "http://localhost:8081"), env("ERP_URL", "http://localhost:8082")),
+		Connectors: hooks.NewConnectors(env("CRM_URL", "http://localhost:8081"), env("ERP_URL", "http://localhost:8082")).
+			WithHR(env("HR_URL", "http://localhost:8083")),
 	}
 	if b := os.Getenv("HOOK_BUDGET"); b != "" {
 		// A Go duration such as 15m or 30s.

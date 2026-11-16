@@ -130,6 +130,9 @@ type lockedItem struct {
 	State       string
 	Fields      map[string]any
 	ItemSeq     int64
+	// Who created it: set at create, never changed. `allowed` and `except`
+	// read them for creator.
+	CreatedBy, CreatedOnBehalfOf string
 }
 
 // lockItem reads the Item row and locks it until the transaction ends. Two
@@ -138,10 +141,12 @@ type lockedItem struct {
 func lockItem(ctx context.Context, tx pgx.Tx, ns string, id uuid.UUID) (lockedItem, error) {
 	var it lockedItem
 	err := tx.QueryRow(ctx,
-		`select type_id, type_version, container_id, scope_id, state, fields, item_seq
+		`select type_id, type_version, container_id, scope_id, state, fields, item_seq,
+		        created_by, coalesce(created_on_behalf_of, '')
 		 from items where id = $1 and namespace_id = $2 for update`,
 		id, ns,
-	).Scan(&it.TypeID, &it.TypeVersion, &it.ContainerID, &it.ScopeID, &it.State, &it.Fields, &it.ItemSeq)
+	).Scan(&it.TypeID, &it.TypeVersion, &it.ContainerID, &it.ScopeID, &it.State, &it.Fields, &it.ItemSeq,
+		&it.CreatedBy, &it.CreatedOnBehalfOf)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return lockedItem{}, ErrNotFound
 	}

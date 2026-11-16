@@ -27,7 +27,21 @@ const (
 	CodeHopLimit          = "hop_limit"                     // a chain of kernel writes went too deep
 	CodeWidenNotConfirmed = "widen_not_confirmed"           // a move widens who can see; the caller must confirm it
 	CodeAudienceChanged   = "audience_changed"              // an approval's audience is not the one the approver was shown
+	CodeFieldFrozen       = string(lifecycle.FieldFrozen)   // a write names a field the Item's state freezes
 )
+
+// FieldNotWritableError is an ErrForbidden naming the fields a write may not
+// set: fields only the kernel writes (writable_by: kernel), refused on the
+// public door, and fields a transition's own `allowed` names through
+// field:<id>, refused in that transition's patch on every door. Fields are
+// IDs, sorted.
+type FieldNotWritableError struct {
+	Fields []string
+	Reason string
+}
+
+func (e *FieldNotWritableError) Error() string { return fmt.Sprintf("%v: %s", ErrForbidden, e.Reason) }
+func (e *FieldNotWritableError) Unwrap() error { return ErrForbidden }
 
 // RejectedError is an ErrRejected with its code: the request is well formed
 // and the rules say no. Reason names field IDs and states, never values.
@@ -68,6 +82,9 @@ func fromLifecycle(err error) error {
 		}
 		if len(rej.Missing) > 0 {
 			md["fields"] = strings.Join(rej.Missing, ",")
+		}
+		if rej.Code == lifecycle.FieldFrozen {
+			md["fields"], md["state"] = strings.Join(rej.Frozen, ","), rej.State
 		}
 		return &RejectedError{Code: string(rej.Code), Reason: rej.Reason, Metadata: md, cause: rej}
 	}

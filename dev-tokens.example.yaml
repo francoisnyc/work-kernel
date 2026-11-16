@@ -6,9 +6,13 @@
 # roles: what the principal holds in that namespace (added at start, never
 # removed). grants: what a user lets an agent do.
 tokens:
-  # acme: two users and an agent.
+  # acme: four users and an agent. In the HR directory
+  # (deploy/hr-directory.json) ana reports to bob, bob to dana, and dana to
+  # herself; erin is not in it.
   - {name: ana, token: dev-ana-not-a-secret, principal: "user:ana", namespace: acme}
   - {name: bob, token: dev-bob-not-a-secret, principal: "user:bob", namespace: acme, roles: [approver]}
+  - {name: dana, token: dev-dana-not-a-secret, principal: "user:dana", namespace: acme}
+  - {name: erin, token: dev-erin-not-a-secret, principal: "user:erin", namespace: acme}
   - {name: triage-bot, token: dev-triage-bot-not-a-secret, principal: "agent:triage-bot", namespace: acme}
   # globex: another namespace, which sees nothing of acme.
   - {name: carol, token: dev-carol-not-a-secret, principal: "user:carol", namespace: globex}
@@ -18,6 +22,13 @@ grants:
   # scopes and powers it needs.
   - agent: "agent:triage-bot"
     user: "user:ana"
+    namespace: acme
+    scopes: [namespaces/acme]
+    powers: [read, create, edit_fields, "transition:*", move]
+  # bob lets triage-bot work anywhere in acme too: an agent acting for the
+  # approver still cannot approve (an approval names user:bob, never the agent).
+  - agent: "agent:triage-bot"
+    user: "user:bob"
     namespace: acme
     scopes: [namespaces/acme]
     powers: [read, create, edit_fields, "transition:*", move]

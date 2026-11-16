@@ -113,6 +113,15 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		if err != nil {
 			return WriteResult{}, err
 		}
+		// Not writable, then frozen (against the state the move leaves),
+		// then held.
+		var declared *typedef.Transition
+		if tr, ok := ty.Transition(it.State, req.ToState); ok {
+			declared = &tr
+		}
+		if err := checkPatch(ty, it.State, declared, req.Fields, kc == nil); err != nil {
+			return WriteResult{}, err
+		}
 		// While a hold is open, only an escape leaves the state, and it
 		// cancels the hold. Everything else, the timer included, is held.
 		hold, err := readOpenHold(ctx, tx, req.ItemID)
@@ -138,7 +147,8 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 			return WriteResult{}, fieldsInvalid(err)
 		}
 		merged, set, cleared := applyPatch(it.Fields, req.Fields)
-		next, err := lifecycle.TransitionLinked(ty, it.State, merged, links, req.ToState)
+		next, err := lifecycle.TransitionWith(ty, it.State,
+			lifecycle.Input{Fields: merged, Links: links, Today: k.today()}, req.ToState)
 		if err != nil {
 			return WriteResult{}, fromLifecycle(err)
 		}
@@ -152,7 +162,7 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 			return WriteResult{}, fmt.Errorf("%w: %s -> %s is checked by %s; only a requester may ask for it",
 				ErrForbidden, it.State, next.State, check.ID)
 		}
-		if err := authorize(ctx, tx, req.Principal, ty, it.State, next.State); err != nil {
+		if err := authorize(ctx, tx, req.Principal, ty, it.State, next.State, facts(it)); err != nil {
 			return WriteResult{}, err
 		}
 		if links != nil {
@@ -199,26 +209,29 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 	return res, kind, nil
 }
 
-// authorize checks the transition's `allowed` list against the principal's
-// roles. When an agent acts on behalf of a user, both must pass: the agent
-// has the user's rights only where it also has its own.
-func authorize(ctx context.Context, tx pgx.Tx, p item.Principal, ty *typedef.Type, from, to string) error {
+// authorize checks the transition's `allowed` and `except` for the
+// principal (policy.MayTransition): the Item's fields for field:<id>
+// entries (as stored: a patch may not write them), its creator for creator,
+// and the roles of the actor and of the user it acts for, read here.
+func authorize(ctx context.Context, tx pgx.Tx, p item.Principal, ty *typedef.Type, from, to string,
+	it policy.ItemFacts) error {
 	tr, _ := ty.Transition(from, to) // lifecycle.Transition has just found it
-	if len(tr.Allowed) == 0 {
+	if len(tr.Allowed) == 0 && len(tr.Except) == 0 {
 		return nil // anyone who can see the Item; no need to read roles
 	}
-	for _, who := range []string{p.Actor, p.OnBehalfOf} {
-		if who == "" {
-			continue
-		}
-		// Roles are read on every write, inside its transaction: no cache.
-		roles, err := policy.Roles(ctx, tx, nsOf(p), who)
-		if err != nil {
+	who := policy.Who{Actor: p.Actor, OnBehalfOf: p.OnBehalfOf}
+	// Roles are read on every write, inside its transaction: no cache.
+	var err error
+	if who.ActorRoles, err = policy.Roles(ctx, tx, nsOf(p), p.Actor); err != nil {
+		return err
+	}
+	if p.OnBehalfOf != "" {
+		if who.OnBehalfOfRoles, err = policy.Roles(ctx, tx, nsOf(p), p.OnBehalfOf); err != nil {
 			return err
 		}
-		if !policy.AuthorizeTransition(who, roles, tr) {
-			return fmt.Errorf("%w: %s may not move this Item from %q to %q", ErrForbidden, who, from, to)
-		}
+	}
+	if !policy.MayTransition(tr, who, it) {
+		return fmt.Errorf("%w: %s may not move this Item from %q to %q", ErrForbidden, p.Actor, from, to)
 	}
 	return nil
 }

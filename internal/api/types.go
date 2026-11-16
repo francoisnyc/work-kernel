@@ -22,6 +22,12 @@ var fieldTypes = map[typedef.FieldType]kernelv1.FieldType{
 	typedef.Bool:      kernelv1.FieldType_FIELD_TYPE_BOOL,
 	typedef.Enum:      kernelv1.FieldType_FIELD_TYPE_ENUM,
 	typedef.Principal: kernelv1.FieldType_FIELD_TYPE_PRINCIPAL,
+	typedef.Date:      kernelv1.FieldType_FIELD_TYPE_DATE,
+}
+
+var fieldWriters = map[typedef.WritableBy]kernelv1.FieldWriter{
+	typedef.WritableByAnyone: kernelv1.FieldWriter_FIELD_WRITER_UNSPECIFIED,
+	typedef.WritableByKernel: kernelv1.FieldWriter_FIELD_WRITER_KERNEL,
 }
 
 var categories = map[string]kernelv1.StateCategory{
@@ -42,17 +48,19 @@ func typeOut(ns string, t *typedef.Type) *kernelv1.Type {
 		InitialState: t.InitialState,
 	}
 	for _, f := range t.Fields {
-		out.Fields = append(out.Fields, &kernelv1.Field{Id: f.ID, Type: fieldTypes[f.Type], Options: f.Options})
+		out.Fields = append(out.Fields, &kernelv1.Field{
+			Id: f.ID, Type: fieldTypes[f.Type], Options: f.Options, WritableBy: fieldWriters[f.WritableBy],
+		})
 	}
 	for _, s := range t.States {
-		out.States = append(out.States, &kernelv1.State{Id: s.ID, Category: categories[s.Category]})
+		out.States = append(out.States, &kernelv1.State{Id: s.ID, Category: categories[s.Category], Frozen: s.Frozen})
 	}
 	for _, tr := range t.Transitions {
 		// Whether a check holds the move is the lifecycle's knowledge.
 		_, checked := lifecycle.CheckFor(t, tr.From, tr.To)
 		out.Transitions = append(out.Transitions, &kernelv1.Transition{
 			FromState: tr.From, ToState: tr.To, Guard: tr.Guard, Required: tr.Required,
-			Allowed: tr.Allowed, Escape: tr.Escape, Checked: checked,
+			Allowed: tr.Allowed, Except: tr.Except, Escape: tr.Escape, Checked: checked,
 		})
 	}
 	for _, l := range t.Links {

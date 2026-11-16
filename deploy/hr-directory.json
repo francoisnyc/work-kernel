@@ -1,0 +1,5 @@
+{
+  "user:ana": "user:bob",
+  "user:bob": "user:dana",
+  "user:dana": "user:dana"
+}
