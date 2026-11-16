@@ -1057,8 +1057,7 @@ so `buf breaking` against it listed a dozen false breaks; `make breaking` now co
 builds pli before it sets one. `docker compose up --wait` treats the one-shot migrate's exit 0 as done.
 
 **Open:** Later has four new items (no health check on relay and worker, roles never removed,
-connstub on `httptest.Server`, Postgres's anonymous volume). The design's Step 0 row still lists the
-stack without `migrate` and `connstub`.
+connstub on `httptest.Server`, Postgres's anonymous volume).
 
 **Next session:** Step 0 is done when the PR's CI is green (the scenario job and `buf breaking`
 included): `main` then becomes the `buf breaking` baseline. Then proof-of-concept Step 1: link types and
