@@ -348,6 +348,93 @@ func TestLink_GetShowsBothDirections(t *testing.T) {
 	assertLinks(t, "z", got, out("blocks", x), inc("duplicates", x))
 }
 
+// assertLinksInOrder checks the links and their exact order.
+func assertLinksInOrder(t *testing.T, what string, got []item.Link, want ...item.Link) {
+	t.Helper()
+	if !slices.Equal(got, want) {
+		t.Errorf("%s: links in order = %v\nwant %v", what, got, want)
+	}
+}
+
+// byID returns the two IDs in ascending order.
+func byID(a, b uuid.UUID) (uuid.UUID, uuid.UUID) {
+	if strings.Compare(a.String(), b.String()) > 0 {
+		return b, a
+	}
+	return a, b
+}
+
+// The order is fixed: outgoing before incoming; within a direction by the
+// link's created_at, then its declared name (link_type), then the other
+// end's ID (the target for outgoing, the source for incoming).
+func TestLink_GetOrder(t *testing.T) {
+	w := newLinkWorld(t)
+	x := w.open(t)
+	y, q, z, v, m := w.open(t), w.open(t), w.open(t), w.open(t), w.open(t)
+	// Created in this order: by created_at alone.
+	w.mustLink(t, w.ana, x, "duplicate_of", z)
+	w.mustLink(t, w.ana, x, "blocks", y)
+	w.mustLink(t, w.ana, x, "about", m)
+	w.mustLink(t, w.ana, x, "blocks", q)
+	w.mustLink(t, w.ana, z, "duplicate_of", x)
+	w.mustLink(t, w.ana, v, "blocks", x)
+	w.mustLink(t, w.ana, m, "about", x)
+	w.mustLink(t, w.ana, z, "blocks", x)
+
+	got, _ := w.linksOf(t, w.ana, x)
+	assertLinksInOrder(t, "by created_at", got,
+		out("duplicate_of", z), out("blocks", y), out("about", m), out("blocks", q),
+		inc("duplicates", z), inc("blocked_by", v), inc("mentioned_by", m), inc("blocked_by", z))
+
+	// A tie on created_at: then by declared name, then by the other end.
+	if _, err := pool.Exec(testCtx(t),
+		`update links set created_at = '2026-01-01T00:00:00Z' where source_id = $1 or target_id = $1`, x); err != nil {
+		t.Fatalf("tie the links: %v", err)
+	}
+	b1, b2 := byID(y, q)
+	i1, i2 := byID(v, z)
+	got, _ = w.linksOf(t, w.ana, x)
+	assertLinksInOrder(t, "tied on created_at", got,
+		out("about", m), out("blocks", b1), out("blocks", b2), out("duplicate_of", z),
+		// Incoming: by the declared name (about < blocks < duplicate_of),
+		// shown as its inverse.
+		inc("mentioned_by", m), inc("blocked_by", i1), inc("blocked_by", i2), inc("duplicates", z))
+}
+
+// A link name keeps its inverse across the versions of a Type: a version
+// that declares it with another inverse is refused when it is registered,
+// with an error naming the Type, the link and both inverses.
+func TestRegisterType_LinkInverseAgreesAcrossVersions(t *testing.T) {
+	k := itemservice.New(pool)
+	id := "inv-" + uuid.NewString()[:8]
+	register := func(version int, inverse string) error {
+		ty, err := typedef.Parse(fmt.Appendf(nil,
+			"id: %s\nversion: %d\nlinks:\n  - {name: blocks, inverse: %s, targets: [%s]}\n", id, version, inverse, id))
+		if err != nil {
+			t.Fatalf("parse v%d: %v", version, err)
+		}
+		return k.RegisterType(testCtx(t), ty)
+	}
+	if err := register(1, "blocked_by"); err != nil {
+		t.Fatalf("register v1: %v", err)
+	}
+	if err := register(2, "blocked_by"); err != nil {
+		t.Errorf("register v2 with the same inverse: %v", err)
+	}
+	err := register(3, "held_up_by")
+	if err == nil {
+		t.Fatal("v3 with another inverse was registered")
+	}
+	for _, s := range []string{id, "blocks", "blocked_by", "held_up_by"} {
+		if !strings.Contains(err.Error(), s) {
+			t.Errorf("error %q does not name %s", err, s)
+		}
+	}
+	if _, err := k.Type(testCtx(t), id, 3); err == nil {
+		t.Error("the refused v3 is registered anyway")
+	}
+}
+
 // Unlink records link_removed on the source and the link is gone from both
 // ends; the same link may be added again later.
 func TestUnlink_RemovesTheLinkWithAnEvent(t *testing.T) {

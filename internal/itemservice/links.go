@@ -65,3 +65,6 @@ func (k *Service) Unlink(ctx context.Context, req LinkRequest) (WriteResult, err
 //
 // An error it returns fails the attempt as if the point had failed.
 var testHook func(ctx context.Context, tx pgx.Tx, point string) error
+
+// retryable reports whether write runs a transaction again after err.
+func retryable(err error) bool { return false } // stub until built

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -336,5 +337,43 @@ func TestTicketV5_IsV4WithLinksAndAPrincipalAssignee(t *testing.T) {
 	if len(v5.Transitions) != len(v4.Transitions) || len(v5.Hooks) != len(v4.Hooks) {
 		t.Errorf("v5 has %d transitions and %d hooks, v4 %d and %d",
 			len(v5.Transitions), len(v5.Hooks), len(v4.Transitions), len(v4.Hooks))
+	}
+}
+
+// A link name keeps its inverse across the versions of a Type, so (Type,
+// link) names one inverse for incoming links and filters. ParseDir refuses
+// a version that disagrees, naming the Type, the link and both inverses.
+func TestParseDir_LinkInverseAgreesAcrossVersions(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	version := func(v int, inverse string) string {
+		return strings.NewReplacer("VERSION", strconv.Itoa(v), "INVERSE", inverse).Replace(
+			"id: chore\nversion: VERSION\nlinks:\n  - {name: blocks, inverse: INVERSE, targets: [chore]}\n")
+	}
+	write("chore.v1.yaml", version(1, "blocked_by"))
+	write("chore.v2.yaml", version(2, "blocked_by"))
+	if _, err := typedef.ParseDir(dir); err != nil {
+		t.Fatalf("two versions with the same inverse: %v", err)
+	}
+	write("chore.v3.yaml", version(3, "held_up_by"))
+	_, err := typedef.ParseDir(dir)
+	if err == nil {
+		t.Fatal("ParseDir accepted a version with another inverse")
+	}
+	for _, s := range []string{"chore", "blocks", "blocked_by", "held_up_by"} {
+		if !strings.Contains(err.Error(), s) {
+			t.Errorf("error %q does not name %s", err, s)
+		}
+	}
+	// The check on its own: one Type's versions against another's.
+	a, _ := typedef.Parse([]byte(version(1, "blocked_by")))
+	b, _ := typedef.Parse([]byte(version(4, "held_up_by")))
+	if err := typedef.CheckLinkInverses([]*typedef.Type{a, b}); err == nil {
+		t.Error("CheckLinkInverses accepted two inverses for chore's blocks")
 	}
 }

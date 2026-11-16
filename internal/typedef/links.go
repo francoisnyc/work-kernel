@@ -51,3 +51,9 @@ func (t *Type) Link(name string) (LinkType, bool) {
 func CheckLinkTargets(types []*Type) error {
 	return nil // Step 1, Phase B stub
 }
+
+// CheckLinkInverses checks that, within each Type, every version that
+// declares a link name gives it the same inverse.
+func CheckLinkInverses(types []*Type) error {
+	return nil // Step 1, Phase C: review change 3, stub until built
+}

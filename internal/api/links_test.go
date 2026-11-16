@@ -299,6 +299,10 @@ func TestSearchItems_LinkAndMeFilters(t *testing.T) {
 	}
 	_, err = search("bob", lf("blocks", kernelv1.LinkDirection_LINK_DIRECTION_UNSPECIFIED, y))
 	invalid(t, "no direction", err, "filter.links[0]")
+	_, err = search("bob", lf("blokcs", kernelv1.LinkDirection_LINK_DIRECTION_OUTGOING, y))
+	invalid(t, "a name no Type declares", err, "filter.links[0]")
+	_, err = search("bob", lf("blocks", kernelv1.LinkDirection_LINK_DIRECTION_INCOMING, y))
+	invalid(t, "a declared name, incoming", err, "filter.links[0]")
 	_, err = search("bob", lf("blocks", kernelv1.LinkDirection_LINK_DIRECTION_OUTGOING, "items/1"))
 	invalid(t, "a malformed item", err, "filter.links[0].item")
 	_, err = search("bea", lf("blocks", kernelv1.LinkDirection_LINK_DIRECTION_OUTGOING,
@@ -367,4 +371,41 @@ func TestLinkItems_ReadOnlyAgent(t *testing.T) {
 		Name: t1, RequestId: newID(), LinkType: "blocks", Target: t2,
 	}))
 	apiError(t, "a read-only session links", err, connect.CodePermissionDenied, "NOT_ALLOWED")
+}
+
+// The order of links is fixed: outgoing before incoming; within a
+// direction by created_at, then the declared name, then the other end's
+// name. A tie on created_at shows the rest of the order.
+func TestGetItem_LinkOrder(t *testing.T) {
+	x := ticket5(t, "ana")
+	a, b, c := ticket5(t, "ana"), ticket5(t, "ana"), ticket5(t, "ana")
+	mustLinkItems(t, "ana", x, "duplicate_of", c)
+	mustLinkItems(t, "ana", x, "blocks", b)
+	mustLinkItems(t, "ana", x, "blocks", a)
+	mustLinkItems(t, "ana", b, "blocks", x)
+	mustLinkItems(t, "ana", a, "duplicate_of", x)
+	mustLinkItems(t, "ana", a, "blocks", x)
+
+	inOrder := func(what string, want ...string) {
+		t.Helper()
+		if got := linkStrings(get(t, "ana", x).Links); !slices.Equal(got, want) {
+			t.Errorf("%s: links = %v\nwant %v", what, got, want)
+		}
+	}
+	inOrder("by created_at",
+		"OUTGOING duplicate_of "+c, "OUTGOING blocks "+b, "OUTGOING blocks "+a,
+		"INCOMING blocked_by "+b, "INCOMING duplicates "+a, "INCOMING blocked_by "+a)
+
+	id := x[len(x)-36:]
+	if _, err := pool.Exec(testCtx(t),
+		`update links set created_at = '2026-01-01T00:00:00Z' where source_id = $1 or target_id = $1`, id); err != nil {
+		t.Fatalf("tie the links: %v", err)
+	}
+	lo, hi := a, b
+	if lo > hi { // names differ only in their IDs, so this is ID order
+		lo, hi = hi, lo
+	}
+	inOrder("tied on created_at",
+		"OUTGOING blocks "+lo, "OUTGOING blocks "+hi, "OUTGOING duplicate_of "+c,
+		"INCOMING blocked_by "+lo, "INCOMING blocked_by "+hi, "INCOMING duplicates "+a)
 }

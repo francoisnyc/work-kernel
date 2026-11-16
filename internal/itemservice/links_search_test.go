@@ -85,14 +85,23 @@ func TestSearch_LinkFilter(t *testing.T) {
 	both := append(linked("blocks", item.LinkOutgoing, y1), linked("blocks", item.LinkOutgoing, y2)...)
 	assertSameIDs(t, "blocks y1 and y2", w.mustSearch(t, w.ana, itemservice.Filter{Links: both}), x)
 
-	// A name in the wrong direction, or no Type's name, matches nothing.
-	// It is not an error: adding a Type later never breaks a filter.
+	// A name no Type declares in that direction (unknown, or known only in
+	// the other direction) is refused: Types only grow, so a refused name
+	// can only start working later, never stop. It catches typos.
 	for _, f := range [][]itemservice.LinkFilter{
 		linked("blocked_by", item.LinkOutgoing, x),
 		linked("blocks", item.LinkIncoming, x),
 		linked("no_such_link", item.LinkOutgoing, y1),
+		append(linked("blocks", item.LinkOutgoing, y1), linked("blokcs", item.LinkOutgoing, y2)...),
 	} {
-		assertSameIDs(t, fmt.Sprintf("%+v", f[0]), w.mustSearch(t, w.ana, itemservice.Filter{Links: f}))
+		_, err := w.search(t, w.ana, itemservice.Filter{Links: f})
+		assertInvalidAt(t, fmt.Sprintf("%+v", f[len(f)-1]), err, "filter.links")
+	}
+	_, err = w.search(t, w.ana, itemservice.Filter{Links: append(linked("blocks", item.LinkOutgoing, y1),
+		linked("blokcs", item.LinkOutgoing, y2)...)})
+	var ie *itemservice.InvalidError
+	if errors.As(err, &ie) && ie.Path != "filter.links[1]" {
+		t.Errorf("the typo in the second condition is refused at %q, want filter.links[1]", ie.Path)
 	}
 
 	// With words, and in List.

@@ -27,6 +27,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/francoisnyc/work-kernel/internal/item"
 	"github.com/francoisnyc/work-kernel/internal/itemservice"
@@ -433,6 +434,32 @@ func TestWrite_RetriesADeadlock(t *testing.T) {
 	for _, id := range []uuid.UUID{a, b} {
 		if seq := itemSeqOf(t, id); seq != 2 {
 			t.Errorf("item_seq = %d, want 2: each update written once", seq)
+		}
+	}
+}
+
+// The retry classifier: a deadlock (40P01) and a serialization failure
+// (40001) are run again, wrapped or not; other Postgres codes and errors
+// that only look like one are not.
+func TestWrite_RetryableErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"deadlock", &pgconn.PgError{Code: "40P01"}, true},
+		{"serialization failure", &pgconn.PgError{Code: "40001"}, true},
+		{"wrapped deadlock", fmt.Errorf("lock item: %w", &pgconn.PgError{Code: "40P01"}), true},
+		{"wrapped serialization failure", fmt.Errorf("insert: %w", &pgconn.PgError{Code: "40001"}), true},
+		{"unique violation", &pgconn.PgError{Code: "23505"}, false},
+		{"statement timeout", &pgconn.PgError{Code: "57014"}, false},
+		{"a plain error naming a code", errors.New("SQLSTATE 40P01"), false},
+		{"a refusal", itemservice.ErrRejected, false},
+		{"nil", nil, false},
+	}
+	for _, c := range cases {
+		if got := itemservice.Retryable(c.err); got != c.want {
+			t.Errorf("%s: Retryable = %v, want %v", c.name, got, c.want)
 		}
 	}
 }

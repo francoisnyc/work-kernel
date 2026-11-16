@@ -13,3 +13,6 @@ func SetTestHook(f func(ctx context.Context, tx pgx.Tx, point string) error) (re
 	testHook = f
 	return func() { testHook = nil }
 }
+
+// Retryable reports whether write runs a transaction again after err.
+func Retryable(err error) bool { return retryable(err) }
