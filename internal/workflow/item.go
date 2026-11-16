@@ -138,14 +138,42 @@ type Snapshot struct {
 }
 
 // PendingUndo is one undo to run: the undo reaction, the hold whose
-// reservation it reverses, and the event that asked for it.
+// reservation it reverses, and the event that asked for it. Attempts and
+// LastError say how it has fared so far; a run that continues as new
+// carries them, so the count and the backoff go on where they were.
 type PendingUndo struct {
 	ReactionID    string
 	HoldID        string
 	CauseSeq      int64
 	CorrelationID string
 	Hop           int // of the cause event
+	Attempts      int
+	LastError     string
 }
+
+// An undo is never dropped: a failure that may pass is retried without
+// limit, the pause doubling from one second up to UndoMaxInterval. Only a
+// refusal (non-retryable Rejected) ends it, recorded with ReactionFailed.
+const UndoMaxInterval = time.Minute
+
+// QueryUndos is the query that shows the run's undos not yet done, with
+// their attempts and last error, so a stuck refund is visible (an alert is
+// Later). It answers []UndoStatus.
+const QueryUndos = "undos"
+
+// UndoStatus is one undo not yet done, as QueryUndos reports it. LastError
+// is the last failure, at most MaxUndoErrorLen bytes, empty before the
+// first.
+type UndoStatus struct {
+	ReactionID string
+	HoldID     string
+	CauseSeq   int64
+	Attempts   int
+	LastError  string
+}
+
+// MaxUndoErrorLen bounds UndoStatus.LastError.
+const MaxUndoErrorLen = 200
 
 // ReactionInput is what RunReaction, ResolveReaction and Undo need: the
 // reaction, the hold, and the cause. Opaque IDs only. The item service

@@ -15,13 +15,18 @@
 //     one; a loaded Snapshot carries that hold as EnteredHold.
 //   - Undos LoadItem reports (PendingUndos) run at the start of a run.
 //   - An undo is never dropped: a failure that may pass is retried without
-//     limit; a refusal (non-retryable Rejected, the code as its detail) is
-//     recorded once through ReactionFailed.
+//     limit, with capped exponential backoff (one second, doubling, at most
+//     UndoMaxInterval); a refusal (non-retryable Rejected, the code as its
+//     detail) is recorded once through ReactionFailed.
+//   - A stuck undo is visible: the query QueryUndos reports each undo not
+//     yet done with its attempts and last error, and a Snapshot carries
+//     them, so continuing as new resets neither the count nor the backoff.
 package workflow_test
 
 import (
 	"context"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -315,5 +320,142 @@ func TestReactions_EscapeCallsOffTheReaction(t *testing.T) {
 	}
 	if now := h.env.Now(); now.After(t0.Add(budget)) {
 		t.Errorf("workflow ended at %v: it waited out the canceled reaction's budget", now)
+	}
+}
+
+// --- a stuck undo ---
+
+// queryUndos asks the running workflow for its undos not yet done.
+func (h *reactionHarness) queryUndos() ([]wf.UndoStatus, error) {
+	v, err := h.env.QueryWorkflow(wf.QueryUndos)
+	if err != nil {
+		return nil, err
+	}
+	var out []wf.UndoStatus
+	err = v.Get(&out)
+	return out, err
+}
+
+// attemptTimes are the times of the Undo attempts for one hold.
+func (h *reactionHarness) attemptTimes(hold string) []time.Time {
+	var out []time.Time
+	for _, c := range h.undos {
+		if c.In.HoldID == hold {
+			out = append(out, c.At)
+		}
+	}
+	return out
+}
+
+// An undo that keeps failing is retried for hours: the pause doubles from
+// about a second and never exceeds UndoMaxInterval; it never gives up, and
+// once the failure passes it succeeds, with no ReactionFailed.
+func TestReactions_StuckUndo_BacksOffToAMinuteAndNeverGivesUp(t *testing.T) {
+	h := newReactionHarness(t, leaveSnapshot("submitted", 5, 5))
+	h.undoFails[hold1] = 1 << 20
+	h.deliver(0, approvalRequest(6, hold1))
+	h.deliver(time.Minute, reactionClose(7, "transition_failed", "", hold1))
+	h.env.RegisterDelayedCallback(func() {
+		h.mu2.Lock()
+		defer h.mu2.Unlock()
+		h.undoFails[hold1] = 0 // the failure passes after four hours
+	}, 4*time.Hour)
+	h.runToCompletion()
+
+	at := h.attemptTimes(hold1)
+	if len(at) < 10 {
+		t.Fatalf("Undo attempts = %d, want many over four hours", len(at))
+	}
+	if last := at[len(at)-1]; last.Before(t0.Add(4 * time.Hour)) {
+		t.Errorf("last attempt at %v, want after the failure passed (four hours): it must not give up", last)
+	}
+	const slack = 5 * time.Second
+	var prev time.Duration
+	reachedCap := false
+	for i := 1; i < len(at); i++ {
+		gap := at[i].Sub(at[i-1])
+		if gap > wf.UndoMaxInterval+slack {
+			t.Errorf("pause before attempt %d = %v, more than %v", i+1, gap, wf.UndoMaxInterval)
+		}
+		if gap+slack < prev && !reachedCap {
+			t.Errorf("pause before attempt %d = %v, shorter than the one before (%v): not backing off", i+1, gap, prev)
+		}
+		if gap >= wf.UndoMaxInterval-slack {
+			reachedCap = true
+		}
+		prev = gap
+	}
+	if !reachedCap {
+		t.Errorf("the pause never reached about %v", wf.UndoMaxInterval)
+	}
+	if first := at[1].Sub(at[0]); first > 5*time.Second {
+		t.Errorf("first pause = %v, want about a second", first)
+	}
+	if len(h.failed) != 0 {
+		t.Errorf("ReactionFailed = %+v, want none: a failure that may pass is never a refusal", h.failed)
+	}
+}
+
+// While it is stuck, the query shows the undo, its attempts and its last
+// error (bounded); once done, it is gone and the run completes.
+func TestReactions_StuckUndo_IsVisibleInAQuery(t *testing.T) {
+	h := newReactionHarness(t, leaveSnapshot("submitted", 5, 5))
+	h.undoFails[hold1] = 1 << 20
+	h.deliver(0, approvalRequest(6, hold1))
+	h.deliver(time.Minute, reactionClose(7, "transition_denied", "", hold1))
+
+	var during []wf.UndoStatus
+	var queryErr error
+	h.env.RegisterDelayedCallback(func() { during, queryErr = h.queryUndos() }, 30*time.Minute)
+	h.env.RegisterDelayedCallback(func() {
+		h.mu2.Lock()
+		defer h.mu2.Unlock()
+		h.undoFails[hold1] = 0
+	}, time.Hour)
+	h.runToCompletion()
+
+	if queryErr != nil {
+		t.Fatalf("query %s: %v", wf.QueryUndos, queryErr)
+	}
+	if len(during) != 1 {
+		t.Fatalf("undos at 30 min = %+v, want one", during)
+	}
+	u := during[0]
+	if u.ReactionID != "refund" || u.HoldID != hold1 || u.CauseSeq != 7 {
+		t.Errorf("undo = %+v, want refund of %s caused by event 7", u, hold1)
+	}
+	if u.Attempts < 5 {
+		t.Errorf("attempts after 29 minutes of failures = %d, want at least 5", u.Attempts)
+	}
+	if !strings.Contains(u.LastError, "connector is down") || len(u.LastError) > wf.MaxUndoErrorLen {
+		t.Errorf("last error = %q, want the failure, at most %d bytes", u.LastError, wf.MaxUndoErrorLen)
+	}
+	if got := len(h.attemptTimes(hold1)); got <= u.Attempts {
+		t.Errorf("Undo attempts in all = %d, want more than the %d seen at 30 min (it went on)", got, u.Attempts)
+	}
+}
+
+// A run started with a pending undo that has already failed (continued as
+// new, or loaded) counts on and backs off from where it was.
+func TestReactions_StuckUndo_CountCarriesOver(t *testing.T) {
+	snap := leaveSnapshot("withdrawn", 8, 8)
+	snap.PendingUndos = []wf.PendingUndo{{ReactionID: "refund", HoldID: hold1, CauseSeq: 8, Attempts: 7, LastError: "earlier"}}
+	h := newReactionHarness(t, snap)
+	h.undoFails[hold1] = 1
+
+	var during []wf.UndoStatus
+	h.env.RegisterDelayedCallback(func() { during, _ = h.queryUndos() }, 5*time.Second)
+	h.runToCompletion()
+
+	if len(during) != 1 || during[0].Attempts != 8 || !strings.Contains(during[0].LastError, "connector is down") {
+		t.Errorf("undos after one more failure = %+v, want attempts 8 and the new error", during)
+	}
+	at := h.attemptTimes(hold1)
+	if len(at) != 2 {
+		t.Fatalf("Undo attempts = %d, want 2", len(at))
+	}
+	if gap := at[1].Sub(at[0]); gap < 30*time.Second {
+		t.Errorf("pause after the eighth failure = %v, want the backoff where it was (about %v), not a restart",
+			gap, wf.UndoMaxInterval)
 	}
 }

@@ -260,6 +260,14 @@ Ideas noted during the spike, not built yet.
   next submit corrects it; a denied resubmission leaves it stale in draft.
   Harmless (deciding needs `submitted`), but misleading to read. (Step 2,
   part 1)
+- `TestDroppedAnswer_DefaultConnectors_NetHTTPResends` (internal/hooks) is
+  flaky: it failed once on main (9cccd7f) and passed 7 reruns. Likely cause:
+  the ERP stub counts a dropped answer after closing the connection, so
+  net/http can resend, get the invoice and return before the count; count
+  before `conn.Close()`. Output and details: the Step 2, part 2 entry.
+  (Step 2, part 2)
+- A stuck undo is visible (the workflow's `undos` query) but alerts no one.
+  An undo or a `reaction_failed` must reach a person. (Step 2, part 2)
 
 ## 2026-11-12 — Step 1 (finished)
 
@@ -1239,3 +1247,24 @@ builds used the module cache served over HTTP as `GOPROXY`.
 others' drafts, approvers outside the readers, days against dates, a stale approver in draft).
 **Next session:** proof-of-concept Step 2, part 2 (link reactions, the leave balance, the held
 deduction and its compensation), once this PR is merged.
+
+## 2026-11-16 — Step 2 (proof of concept), part 2: link reactions (in progress)
+
+Phases A and B done; Phase D completes this entry.
+
+**Flaky test on main.** Before any change, the baseline `go test ./...` (9cccd7f, with
+`dockerd` started by hand) failed once in `internal/hooks`:
+
+```
+--- FAIL: TestDroppedAnswer_DefaultConnectors_NetHTTPResends (0.00s)
+    resend_test.go:36: result [INV-1], ERP invoices [INV-1], dropped 0; want one invoice, returned, after one dropped answer
+FAIL
+FAIL	github.com/francoisnyc/work-kernel/internal/hooks	0.124s
+```
+
+The invoice was made once and returned, but the stub reported no dropped answer. It passed
+7 reruns alone, and the whole suite on the next two runs. The stub (`connstub`) closes the
+connection and only then counts the drop, so the resend can complete, and the test read the
+counter, first. Not fixed here (Later). If it fails in CI on this PR, stop and report; no
+reruns until green.
+
