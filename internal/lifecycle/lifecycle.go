@@ -45,7 +45,17 @@ type Result struct {
 // call from the item service and from inside a Temporal workflow alike.
 //
 // A legal move returns the new state. An illegal one returns a *Rejection.
+//
+// It reads no links: a guard that reads them does not hold. Callers with
+// links use TransitionLinked.
 func Transition(t *typedef.Type, current string, fields map[string]any, to string) (Result, error) {
+	return TransitionLinked(t, current, fields, nil, to)
+}
+
+// TransitionLinked is Transition with the linked Items the guard may read
+// (see Links). It is the one pure lifecycle function.
+func TransitionLinked(t *typedef.Type, current string, fields map[string]any, links Links,
+	to string) (Result, error) {
 	tr, ok := t.Transition(current, to)
 	if !ok {
 		return Result{}, &Rejection{
@@ -68,7 +78,7 @@ func Transition(t *typedef.Type, current string, fields map[string]any, to strin
 		}
 	}
 
-	if !guardHolds(t, tr, fields) {
+	if !guardHolds(t, tr, fields, links) {
 		return Result{}, &Rejection{
 			Code: GuardFailed, From: current, To: to,
 			Reason: fmt.Sprintf("transition from %q to %q: guard not satisfied: %s", current, to, tr.Guard),
@@ -86,11 +96,23 @@ func Transition(t *typedef.Type, current string, fields map[string]any, to strin
 //
 // The reason given for a failed guard is the guard's own text, never the
 // values it saw: those may be personal data.
-func guardHolds(t *typedef.Type, tr typedef.Transition, fields map[string]any) bool {
+func guardHolds(t *typedef.Type, tr typedef.Transition, fields map[string]any, links Links) bool {
 	if tr.Program == nil {
 		return true // no guard
 	}
-	vars := make(map[string]any, len(t.Fields))
+	// Links the guard reads but nobody read: fail safe.
+	if len(tr.GuardLinks) > 0 && links == nil {
+		return false
+	}
+	vars := make(map[string]any, len(t.Fields)+len(tr.GuardLinks))
+	for _, name := range tr.GuardLinks {
+		// A linked Item is its state and category, and nothing else.
+		list := make([]map[string]string, 0, len(links[name]))
+		for _, li := range links[name] {
+			list = append(list, map[string]string{"state": li.State, "category": li.Category})
+		}
+		vars[typedef.LinksPrefix+name] = list
+	}
 	for _, f := range t.Fields {
 		v := fields[f.ID]
 		switch {

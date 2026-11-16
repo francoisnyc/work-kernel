@@ -17,10 +17,11 @@ import (
 // list under its own names (docs/journal.md, Later: Types per namespace).
 
 var fieldTypes = map[typedef.FieldType]kernelv1.FieldType{
-	typedef.String: kernelv1.FieldType_FIELD_TYPE_STRING,
-	typedef.Int:    kernelv1.FieldType_FIELD_TYPE_INT,
-	typedef.Bool:   kernelv1.FieldType_FIELD_TYPE_BOOL,
-	typedef.Enum:   kernelv1.FieldType_FIELD_TYPE_ENUM,
+	typedef.String:    kernelv1.FieldType_FIELD_TYPE_STRING,
+	typedef.Int:       kernelv1.FieldType_FIELD_TYPE_INT,
+	typedef.Bool:      kernelv1.FieldType_FIELD_TYPE_BOOL,
+	typedef.Enum:      kernelv1.FieldType_FIELD_TYPE_ENUM,
+	typedef.Principal: kernelv1.FieldType_FIELD_TYPE_PRINCIPAL,
 }
 
 var categories = map[string]kernelv1.StateCategory{
@@ -53,6 +54,13 @@ func typeOut(ns string, t *typedef.Type) *kernelv1.Type {
 			FromState: tr.From, ToState: tr.To, Guard: tr.Guard, Required: tr.Required,
 			Allowed: tr.Allowed, Escape: tr.Escape, Checked: checked,
 		})
+	}
+	for _, l := range t.Links {
+		lt := &kernelv1.LinkType{Name: l.Name, Inverse: l.Inverse, MaxOne: l.SourceSingle(), InverseMaxOne: l.TargetSingle()}
+		for _, target := range l.Targets {
+			lt.Targets = append(lt.Targets, namespaceName(ns)+"/types/"+target)
+		}
+		out.LinkTypes = append(out.LinkTypes, lt)
 	}
 	return out
 }

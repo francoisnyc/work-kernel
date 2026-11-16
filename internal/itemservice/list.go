@@ -42,7 +42,7 @@ func (k *Service) List(ctx context.Context, req ListRequest) (ListResult, error)
 	if err != nil {
 		return ListResult{}, err
 	}
-	filter, err := k.resolveFilter(ctx, req.Filter)
+	filter, err := k.resolveFilter(ctx, req.Principal, req.Filter)
 	if err != nil {
 		return ListResult{}, err
 	}

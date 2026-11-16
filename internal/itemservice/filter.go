@@ -6,8 +6,10 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/francoisnyc/work-kernel/internal/item"
 	"github.com/francoisnyc/work-kernel/internal/typedef"
 )
 
@@ -22,6 +24,8 @@ type Filter struct {
 	// Fields needs exactly one Type in TypeIDs, and the field must have one
 	// type in every version of it; else ErrInvalid.
 	Fields []FieldFilter
+	// Links keeps Items linked to or from given Items (see LinkFilter).
+	Links []LinkFilter
 }
 
 // FieldFilter is a condition on one field: Eq, or a range of one or two
@@ -34,7 +38,8 @@ type FieldFilter struct {
 
 // empty reports whether the filter says nothing.
 func (f Filter) empty() bool {
-	return len(f.TypeIDs) == 0 && len(f.States) == 0 && len(f.Categories) == 0 && len(f.Fields) == 0
+	return len(f.TypeIDs) == 0 && len(f.States) == 0 && len(f.Categories) == 0 && len(f.Fields) == 0 &&
+		len(f.Links) == 0
 }
 
 // sqlFilter is a Filter checked against the registered Types and turned into
@@ -44,10 +49,12 @@ type sqlFilter struct {
 	args  pgx.NamedArgs
 }
 
-// resolveFilter checks f against the registered Types and builds its SQL.
-// A malformed filter is an *InvalidError naming where: filter.types,
-// filter.categories or filter.fields[i].
-func (k *Service) resolveFilter(ctx context.Context, f Filter) (sqlFilter, error) {
+// resolveFilter checks f against the registered Types and builds its SQL,
+// for the principal p ("me" on a principal field; the Items a link
+// condition names must be visible to p). A malformed filter is an
+// *InvalidError naming where: filter.types, filter.categories,
+// filter.fields[i] or filter.links[i].
+func (k *Service) resolveFilter(ctx context.Context, p item.Principal, f Filter) (sqlFilter, error) {
 	out := sqlFilter{args: pgx.NamedArgs{}}
 	all, err := k.ListTypes(ctx)
 	if err != nil {
@@ -105,11 +112,18 @@ func (k *Service) resolveFilter(ctx context.Context, f Filter) (sqlFilter, error
 		if err != nil {
 			return out, &InvalidError{Path: path, Reason: err.Error()}
 		}
-		conds, err := fieldConds(ft, ff, i, out.args)
+		conds, err := fieldConds(ft, ff, i, out.args, p)
 		if err != nil {
 			return out, &InvalidError{Path: path, Reason: err.Error()}
 		}
 		out.conds = append(out.conds, conds...)
+	}
+	for i, lf := range f.Links {
+		cond, err := k.linkCond(ctx, p, all, lf, i, out.args)
+		if err != nil {
+			return out, err
+		}
+		out.conds = append(out.conds, cond)
 	}
 	return out, nil
 }
@@ -124,10 +138,15 @@ func fieldTypeAcross(versions []*typedef.Type, id string) (typedef.Field, error)
 			continue
 		}
 		if found != nil && found.Type != f.Type {
-			return typedef.Field{}, fmt.Errorf("the field has different types across the Type's versions")
+			// A string in one version and a principal in another is one
+			// stored type: it filters as a principal (eq only).
+			if !stringOrPrincipal(found.Type) || !stringOrPrincipal(f.Type) {
+				return typedef.Field{}, fmt.Errorf("the field has different types across the Type's versions")
+			}
+			f.Type = typedef.Principal
 		}
-		if found == nil || len(f.Options) > len(found.Options) {
-			found = &f // for an enum, the widest set of options
+		if found == nil || len(f.Options) > len(found.Options) || f.Type == typedef.Principal {
+			found = &f // for an enum, the widest set of options; a principal wins over a string
 		}
 	}
 	if found == nil {
@@ -138,7 +157,7 @@ func fieldTypeAcross(versions []*typedef.Type, id string) (typedef.Field, error)
 
 // fieldConds checks one field filter and returns its SQL conditions, adding
 // the values to args under names numbered by the filter's position.
-func fieldConds(f typedef.Field, ff FieldFilter, i int, args pgx.NamedArgs) ([]string, error) {
+func fieldConds(f typedef.Field, ff FieldFilter, i int, args pgx.NamedArgs, p item.Principal) ([]string, error) {
 	type bound struct {
 		op string
 		v  any
@@ -158,6 +177,14 @@ func fieldConds(f typedef.Field, ff FieldFilter, i int, args pgx.NamedArgs) ([]s
 		return nil, fmt.Errorf("one lower bound and one upper bound at most")
 	case len(bounds) > 0 && f.Type != typedef.Int:
 		return nil, fmt.Errorf("ranges are for int fields only")
+	}
+	// On a principal field "me" is the caller: the user an agent acts for,
+	// else the actor itself.
+	if f.Type == typedef.Principal && ff.Eq == "me" {
+		ff.Eq = p.Actor
+		if p.OnBehalfOf != "" {
+			ff.Eq = p.OnBehalfOf
+		}
 	}
 
 	// The field's ID is a Type's stable ID, passed as an argument, never
@@ -184,6 +211,12 @@ func fieldConds(f typedef.Field, ff FieldFilter, i int, args pgx.NamedArgs) ([]s
 				return nil, fmt.Errorf("want one of the field's options")
 			}
 			return s, nil
+		case typedef.Principal:
+			s, ok := v.(string)
+			if !ok || !item.IsKind(s, item.KindUser, item.KindAgent) {
+				return nil, fmt.Errorf("want user:<id>, agent:<id> or me")
+			}
+			return s, nil
 		default:
 			s, ok := v.(string)
 			if !ok {
@@ -197,12 +230,14 @@ func fieldConds(f typedef.Field, ff FieldFilter, i int, args pgx.NamedArgs) ([]s
 		// CASE, because SQL does not promise to test a guard before a cast.
 		typedef.Int: "(case when jsonb_typeof(m.fields -> @" + fieldArg + ") = 'number' " +
 			"then (m.fields ->> @" + fieldArg + ")::numeric end)",
-		typedef.Bool:   "(m.fields ->> @" + fieldArg + ")::boolean",
-		typedef.Enum:   "(m.fields ->> @" + fieldArg + ")",
-		typedef.String: "(m.fields ->> @" + fieldArg + ")",
+		typedef.Bool:      "(m.fields ->> @" + fieldArg + ")::boolean",
+		typedef.Enum:      "(m.fields ->> @" + fieldArg + ")",
+		typedef.String:    "(m.fields ->> @" + fieldArg + ")",
+		typedef.Principal: "(m.fields ->> @" + fieldArg + ")",
 	}[f.Type]
 	cast := map[typedef.FieldType]string{
 		typedef.Int: "::numeric", typedef.Bool: "::boolean", typedef.Enum: "::text", typedef.String: "::text",
+		typedef.Principal: "::text",
 	}[f.Type]
 
 	if ff.Eq != nil {
@@ -233,4 +268,65 @@ func oneOrAny(column, arg string, values []string, args pgx.NamedArgs) []string 
 	}
 	args[arg] = values
 	return []string{column + " = any(@" + arg + ")"}
+}
+
+func stringOrPrincipal(t typedef.FieldType) bool {
+	return t == typedef.String || t == typedef.Principal
+}
+
+// linkCond checks one link condition and returns its SQL on the Items alias
+// m. Outgoing: m is the source of a link named lf.LinkType to the Item.
+// Incoming: m is the target of a link from the Item whose declared name has
+// lf.LinkType as its inverse in the Item's Type. A name no registered Type
+// declares in that direction is refused: Types only grow, so a refused name
+// can only start working later, never stop working. The Item must be one
+// the principal sees (else ErrNotFound, like a missing one); naming it in a
+// filter records no read.
+func (k *Service) linkCond(ctx context.Context, p item.Principal, all []*typedef.Type, lf LinkFilter, i int,
+	args pgx.NamedArgs) (string, error) {
+	path := fmt.Sprintf("filter.links[%d]", i)
+	if lf.LinkType == "" || lf.ItemID == uuid.Nil {
+		return "", &InvalidError{Path: path, Reason: "a link condition needs a link type and an Item"}
+	}
+	known := false
+	var declared []string // incoming: the declared names whose inverse is lf.LinkType
+	for _, t := range all {
+		for _, l := range t.Links {
+			switch {
+			case lf.Direction == item.LinkOutgoing && l.Name == lf.LinkType:
+				known = true
+			case lf.Direction == item.LinkIncoming && l.Inverse == lf.LinkType:
+				known = true
+				if !slices.Contains(declared, t.ID+"\x00"+l.Name) {
+					declared = append(declared, t.ID+"\x00"+l.Name)
+				}
+			}
+		}
+	}
+	if lf.Direction != item.LinkOutgoing && lf.Direction != item.LinkIncoming {
+		return "", &InvalidError{Path: path, Reason: "a link condition needs a direction, outgoing or incoming"}
+	}
+	if !known {
+		return "", &InvalidError{Path: path, Reason: "no Type declares that link name in that direction"}
+	}
+	if _, _, err := k.visibleItem(ctx, p, lf.ItemID); err != nil {
+		return "", err
+	}
+	itemArg, nameArg := fmt.Sprintf("f_link_item_%d", i), fmt.Sprintf("f_link_name_%d", i)
+	args[itemArg] = lf.ItemID
+	if lf.Direction == item.LinkOutgoing {
+		args[nameArg] = lf.LinkType
+		return fmt.Sprintf(`m.id in (select l.source_id from links l where l.target_id = @%s and l.link_type = @%s)`,
+			itemArg, nameArg), nil
+	}
+	var types, names []string
+	for _, d := range declared {
+		t, n, _ := strings.Cut(d, "\x00")
+		types, names = append(types, t), append(names, n)
+	}
+	typesArg := fmt.Sprintf("f_link_types_%d", i)
+	args[typesArg], args[nameArg] = types, names
+	return fmt.Sprintf(`m.id in (select l.target_id from links l where l.source_id = @%s
+	    and (l.source_type_id, l.link_type) in (select * from unnest(@%s::text[], @%s::text[])))`,
+		itemArg, typesArg, nameArg), nil
 }

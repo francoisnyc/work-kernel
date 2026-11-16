@@ -46,7 +46,8 @@ func TestContract_OnlyPublicOperations(t *testing.T) {
 		got = append(got, string(methods.Get(i).Name()))
 	}
 	want := []string{"CreateItem", "GetItem", "UpdateItem", "TransitionItem", "SearchItems",
-		"ListItems", "ListItemEvents", "GetType", "ListTypes", "StartAgentSession", "ApproveWiden"} // part 2 added five
+		"ListItems", "ListItemEvents", "GetType", "ListTypes", "StartAgentSession", "ApproveWiden", // part 2 added five
+		"LinkItems", "UnlinkItems"} // proof of concept Step 1
 	if !slices.Equal(got, want) {
 		t.Errorf("ItemService methods = %v, want %v", got, want)
 	}

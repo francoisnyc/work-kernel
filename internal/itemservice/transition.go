@@ -85,7 +85,9 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 	res, err := k.write(ctx, req.Principal, req.IdempotencyKey, hash, func(tx pgx.Tx) (WriteResult, error) {
 		// The decision depends on the current state and fields, so it is made
 		// under the row lock: no other write can slip in between check and write.
-		it, err := lockItem(ctx, tx, nsOf(req.Principal), req.ItemID)
+		// When the guards into ToState read links, the linked Items are locked
+		// too (FOR SHARE), so they cannot change before this commits.
+		it, links, err := k.lockForTransition(ctx, tx, nsOf(req.Principal), req.ItemID, req.ToState)
 		if err != nil {
 			return WriteResult{}, err
 		}
@@ -136,7 +138,7 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 			return WriteResult{}, fieldsInvalid(err)
 		}
 		merged, set, cleared := applyPatch(it.Fields, req.Fields)
-		next, err := lifecycle.Transition(ty, it.State, merged, req.ToState)
+		next, err := lifecycle.TransitionLinked(ty, it.State, merged, links, req.ToState)
 		if err != nil {
 			return WriteResult{}, fromLifecycle(err)
 		}
@@ -152,6 +154,11 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		}
 		if err := authorize(ctx, tx, req.Principal, ty, it.State, next.State); err != nil {
 			return WriteResult{}, err
+		}
+		if links != nil {
+			if err := callTestHook(ctx, tx, "link_guard_held"); err != nil {
+				return WriteResult{}, err
+			}
 		}
 		if checked {
 			kind = holdOpened

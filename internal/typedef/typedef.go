@@ -104,6 +104,10 @@ type Transition struct {
 	// there is no guard. The "-" tag keeps it out of YAML and JSON. Package
 	// lifecycle evaluates it; this package only compiles it.
 	Program cel.Program `yaml:"-" json:"-"`
+	// GuardLinks are the link names the guard reads (links.<name>), sorted;
+	// filled when the Type is loaded. A transition with none needs no link
+	// read and no lock beyond its own Item.
+	GuardLinks []string `yaml:"-" json:"-"`
 }
 
 // Type is one version of a Type definition.
@@ -115,6 +119,8 @@ type Type struct {
 	States       []State      `yaml:"states" json:"states"`
 	Transitions  []Transition `yaml:"transitions" json:"transitions,omitempty"`
 	Hooks        []Hook       `yaml:"hooks" json:"hooks,omitempty"`
+	// Links are the link types Items of this version may have as sources.
+	Links []LinkType `yaml:"links" json:"links,omitempty"`
 }
 
 // Parse reads a Type from YAML and checks it. Unknown keys are errors, so a
@@ -200,7 +206,7 @@ func (t *Type) check() error {
 		}
 		seen[f.ID] = true
 		switch f.Type {
-		case String, Int, Bool:
+		case String, Int, Bool, Principal:
 			if len(f.Options) > 0 {
 				return fail("field %s: only enum fields take options", f.ID)
 			}
@@ -241,6 +247,9 @@ func (t *Type) check() error {
 		return fail("initial_state %q is not a declared state", t.InitialState)
 	}
 
+	if err := t.checkLinks(fail); err != nil {
+		return err
+	}
 	guards, err := newGuardEnv(t)
 	if err != nil {
 		return fail("%v", err)
@@ -290,11 +299,11 @@ func (t *Type) check() error {
 					name, entry, hookType)
 			}
 		}
-		prg, err := compileGuard(guards, tr.Guard)
+		prg, links, err := compileGuard(guards, tr.Guard)
 		if err != nil {
 			return fail("transition %s: guard %q: %v", name, tr.Guard, err)
 		}
-		tr.Program = prg
+		tr.Program, tr.GuardLinks = prg, links
 	}
 
 	// Timers come last: each must name a transition checked above.
@@ -425,6 +434,10 @@ func (t *Type) CheckFields(values map[string]any, allowNull bool) error {
 			s, ok := v.(string)
 			if !ok || !slices.Contains(f.Options, s) {
 				return fail("field %s: want one of %s", id, strings.Join(f.Options, ", "))
+			}
+		case Principal:
+			if !checkPrincipalValue(v) {
+				return fail("field %s: want a principal, user:<id> or agent:<id>", id)
 			}
 		}
 	}

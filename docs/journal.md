@@ -208,6 +208,37 @@ Ideas noted during the spike, not built yet.
 - Postgres in the compose stack keeps its data in an anonymous volume:
   `docker compose down` without `-v` leaves one behind each time. Name the
   volume if the stack starts being kept between sessions. (Step 0, part 3)
+- A link event gets an outbox row when the source's Type has listeners, so
+  every link costs one Temporal call that the workflow ignores. Skip events
+  no listener needs, per op. (Step 1)
+- A later Type version that drops a link type or changes its cardinality
+  leaves existing links as they were written: `src_single` and `dst_single`
+  are snapshots. Decide what a migration does to them. (Step 1)
+- Initial links on `CreateItem` (one write, the new Item as source). The
+  lock helper already takes a set of targets. (Step 1)
+- Enforce the finer agent powers together, with a dedicated `link` power;
+  v1 checks read versus any write. (Step 1)
+- Guards see incoming links only for link types that target the Type
+  itself. An epic's guard cannot read its `stories` (declared by story).
+  Let a Type name incoming links it reads, or derive them from the loaded
+  set. (Step 1)
+- Search indexes principal values like any string (`user:ana` gives the
+  words "user" and "ana"). Part of per-field indexing, above. (Step 1)
+- Notifications, when they come, must pass through `Project` for each
+  recipient, so assigning someone who cannot see an Item sends nothing; the
+  taint rule already lists assignee changes as privileged. (Step 1)
+- "Linked to" at a hub (2,000 links): once analyzed, Postgres hash-joins
+  every Item (27-44 ms). `= any(array(...))` takes 6 ms analyzed but 10 ms
+  fresh, and 3 ms instead of 0.15 on small Items; a join is no better. Try
+  a LATERAL lookup per link, or pick the shape from the link count.
+  (Step 1, EXPLAIN)
+- "Assigned to me" walks the Type's Items and filters (9-24 ms at 31,000):
+  the same cost as other field filters; fix both together (an expression
+  index per principal field, or Postgres 18's skip scan). Fresh, Get at a
+  hub still sorts its links (5.8 ms); analyzed it walks the order indexes
+  (0.7 ms). `RegisterType` checks link inverses but not targets; only the
+  directory load at start does, and only it and the bench register Types.
+  (Step 1, EXPLAIN)
 
 ## 2026-11-12 — Step 1 (finished)
 
@@ -1062,3 +1093,73 @@ connstub on `httptest.Server`, Postgres's anonymous volume).
 **Next session:** Step 0 is done when the PR's CI is green (the scenario job and `buf breaking`
 included): `main` then becomes the `buf breaking` baseline. Then proof-of-concept Step 1: link types and
 principal fields.
+
+## 2026-11-16 — Step 1 (proof of concept): link types and principal fields (finished)
+
+**Built:** typed links and principal fields, through the kernel, the API, pli and the scenario.
+A Type declares `links` (name, inverse, targets, `max`/`inverse_max`); `Link` and `Unlink`
+(`LinkItems`, `UnlinkItems`) write one event on the source only, with its `item_seq` and etag;
+the database enforces cardinality (snapshot flags under partial unique indexes); both ends must be
+visible, and for an agent in its session, with the write rule on both ends. Get shows links both
+ways in a fixed order (200 per direction, hidden targets restricted, hidden sources omitted); history
+shows link events; neither records a read. Guards read `links.<name>` (`{state, category}`) on all
+three doors, locking the linked Items FOR SHARE in UUID order with a re-read and retry. Search
+filters on links (by the name the results see) and on principal fields with `me`. Ticket v5
+(blocks/blocked_by, duplicate_of, `f_assignee: principal`, no close while blocked); the scenario
+runs on it. Review: unknown link names in filters are refused; a link name keeps its inverse across
+versions; ordering indexes for Get.
+
+**Kernel changes, counted:** (1) migration 00010: `links`, PK, two partial unique indexes,
+`links_target`, `links_source_order`, `links_target_order`. (2) typedef: link types, the
+`principal` field type, `links.<name>` in guards and each transition's `GuardLinks` (from the CEL
+AST), `CheckLinkTargets` and `CheckLinkInverses` in `ParseDir`. (3) `lifecycle.TransitionLinked`;
+`Transition` is it with no links, which fails safe. (4) `Link`, `Unlink`, `lockLinkEnds`. (5)
+`lockForTransition` on the public and internal transitions and in `ResolveHold`'s re-check. (6)
+`write()` retries 40P01 and 40001 (`retryable`); an unexported test hook (set only from
+`export_test.go`). (7) Links in `Get`, link events in history. (8) Link conditions, `me`, and
+string/principal fields across versions in filters; `resolveFilter` takes the principal. (9)
+`RegisterType` checks inverses against the registered versions. Proto, additive only (buf
+breaking green): two operations, `Link`, `LinkDirection`, `LinkFilter`, `LinkType`, two event
+kinds, `FIELD_TYPE_PRINCIPAL`, four reasons.
+
+**EXPLAIN** (`go run ./cmd/bench -explain-links`: 31,000 v5 tickets, 1,000 hidden from the
+reader; a hub with 2,000 links each way, 10% hidden; 16,000 links; Xeon 2.1 GHz, 4 CPUs,
+Postgres 17.12). ms fresh / analyzed. Before: without the ordering indexes. After: with them.
+
+| Read | Before | After | Plan after (analyzed) |
+| --- | --- | --- | --- |
+| Get, outgoing links, hub (2,200) | 5.7 / 12.2 | 5.8 / 0.71 | `links_source_order`, stops at 201 |
+| Get, incoming links, hub (2,000, 200 hidden) | 3.7 / 13.9 | 3.7 / 0.63 | `links_target_order`, filters hidden, stops |
+| Get, either direction, small (2) | 0.11–0.12 / 0.09–0.10 | 0.13–0.15 / 0.10 | the order indexes |
+| Guard link set (blocked_by), hub | 0.53 / 0.88 | 0.54 / 0.90 | `links_target` |
+| Assigned to me (300 visible of 31,000) | 23.5 / 9.0 | 15.5 / 9.7 | seq scan of items, top-N |
+| Linked to, outgoing, hub (`IN`) | 5.6 / 27.5 | 5.7 / 43.7 | hash join on a seq scan of items |
+| Linked to, incoming, hub (`IN`) | 8.3 / 11.1 | 8.3 / 19.3 | hash join on a seq scan of items |
+| Linked to, either direction, small (`IN`) | 0.13–0.23 / 0.11–0.15 | 0.15–0.18 / 0.12–0.20 | indexes |
+
+"Linked to" rewritten, hub out / in / small out / small in, fresh then analyzed: as a join
+5.5 / 7.4 / 0.27 / 0.16, then 35.6 / 41.4 / 0.12 / 0.21; as `= any(array(...))` 10.4 / 11.1 /
+3.0 / 2.6, then 6.4 / 5.7 / 0.12 / 0.12. Neither is faster both fresh and analyzed at the hub
+and no slower on small Items, so `IN` stays (Later). Without `links_target`, the guard's link set
+is 0.86 / 1.02 and "linked to" outgoing at the hub 9.6 fresh: it stays.
+
+**Surprises:** cel-go takes `links.blocked_by` as a declared variable name and resolves the
+qualified identifier to it, so a typo in a link name fails at load; the checked AST's reference
+map gives the names a guard reads. Phase A's premise was wrong that KEY SHARE would not block a
+state change (every write takes FOR UPDATE); FOR SHARE was kept as the robust choice. Once
+analyzed, Postgres serves "linked to" at the hub by hash-joining all 31,000 Items, and its time
+varies between runs (27.5 and 43.7 ms, same plan). Bash's `set -e` does not reach a failing
+command inside `$(...)` used as an argument: the scenario's jq helper turned a jq error into "no
+results", which two of my empty-result checks then passed; `fail` now leaves a marker the parent
+checks. Three Phase B tests were wrong (an agent ID not among the readers, a fourth pinned Type
+list, the jq helper); fixed with approval. Get returned an empty, non-nil link slice, which broke
+two equality tests: no links is nil. The Docker daemon in this container stopped twice between
+commands; images were built through a module mirror served from the local cache, as in Step 0.
+
+**Numbers:** scenario, two runs in a row on a fresh stack with the final images: 6.4 s and 6.3 s;
+the held approve 1,204 and 1,198 ms, the denied one 1,149 and 1,195 ms (the ERP stub answers in
+1 s), as in Step 0. `go test -race ./...` green, no data race.
+
+**Open:** Later has nine new items. **Next session:** proof-of-concept Step 2 (the vacation
+request: human approvals, acting timers, link reactions, a stub email connector), once this PR
+is merged.

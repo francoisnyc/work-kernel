@@ -26,7 +26,8 @@
 //     unknown session, or another agent's or another namespace's, is
 //     UNAUTHENTICATED / SESSION_INVALID.
 //
-// kernel.v1 only grows. Links arrive in Step 1.
+// kernel.v1 only grows. Links and principal fields arrived in Step 1 of
+// the proof of concept.
 package kernelv1connect
 
 import (
@@ -84,6 +85,10 @@ const (
 	// ItemServiceApproveWidenProcedure is the fully-qualified name of the ItemService's ApproveWiden
 	// RPC.
 	ItemServiceApproveWidenProcedure = "/kernel.v1.ItemService/ApproveWiden"
+	// ItemServiceLinkItemsProcedure is the fully-qualified name of the ItemService's LinkItems RPC.
+	ItemServiceLinkItemsProcedure = "/kernel.v1.ItemService/LinkItems"
+	// ItemServiceUnlinkItemsProcedure is the fully-qualified name of the ItemService's UnlinkItems RPC.
+	ItemServiceUnlinkItemsProcedure = "/kernel.v1.ItemService/UnlinkItems"
 )
 
 // ItemServiceClient is a client for the kernel.v1.ItemService service.
@@ -115,6 +120,12 @@ type ItemServiceClient interface {
 	// Called with a user's token: approve one wider scope for an agent session
 	// acting for that user (the answer to NEEDS_APPROVAL).
 	ApproveWiden(context.Context, *connect.Request[v1.ApproveWidenRequest]) (*connect.Response[v1.ApproveWidenResponse], error)
+	// Add a link of a type the source's Type declares, from the source Item
+	// (name) to a target. The event, the item_seq and the etag are the
+	// source's only. The caller must see both Items (else NOT_FOUND).
+	LinkItems(context.Context, *connect.Request[v1.LinkItemsRequest]) (*connect.Response[v1.LinkItemsResponse], error)
+	// Remove a link, with the same rules as LinkItems.
+	UnlinkItems(context.Context, *connect.Request[v1.UnlinkItemsRequest]) (*connect.Response[v1.UnlinkItemsResponse], error)
 }
 
 // NewItemServiceClient constructs a client for the kernel.v1.ItemService service. By default, it
@@ -194,6 +205,18 @@ func NewItemServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(itemServiceMethods.ByName("ApproveWiden")),
 			connect.WithClientOptions(opts...),
 		),
+		linkItems: connect.NewClient[v1.LinkItemsRequest, v1.LinkItemsResponse](
+			httpClient,
+			baseURL+ItemServiceLinkItemsProcedure,
+			connect.WithSchema(itemServiceMethods.ByName("LinkItems")),
+			connect.WithClientOptions(opts...),
+		),
+		unlinkItems: connect.NewClient[v1.UnlinkItemsRequest, v1.UnlinkItemsResponse](
+			httpClient,
+			baseURL+ItemServiceUnlinkItemsProcedure,
+			connect.WithSchema(itemServiceMethods.ByName("UnlinkItems")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -210,6 +233,8 @@ type itemServiceClient struct {
 	listTypes         *connect.Client[v1.ListTypesRequest, v1.ListTypesResponse]
 	startAgentSession *connect.Client[v1.StartAgentSessionRequest, v1.StartAgentSessionResponse]
 	approveWiden      *connect.Client[v1.ApproveWidenRequest, v1.ApproveWidenResponse]
+	linkItems         *connect.Client[v1.LinkItemsRequest, v1.LinkItemsResponse]
+	unlinkItems       *connect.Client[v1.UnlinkItemsRequest, v1.UnlinkItemsResponse]
 }
 
 // CreateItem calls kernel.v1.ItemService.CreateItem.
@@ -267,6 +292,16 @@ func (c *itemServiceClient) ApproveWiden(ctx context.Context, req *connect.Reque
 	return c.approveWiden.CallUnary(ctx, req)
 }
 
+// LinkItems calls kernel.v1.ItemService.LinkItems.
+func (c *itemServiceClient) LinkItems(ctx context.Context, req *connect.Request[v1.LinkItemsRequest]) (*connect.Response[v1.LinkItemsResponse], error) {
+	return c.linkItems.CallUnary(ctx, req)
+}
+
+// UnlinkItems calls kernel.v1.ItemService.UnlinkItems.
+func (c *itemServiceClient) UnlinkItems(ctx context.Context, req *connect.Request[v1.UnlinkItemsRequest]) (*connect.Response[v1.UnlinkItemsResponse], error) {
+	return c.unlinkItems.CallUnary(ctx, req)
+}
+
 // ItemServiceHandler is an implementation of the kernel.v1.ItemService service.
 type ItemServiceHandler interface {
 	// Create an Item of a Type version, optionally in a container and narrowed.
@@ -296,6 +331,12 @@ type ItemServiceHandler interface {
 	// Called with a user's token: approve one wider scope for an agent session
 	// acting for that user (the answer to NEEDS_APPROVAL).
 	ApproveWiden(context.Context, *connect.Request[v1.ApproveWidenRequest]) (*connect.Response[v1.ApproveWidenResponse], error)
+	// Add a link of a type the source's Type declares, from the source Item
+	// (name) to a target. The event, the item_seq and the etag are the
+	// source's only. The caller must see both Items (else NOT_FOUND).
+	LinkItems(context.Context, *connect.Request[v1.LinkItemsRequest]) (*connect.Response[v1.LinkItemsResponse], error)
+	// Remove a link, with the same rules as LinkItems.
+	UnlinkItems(context.Context, *connect.Request[v1.UnlinkItemsRequest]) (*connect.Response[v1.UnlinkItemsResponse], error)
 }
 
 // NewItemServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -371,6 +412,18 @@ func NewItemServiceHandler(svc ItemServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(itemServiceMethods.ByName("ApproveWiden")),
 		connect.WithHandlerOptions(opts...),
 	)
+	itemServiceLinkItemsHandler := connect.NewUnaryHandler(
+		ItemServiceLinkItemsProcedure,
+		svc.LinkItems,
+		connect.WithSchema(itemServiceMethods.ByName("LinkItems")),
+		connect.WithHandlerOptions(opts...),
+	)
+	itemServiceUnlinkItemsHandler := connect.NewUnaryHandler(
+		ItemServiceUnlinkItemsProcedure,
+		svc.UnlinkItems,
+		connect.WithSchema(itemServiceMethods.ByName("UnlinkItems")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/kernel.v1.ItemService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ItemServiceCreateItemProcedure:
@@ -395,6 +448,10 @@ func NewItemServiceHandler(svc ItemServiceHandler, opts ...connect.HandlerOption
 			itemServiceStartAgentSessionHandler.ServeHTTP(w, r)
 		case ItemServiceApproveWidenProcedure:
 			itemServiceApproveWidenHandler.ServeHTTP(w, r)
+		case ItemServiceLinkItemsProcedure:
+			itemServiceLinkItemsHandler.ServeHTTP(w, r)
+		case ItemServiceUnlinkItemsProcedure:
+			itemServiceUnlinkItemsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -446,4 +503,12 @@ func (UnimplementedItemServiceHandler) StartAgentSession(context.Context, *conne
 
 func (UnimplementedItemServiceHandler) ApproveWiden(context.Context, *connect.Request[v1.ApproveWidenRequest]) (*connect.Response[v1.ApproveWidenResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kernel.v1.ItemService.ApproveWiden is not implemented"))
+}
+
+func (UnimplementedItemServiceHandler) LinkItems(context.Context, *connect.Request[v1.LinkItemsRequest]) (*connect.Response[v1.LinkItemsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kernel.v1.ItemService.LinkItems is not implemented"))
+}
+
+func (UnimplementedItemServiceHandler) UnlinkItems(context.Context, *connect.Request[v1.UnlinkItemsRequest]) (*connect.Response[v1.UnlinkItemsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kernel.v1.ItemService.UnlinkItems is not implemented"))
 }

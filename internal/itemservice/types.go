@@ -23,6 +23,10 @@ func (k *Service) RegisterType(ctx context.Context, t *typedef.Type) error {
 	}
 	var same bool
 	err = pgx.BeginFunc(ctx, k.pool, func(tx pgx.Tx) error {
+		// A link name keeps its inverse across the Type's versions.
+		if err := checkInversesWith(ctx, tx, t); err != nil {
+			return err
+		}
 		_, err := tx.Exec(ctx,
 			`insert into types (id, version, definition) values ($1, $2, $3::jsonb)
 			 on conflict (id, version) do nothing`,
@@ -128,6 +132,35 @@ func (k *Service) EnsureNamespace(ctx context.Context, ns string) error {
 		 on conflict (namespace_id) where parent_id is null do nothing`, ns)
 	if err != nil {
 		return fmt.Errorf("ensure namespace %s: %w", ns, err)
+	}
+	return nil
+}
+
+// checkInversesWith refuses t if a registered version of its Type gives one
+// of its link names another inverse (typedef.CheckLinkInverses).
+func checkInversesWith(ctx context.Context, tx pgx.Tx, t *typedef.Type) error {
+	if len(t.Links) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `select definition from types where id = $1 and version <> $2 order by version`,
+		t.ID, t.Version)
+	if err != nil {
+		return fmt.Errorf("read type versions: %w", err)
+	}
+	defs, err := pgx.CollectRows(rows, pgx.RowTo[[]byte])
+	if err != nil {
+		return fmt.Errorf("read type versions: %w", err)
+	}
+	all := make([]*typedef.Type, 0, len(defs)+1)
+	for _, def := range defs {
+		other, err := typedef.FromJSON(def)
+		if err != nil {
+			return err
+		}
+		all = append(all, other)
+	}
+	if err := typedef.CheckLinkInverses(append(all, t)); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
 	return nil
 }

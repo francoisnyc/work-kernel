@@ -48,6 +48,7 @@ func main() {
 	holds := flag.Bool("holds", false, "measure Step 6: answers to held approvals (variant D) and write latency")
 	invoices := flag.Bool("invoices", false, "measure Step 7: the invoice action under forced timeouts and worker kills")
 	variants := flag.Bool("variants", false, "measure Step 7: time to an answer for variants A, D (and B on its branch)")
+	explainLinks := flag.Bool("explain-links", false, "print query plans for the link reads and the link and principal filters")
 	flag.Parse()
 	run := run
 	if *explain {
@@ -64,6 +65,9 @@ func main() {
 	}
 	if *variants {
 		run = func() error { return variantsMode(context.Background()) }
+	}
+	if *explainLinks {
+		run = func() error { return linksExplainMode(context.Background()) }
 	}
 	if err := run(); err != nil {
 		log.Fatal(err)
