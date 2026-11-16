@@ -40,7 +40,8 @@ type Event struct {
 	ItemSeq   int64
 	CommitSeq int64
 	// Op: create, update, transition, transition_requested,
-	// transition_denied, transition_failed or hook_failed.
+	// transition_denied, transition_failed, hook_failed, link_added or
+	// link_removed.
 	Op        string
 	CreatedAt time.Time
 
@@ -70,6 +71,9 @@ type Event struct {
 	Moved         bool
 	ContainerFrom *ItemRef // a move; nil is the top level
 	ContainerTo   *ItemRef
+
+	LinkType   string   // link_added, link_removed: the declared name
+	LinkTarget *ItemRef // link_added, link_removed: the target
 }
 
 // ItemRef is another Item named by an event: its ID, or Restricted (and no

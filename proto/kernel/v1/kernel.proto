@@ -24,7 +24,8 @@ syntax = "proto3";
 //   unknown session, or another agent's or another namespace's, is
 //   UNAUTHENTICATED / SESSION_INVALID.
 //
-// kernel.v1 only grows. Links arrive in Step 1.
+// kernel.v1 only grows. Links and principal fields arrived in Step 1 of
+// the proof of concept.
 package kernel.v1;
 
 import "google/protobuf/duration.proto";
@@ -61,6 +62,13 @@ service ItemService {
   // Called with a user's token: approve one wider scope for an agent session
   // acting for that user (the answer to NEEDS_APPROVAL).
   rpc ApproveWiden(ApproveWidenRequest) returns (ApproveWidenResponse);
+
+  // Add a link of a type the source's Type declares, from the source Item
+  // (name) to a target. The event, the item_seq and the etag are the
+  // source's only. The caller must see both Items (else NOT_FOUND).
+  rpc LinkItems(LinkItemsRequest) returns (LinkItemsResponse);
+  // Remove a link, with the same rules as LinkItems.
+  rpc UnlinkItems(UnlinkItemsRequest) returns (UnlinkItemsResponse);
 }
 
 // An Item as the caller may see it.
@@ -90,6 +98,33 @@ message Item {
   string creator_on_behalf_of = 10;
   // The current state's category in the Item's Type version.
   StateCategory category = 11;
+  // Links in both directions, outgoing first, at most 200 per direction
+  // (restricted ones count). Filled by GetItem and by every write's answer;
+  // Items in SearchItems and ListItems carry none. An outgoing link whose
+  // target the caller cannot see is restricted; an incoming link whose
+  // source the caller cannot see is left out.
+  repeated Link links = 12;
+  // More links exist in some direction than are shown: page through them
+  // with an ItemFilter link condition.
+  bool links_truncated = 13;
+}
+
+// One link of an Item, as seen from that Item.
+message Link {
+  // The name as this Item sees it: the declared name when OUTGOING
+  // (blocks), the inverse name when INCOMING (blocked_by).
+  string link_type = 1;
+  LinkDirection direction = 2;
+  // The Item at the other end; restricted when the caller cannot see it.
+  ItemRef item = 3;
+}
+
+enum LinkDirection {
+  LINK_DIRECTION_UNSPECIFIED = 0;
+  // From this Item: it is the link's source.
+  LINK_DIRECTION_OUTGOING = 1;
+  // To this Item: it is the link's target.
+  LINK_DIRECTION_INCOMING = 2;
 }
 
 // Another Item named in an Item's history (later, in its links). One the
@@ -267,11 +302,28 @@ message ItemFilter {
   // Conditions on field values. A field filter needs exactly one Type in
   // types, and the field must have one type in every version of it.
   repeated FieldFilter fields = 4;
+  // Conditions on links: Items linked to (or from) an Item.
+  repeated LinkFilter links = 5;
+}
+
+// Items with a link of this name to or from item, as the result Items see
+// it: OUTGOING takes a declared name (Items that block item), INCOMING an
+// inverse name (Items blocked by item). The name matches every Type that
+// declares it in that direction. The item must be one the caller can see,
+// else NOT_FOUND.
+message LinkFilter {
+  string link_type = 1;
+  LinkDirection direction = 2;
+  // namespaces/{ns}/items/{item}
+  string item = 3;
 }
 
 // A condition on one field's value: eq, or a range of one or two bounds.
 // Values are plain JSON as in Item.fields (an int is a string). Ranges are
 // for ordered types only (int); strings, enums and booleans take eq.
+//
+// On a principal field, eq takes user:<id> or agent:<id>, or "me": the
+// caller (for an agent, the user it acts for, else the agent).
 message FieldFilter {
   // The field ID.
   string field = 1;
@@ -362,6 +414,10 @@ message ItemEvent {
   bool moved = 24;
   ItemRef container_from = 25;
   ItemRef container_to = 26;
+  // LINK_ADDED and LINK_REMOVED: the link's declared name and its target
+  // (restricted when the caller cannot see it).
+  string link_type = 27;
+  ItemRef link_target = 28;
 }
 
 enum ItemEventKind {
@@ -375,6 +431,9 @@ enum ItemEventKind {
   ITEM_EVENT_KIND_TRANSITION_DENIED = 5;
   ITEM_EVENT_KIND_TRANSITION_FAILED = 6;
   ITEM_EVENT_KIND_HOOK_FAILED = 7;
+  // A link from this Item was added or removed.
+  ITEM_EVENT_KIND_LINK_ADDED = 8;
+  ITEM_EVENT_KIND_LINK_REMOVED = 9;
 }
 
 message StartAgentSessionRequest {
@@ -449,6 +508,23 @@ message Type {
   repeated Field fields = 5;
   repeated State states = 6;
   repeated Transition transitions = 7;
+  // The link types Items of this version may have as sources.
+  repeated LinkType link_types = 8;
+}
+
+// A link type a Type declares: links from its Items to Items of the target
+// Types.
+message LinkType {
+  // The name from the source (blocks) and from the target (blocked_by).
+  string name = 1;
+  string inverse = 2;
+  // Type names without a version, namespaces/{ns}/types/{type}: a target
+  // may be of any version of these Types.
+  repeated string targets = 3;
+  // At most one link of this type from a source; else many.
+  bool max_one = 4;
+  // At most one link of this type to a target; else many.
+  bool inverse_max_one = 5;
 }
 
 message Field {
@@ -464,6 +540,8 @@ enum FieldType {
   FIELD_TYPE_INT = 2;
   FIELD_TYPE_BOOL = 3;
   FIELD_TYPE_ENUM = 4;
+  // A principal: user:<id> or agent:<id>. It grants nothing.
+  FIELD_TYPE_PRINCIPAL = 5;
 }
 
 message State {
@@ -518,4 +596,40 @@ message ListTypesRequest {
 message ListTypesResponse {
   // Ordered by type ID, then version.
   repeated Type types = 1;
+}
+
+message LinkItemsRequest {
+  // The source Item, namespaces/{ns}/items/{item}.
+  string name = 1;
+  // Required; see CreateItemRequest.request_id.
+  string request_id = 2;
+  // Optional if-match on the source, as on UpdateItemRequest.
+  string etag = 3;
+  // Required: a link type the source's Type declares, by its declared name
+  // (blocks, never blocked_by).
+  string link_type = 4;
+  // Required: the target Item, namespaces/{ns}/items/{item}.
+  string target = 5;
+}
+
+message LinkItemsResponse {
+  // The source Item after the write.
+  Item item = 1;
+  int64 item_seq = 2;
+  int64 commit_seq = 3;
+}
+
+message UnlinkItemsRequest {
+  // As on LinkItemsRequest.
+  string name = 1;
+  string request_id = 2;
+  string etag = 3;
+  string link_type = 4;
+  string target = 5;
+}
+
+message UnlinkItemsResponse {
+  Item item = 1;
+  int64 item_seq = 2;
+  int64 commit_seq = 3;
 }

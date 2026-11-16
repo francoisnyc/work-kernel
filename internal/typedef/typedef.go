@@ -104,6 +104,10 @@ type Transition struct {
 	// there is no guard. The "-" tag keeps it out of YAML and JSON. Package
 	// lifecycle evaluates it; this package only compiles it.
 	Program cel.Program `yaml:"-" json:"-"`
+	// GuardLinks are the link names the guard reads (links.<name>), sorted;
+	// filled when the Type is loaded. A transition with none needs no link
+	// read and no lock beyond its own Item.
+	GuardLinks []string `yaml:"-" json:"-"`
 }
 
 // Type is one version of a Type definition.
@@ -115,6 +119,8 @@ type Type struct {
 	States       []State      `yaml:"states" json:"states"`
 	Transitions  []Transition `yaml:"transitions" json:"transitions,omitempty"`
 	Hooks        []Hook       `yaml:"hooks" json:"hooks,omitempty"`
+	// Links are the link types Items of this version may have as sources.
+	Links []LinkType `yaml:"links" json:"links,omitempty"`
 }
 
 // Parse reads a Type from YAML and checks it. Unknown keys are errors, so a

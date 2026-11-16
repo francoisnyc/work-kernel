@@ -22,6 +22,8 @@ type Filter struct {
 	// Fields needs exactly one Type in TypeIDs, and the field must have one
 	// type in every version of it; else ErrInvalid.
 	Fields []FieldFilter
+	// Links keeps Items linked to or from given Items (see LinkFilter).
+	Links []LinkFilter
 }
 
 // FieldFilter is a condition on one field: Eq, or a range of one or two

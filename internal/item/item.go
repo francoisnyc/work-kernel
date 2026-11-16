@@ -56,6 +56,11 @@ type Item struct {
 	CreatedAt         time.Time
 	CreatedBy         string
 	CreatedOnBehalfOf string
+	// Links in both directions, outgoing first, at most MaxLinksShown per
+	// direction (restricted ones count). Only Get fills them; LinksTruncated
+	// says more exist.
+	Links          []Link
+	LinksTruncated bool
 }
 
 // Hold is a request for a checked transition, held while its check runs.
@@ -76,3 +81,22 @@ const (
 	HoldError    = "error"    // the check could not answer
 	HoldCanceled = "canceled" // an escape left the state
 )
+
+// LinkDirection says which end of a link an Item is.
+type LinkDirection string
+
+const (
+	LinkOutgoing LinkDirection = "outgoing" // the Item is the link's source
+	LinkIncoming LinkDirection = "incoming" // the Item is the link's target
+)
+
+// Link is one link of an Item, as a principal sees it from that Item.
+type Link struct {
+	// LinkType is the name as seen from this Item: the declared name when
+	// outgoing (blocks), the inverse name when incoming (blocked_by).
+	LinkType  string
+	Direction LinkDirection
+	// Other is the Item at the other end; uuid.Nil when Restricted.
+	Other      uuid.UUID
+	Restricted bool
+}
