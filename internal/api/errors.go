@@ -48,6 +48,8 @@ var messages = map[string]string{
 	"ALREADY_LINKED":      "the link already exists",
 	"NOT_LINKED":          "there is no such link",
 	"LINK_TARGET_TYPE":    "the link type does not allow a target of that Type",
+	"FIELD_NOT_WRITABLE":  "the caller may not write these fields",
+	"FIELD_FROZEN":        "these fields are frozen in the Item's state",
 }
 
 // ReasonMessage returns the one fixed message of an ErrorInfo reason, and
@@ -136,6 +138,7 @@ func errorWith(err error, item, readersPath, ns string) *connect.Error {
 		invalid  *itemservice.InvalidError
 		rejected *itemservice.RejectedError
 		approval *itemservice.NeedsApprovalError
+		fieldNW  *itemservice.FieldNotWritableError
 	)
 	switch {
 	case errors.As(err, &held):
@@ -172,6 +175,9 @@ func errorWith(err error, item, readersPath, ns string) *connect.Error {
 			md = map[string]string{"scope": scope, "audience": audience(approval.Open)}
 		}
 		return apiError(connect.CodePermissionDenied, "NEEDS_APPROVAL", md)
+	case errors.As(err, &fieldNW):
+		return apiError(connect.CodePermissionDenied, "FIELD_NOT_WRITABLE",
+			map[string]string{"fields": strings.Join(fieldNW.Fields, ",")})
 	case errors.Is(err, itemservice.ErrForbidden):
 		return apiError(connect.CodePermissionDenied, "NOT_ALLOWED", nil)
 	// A rule's refusal answers with its code. One without a code is a bug
