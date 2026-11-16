@@ -241,6 +241,3 @@ func sessionFilter(c *caps, alias string, args pgx.NamedArgs) (cte, cond string)
 	       )`
 	return cte, " and " + alias + ".id in (select id from in_session)"
 }
-
-// errNotBuilt marks what Step 0, part 2 has not built yet.
-var errNotBuilt = errors.New("itemservice: not built yet (Step 0, part 2)")
