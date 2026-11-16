@@ -125,3 +125,40 @@ func AuthorizeTransition(principal string, roles []string, tr typedef.Transition
 func AuthorizeTransitionOn(principal string, roles []string, tr typedef.Transition, fields map[string]any) bool {
 	return AuthorizeTransition(principal, roles, tr)
 }
+
+// Who is the principal asking for a transition, with the roles each part
+// holds in the Item's namespace. OnBehalfOf is the user an agent acts for;
+// empty for a user acting as themselves and for the kernel's own actors.
+type Who struct {
+	Actor           string
+	ActorRoles      []string
+	OnBehalfOf      string
+	OnBehalfOfRoles []string
+}
+
+// ItemFacts is what `allowed` and `except` read of the Item: its fields
+// (for field:<id>) and who created it (for creator).
+type ItemFacts struct {
+	Fields                       map[string]any
+	CreatedBy, CreatedOnBehalfOf string
+}
+
+// IsCreator reports whether the principal is the Item's creator: its
+// effective user (on_behalf_of if set, else the actor) is the Item's
+// effective creator (created_on_behalf_of if set, else created_by). The
+// kernel's own actors (system:, hook:) never are. It is the one place this
+// is computed. Contract stub (Step 2, part 1, Phase B): never.
+func IsCreator(actor, onBehalfOf, createdBy, createdOnBehalfOf string) bool {
+	return false
+}
+
+// MayTransition answers "may this principal make this move?" from the
+// transition's `allowed` and `except`. Contract stub (Phase B): it asks
+// AuthorizeTransitionOn for the actor and the on_behalf_of user, and
+// ignores creator and except.
+func MayTransition(tr typedef.Transition, who Who, it ItemFacts) bool {
+	if !AuthorizeTransitionOn(who.Actor, who.ActorRoles, tr, it.Fields) {
+		return false
+	}
+	return who.OnBehalfOf == "" || AuthorizeTransitionOn(who.OnBehalfOf, who.OnBehalfOfRoles, tr, it.Fields)
+}

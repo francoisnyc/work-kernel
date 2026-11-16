@@ -9,9 +9,14 @@
 #   - f_approver is written by the kernel only: the public door refuses it.
 #   - The request's terms and its approver are frozen once submitted, and stay
 #     frozen once approved or rejected, so what was approved is what stands.
-#   - The manager decides by an ordinary transition: allowed to whoever
-#     f_approver names, never to the requester (the guard), and an agent
-#     acting for the manager does not pass `allowed` (only user:<manager> does).
+#   - Who may act is declared, never written in CEL. `creator` is the user the
+#     request is for (the creator's on_behalf_of, else the creator), matched
+#     against the acting principal's user (its on_behalf_of, else itself).
+#     Submit, recall and withdraw are the creator's. The manager decides by an
+#     ordinary transition: allowed to whoever f_approver names, except the
+#     creator; an agent acting for the manager does not pass `allowed` (both
+#     it and its user must, and only user:<manager> does).
+#   - Guards keep the data rules: the dates and the days.
 #   - To change a pending request: recall it to draft, edit, submit again.
 id: vacation_request
 version: 1
@@ -39,44 +44,21 @@ states:
   - {id: withdrawn, category: canceled}
 
 transitions:
-  # Submit: the terms make sense and the leave has not started.
+  # Submit: the requester's act; the terms make sense and the leave has not
+  # started.
   - from: draft
     to: submitted
+    allowed: [creator]
     required: [f_start, f_end, f_days, f_leave_type]
     guard: 'f_end >= f_start && f_start >= today && f_days > 0'
-  # The manager's decision. Whoever f_approver names, never the requester
-  # (nor anyone acting for them). caller_on_behalf_of is null for a user
-  # acting as themselves, and null == null holds in CEL: test it first.
-  - from: submitted
-    to: approved
-    allowed: ['field:f_approver']
-    guard: >-
-      caller != created_by && caller != created_on_behalf_of &&
-      (caller_on_behalf_of == null ||
-       (caller_on_behalf_of != created_by && caller_on_behalf_of != created_on_behalf_of))
-  - from: submitted
-    to: rejected
-    allowed: ['field:f_approver']
-    guard: >-
-      caller != created_by && caller != created_on_behalf_of &&
-      (caller_on_behalf_of == null ||
-       (caller_on_behalf_of != created_by && caller_on_behalf_of != created_on_behalf_of))
-  # The requester (or an agent acting for them) recalls a pending request to
-  # edit it, or withdraws it. A withdrawal from draft is an escape: it ends
-  # an open HR check.
-  - from: submitted
-    to: draft
-    guard: &requester >-
-      caller == created_by || caller == created_on_behalf_of ||
-      (caller_on_behalf_of != null &&
-       (caller_on_behalf_of == created_by || caller_on_behalf_of == created_on_behalf_of))
-  - from: submitted
-    to: withdrawn
-    guard: *requester
-  - from: draft
-    to: withdrawn
-    escape: true
-    guard: *requester
+  # The manager's decision: whoever f_approver names, never the requester.
+  - {from: submitted, to: approved, allowed: ['field:f_approver'], except: [creator]}
+  - {from: submitted, to: rejected, allowed: ['field:f_approver'], except: [creator]}
+  # The requester recalls a pending request to edit it, or withdraws it. A
+  # withdrawal from draft is an escape: it ends an open HR check.
+  - {from: submitted, to: draft,     allowed: [creator]}
+  - {from: submitted, to: withdrawn, allowed: [creator]}
+  - {from: draft,     to: withdrawn, allowed: [creator], escape: true}
 
 hooks:
   - id: hr_check

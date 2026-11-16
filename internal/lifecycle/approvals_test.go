@@ -1,7 +1,8 @@
-// Tests for proof-of-concept Step 2, part 1: guards that see who is acting,
-// who created the Item and today's date, and fields frozen per state. The
-// function stays pure: the item service passes who and today in (Input),
-// so the same answer comes from the same input on every door.
+// Tests for proof-of-concept Step 2, part 1: guards that read today's date,
+// and fields frozen per state. The function stays pure: the item service
+// passes today in (Input), so the same answer comes from the same input on
+// every door. Who may act is not a guard: see package policy (creator,
+// except).
 package lifecycle_test
 
 import (
@@ -55,51 +56,25 @@ func assertGuardFailed(t *testing.T, what string, err error) {
 	}
 }
 
-// No self-approval: the approver may decide unless they are the requester:
-// the creator, the user it was created for, or someone acting for either.
-// An empty string is null to the guard; null == null holds in CEL, which
-// the guard must not trip over when neither side involves an agent.
-func TestApproveGuard_NoSelfApproval(t *testing.T) {
+// Identity is not the lifecycle's question: the vacation request declares
+// who may act in `allowed` and `except` (package policy), and its guards
+// hold only data rules. So the decision and the requester's moves are legal
+// for any input whose data is fine; whether this principal may make them is
+// asked afterwards.
+func TestVacation_IdentityIsNotInTheGuards(t *testing.T) {
 	ty := vacationType(t)
-	cases := []struct {
-		name                         string
-		caller, callerOBO            string
-		createdBy, createdOnBehalfOf string
-		ok                           bool
-	}{
-		{"the manager decides a user's request (both on_behalf_of null)", "user:bob", "", "user:ana", "", true},
-		{"the requester decides her own request", "user:ana", "", "user:ana", "", false},
-		{"the user an agent created it for decides it", "user:ana", "", "agent:bot", "user:ana", false},
-		{"the agent that created it decides it", "agent:bot", "", "agent:bot", "user:ana", false},
-		{"an agent acting for the requester decides it", "agent:bot", "user:ana", "user:ana", "", false},
-		{"an agent acting for the requester, created by an agent for her", "agent:other", "user:ana", "agent:bot", "user:ana", false},
-		{"the manager decides a request an agent created for its user", "user:bob", "", "agent:bot", "user:ana", true},
-		// The guard does not decide who may approve: `allowed` does, after it.
-		{"an agent acting for the manager passes the guard", "agent:bot", "user:bob", "user:ana", "", true},
-	}
-	for _, c := range cases {
-		for _, to := range []string{"approved", "rejected"} {
-			in := lifecycle.Input{
-				Fields: terms(), Caller: c.caller, CallerOnBehalfOf: c.callerOBO,
-				CreatedBy: c.createdBy, CreatedOnBehalfOf: c.createdOnBehalfOf, Today: today,
-			}
-			_, err := lifecycle.TransitionWith(ty, "submitted", in, to)
-			switch {
-			case c.ok && err != nil:
-				t.Errorf("%s (-> %s): %v, want allowed by the guard", c.name, to, err)
-			case !c.ok:
-				assertGuardFailed(t, c.name+" -> "+to, err)
-			}
+	for _, mv := range [][2]string{
+		{"submitted", "approved"}, {"submitted", "rejected"}, {"submitted", "draft"},
+		{"submitted", "withdrawn"}, {"draft", "withdrawn"},
+	} {
+		tr, _ := ty.Transition(mv[0], mv[1])
+		if tr.Guard != "" {
+			t.Errorf("%s -> %s has the guard %q, want none", mv[0], mv[1], tr.Guard)
+		}
+		if _, err := lifecycle.TransitionWith(ty, mv[0], lifecycle.Input{Fields: terms(), Today: today}, mv[1]); err != nil {
+			t.Errorf("%s -> %s: %v, want legal", mv[0], mv[1], err)
 		}
 	}
-}
-
-// Without who is acting (the old entry points), the approve guard does not
-// hold: it fails safe.
-func TestApproveGuard_WithoutWhoFailsSafe(t *testing.T) {
-	ty := vacationType(t)
-	_, err := lifecycle.Transition(ty, "submitted", terms(), "approved")
-	assertGuardFailed(t, "approve with no caller", err)
 }
 
 // Submit: end on or after start (a one-day leave has start == end), start
@@ -108,9 +83,7 @@ func TestApproveGuard_WithoutWhoFailsSafe(t *testing.T) {
 func TestSubmitGuard_DatesAndDays(t *testing.T) {
 	ty := vacationType(t)
 	submit := func(fields map[string]any, today time.Time) error {
-		_, err := lifecycle.TransitionWith(ty, "draft", lifecycle.Input{
-			Fields: fields, Caller: "user:ana", CreatedBy: "user:ana", Today: today,
-		}, "submitted")
+		_, err := lifecycle.TransitionWith(ty, "draft", lifecycle.Input{Fields: fields, Today: today}, "submitted")
 		return err
 	}
 	with := func(k string, v any) map[string]any {
@@ -138,45 +111,12 @@ func TestSubmitGuard_DatesAndDays(t *testing.T) {
 	assertGuardFailed(t, "negative days", submit(with("f_days", float64(-2)), today))
 
 	_, err := lifecycle.TransitionWith(ty, "draft", lifecycle.Input{
-		Fields: map[string]any{"f_start": "2099-07-01"}, Caller: "user:ana", CreatedBy: "user:ana", Today: today,
+		Fields: map[string]any{"f_start": "2099-07-01"}, Today: today,
 	}, "submitted")
 	var rej *lifecycle.Rejection
 	if !errors.As(err, &rej) || rej.Code != lifecycle.MissingFields ||
 		!slices.Equal(rej.Missing, []string{"f_days", "f_end", "f_leave_type"}) {
 		t.Errorf("submit without the terms = %v, want missing_fields f_days, f_end, f_leave_type", err)
-	}
-}
-
-// Only the requester (or an agent acting for them) recalls or withdraws.
-func TestRequesterGuard_RecallAndWithdraw(t *testing.T) {
-	ty := vacationType(t)
-	moves := [][2]string{{"submitted", "draft"}, {"submitted", "withdrawn"}, {"draft", "withdrawn"}}
-	cases := []struct {
-		name              string
-		caller, callerOBO string
-		createdBy, cobo   string
-		ok                bool
-	}{
-		{"the requester", "user:ana", "", "user:ana", "", true},
-		{"the user an agent created it for", "user:ana", "", "agent:bot", "user:ana", true},
-		{"an agent acting for the requester", "agent:bot", "user:ana", "user:ana", "", true},
-		{"the manager", "user:bob", "", "user:ana", "", false},
-		{"an agent acting for the manager", "agent:bot", "user:bob", "user:ana", "", false},
-	}
-	for _, c := range cases {
-		for _, mv := range moves {
-			_, err := lifecycle.TransitionWith(ty, mv[0], lifecycle.Input{
-				Fields: terms(), Caller: c.caller, CallerOnBehalfOf: c.callerOBO,
-				CreatedBy: c.createdBy, CreatedOnBehalfOf: c.cobo, Today: today,
-			}, mv[1])
-			what := c.name + ": " + mv[0] + " -> " + mv[1]
-			if c.ok && err != nil {
-				t.Errorf("%s: %v, want allowed", what, err)
-			}
-			if !c.ok {
-				assertGuardFailed(t, what, err)
-			}
-		}
 	}
 }
 

@@ -6,7 +6,9 @@
 //   - writable_by: kernel, a field only the internal door may write;
 //   - frozen: [fields] on a state, fields no write may change in it;
 //   - field:<id> in `allowed`, matching the principal a principal field holds;
-//   - guard variables for who acts and who created the Item, and today;
+//   - creator in `allowed`, and `except: [creator]` (identity rules are
+//     declared, never written in CEL);
+//   - today as a guard variable;
 //   - hook reads of the kernel-set attributes created_by and
 //     created_on_behalf_of.
 package typedef_test
@@ -66,7 +68,7 @@ func approval(fields, state, allowed, guard, hooks string) string {
 		allowed = `['field:f_approver']`
 	}
 	if guard == "" {
-		guard = `'caller != created_by'`
+		guard = `'f_end >= f_start'`
 	}
 	r := strings.NewReplacer("FIELDS\n", fields, "STATE\n", state, "ALLOWED", allowed, "GUARD", guard,
 		"HOOKS\n", hooks)
@@ -231,21 +233,39 @@ func TestReservedNames_NotFieldIDs(t *testing.T) {
 	}
 }
 
-// Guards read caller, caller_on_behalf_of, created_by and
-// created_on_behalf_of (nullable strings) and today (a date).
-func TestGuardVariables_Compile(t *testing.T) {
+// today is the one guard variable that is not a field. Who acts is not a
+// guard variable: caller, caller_on_behalf_of, created_by and
+// created_on_behalf_of are refused in guards (and stay reserved names).
+func TestGuardVariables_OnlyToday(t *testing.T) {
+	mustParse(t, approval("", "", "", `'f_start >= today'`, ""))
 	for _, guard := range []string{
-		`caller != created_by && caller != created_on_behalf_of`,
-		`caller_on_behalf_of == null || caller_on_behalf_of != created_by`,
+		`caller != created_by`,
+		`caller_on_behalf_of == null`,
 		`created_on_behalf_of != null`,
-		`f_start >= today`,
-		`caller == "user:ana"`,
+		`created_by == "user:ana"`,
 	} {
-		if _, err := typedef.Parse([]byte(approval("", "", "", "'"+guard+"'", ""))); err != nil {
-			t.Errorf("guard %q refused: %v", guard, err)
-		}
+		mustRefuse(t, "guard "+guard, approval("", "", "", "'"+guard+"'", ""), "")
 	}
-	mustRefuse(t, "caller compared with an int", approval("", "", "", `'caller == 1'`, ""), "")
+}
+
+// --- creator and except ---
+
+// creator is an `allowed` entry, alone or with others. except takes only
+// creator for now: anything else is refused at load, naming except.
+func TestAllowedCreatorAndExcept(t *testing.T) {
+	mustParse(t, approval("", "", `[creator]`, "", ""))
+	mustParse(t, approval("", "", `[creator, 'role:hr', 'field:f_owner']`, "", ""))
+	ty := mustParse(t, strings.Replace(approval("", "", "", "", ""), "allowed: ['field:f_approver']",
+		"allowed: ['field:f_approver']\n    except: [creator]", 1))
+	if tr, _ := ty.Transition("pending", "done"); !slices.Equal(tr.Except, []string{"creator"}) {
+		t.Errorf("except = %v, want [creator]", tr.Except)
+	}
+	for _, entry := range []string{`'role:hr'`, `'principal:user:ana'`, `'field:f_owner'`, `creators`, `''`} {
+		src := strings.Replace(approval("", "", "", "", ""), "allowed: ['field:f_approver']",
+			"allowed: ['field:f_approver']\n    except: ["+entry+"]", 1)
+		mustRefuse(t, "except "+entry, src, "except")
+	}
+	mustRefuse(t, "creator with a suffix in allowed", approval("", "", `['creator:ana']`, "", ""), "creator:ana")
 }
 
 // --- hook reads of the creator ---
@@ -320,22 +340,27 @@ func TestVacationRequestV1(t *testing.T) {
 		}
 	}
 
+	// Identity is declared; guards hold data rules only.
 	for _, to := range []string{"approved", "rejected"} {
 		tr, ok := ty.Transition("submitted", to)
-		if !ok || !slices.Equal(tr.Allowed, []string{"field:f_approver"}) || tr.Guard == "" {
-			t.Errorf("submitted -> %s = %+v, want allowed [field:f_approver] and a guard", to, tr)
+		if !ok || !slices.Equal(tr.Allowed, []string{"field:f_approver"}) ||
+			!slices.Equal(tr.Except, []string{"creator"}) || tr.Guard != "" {
+			t.Errorf("submitted -> %s = %+v, want allowed [field:f_approver], except [creator], no guard", to, tr)
 		}
 	}
 	submit, _ := ty.Transition("draft", "submitted")
-	if !slices.Equal(submit.Required, []string{"f_start", "f_end", "f_days", "f_leave_type"}) {
-		t.Errorf("submit required = %v", submit.Required)
+	if !slices.Equal(submit.Required, []string{"f_start", "f_end", "f_days", "f_leave_type"}) ||
+		!slices.Equal(submit.Allowed, []string{"creator"}) || len(submit.Except) != 0 ||
+		submit.Guard != "f_end >= f_start && f_start >= today && f_days > 0" {
+		t.Errorf("submit = %+v, want allowed [creator], the terms required, the date and days guard", submit)
 	}
 	if tr, ok := ty.Transition("draft", "withdrawn"); !ok || !tr.Escape {
 		t.Errorf("draft -> withdrawn = %+v, want an escape", tr)
 	}
-	for _, mv := range [][2]string{{"submitted", "draft"}, {"submitted", "withdrawn"}} {
-		if _, ok := ty.Transition(mv[0], mv[1]); !ok {
-			t.Errorf("no transition %s -> %s", mv[0], mv[1])
+	for _, mv := range [][2]string{{"submitted", "draft"}, {"submitted", "withdrawn"}, {"draft", "withdrawn"}} {
+		tr, ok := ty.Transition(mv[0], mv[1])
+		if !ok || !slices.Equal(tr.Allowed, []string{"creator"}) || tr.Guard != "" {
+			t.Errorf("%s -> %s = %+v, want allowed [creator], no guard", mv[0], mv[1], tr)
 		}
 	}
 	if _, ok := ty.Transition("rejected", "draft"); ok {

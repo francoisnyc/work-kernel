@@ -506,6 +506,13 @@ expect "submit's outcome" "$(j .outcome <<<"$sub")" "TRANSITION_OUTCOME_APPLIED"
 expect "state" "$(j .item.state <<<"$sub")" "submitted"
 expect "the approver, from HR" "$(j .item.fields.f_approver <<<"$sub")" "user:bob"
 
+step "vacation: only the requester submits; the dates and days must make sense (GUARD_FAILED)"
+v0=$(new_leave ana --set f_days=0)
+refuse bob "PERMISSION_DENIED NOT_ALLOWED" item transition "$v0" --to submitted
+refuse ana "FAILED_PRECONDITION GUARD_FAILED" item transition "$v0" --to submitted
+refuse ana "FAILED_PRECONDITION GUARD_FAILED" item transition "$v0" --to submitted \
+	--set f_days=5 --set f_start=2000-01-03 --set f_end=2000-01-07
+
 step "vacation: ana cannot name the approver herself (FIELD_NOT_WRITABLE)"
 refuse ana "PERMISSION_DENIED FIELD_NOT_WRITABLE" item create --type vacation_request@1 \
 	--set f_start=2099-07-01 --set f_end=2099-07-05 --set f_days=5 --set f_leave_type=annual --set f_approver=user:ana
@@ -521,8 +528,8 @@ expect "the frozen field" "$(meta fields)" "f_days"
 expect "the state that freezes it" "$(meta state)" "submitted"
 ok ana item update "$v1" --set "f_comment=$w, beach" >/dev/null
 
-step "vacation: ana approving her own request fails the guard; erin is not allowed"
-refuse ana "FAILED_PRECONDITION GUARD_FAILED" item transition "$v1" --to approved
+step "vacation: ana may not approve her own request (except: creator); erin is not allowed"
+refuse ana "PERMISSION_DENIED NOT_ALLOWED" item transition "$v1" --to approved
 refuse erin "PERMISSION_DENIED NOT_ALLOWED" item transition "$v1" --to approved
 
 step "vacation: triage-bot acting for bob, with a namespace-wide session, is not allowed"
@@ -548,7 +555,7 @@ expect "category" "$(j .item.category <<<"$dec")" "STATE_CATEGORY_CANCELED"
 step "vacation: recall, edit, resubmit; withdraw"
 v4=$(new_leave ana)
 submit_leave ana "$v4" >/dev/null
-refuse bob "FAILED_PRECONDITION GUARD_FAILED" item transition "$v4" --to draft
+refuse bob "PERMISSION_DENIED NOT_ALLOWED" item transition "$v4" --to draft
 ok ana item transition "$v4" --to draft >/dev/null
 ok ana item update "$v4" --set f_days=3 --set f_end=2099-07-03 >/dev/null
 sub=$(submit_leave ana "$v4")

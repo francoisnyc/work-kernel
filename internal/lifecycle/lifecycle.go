@@ -37,22 +37,17 @@ type Rejection struct {
 }
 
 // Input is what a transition's guards see besides the Type: the fields as
-// the write would leave them, the linked Items, who is acting, who created
-// the Item, and today's date. Empty strings are null to a guard.
+// the write would leave them, the linked Items, and today's date. Who acts
+// is not here: identity rules are `allowed` and `except`, policy's question.
 type Input struct {
 	Fields map[string]any
 	Links  Links
-	// Caller is the actor whose permissions are checked; CallerOnBehalfOf
-	// the user an agent acts for (empty for timers and hooks).
-	Caller, CallerOnBehalfOf string
-	// CreatedBy and CreatedOnBehalfOf are kernel-set at create.
-	CreatedBy, CreatedOnBehalfOf string
 	// Today is a date (UTC); the time of day is ignored.
 	Today time.Time
 }
 
 // TransitionWith is TransitionLinked with everything a guard may read.
-// Contract stub (Step 2, part 1, Phase B): it ignores who and today.
+// Contract stub (Step 2, part 1, Phase B): it ignores today.
 func TransitionWith(t *typedef.Type, current string, in Input, to string) (Result, error) {
 	return TransitionLinked(t, current, in.Fields, in.Links, to)
 }

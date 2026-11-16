@@ -3115,15 +3115,19 @@ type Transition struct {
 	Guard string `protobuf:"bytes,3,opt,name=guard,proto3" json:"guard,omitempty"`
 	// Field IDs that must be set.
 	Required []string `protobuf:"bytes,4,rep,name=required,proto3" json:"required,omitempty"`
-	// Who may make the move: role:<name>, principal:<id>, or field:<id> (the
-	// principal a principal field holds when the move is made). Empty: anyone
-	// who can see the Item.
+	// Who may make the move: role:<name>, principal:<id>, field:<id> (the
+	// principal a principal field holds when the move is made), or creator
+	// (the user the Item was created for, or an agent acting for them).
+	// Empty: anyone who can see the Item.
 	Allowed []string `protobuf:"bytes,5,rep,name=allowed,proto3" json:"allowed,omitempty"`
 	// May leave a state while a hold is open on it (it cancels the hold).
 	Escape bool `protobuf:"varint,6,opt,name=escape,proto3" json:"escape,omitempty"`
 	// A check runs before the move is applied: the transition is held, and
 	// TransitionItemRequest.wait matters.
-	Checked       bool `protobuf:"varint,7,opt,name=checked,proto3" json:"checked,omitempty"`
+	Checked bool `protobuf:"varint,7,opt,name=checked,proto3" json:"checked,omitempty"`
+	// Who may not make the move, even if `allowed` names them: for now only
+	// creator.
+	Except        []string `protobuf:"bytes,8,rep,name=except,proto3" json:"except,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3205,6 +3209,13 @@ func (x *Transition) GetChecked() bool {
 		return x.Checked
 	}
 	return false
+}
+
+func (x *Transition) GetExcept() []string {
+	if x != nil {
+		return x.Except
+	}
+	return nil
 }
 
 type GetTypeRequest struct {
@@ -3894,7 +3905,7 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\x05State\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x124\n" +
 	"\bcategory\x18\x02 \x01(\x0e2\x18.kernel.v1.StateCategoryR\bcategory\x12\x16\n" +
-	"\x06frozen\x18\x03 \x03(\tR\x06frozen\"\xc4\x01\n" +
+	"\x06frozen\x18\x03 \x03(\tR\x06frozen\"\xdc\x01\n" +
 	"\n" +
 	"Transition\x12\x1d\n" +
 	"\n" +
@@ -3904,7 +3915,8 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\brequired\x18\x04 \x03(\tR\brequired\x12\x18\n" +
 	"\aallowed\x18\x05 \x03(\tR\aallowed\x12\x16\n" +
 	"\x06escape\x18\x06 \x01(\bR\x06escape\x12\x18\n" +
-	"\achecked\x18\a \x01(\bR\achecked\"$\n" +
+	"\achecked\x18\a \x01(\bR\achecked\x12\x16\n" +
+	"\x06except\x18\b \x03(\tR\x06except\"$\n" +
 	"\x0eGetTypeRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\"6\n" +
 	"\x0fGetTypeResponse\x12#\n" +

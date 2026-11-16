@@ -587,15 +587,19 @@ message Transition {
   string guard = 3;
   // Field IDs that must be set.
   repeated string required = 4;
-  // Who may make the move: role:<name>, principal:<id>, or field:<id> (the
-  // principal a principal field holds when the move is made). Empty: anyone
-  // who can see the Item.
+  // Who may make the move: role:<name>, principal:<id>, field:<id> (the
+  // principal a principal field holds when the move is made), or creator
+  // (the user the Item was created for, or an agent acting for them).
+  // Empty: anyone who can see the Item.
   repeated string allowed = 5;
   // May leave a state while a hold is open on it (it cancels the hold).
   bool escape = 6;
   // A check runs before the move is applied: the transition is held, and
   // TransitionItemRequest.wait matters.
   bool checked = 7;
+  // Who may not make the move, even if `allowed` names them: for now only
+  // creator.
+  repeated string except = 8;
 }
 
 message GetTypeRequest {

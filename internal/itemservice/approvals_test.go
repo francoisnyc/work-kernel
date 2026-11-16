@@ -13,8 +13,10 @@
 //     state may set them, the one leaving it may not.
 //   - field:<id> in `allowed`: whoever the field holds when the move runs;
 //     a transition's patch may not write a field its own `allowed` names.
-//   - guards see caller, caller_on_behalf_of, created_by,
-//     created_on_behalf_of, and today from the service's clock.
+//   - creator in `allowed`, and `except: [creator]`: the user the Item was
+//     created for, judged once for the principal as a whole, on every door
+//     (never a timer or a hook; the requester on ResolveHold's re-check).
+//   - guards see today, from the service's clock.
 //
 // The HR check is the hook hr_check; here the tests play it, through
 // Internal().ResolveHold, so they can also set data HR would refuse (a
@@ -401,7 +403,7 @@ func TestVacation_RecallEditResubmit(t *testing.T) {
 	id := w.submitted(t, w.ana, w.bob)
 
 	_, err := w.move(t, w.bob, id, "draft", nil, newKey())
-	assertRejectedCode(t, "the approver recalls", err, itemservice.CodeGuardFailed)
+	assertNotAllowed(t, "the approver recalls", err)
 
 	if res, err := w.move(t, w.ana, id, "draft", nil, newKey()); err != nil || res.Outcome != itemservice.OutcomeApplied {
 		t.Fatalf("ana recalls = %+v, %v; want applied", res, err)
@@ -421,26 +423,26 @@ func TestVacation_RecallEditResubmit(t *testing.T) {
 
 // --- 4-7: who decides ---
 
-// 5c: the requester asking to approve her own request fails the guard
-// (guards are asked before `allowed`): GUARD_FAILED, not NOT_ALLOWED.
-func TestVacation_RequesterApprovingIsGuardFailed(t *testing.T) {
+// 5c (as changed in review): the requester asking to approve her own
+// request is NOT_ALLOWED (except: [creator]; she is not the approver either).
+func TestVacation_RequesterApprovingIsNotAllowed(t *testing.T) {
 	w := newVacWorld(t)
 	id := w.submitted(t, w.ana, w.bob)
 	for _, to := range []string{"approved", "rejected"} {
 		_, err := w.move(t, w.ana, id, to, nil, newKey())
-		assertRejectedCode(t, "ana -> "+to, err, itemservice.CodeGuardFailed)
+		assertNotAllowed(t, "ana -> "+to, err)
 	}
 	assertState(t, w, w.ana, id, "submitted")
 }
 
 // 6: no self-approval, even when the approver field names the requester
-// (HR refuses that case; the rule stands on its own).
+// (HR refuses that case; the rule stands on its own): `except` refuses her.
 func TestVacation_NoSelfApprovalEvenIfNamed(t *testing.T) {
 	w := newVacWorld(t)
 	id := w.submitted(t, w.ana, w.ana)
 	for _, to := range []string{"approved", "rejected"} {
 		_, err := w.move(t, w.ana, id, to, nil, newKey())
-		assertRejectedCode(t, "ana named as her own approver -> "+to, err, itemservice.CodeGuardFailed)
+		assertNotAllowed(t, "ana named as her own approver -> "+to, err)
 	}
 	assertState(t, w, w.ana, id, "submitted")
 }
@@ -455,7 +457,54 @@ func TestVacation_NoSelfApprovalForAnAgentsUser(t *testing.T) {
 		t.Fatalf("HR correct: %v", err)
 	}
 	_, err := w.move(t, w.ana, id, "approved", nil, newKey())
-	assertRejectedCode(t, "ana approves what her agent asked for", err, itemservice.CodeGuardFailed)
+	assertNotAllowed(t, "ana approves what her agent asked for", err)
+}
+
+// 5 (review): submitting is the requester's act. bob may not submit ana's
+// draft, nor an agent acting for bob; an agent acting for ana may.
+func TestVacation_SubmitIsTheRequesters(t *testing.T) {
+	w := newVacWorld(t)
+	id := w.create(t, w.ana, vacTerms())
+	_, err := w.move(t, w.bob, id, "submitted", nil, newKey())
+	assertNotAllowed(t, "bob submits ana's draft", err)
+	forBob := withSession(t, w.k, item.Principal{Actor: "agent:" + uuid.NewString()[:8], OnBehalfOf: w.bob.Actor})
+	_, err = w.move(t, forBob, id, "submitted", nil, newKey())
+	assertNotAllowed(t, "an agent for bob submits ana's draft", err)
+	assertEventCount(t, id, 1)
+
+	forAna := withSession(t, w.k, item.Principal{Actor: "agent:" + uuid.NewString()[:8], OnBehalfOf: w.ana.Actor})
+	w.submit(t, forAna, id)
+}
+
+// 9 (review): one request, created by agent:bot for ana. The creator is
+// ana: agent:bot acting for bob is not (submit, recall, withdraw refused);
+// agent:bot acting for ana is (submit allowed; approve refused by except);
+// bob, the approver, approves.
+func TestVacation_AgentCreatedRequest_TheCreatorIsItsUser(t *testing.T) {
+	w := newVacWorld(t)
+	bot := "agent:" + uuid.NewString()[:8]
+	forAna := withSession(t, w.k, item.Principal{Actor: bot, OnBehalfOf: w.ana.Actor})
+	forBob := withSession(t, w.k, item.Principal{Actor: bot, OnBehalfOf: w.bob.Actor})
+	id := w.create(t, forAna, vacTerms())
+
+	_, err := w.move(t, forBob, id, "submitted", nil, newKey())
+	assertNotAllowed(t, "agent:bot for bob submits", err)
+	_, err = w.move(t, forBob, id, "withdrawn", nil, newKey())
+	assertNotAllowed(t, "agent:bot for bob withdraws the draft", err)
+
+	req := w.submit(t, forAna, id)
+	if _, err := w.hr(t, id, req, itemservice.VerdictCorrect, map[string]any{"f_approver": w.bob.Actor}, ""); err != nil {
+		t.Fatalf("HR correct: %v", err)
+	}
+	for _, to := range []string{"draft", "withdrawn"} {
+		_, err = w.move(t, forBob, id, to, nil, newKey())
+		assertNotAllowed(t, "agent:bot for bob -> "+to, err)
+	}
+	_, err = w.move(t, forAna, id, "approved", nil, newKey())
+	assertNotAllowed(t, "agent:bot for ana approves", err)
+	if res, err := w.move(t, w.bob, id, "approved", nil, newKey()); err != nil || res.Outcome != itemservice.OutcomeApplied {
+		t.Errorf("bob approves = %+v, %v; want applied", res, err)
+	}
 }
 
 // 4: someone who is neither the requester nor the approver: NOT_ALLOWED.
@@ -490,7 +539,7 @@ func TestVacation_AgentActingForTheApproverIsNotAllowed(t *testing.T) {
 // requester may still withdraw. The move cancels the hold in the same
 // event; the hold shows canceled; asking about the submission again (same
 // key) answers denied, canceled; the check's late answer is stale.
-// Someone else may not withdraw (the guard), hold or not.
+// Someone else may not withdraw (allowed: [creator]), hold or not.
 func TestVacation_WithdrawEndsTheHRCheck(t *testing.T) {
 	w := newVacWorld(t)
 	id := w.create(t, w.ana, vacTerms())
@@ -501,7 +550,7 @@ func TestVacation_WithdrawEndsTheHRCheck(t *testing.T) {
 	}
 
 	_, err = w.move(t, w.bob, id, "withdrawn", nil, newKey())
-	assertRejectedCode(t, "bob withdraws ana's request", err, itemservice.CodeGuardFailed)
+	assertNotAllowed(t, "bob withdraws ana's request", err)
 
 	res, err := w.move(t, w.ana, id, "withdrawn", nil, newKey())
 	assertOutcome(t, "ana withdraws while HR checks", res, err, itemservice.OutcomeApplied, req.ItemSeq+1)
@@ -811,10 +860,10 @@ func TestFrozen_BeforeHeld(t *testing.T) {
 	assertFrozen(t, "f_x, frozen and held", err, "pending", "f_x")
 }
 
-// --- 5: who the guards see, on every entry point ---
+// --- 5 and 9: creator and except, on every entry point ---
 
-// probeType: each move out of start has a guard that holds for exactly one
-// caller, so a move that succeeds proves what the guard saw.
+// probeType: creator in `allowed` and in `except`, on moves a user, an
+// agent, the timer, a hook and a held request each try.
 const probeType = `
 id: probe
 version: 1
@@ -822,37 +871,20 @@ initial_state: start
 fields:
   - {id: f_note, type: string}
 states:
-  - {id: start,      category: todo, timer: {after: 1h, to: by_timer}}
-  - {id: by_user,    category: done}
-  - {id: by_agent,   category: done}
-  - {id: by_timer,   category: done}
-  - {id: by_hook,    category: done}
-  - {id: by_request, category: done}
+  - {id: start,       category: todo, timer: {after: 1h, to: by_timer}}
+  - {id: by_creator,  category: done}
+  - {id: not_creator, category: done}
+  - {id: by_timer,    category: done}
+  - {id: by_request,  category: done}
 transitions:
-  - from: start
-    to: by_user
-    guard: 'caller == "user:probe-ana" && caller_on_behalf_of == null && created_by == "user:probe-ana" && created_on_behalf_of == null'
-  - from: start
-    to: by_agent
-    guard: 'caller == "agent:probe-bot" && caller_on_behalf_of == "user:probe-ana" && created_by == "agent:probe-bot" && created_on_behalf_of == "user:probe-ana"'
-  - from: start
-    to: by_timer
-    guard: 'caller == "system:timer" && caller_on_behalf_of == null && created_by == "user:probe-ana"'
-  - from: start
-    to: by_hook
-    guard: 'caller == "hook:probe:stamp" && caller_on_behalf_of == null && created_by == "user:probe-ana"'
-  - from: start
-    to: by_request
-    guard: 'caller == "agent:probe-bot" && caller_on_behalf_of == "user:probe-ana"'
+  - {from: start, to: by_creator,  allowed: [creator]}
+  - {from: start, to: not_creator, except: [creator]}
+  - {from: start, to: by_timer,    allowed: ['principal:system:timer']}
+  - {from: start, to: by_request,  allowed: [creator]}
 hooks:
   - {id: stamp, on: enter, state: start, kind: enrich, action: crm.get_plan, reads: [f_note], writes: [f_note]}
   - {id: gate, on: transition, from: start, to: by_request, kind: check, action: crm.get_plan, reads: [f_note], writes: [f_note]}
 `
-
-var (
-	probeAna = item.Principal{Actor: "user:probe-ana"}
-	probeBot = item.Principal{Actor: "agent:probe-bot", OnBehalfOf: "user:probe-ana"}
-)
 
 func newProbe(t *testing.T, k *itemservice.Service, p item.Principal) uuid.UUID {
 	t.Helper()
@@ -873,61 +905,89 @@ func newProbe(t *testing.T, k *itemservice.Service, p item.Principal) uuid.UUID 
 	return res.ItemID
 }
 
-// Public door, a user: caller is the token's actor; nobody on behalf.
-func TestGuardCaller_PublicDoorUser(t *testing.T) {
+// Public door, a user: the creator passes allowed: [creator] and is refused
+// by except: [creator]; anyone else the other way round.
+func TestCreator_PublicDoorUser(t *testing.T) {
 	k := itemservice.New(pool)
-	id := newProbe(t, k, probeAna)
-	assertRejectedCode(t, "ana takes the agent's move", move(t, k, probeAna, id, "by_agent", newKey()), itemservice.CodeGuardFailed)
-	if err := move(t, k, probeAna, id, "by_user", newKey()); err != nil {
-		t.Errorf("ana -> by_user: %v", err)
+	ana, bob := person("ana"), person("bob")
+	id := newProbe(t, k, ana)
+	assertNotAllowed(t, "ana -> not_creator", move(t, k, ana, id, "not_creator", newKey()))
+	assertNotAllowed(t, "bob -> by_creator", move(t, k, bob, id, "by_creator", newKey()))
+	if err := move(t, k, ana, id, "by_creator", newKey()); err != nil {
+		t.Errorf("ana -> by_creator: %v", err)
+	}
+	other := newProbe(t, k, ana)
+	if err := move(t, k, bob, other, "not_creator", newKey()); err != nil {
+		t.Errorf("bob -> not_creator: %v", err)
 	}
 }
 
-// Public door, an agent: caller is the agent, caller_on_behalf_of its user;
-// created_by and created_on_behalf_of are what the kernel set at create.
-func TestGuardCaller_PublicDoorAgent(t *testing.T) {
+// Public door, an agent: judged by its user. An agent created the Item for
+// ana; the same agent acting for ana is the creator, acting for bob it is not.
+func TestCreator_PublicDoorAgent(t *testing.T) {
 	k := itemservice.New(pool)
-	bot := withSession(t, k, probeBot)
-	id := newProbe(t, k, bot)
-	assertRejectedCode(t, "the agent takes the user's move", move(t, k, bot, id, "by_user", newKey()), itemservice.CodeGuardFailed)
-	if err := move(t, k, bot, id, "by_agent", newKey()); err != nil {
-		t.Errorf("the agent -> by_agent: %v", err)
+	ana, bob := person("ana"), person("bob")
+	bot := "agent:" + uuid.NewString()[:8]
+	forAna := withSession(t, k, item.Principal{Actor: bot, OnBehalfOf: ana.Actor})
+	forBob := withSession(t, k, item.Principal{Actor: bot, OnBehalfOf: bob.Actor})
+	id := newProbe(t, k, forAna)
+	assertNotAllowed(t, "agent for bob -> by_creator", move(t, k, forBob, id, "by_creator", newKey()))
+	assertNotAllowed(t, "agent for ana -> not_creator", move(t, k, forAna, id, "not_creator", newKey()))
+	if err := move(t, k, ana, id, "by_creator", newKey()); err != nil {
+		t.Errorf("ana herself -> by_creator: %v", err)
+	}
+	other := newProbe(t, k, forAna)
+	if err := move(t, k, forAna, other, "by_creator", newKey()); err != nil {
+		t.Errorf("agent for ana -> by_creator: %v", err)
 	}
 }
 
-// A timer: caller is system:timer, nobody on behalf (the attribution's
-// on_behalf_of is never checked).
-func TestGuardCaller_Timer(t *testing.T) {
+// The timer is never the creator: refused by allowed: [creator], not
+// stopped by except: [creator].
+func TestCreator_Timer(t *testing.T) {
 	k := itemservice.New(pool)
-	id := newProbe(t, k, probeAna)
-	_, err := k.Internal().Transition(testCtx(t), itemservice.TransitionRequest{
-		IdempotencyKey: newKey(), Principal: systemTimer, ItemID: id, ToState: "by_timer",
-		Attribution: item.Attribution{OriginatingHook: "timer:probe@v1:start", CausationID: fmt.Sprintf("%s:1", id), Hop: 1},
-	})
-	if err != nil {
-		t.Errorf("the timer -> by_timer: %v", err)
+	ana := person("ana")
+	timerMove := func(id uuid.UUID, to string) error {
+		_, err := k.Internal().Transition(testCtx(t), itemservice.TransitionRequest{
+			IdempotencyKey: newKey(), Principal: systemTimer, ItemID: id, ToState: to,
+			Attribution: item.Attribution{OriginatingHook: "timer:probe@v1:start", CausationID: fmt.Sprintf("%s:1", id), Hop: 1},
+		})
+		return err
+	}
+	id := newProbe(t, k, ana)
+	assertNotAllowed(t, "the timer -> by_creator", timerMove(id, "by_creator"))
+	if err := timerMove(id, "not_creator"); err != nil {
+		t.Errorf("the timer -> not_creator: %v", err)
 	}
 }
 
-// A hook: caller is the hook's principal, nobody on behalf.
-func TestGuardCaller_Hook(t *testing.T) {
+// A hook is never the creator either.
+func TestCreator_Hook(t *testing.T) {
 	k := itemservice.New(pool)
-	id := newProbe(t, k, probeAna)
-	_, err := k.Internal().Transition(testCtx(t), itemservice.TransitionRequest{
-		IdempotencyKey: newKey(), Principal: item.Principal{Actor: "hook:probe:stamp"}, ItemID: id, ToState: "by_hook",
-		Attribution: item.Attribution{OriginatingHook: "hook:probe@v1:stamp", CausationID: fmt.Sprintf("%s:1", id), Hop: 1},
-	})
-	if err != nil {
-		t.Errorf("the hook -> by_hook: %v", err)
+	ana := person("ana")
+	stamp := item.Principal{Actor: "hook:probe:stamp"}
+	hookMove := func(id uuid.UUID, to string) error {
+		_, err := k.Internal().Transition(testCtx(t), itemservice.TransitionRequest{
+			IdempotencyKey: newKey(), Principal: stamp, ItemID: id, ToState: to,
+			Attribution: item.Attribution{OriginatingHook: "hook:probe@v1:stamp", CausationID: fmt.Sprintf("%s:1", id), Hop: 1},
+		})
+		return err
+	}
+	id := newProbe(t, k, ana)
+	assertNotAllowed(t, "the hook -> by_creator", hookMove(id, "by_creator"))
+	if err := hookMove(id, "not_creator"); err != nil {
+		t.Errorf("the hook -> not_creator: %v", err)
 	}
 }
 
-// ResolveHold's re-check: the guard sees the original requester (actor and
-// on_behalf_of), not the hook that resolves.
-func TestGuardCaller_ResolveHoldRecheckIsTheRequester(t *testing.T) {
+// ResolveHold's re-check judges the original requester (actor and
+// on_behalf_of), not the hook that resolves: an agent acting for the
+// creator asked, so the move is applied.
+func TestCreator_ResolveHoldRecheckIsTheRequester(t *testing.T) {
 	k := itemservice.New(pool)
-	id := newProbe(t, k, probeAna)
-	bot := withSession(t, k, probeBot)
+	ana := person("ana")
+	id := newProbe(t, k, ana)
+	bot := withSession(t, k, item.Principal{Actor: "agent:" + uuid.NewString()[:8], OnBehalfOf: ana.Actor})
 	req, err := k.Transition(testCtx(t), itemservice.TransitionRequest{
 		IdempotencyKey: newKey(), Principal: bot, ItemID: id, ToState: "by_request",
 	})
@@ -944,9 +1004,9 @@ func TestGuardCaller_ResolveHoldRecheckIsTheRequester(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("gate allows: %v", err)
 	}
-	state, hold := holdOf(t, k, probeAna, id)
+	state, hold := holdOf(t, k, ana, id)
 	if state != "by_request" || hold == nil || hold.Status != item.HoldAllowed {
-		t.Errorf("after resolution: state %s, hold %+v; want by_request, allowed (the re-check saw the agent and ana)",
+		t.Errorf("after resolution: state %s, hold %+v; want by_request, allowed (the re-check judged the agent for ana)",
 			state, hold)
 	}
 }

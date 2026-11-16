@@ -54,13 +54,14 @@ const (
 	AttrCreatedOnBehalfOf = "created_on_behalf_of"
 )
 
-// Guard variables that are not fields: who is acting, who created the
-// Item, and today's date (UTC). They are reserved: no field may take one
-// of these IDs, nor "links".
+// VarToday is the one guard variable that is not a field: today's date
+// (UTC). Who acts is never a guard variable: identity rules are declared in
+// `allowed` and `except`. The names below stay reserved (no field may take
+// one, nor "links"), so a later version can give them a meaning.
 const (
+	VarToday            = "today"
 	VarCaller           = "caller"
 	VarCallerOnBehalfOf = "caller_on_behalf_of"
-	VarToday            = "today"
 )
 
 // categories are the fixed state categories from the design. "none" means
@@ -89,6 +90,11 @@ const (
 	// AllowedFieldPrefix names a principal field: the entry matches the
 	// principal the field holds when the transition runs.
 	AllowedFieldPrefix = "field:"
+	// AllowedCreator matches the principal whose user is the user the Item
+	// was created for (see policy.IsCreator). It is judged once for the
+	// principal as a whole, not for its actor and on_behalf_of in turn. It
+	// is the only entry `except` takes for now.
+	AllowedCreator = "creator"
 )
 
 // The struct tags (the text in backquotes) tell the YAML and JSON libraries
@@ -135,6 +141,9 @@ type Transition struct {
 	// "principal:<id>". Empty means anyone who can see the Item. The list is
 	// only checked for shape here; package policy decides.
 	Allowed []string `yaml:"allowed" json:"allowed,omitempty"`
+	// Except refuses whoever matches it, even if `allowed` lets them in
+	// (ErrForbidden). For now it takes only "creator".
+	Except []string `yaml:"except" json:"except,omitempty"`
 	// Escape marks a move that may leave a state while a hold is open on it
 	// (cancel, say). Making it cancels the hold.
 	Escape bool `yaml:"escape" json:"escape,omitempty"`

@@ -8,7 +8,8 @@
 //     fields and state.
 //   - A date is an ISO 8601 string; anything else is INVALID_ARGUMENT naming
 //     the field.
-//   - GetType shows the date type, writable_by, frozen and field: entries.
+//   - GetType shows the date type, writable_by, frozen, field: and creator
+//     entries, and except.
 //
 // The HR check is played through the kernel's internal door, as the worker
 // would play it.
@@ -95,6 +96,12 @@ func TestVacation_ApproverIsNotWritable(t *testing.T) {
 	if it := get(t, "ana", name); it.Hold != nil || it.State != "draft" {
 		t.Errorf("after the refusals: state %s, hold %v; want draft and no hold", it.State, it.Hold)
 	}
+
+	// Submitting is the requester's act (allowed: [creator]).
+	_, err = as("bob").TransitionItem(ctx, connect.NewRequest(&kernelv1.TransitionItemRequest{
+		Name: name, RequestId: newID(), ToState: "submitted",
+	}))
+	apiError(t, "bob submits ana's draft", err, connect.CodePermissionDenied, "NOT_ALLOWED")
 }
 
 func TestVacation_FrozenAndDecided(t *testing.T) {
@@ -111,11 +118,11 @@ func TestVacation_FrozenAndDecided(t *testing.T) {
 		t.Errorf("metadata = %v, want fields f_days, state submitted", md)
 	}
 
-	// ana asks to approve her own request: the guard (before `allowed`).
+	// ana asks to approve her own request: except: [creator].
 	_, err = as("ana").TransitionItem(ctx, connect.NewRequest(&kernelv1.TransitionItemRequest{
 		Name: name, RequestId: newID(), ToState: "approved",
 	}))
-	apiError(t, "ana approves her own", err, connect.CodeFailedPrecondition, "GUARD_FAILED")
+	apiError(t, "ana approves her own", err, connect.CodePermissionDenied, "NOT_ALLOWED")
 	// sam is neither requester nor approver.
 	_, err = as("sam-acme").TransitionItem(ctx, connect.NewRequest(&kernelv1.TransitionItemRequest{
 		Name: name, RequestId: newID(), ToState: "approved",
@@ -191,9 +198,18 @@ func TestGetType_VacationRequest(t *testing.T) {
 		}
 	}
 	for _, tr := range ty.Transitions {
-		if tr.FromState == "submitted" && (tr.ToState == "approved" || tr.ToState == "rejected") &&
-			!slices.Equal(tr.Allowed, []string{"field:f_approver"}) {
-			t.Errorf("%s -> %s allowed = %v, want [field:f_approver]", tr.FromState, tr.ToState, tr.Allowed)
+		decide := tr.FromState == "submitted" && (tr.ToState == "approved" || tr.ToState == "rejected")
+		switch {
+		case decide:
+			if !slices.Equal(tr.Allowed, []string{"field:f_approver"}) || !slices.Equal(tr.Except, []string{"creator"}) ||
+				tr.Guard != "" {
+				t.Errorf("%s -> %s = %v, want allowed [field:f_approver], except [creator], no guard",
+					tr.FromState, tr.ToState, tr)
+			}
+		default: // submit, recall, withdraw: the requester's
+			if !slices.Equal(tr.Allowed, []string{"creator"}) || len(tr.Except) != 0 {
+				t.Errorf("%s -> %s = %v, want allowed [creator], no except", tr.FromState, tr.ToState, tr)
+			}
 		}
 		if tr.FromState == "draft" && tr.ToState == "submitted" && !tr.Checked {
 			t.Error("draft -> submitted is not shown as checked")
