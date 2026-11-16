@@ -118,6 +118,11 @@ type Field struct {
 	Options []string  `yaml:"options" json:"options,omitempty"` // enum only
 	// WritableBy limits who may write the field; empty is anyone.
 	WritableBy WritableBy `yaml:"writable_by" json:"writable_by,omitempty"`
+	// WritableByRoles (from writable_by: [role:<name>, ...]): on the public
+	// door only principals holding one of these roles write the field (an
+	// agent and the user it acts for must both hold one). The kernel's own
+	// writers are not affected. Role names, without the role: prefix.
+	WritableByRoles []string `yaml:"-" json:"writable_by_roles,omitempty"`
 }
 
 // State is one lifecycle state. Every state has a category.
@@ -180,6 +185,14 @@ type Type struct {
 	Hooks        []Hook       `yaml:"hooks" json:"hooks,omitempty"`
 	// Links are the link types Items of this version may have as sources.
 	Links []LinkType `yaml:"links" json:"links,omitempty"`
+	// Reactions are the writes this Type's transitions make on linked Items.
+	Reactions []Reaction `yaml:"reactions" json:"reactions,omitempty"`
+	// AcceptsReactions: which reactions of other Types (<type>:<id>, no
+	// version) may write which fields of this Type's Items. Anything else
+	// is refused (reaction_not_accepted).
+	AcceptsReactions map[string][]string `yaml:"accepts_reactions" json:"accepts_reactions,omitempty"`
+	// Invariants are rules over the fields every write must keep.
+	Invariants []Invariant `yaml:"invariants" json:"invariants,omitempty"`
 }
 
 // Parse reads a Type from YAML and checks it. Unknown keys are errors, so a
@@ -447,6 +460,9 @@ func (t *Type) check() error {
 			continue
 		}
 		written := slices.ContainsFunc(t.Hooks, func(h Hook) bool { return slices.Contains(h.Writes, f.ID) })
+		for _, fields := range t.AcceptsReactions {
+			written = written || slices.Contains(fields, f.ID)
+		}
 		if !written {
 			return fail("field %s is writable_by kernel, but no hook writes it", f.ID)
 		}

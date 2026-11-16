@@ -74,6 +74,15 @@ type Event struct {
 
 	LinkType   string   // link_added, link_removed: the declared name
 	LinkTarget *ItemRef // link_added, link_removed: the target
+	// A transition that set a resolved link (Step 2, part 2) also names
+	// LinkType and LinkTarget; LinkReplaced is the target it replaced.
+	LinkReplaced *ItemRef
+
+	// Added: the fields a reaction added to, with the amounts (the delta;
+	// Values holds the results). A cleared or erased value is in neither.
+	Added map[string]any
+	// Reaction: reaction_failed's reaction (<type>:<id>); Reason its code.
+	Reaction string
 }
 
 // ItemRef is another Item named by an event: its ID, or Restricted (and no

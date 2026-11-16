@@ -226,3 +226,14 @@ func MayTransition(tr typedef.Transition, who Who, it ItemFacts) bool {
 	}
 	return who.OnBehalfOf == "" || AuthorizeTransitionOn(who.OnBehalfOf, who.OnBehalfOfRoles, tr, it.Fields)
 }
+
+// MayWriteRoleField answers whether who may write a field limited to roles
+// (writable_by: [role:<name>, ...]) on the public door: the actor holds one
+// of the roles and, when it acts for a user, so does the user (an agent has
+// its user's rights only where it also has its own). A field without roles
+// is anyone's; a kernel-written field is not this function's question.
+//
+// Phase B stub: not implemented yet.
+func MayWriteRoleField(f typedef.Field, who Who) bool {
+	return true
+}

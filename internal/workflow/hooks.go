@@ -251,3 +251,36 @@ func kernelError(err error) error {
 	}
 	return err
 }
+
+// --- link reactions (proof of concept, Step 2, part 2) ---
+
+// RunReaction applies a held reaction to its target and resolves its hold:
+// allow if the write committed (or had committed: a retry), deny with the
+// target's refusal (DenyReason) if refused. A hold already closed is not an
+// error: there is nothing left to decide.
+//
+// Phase B stub: not implemented yet.
+func (a *Activities) RunReaction(ctx context.Context, in ReactionInput) error {
+	return temporal.NewNonRetryableApplicationError("RunReaction is not implemented", ErrTypeInvalid, nil)
+}
+
+// ResolveReaction resolves a held reaction's hold as error, as the reaction.
+//
+// Phase B stub: not implemented yet.
+func (a *Activities) ResolveReaction(ctx context.Context, in ResolveReactionInput) error {
+	return temporal.NewNonRetryableApplicationError("ResolveReaction is not implemented", ErrTypeInvalid, nil)
+}
+
+// Undo reverses a hold's reservation, if one committed.
+//
+// Phase B stub: not implemented yet.
+func (a *Activities) Undo(ctx context.Context, in ReactionInput) error {
+	return temporal.NewNonRetryableApplicationError("Undo is not implemented", ErrTypeInvalid, nil)
+}
+
+// ReactionFailed records on the source that an undo gave up.
+//
+// Phase B stub: not implemented yet.
+func (a *Activities) ReactionFailed(ctx context.Context, in ReactionFailedInput) error {
+	return temporal.NewNonRetryableApplicationError("ReactionFailed is not implemented", ErrTypeInvalid, nil)
+}

@@ -34,6 +34,17 @@ const (
 	ActivityRunAction  = "RunAction"  // runs an action hook and writes back what it made
 	ActivityHookFailed = "HookFailed" // records that an action hook gave up
 
+	// Link reactions (proof of concept, Step 2, part 2). A held reaction
+	// decides its hold: RunReaction writes on the target, then resolves the
+	// hold (allow, or deny with the target's refusal). ResolveReaction
+	// resolves it as error when the reaction gives up. Undo reverses a
+	// reaction's committed write; ReactionFailed records an undo that gave
+	// up. Each activity writes through the item service itself.
+	ActivityRunReaction     = "RunReaction"
+	ActivityResolveReaction = "ResolveReaction"
+	ActivityUndo            = "Undo"
+	ActivityReactionFailed  = "ReactionFailed"
+
 	// Error types by which the activities report the item service's final answers.
 	// All are non-retryable.
 	ErrTypeStale      = "Stale"      // the Item moved on; the workflow is behind
@@ -109,6 +120,57 @@ type Snapshot struct {
 	// their state: LoadItem reports those not yet completed, and entering a
 	// state adds its actions. Leaving the state never drops one.
 	PendingActions []PendingAction
+
+	// Link reactions, reduced like Checks. HeldReactions maps "from->to" to
+	// the held reaction deciding that transition; Undos maps a held
+	// reaction to the reaction that undoes it; UndoOnEntry maps "from->to"
+	// to the undo an Item entering `to` from `from` runs.
+	HeldReactions map[string]string
+	Undos         map[string]string
+	UndoOnEntry   map[string]string
+	// EnteredHold is the hold whose allowed resolution entered State, ""
+	// if none: leaving State by an undo's trigger reverses that hold's
+	// reservation. PendingUndos are undos not yet started; LoadItem reports
+	// those not yet done, and closing a reaction's hold non-allow (or
+	// leaving its state by the trigger) adds one. Nothing drops one.
+	EnteredHold  string
+	PendingUndos []PendingUndo
+}
+
+// PendingUndo is one undo to run: the undo reaction, the hold whose
+// reservation it reverses, and the event that asked for it.
+type PendingUndo struct {
+	ReactionID    string
+	HoldID        string
+	CauseSeq      int64
+	CorrelationID string
+	Hop           int // of the cause event
+}
+
+// ReactionInput is what RunReaction, ResolveReaction and Undo need: the
+// reaction, the hold, and the cause. Opaque IDs only. The item service
+// derives the keys itself.
+type ReactionInput struct {
+	ItemID        string // the source
+	TypeID        string
+	TypeVersion   int
+	ReactionID    string
+	HoldID        string
+	CauseSeq      int64 // RunReaction: the request; Undo: the event that closed the hold or left the state
+	CorrelationID string
+	Hop           int // the cause's hop + 1
+}
+
+// ResolveReactionInput resolves a held reaction's hold as error.
+type ResolveReactionInput struct {
+	Reaction ReactionInput
+	Reason   string // budget_exhausted or reaction_failed
+}
+
+// ReactionFailedInput records that an undo gave up.
+type ReactionFailedInput struct {
+	Reaction ReactionInput
+	Reason   string // the refusal's code
 }
 
 // PendingAction is one action hook to run for one entry of its state.

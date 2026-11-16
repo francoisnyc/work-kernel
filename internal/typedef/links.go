@@ -36,6 +36,11 @@ type LinkType struct {
 	// Max is per source, InverseMax per target; empty means Many.
 	Max        Cardinality `yaml:"max" json:"max,omitempty"`
 	InverseMax Cardinality `yaml:"inverse_max" json:"inverse_max,omitempty"`
+	// WritableBy: kernel blocks LinkItems and UnlinkItems on the public door
+	// (LINK_NOT_WRITABLE); only the kernel sets the link (Resolve).
+	WritableBy WritableBy `yaml:"writable_by" json:"writable_by,omitempty"`
+	// Resolve makes the kernel set the link on entering a state.
+	Resolve *LinkResolve `yaml:"resolve" json:"resolve,omitempty"`
 }
 
 // SourceSingle reports whether a source has at most one link of this type.

@@ -34,6 +34,8 @@ type Rejection struct {
 	// For FieldFrozen: the state that freezes them and the fields named.
 	State  string
 	Frozen []string
+	// For InvariantFailed: the invariant's ID.
+	Invariant string
 }
 
 // Input is what a transition's guards see besides the Type: the fields as

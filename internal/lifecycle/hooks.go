@@ -26,6 +26,7 @@ const Held Code = "held"
 type Event struct {
 	Op      string
 	Entered string
+	From    string // the state left, for a transition; an after reaction depends on it
 }
 
 // StartsWorkflow reports whether an event needs the Item's workflow to be
@@ -113,4 +114,56 @@ func TransitionDuringHold(t *typedef.Type, h Hold, to string) error {
 		Code:   Held,
 		Reason: fmt.Sprintf("%s is checking %s -> %s; only an escape may leave %s now", h.Hook, h.From, h.To, h.From),
 	}
+}
+
+// --- link reactions and invariants (proof of concept, Step 2, part 2) ---
+
+// OpReactionFailed is the op of the event that records, on the source, that
+// a reaction could not be applied (an undo refused by its target, say). It
+// is written once and not retried; someone must look (Later: an alert).
+const OpReactionFailed = "reaction_failed"
+
+// InvariantFailed is the Rejection code for a write that would break one of
+// the Type's invariants; Rejection.Invariant names it.
+const InvariantFailed Code = "invariant_failed"
+
+// CheckInvariants decides whether fields (as a write would leave them) keep
+// every invariant of the Type. The first that does not hold, in the order
+// declared, refuses: a rule that cannot be evaluated does not hold.
+//
+// Phase B stub: not implemented yet.
+func CheckInvariants(t *typedef.Type, fields map[string]any) error {
+	return nil
+}
+
+// HeldReaction returns the held reaction on the transition from -> to, if
+// any: asking for that transition opens a hold the reaction decides.
+//
+// Phase B stub: not implemented yet.
+func HeldReaction(t *typedef.Type, from, to string) (typedef.Reaction, bool) {
+	return typedef.Reaction{}, false
+}
+
+// UndoOf returns the reaction that undoes the held reaction heldID.
+//
+// Phase B stub: not implemented yet.
+func UndoOf(t *typedef.Type, heldID string) (typedef.Reaction, bool) {
+	return typedef.Reaction{}, false
+}
+
+// UndoOnEntry returns the after reaction an Item entering `to` from `from`
+// triggers (approved -> withdrawn runs refund), if any.
+//
+// Phase B stub: not implemented yet.
+func UndoOnEntry(t *typedef.Type, from, to string) (typedef.Reaction, bool) {
+	return typedef.Reaction{}, false
+}
+
+// ReactionAdds evaluates a held reaction's add expressions over the
+// source's fields: target field -> the amount to add. An expression that
+// cannot be evaluated (a null field) is an error.
+//
+// Phase B stub: not implemented yet.
+func ReactionAdds(r typedef.Reaction, fields map[string]any) (map[string]int64, error) {
+	return nil, fmt.Errorf("lifecycle: ReactionAdds is not implemented")
 }

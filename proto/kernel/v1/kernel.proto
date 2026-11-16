@@ -415,9 +415,17 @@ message ItemEvent {
   ItemRef container_from = 25;
   ItemRef container_to = 26;
   // LINK_ADDED and LINK_REMOVED: the link's declared name and its target
-  // (restricted when the caller cannot see it).
+  // (restricted when the caller cannot see it). Also TRANSITIONED, when the
+  // transition set a link the kernel resolves.
   string link_type = 27;
   ItemRef link_target = 28;
+  // UPDATED by a reaction: the amounts added to these fields (fields holds
+  // the results).
+  google.protobuf.Struct added = 29;
+  // TRANSITIONED: the target a resolved link replaced.
+  ItemRef link_replaced = 30;
+  // REACTION_FAILED: the reaction, <type>:<id>; reason holds its code.
+  string reaction = 31;
 }
 
 enum ItemEventKind {
@@ -434,6 +442,9 @@ enum ItemEventKind {
   // A link from this Item was added or removed.
   ITEM_EVENT_KIND_LINK_ADDED = 8;
   ITEM_EVENT_KIND_LINK_REMOVED = 9;
+  // A link reaction could not be applied (an undo its target refused). It
+  // is not retried.
+  ITEM_EVENT_KIND_REACTION_FAILED = 10;
 }
 
 message StartAgentSessionRequest {
@@ -510,6 +521,60 @@ message Type {
   repeated Transition transitions = 7;
   // The link types Items of this version may have as sources.
   repeated LinkType link_types = 8;
+  // Rules over the fields that every write must keep, on every door
+  // (FAILED_PRECONDITION / INVARIANT_FAILED, metadata invariant).
+  repeated Invariant invariants = 9;
+  // Writes this version's transitions make on the Items its links point to.
+  repeated Reaction reactions = 10;
+  // Reactions of other Types that may write Items of this version, and the
+  // fields each may write. Any other reaction is refused.
+  repeated AcceptedReaction accepts_reactions = 11;
+}
+
+// A rule over an Item's fields. Its id is the refusal code: a write that
+// would break it is refused naming it, and a held reaction refused by it is
+// denied with it as the reason.
+message Invariant {
+  string id = 1;
+  // A CEL expression over the fields; a rule that cannot be evaluated (a
+  // null field) does not hold.
+  string rule = 2;
+}
+
+// A link reaction: a write on a linked Item, run by the kernel when an
+// Item enters a state. Its principal is reaction:<type>:<id>.
+message Reaction {
+  string id = 1;
+  ReactionKind kind = 2;
+  // Entering this state, from one of from_states (empty: from any).
+  string state = 3;
+  repeated string from_states = 4;
+  // HELD: the declared link (at most one target) the reaction follows.
+  string link_type = 5;
+  // HELD: target field ID -> a CEL expression over this Item's fields
+  // whose value (an int) is added to the target field.
+  map<string, string> add = 6;
+  // AFTER: the held reaction whose committed write this one reverses.
+  string undoes = 7;
+}
+
+enum ReactionKind {
+  REACTION_KIND_UNSPECIFIED = 0;
+  // Holds the transition (TransitionItemRequest.wait matters): it applies
+  // if the write on the target commits, and is denied with the target's
+  // refusal code if not. Its undo gives back what it took if the hold
+  // closes any other way.
+  REACTION_KIND_HELD = 1;
+  // Runs after the transition has committed, without holding it.
+  REACTION_KIND_AFTER = 2;
+}
+
+// A reaction another Type may run on Items of this Type.
+message AcceptedReaction {
+  // <type>:<reaction id>, no version.
+  string reaction = 1;
+  // The fields it may write.
+  repeated string fields = 2;
 }
 
 // A link type a Type declares: links from its Items to Items of the target
@@ -525,6 +590,24 @@ message LinkType {
   bool max_one = 4;
   // At most one link of this type to a target; else many.
   bool inverse_max_one = 5;
+  // KERNEL: only the kernel sets these links (resolve); LinkItems and
+  // UnlinkItems refuse them (PERMISSION_DENIED / LINK_NOT_WRITABLE).
+  FieldWriter writable_by = 6;
+  // Set when the kernel sets the link itself on entering a state.
+  LinkResolve resolve = 7;
+}
+
+// The kernel sets a link in the write that enters on_enter: to the unique
+// Item of the link's target Type, in state `state`, whose principal field
+// `field` holds the Item's creator. None or several refuse the entry
+// (no_<link> or ambiguous_<link>; on a direct transition FAILED_PRECONDITION
+// / LINK_UNRESOLVED).
+message LinkResolve {
+  string on_enter = 1;
+  string field = 2;
+  // What the field must equal: creator.
+  string equals = 3;
+  string state = 4;
 }
 
 message Field {
@@ -534,6 +617,10 @@ message Field {
   repeated string options = 3;
   // Who may write the field. UNSPECIFIED: anyone who may write the Item.
   FieldWriter writable_by = 4;
+  // When set, only principals holding one of these roles write the field
+  // through the public API (an agent and the user it acts for must both
+  // hold one): PERMISSION_DENIED / FIELD_NOT_WRITABLE otherwise.
+  repeated string writable_by_roles = 5;
 }
 
 // Who may write a field.

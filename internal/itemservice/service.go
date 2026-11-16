@@ -404,6 +404,13 @@ type StateEntry struct {
 	// of their state, not just the current one: an action is never dropped
 	// because the Item moved on (or the worker died).
 	PendingActions []PendingAction
+	// PendingUndos are the undos not yet done, for any hold of the Item
+	// (Step 2, part 2): a workflow run that starts after a crash resumes them.
+	PendingUndos []PendingUndo
+	// EnteredHold is the hold whose allowed resolution entered State, if
+	// the entry was a held transition: an undo on leaving State reverses
+	// that hold's reservation, never an earlier one's.
+	EnteredHold uuid.UUID
 }
 
 // HoldEntry is an open hold, as the workflow needs it: opaque IDs, state

@@ -13,7 +13,19 @@ const (
 	// version, so a Type's `allowed` list matches it across versions; the
 	// version is on the event's originating_hook instead.
 	KindHook = "hook"
+	// KindReaction is a Type's link reaction acting: reaction:<type>:<id>
+	// (proof of concept, Step 2, part 2). Like a hook, it has no version;
+	// the version is on originating_hook, reaction:<type>@v<n>:<id>.
+	KindReaction = "reaction"
 )
+
+// ReactionParts splits a reaction principal, reaction:<type>:<id>, into its
+// Type and reaction ID. ok is false for anything else.
+//
+// Phase B stub: not implemented yet.
+func ReactionParts(id string) (typeID, reactionID string, ok bool) {
+	return "", "", false
+}
 
 // KindOf returns the kind of a typed principal ID. ok is false for an
 // untyped ID, an unknown kind, or an empty ID after the colon.
