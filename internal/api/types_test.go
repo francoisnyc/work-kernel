@@ -126,6 +126,7 @@ func TestListTypes_EveryVersionInOrder(t *testing.T) {
 		"namespaces/globex/types/ticket/versions/3",
 		"namespaces/globex/types/ticket/versions/4",
 		"namespaces/globex/types/ticket/versions/5",
+		"namespaces/globex/types/vacation_request/versions/1",
 	}
 	if !slices.Equal(names, want) {
 		t.Errorf("ListTypes = %v\nwant %v", names, want)
