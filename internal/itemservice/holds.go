@@ -290,6 +290,12 @@ func (in *Internal) ResolveHold(ctx context.Context, req ResolveHoldRequest) (Wr
 		if err := ty.CheckFields(req.Fields, false); err != nil {
 			return WriteResult{}, fmt.Errorf("%w: correction: %v", ErrInvalid, err)
 		}
+		// A correction travels with the move out of the held state: it may
+		// not write what that state freezes. (What the transition's allowed
+		// names, it may not write either: refused at load.)
+		if err := checkPatch(ty, it.State, nil, req.Fields, false); err != nil {
+			return WriteResult{}, err
+		}
 
 		verdict, reason := req.Verdict, req.Reason
 		var set map[string]any
@@ -299,7 +305,7 @@ func (in *Internal) ResolveHold(ctx context.Context, req ResolveHoldRequest) (Wr
 			// The hold applies the requester's transition, so it is the
 			// requester who is checked again: their access and roles may
 			// have changed since they asked, and the fields may have too.
-			if reason, err = recheckRequester(ctx, tx, ty, it, requester, from, to, merged, links); err != nil {
+			if reason, err = recheckRequester(ctx, tx, ty, it, requester, from, to, merged, links, k.today()); err != nil {
 				return WriteResult{}, err
 			}
 			if reason != "" {
@@ -369,7 +375,7 @@ func checkVerdict(req ResolveHoldRequest) error {
 // recheckRequester asks again what was asked when the hold was requested.
 // It returns the reason the transition may no longer be made, or "".
 func recheckRequester(ctx context.Context, tx pgx.Tx, ty *typedef.Type, it lockedItem, requester item.Principal,
-	from, to string, fields map[string]any, links lifecycle.Links) (string, error) {
+	from, to string, fields map[string]any, links lifecycle.Links, today time.Time) (string, error) {
 	visible, err := policy.CanSee(ctx, tx, requester, it.ScopeID)
 	if err != nil {
 		return "", err
@@ -377,14 +383,16 @@ func recheckRequester(ctx context.Context, tx pgx.Tx, ty *typedef.Type, it locke
 	if !visible {
 		return "requester_lost_access", nil
 	}
-	if _, err := lifecycle.TransitionLinked(ty, from, fields, links, to); err != nil {
+	if _, err := lifecycle.TransitionWith(ty, from, lifecycle.Input{Fields: fields, Links: links, Today: today}, to); err != nil {
 		var rej *lifecycle.Rejection
 		if errors.As(err, &rej) {
 			return string(rej.Code), nil
 		}
 		return "", err
 	}
-	err = authorize(ctx, tx, requester, ty, from, to)
+	// allowed and except judge the requester (actor and on_behalf_of),
+	// against the Item as it is now.
+	err = authorize(ctx, tx, requester, ty, from, to, facts(it))
 	if errors.Is(err, ErrForbidden) {
 		return "forbidden", nil
 	}
@@ -405,9 +413,12 @@ func (in *Internal) HookInput(ctx context.Context, req HookInputRequest) (map[st
 	}
 	it := item.Item{ID: req.ItemID}
 	err = k.pool.QueryRow(ctx,
-		`select type_id, type_version, scope_id, state, fields, item_seq from items where id = $1`,
+		`select type_id, type_version, scope_id, state, fields, item_seq,
+		        created_by, coalesce(created_on_behalf_of, '')
+		 from items where id = $1`,
 		req.ItemID, // the kernel's own read: by ID, in any namespace
-	).Scan(&it.TypeID, &it.TypeVersion, &it.ScopeID, &it.State, &it.Fields, &it.ItemSeq)
+	).Scan(&it.TypeID, &it.TypeVersion, &it.ScopeID, &it.State, &it.Fields, &it.ItemSeq,
+		&it.CreatedBy, &it.CreatedOnBehalfOf)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -442,8 +453,19 @@ func (in *Internal) HookInput(ctx context.Context, req HookInputRequest) (map[st
 	if !ok {
 		return nil, ErrNotFound
 	}
+	// A hook may also read who created the Item (an unset attribute is
+	// left out, like an unset field).
+	attrs := map[string]string{
+		typedef.AttrCreatedBy: projected.CreatedBy, typedef.AttrCreatedOnBehalfOf: projected.CreatedOnBehalfOf,
+	}
 	out := map[string]any{}
 	for _, id := range h.Reads {
+		if typedef.IsAttribute(id) {
+			if v := attrs[id]; v != "" {
+				out[id] = v
+			}
+			continue
+		}
 		if v, ok := projected.Fields[id]; ok {
 			out[id] = v
 		}

@@ -83,6 +83,9 @@ func fromLifecycle(err error) error {
 		if len(rej.Missing) > 0 {
 			md["fields"] = strings.Join(rej.Missing, ",")
 		}
+		if rej.Code == lifecycle.FieldFrozen {
+			md["fields"], md["state"] = strings.Join(rej.Frozen, ","), rej.State
+		}
 		return &RejectedError{Code: string(rej.Code), Reason: rej.Reason, Metadata: md, cause: rej}
 	}
 	return err
