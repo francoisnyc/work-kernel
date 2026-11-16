@@ -23,6 +23,11 @@ create unique index links_src_single on links (source_id, link_type) where src_s
 create unique index links_dst_single on links (target_id, source_type_id, link_type) where dst_single;
 -- Incoming links: an Item's inverse view, guards and the "linked to" filter.
 create index links_target on links (target_id, link_type, source_id);
+-- Get shows each direction in a fixed order (created_at, the declared name,
+-- the other end's ID) and stops at 201 rows: these walk it in that order,
+-- so a hub's Get reads one page, not all its links.
+create index links_source_order on links (source_id, created_at, link_type, target_id);
+create index links_target_order on links (target_id, created_at, link_type, source_id);
 
 -- +goose Down
 drop table links;

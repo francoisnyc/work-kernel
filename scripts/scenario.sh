@@ -31,6 +31,7 @@ trap cleanup EXIT
 
 step_name="setup"
 step() {
+	check_failed
 	step_name=$1
 	printf '==> %s\n' "$1"
 }
@@ -44,7 +45,19 @@ fail() {
 			sed 's/^/    /' "$tmp/err"
 		fi
 	} >&2
+	# Inside $(...) exit leaves only the subshell, and the script would go
+	# on with an empty answer. The marker makes the parent stop too (see
+	# check_failed): a failure can never pass as "nothing".
+	: >"$tmp/failed"
 	exit 1
+}
+
+# check_failed stops the script if a fail ran in a subshell.
+check_failed() {
+	if [ -e "$tmp/failed" ]; then
+		printf '\nFAILED inside a command substitution, at step: %s (see above)\n' "$step_name" >&2
+		exit 1
+	fi
 }
 
 for tool in jq go; do
@@ -107,6 +120,7 @@ meta() {
 
 # expect WHAT GOT WANT
 expect() {
+	check_failed # GOT may come from a subshell that failed
 	[ "$2" = "$3" ] || fail "$1: got '$2', want '$3'"
 }
 
@@ -115,10 +129,20 @@ err_has() {
 	grep -qF -- "$1" "$tmp/err" || fail "pli's stderr does not contain: $1"
 }
 
-j() { jq -r "$1"; }
+# jqx ARGS...: jq on stdin, failing the script if jq itself fails (a
+# malformed answer, or a filter that does not fit it): a jq error must never
+# read as "no results".
+jqx() {
+	local out
+	out=$(jq "$@") || fail "jq $* failed on pli's answer"
+	printf '%s\n' "$out"
+}
 
-# names: the Item names of a search or list answer, sorted, on one line.
-names() { jq -r '[.items[].name] | sort | join(" ")'; }
+j() { jqx -r "$1"; }
+
+# names: the Item names of a search or list answer, sorted, on one line. An
+# answer with no Items has no "items" key at all: that is "", not an error.
+names() { jqx -r '[.items[]?.name] | sort | join(" ")'; }
 
 # sorted NAME...: the names sorted, on one line, to compare with names.
 sorted() { printf '%s\n' "$@" | sort | tr '\n' ' ' | sed 's/ $//'; }
@@ -335,9 +359,9 @@ link_ticket() { # WHO [--set ...]...: a ticket@5 titled with both words; prints 
 	ok "$who" item create --type ticket@5 --set "f_title=$w $lw" "$@" | j .item.name
 }
 # links_of: an Item answer's links as "DIRECTION link_type name", one line.
-links_of() { jq -r '[.item.links[]? | "\(.direction | sub("LINK_DIRECTION_"; "")) \(.link_type) \(if .item.restricted then "restricted" else .item.name end)"] | sort | join(",")'; }
+links_of() { jqx -r '[.item.links[]? | "\(.direction | sub("LINK_DIRECTION_"; "")) \(.link_type) \(if .item.restricted then "restricted" else .item.name end)"] | sort | join(",")'; }
 # link_events: a history's link events as "KIND link_type target", one line.
-link_events() { jq -r '[.events[] | select(.kind | test("LINK")) | "\(.kind | sub("ITEM_EVENT_KIND_"; "")) \(.link_type) \(.link_target.name // "restricted")"] | join(",")'; }
+link_events() { jqx -r '[.events[] | select(.kind | test("LINK")) | "\(.kind | sub("ITEM_EVENT_KIND_"; "")) \(.link_type) \(.link_target.name // "restricted")"] | join(",")'; }
 
 step "links: ana links x blocks y; the link shows from both ends; the event is x's only"
 x=$(link_ticket ana --set f_assignee=user:bob)
@@ -500,5 +524,6 @@ cat <<'EOF'
       DEADLINE_EXCEEDED  likewise; pli sets no deadline
 EOF
 
+check_failed
 echo
 echo "scenario passed (run word $w)"

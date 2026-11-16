@@ -61,6 +61,41 @@ const (
 		 limit 51`
 )
 
+// Rewrites of "linked to", driven from links: a join, and = any(array).
+// Each Item matches at most one link row (the source and the declared name
+// are fixed for outgoing, the source for incoming), so the join adds no
+// duplicates.
+const (
+	explainLinkedOutJoin = `select ` + explainItemCols + `
+		 from links l join items m on m.id = l.source_id join scopes s on s.id = m.scope_id
+		 where l.target_id = @id and l.link_type = 'blocks' and m.namespace_id = @ns
+		   and ` + explainVisible + `
+		 order by m.created_at desc, m.id desc
+		 limit 51`
+	explainLinkedInJoin = `select ` + explainItemCols + `
+		 from links l join items m on m.id = l.target_id join scopes s on s.id = m.scope_id
+		 where l.source_id = @id
+		   and (l.source_type_id, l.link_type) in (select * from unnest('{ticket}'::text[], '{blocks}'::text[]))
+		   and m.namespace_id = @ns and ` + explainVisible + `
+		 order by m.created_at desc, m.id desc
+		 limit 51`
+	explainLinkedOutAny = `select ` + explainItemCols + `
+		 from items m join scopes s on s.id = m.scope_id
+		 where m.namespace_id = @ns
+		   and m.id = any(array(select l.source_id from links l where l.target_id = @id and l.link_type = 'blocks'))
+		   and ` + explainVisible + `
+		 order by m.created_at desc, m.id desc
+		 limit 51`
+	explainLinkedInAny = `select ` + explainItemCols + `
+		 from items m join scopes s on s.id = m.scope_id
+		 where m.namespace_id = @ns
+		   and m.id = any(array(select l.target_id from links l where l.source_id = @id
+		       and (l.source_type_id, l.link_type) in (select * from unnest('{ticket}'::text[], '{blocks}'::text[]))))
+		   and ` + explainVisible + `
+		 order by m.created_at desc, m.id desc
+		 limit 51`
+)
+
 // linksExplainMode builds 30,000 tickets (v5), 1,000 more hidden from the
 // reader, a hub ticket with 2,000 links each way (10% to or from hidden
 // tickets), 10,000 other links, and a small ticket with two links each
@@ -189,11 +224,12 @@ func explainLinks(ctx context.Context, pool *pgxpool.Pool, title string, me item
 	args := func(id uuid.UUID) pgx.NamedArgs {
 		return pgx.NamedArgs{"actor": me.Actor, "behalf": "", "ns": "default", "me": me.Actor, "id": id}
 	}
-	steps := []struct {
+	type step struct {
 		name string
 		sql  string
 		args pgx.NamedArgs
-	}{
+	}
+	steps := []step{
 		{"Get, outgoing links, hub (2,200 targets, 400 hidden)", explainLinksOut, args(hub)},
 		{"Get, incoming links, hub (2,000 sources, 200 hidden)", explainLinksIn, args(hub)},
 		{"Get, outgoing links, small (2)", explainLinksOut, args(small)},
@@ -204,12 +240,23 @@ func explainLinks(ctx context.Context, pool *pgxpool.Pool, title string, me item
 		{"Linked to, incoming: Items blocked by the hub", explainLinkedIn, args(hub)},
 		{"Linked to, outgoing: Items that block small", explainLinkedOut, args(small)},
 		{"Linked to, incoming: Items blocked by small", explainLinkedIn, args(small)},
+		{"Linked to, outgoing, hub, as a join", explainLinkedOutJoin, args(hub)},
+		{"Linked to, incoming, hub, as a join", explainLinkedInJoin, args(hub)},
+		{"Linked to, outgoing, small, as a join", explainLinkedOutJoin, args(small)},
+		{"Linked to, incoming, small, as a join", explainLinkedInJoin, args(small)},
+		{"Linked to, outgoing, hub, as = any(array)", explainLinkedOutAny, args(hub)},
+		{"Linked to, incoming, hub, as = any(array)", explainLinkedInAny, args(hub)},
+		{"Linked to, outgoing, small, as = any(array)", explainLinkedOutAny, args(small)},
+		{"Linked to, incoming, small, as = any(array)", explainLinkedInAny, args(small)},
 	}
-	for _, s := range steps {
-		if rows, err := pool.Query(ctx, s.sql, s.args); err == nil {
+	type querier interface {
+		Query(context.Context, string, ...any) (pgx.Rows, error)
+	}
+	explain := func(q querier, prefix string, s step) error {
+		if rows, err := q.Query(ctx, s.sql, s.args); err == nil {
 			rows.Close()
 		}
-		rows, err := pool.Query(ctx, "explain (analyze, buffers) "+s.sql, s.args)
+		rows, err := q.Query(ctx, "explain (analyze, buffers) "+s.sql, s.args)
 		if err != nil {
 			return fmt.Errorf("%s: %w", s.name, err)
 		}
@@ -217,7 +264,33 @@ func explainLinks(ctx context.Context, pool *pgxpool.Pool, title string, me item
 		if err != nil {
 			return fmt.Errorf("%s: %w", s.name, err)
 		}
-		fmt.Printf("### %s\n\n```\n%s\n```\n\n", s.name, strings.Join(lines, "\n"))
+		fmt.Printf("### %s%s\n\n```\n%s\n```\n\n", prefix, s.name, strings.Join(lines, "\n"))
+		return nil
+	}
+	for _, s := range steps {
+		if err := explain(pool, "", s); err != nil {
+			return err
+		}
+	}
+	// Whether links_target_order also serves what links_target serves: the
+	// same queries with links_target dropped, in a transaction that rolls
+	// back (DDL is transactional in Postgres).
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `drop index links_target`); err != nil {
+		return err
+	}
+	for _, s := range steps {
+		if !strings.HasPrefix(s.name, "Guard") && !strings.HasPrefix(s.name, "Linked to, outgoing") &&
+			!strings.HasPrefix(s.name, "Get, incoming") {
+			continue
+		}
+		if err := explain(tx, "without links_target: ", s); err != nil {
+			return err
+		}
 	}
 	return nil
 }

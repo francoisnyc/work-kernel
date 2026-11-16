@@ -97,9 +97,9 @@ func TestLinkAgent_WriteRuleOnBothEnds(t *testing.T) {
 		t.Errorf("the same link after approval: %v", err)
 	}
 
-	// Unlink follows the same rule: a fresh session that read the space
-	// needs approval to unlink it too.
-	other := agentFor(t, w.k, w.ana)
+	// Unlink follows the same rule: a fresh session of the same agent (a
+	// reader of the space) that read the space needs approval to unlink too.
+	other := withSession(t, w.k, item.Principal{Actor: agent.Actor, OnBehalfOf: w.ana.Actor})
 	other.Namespace = "default"
 	if _, err := w.k.Get(testCtx(t), other, inSpace); err != nil {
 		t.Fatalf("the other agent reads the space: %v", err)
