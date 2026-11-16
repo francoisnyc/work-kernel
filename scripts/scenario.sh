@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# The Step 0 scenario: a scripted session against the public API, through pli
-# only, as two users (ana and bob), an agent (triage-bot, for ana) and a user
-# in another namespace (carol). It is the proof of concept's end-to-end test.
+# The proof of concept's scenario (Steps 0 and 1): a scripted session against
+# the public API, through pli only, as two users (ana and bob), an agent
+# (triage-bot, for ana) and a user in another namespace (carol). It is the
+# proof of concept's end-to-end test. Step 1 added links (blocks /
+# blocked_by, duplicate_of) and the principal field f_assignee, on ticket v5.
 #
 #   scripts/scenario.sh          (or: make scenario, which starts the stack first)
 #
@@ -144,22 +146,22 @@ run ana type list
 [ "$rc" -eq 0 ] || fail "pli could not reach $server as ana (exit $rc)"
 types=$(j '[.types[].name] | join(" ")' <"$tmp/out")
 case " $types " in
-*" namespaces/acme/types/ticket/versions/4 "*) ;;
-*) fail "type list does not have ticket v4: $types" ;;
+*" namespaces/acme/types/ticket/versions/5 "*) ;;
+*) fail "type list does not have ticket v5: $types" ;;
 esac
 
 # ---------------------------------------------------------------------------
 # Two users: ana creates, bob reads and moves the work on.
 # ---------------------------------------------------------------------------
 
-new_ticket() { # WHO [--set ...]...: a ticket@4 tagged with this run's word; prints its name
+new_ticket() { # WHO [--set ...]...: a ticket@5 tagged with this run's word; prints its name
 	local who=$1
 	shift
-	ok "$who" item create --type ticket@4 --set "f_title=$w" "$@" | j .item.name
+	ok "$who" item create --type ticket@5 --set "f_title=$w" "$@" | j .item.name
 }
 
 step "ana creates a ticket"
-created=$(ok ana item create --type ticket@4 --set "f_title=printer $w" --set f_priority=2 \
+created=$(ok ana item create --type ticket@5 --set "f_title=printer $w" --set f_priority=2 \
 	--set f_customer_id=cust-good --set f_amount=100)
 t1=$(j .item.name <<<"$created")
 etag1=$(j .item.etag <<<"$created")
@@ -172,7 +174,7 @@ expect "bob sees the title" "$(j .item.fields.f_title <<<"$got")" "printer $w"
 expect "bob sees the amount (an int, as a string)" "$(j .item.fields.f_amount <<<"$got")" "100"
 
 step "bob assigns it to himself and moves it to in_progress"
-ok bob item update "$t1" --set f_assignee=bob >/dev/null
+ok bob item update "$t1" --set f_assignee=user:bob >/dev/null
 ok bob item transition "$t1" --to open >/dev/null
 moved=$(ok bob item transition "$t1" --to in_progress)
 expect "outcome" "$(j .outcome <<<"$moved")" "TRANSITION_OUTCOME_APPLIED"
@@ -189,7 +191,7 @@ expect "state after approve" "$(j .item.state <<<"$approved")" "approved"
 echo "    the held approve answered in ${took} ms"
 
 step "a second ticket: bob approves with --wait 0s (PENDING); ana's write meanwhile is HELD"
-t2=$(new_ticket ana --set f_customer_id=cust-good --set f_amount=200 --set f_assignee=bob)
+t2=$(new_ticket ana --set f_customer_id=cust-good --set f_amount=200 --set f_assignee=user:bob)
 ok bob item transition "$t2" --to open >/dev/null
 ok bob item transition "$t2" --to in_progress >/dev/null
 pending=$(ok bob item transition "$t2" --to approved --wait 0s)
@@ -201,7 +203,7 @@ refuse ana "ABORTED HELD" item update "$t2" --set f_amount=5
 expect "HELD names the hold" "$(meta hold)" "$hold"
 
 step "a third ticket over the credit limit: the check denies it (DENIED is an answer, not an error)"
-t3=$(new_ticket ana --set f_customer_id=cust-good --set f_amount=5000 --set f_assignee=bob)
+t3=$(new_ticket ana --set f_customer_id=cust-good --set f_amount=5000 --set f_assignee=user:bob)
 ok bob item transition "$t3" --to open >/dev/null
 ok bob item transition "$t3" --to in_progress >/dev/null
 began=$(now_ms)
@@ -240,8 +242,8 @@ echo "    t2 was approved $(($(now_ms) - pending_at)) ms after its PENDING answe
 
 step "list a container, one page at a time"
 board=$(ok ana item create --type channel@1 --set "f_name=board $w" | j .item.name)
-a=$(ok ana item create --type ticket@4 --in "$board" --set "f_title=first $w" | j .item.name)
-b=$(ok ana item create --type ticket@4 --in "$board" --set "f_title=second $w" | j .item.name)
+a=$(ok ana item create --type ticket@5 --in "$board" --set "f_title=first $w" | j .item.name)
+b=$(ok ana item create --type ticket@5 --in "$board" --set "f_title=second $w" | j .item.name)
 page=$(ok bob item list "$board" --page-size 1)
 expect "page 1" "$(j '[.items[].name] | join(" ")' <<<"$page")" "$b"
 next=$(j .next_page_token <<<"$page")
@@ -304,19 +306,104 @@ expect "to_state" "$(meta to_state)" "in_progress"
 
 step "WIDEN_NOT_CONFIRMED: moving out of a narrowed container must be confirmed"
 den=$(ok ana item create --type channel@1 --set "f_name=den $w" --narrow user:ana | j .item.name)
-inden=$(ok ana item create --type ticket@4 --in "$den" --set "f_title=in the den $w" | j .item.name)
+inden=$(ok ana item create --type ticket@5 --in "$den" --set "f_title=in the den $w" | j .item.name)
 refuse ana "FAILED_PRECONDITION WIDEN_NOT_CONFIRMED" item update "$inden" --move-to-top
 ok ana item update "$inden" --move-to-top --confirm-widen >/dev/null
 
 step "IDEMPOTENCY_KEY_REUSED: one request_id, two different requests"
 key="scenario-$w"
-first=$(ok ana item create --type ticket@4 --set "f_title=once $w" --request-id "$key")
-again=$(ok ana item create --type ticket@4 --set "f_title=once $w" --request-id "$key")
+first=$(ok ana item create --type ticket@5 --set "f_title=once $w" --request-id "$key")
+again=$(ok ana item create --type ticket@5 --set "f_title=once $w" --request-id "$key")
 expect "the replay is the same Item" "$(j .item.name <<<"$again")" "$(j .item.name <<<"$first")"
-refuse ana "ALREADY_EXISTS IDEMPOTENCY_KEY_REUSED" item create --type ticket@4 --set "f_title=twice $w" --request-id "$key"
+refuse ana "ALREADY_EXISTS IDEMPOTENCY_KEY_REUSED" item create --type ticket@5 --set "f_title=twice $w" --request-id "$key"
 
 step "NOT_CAUGHT_UP: a min_seq far ahead (about 2 s)"
 refuse ana "UNAVAILABLE NOT_CAUGHT_UP" item search "$w" --min-seq 999999999999
+
+
+# ---------------------------------------------------------------------------
+# Links (Step 1): blocks / blocked_by (many to many) and duplicate_of (one
+# from a ticket) on ticket v5, and the principal field f_assignee. A link is
+# an event on its source only; guards and search see links.
+# ---------------------------------------------------------------------------
+
+# Link-section tickets also carry their own word, so searches see only them.
+lw="lnk$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
+link_ticket() { # WHO [--set ...]...: a ticket@5 titled with both words; prints its name
+	local who=$1
+	shift
+	ok "$who" item create --type ticket@5 --set "f_title=$w $lw" "$@" | j .item.name
+}
+# links_of: an Item answer's links as "DIRECTION link_type name", one line.
+links_of() { jq -r '[.item.links[]? | "\(.direction | sub("LINK_DIRECTION_"; "")) \(.link_type) \(if .item.restricted then "restricted" else .item.name end)"] | sort | join(",")'; }
+# link_events: a history's link events as "KIND link_type target", one line.
+link_events() { jq -r '[.events[] | select(.kind | test("LINK")) | "\(.kind | sub("ITEM_EVENT_KIND_"; "")) \(.link_type) \(.link_target.name // "restricted")"] | join(",")'; }
+
+step "links: ana links x blocks y; the link shows from both ends; the event is x's only"
+x=$(link_ticket ana --set f_assignee=user:bob)
+y=$(link_ticket ana --set f_assignee=user:bob)
+linked=$(ok ana item link "$x" blocks "$y")
+expect "x's links in the answer" "$(links_of <<<"$linked")" "OUTGOING blocks $y"
+expect "y's links, as bob" "$(ok bob item get "$y" | links_of)" "INCOMING blocked_by $x"
+expect "x's link events" "$(ok bob item history "$x" | link_events)" "LINK_ADDED blocks $y"
+expect "y's link events (none: a link writes only on its source)" "$(ok bob item history "$y" | link_events)" ""
+
+step "GUARD_FAILED from a link: y cannot be resolved while x (in triage) blocks it"
+ok bob item transition "$y" --to open >/dev/null
+ok bob item transition "$y" --to in_progress >/dev/null
+refuse bob "FAILED_PRECONDITION GUARD_FAILED" item transition "$y" --to resolved --set f_resolution=fixed
+expect "from_state" "$(meta from_state)" "in_progress"
+expect "to_state" "$(meta to_state)" "resolved"
+
+step "x is canceled: a canceled blocker does not block, and y resolves"
+ok ana item transition "$x" --to canceled >/dev/null
+resolved=$(ok bob item transition "$y" --to resolved --set f_resolution=fixed)
+expect "y's state" "$(j .item.state <<<"$resolved")" "resolved"
+
+step "unlink; NOT_LINKED, ALREADY_LINKED, LINK_TARGET_TYPE; STALE on the source's etag"
+ok ana item unlink "$x" blocks "$y" >/dev/null
+expect "y's links after the unlink" "$(ok bob item get "$y" | links_of)" ""
+expect "x's link events" "$(ok bob item history "$x" | link_events)" "LINK_ADDED blocks $y,LINK_REMOVED blocks $y"
+refuse ana "FAILED_PRECONDITION NOT_LINKED" item unlink "$x" blocks "$y"
+ok ana item link "$x" blocks "$y" >/dev/null
+refuse ana "FAILED_PRECONDITION ALREADY_LINKED" item link "$x" blocks "$y"
+refuse ana "FAILED_PRECONDITION LINK_TARGET_TYPE" item link "$x" blocks "$board"
+refuse ana "ABORTED STALE" item link "$x" duplicate_of "$y" --etag 1
+
+step "LINK_CARDINALITY: a ticket is a duplicate of one ticket at most"
+d=$(link_ticket ana)
+ok ana item link "$d" duplicate_of "$x" >/dev/null
+refuse ana "FAILED_PRECONDITION LINK_CARDINALITY" item link "$d" duplicate_of "$y"
+expect "link_type" "$(meta link_type)" "duplicate_of"
+expect "side" "$(meta side)" "source"
+expect "x's links, as ana" "$(ok ana item get "$x" | links_of)" "INCOMING duplicates $d,OUTGOING blocks $y"
+
+step "hidden ends: an outgoing link to ana's private ticket is restricted for bob; an incoming one is left out"
+y2=$(link_ticket ana --set f_assignee=user:bob)
+ok ana item link "$private" blocks "$y2" >/dev/null
+ok ana item link "$y2" duplicate_of "$private" >/dev/null
+expect "y2 as ana" "$(ok ana item get "$y2" | links_of)" "INCOMING blocked_by $private,OUTGOING duplicate_of $private"
+expect "y2 as bob" "$(ok bob item get "$y2" | links_of)" "OUTGOING duplicate_of restricted"
+
+step "the hidden blocker still blocks bob, and the refusal names nothing about it"
+ok bob item transition "$y2" --to open >/dev/null
+ok bob item transition "$y2" --to in_progress >/dev/null
+refuse bob "FAILED_PRECONDITION GUARD_FAILED" item transition "$y2" --to resolved --set f_resolution=fixed
+if grep -qF -- "${private##*/}" "$tmp/err"; then fail "the refusal names the hidden blocker"; fi
+refuse bob "NOT_FOUND NOT_FOUND" item link "$y2" blocks "$private"
+
+step "principal fields: f_assignee takes user:<id> or agent:<id>"
+refuse ana "INVALID_ARGUMENT INVALID_REQUEST" item update "$d" --set f_assignee=bob
+
+step "search: assigned to me, and linked to"
+found=$(ok bob item search "$lw" --type ticket --where f_assignee=me)
+expect "assigned to bob" "$(names <<<"$found")" "$(sorted "$x" "$y" "$y2")"
+expect "assigned to ana" "$(ok ana item search "$lw" --type ticket --where f_assignee=me | names)" ""
+expect "blocked by x" "$(ok bob item search --linked "in:blocked_by=$x" | names)" "$y"
+expect "blocking y" "$(ok bob item search --linked "out:blocks=$y" | names)" "$x"
+expect "blocking y2, as ana" "$(ok ana item search --linked "out:blocks=$y2" | names)" "$private"
+expect "blocking y2, as bob (the blocker is hidden)" "$(ok bob item search --linked "out:blocks=$y2" | names)" ""
+refuse bob "NOT_FOUND NOT_FOUND" item search --linked "in:blocked_by=$private"
 
 # ---------------------------------------------------------------------------
 # An agent in capability mode: ana's grant covers all of acme; the session
@@ -328,8 +415,8 @@ room=$(ok ana item create --type channel@1 --set "f_name=project $w" \
 	--narrow user:ana,user:bob,agent:triage-bot | j .item.name)
 inner=$(ok ana item create --type channel@1 --in "$room" --set "f_name=secrets $w" \
 	--narrow user:ana,agent:triage-bot | j .item.name)
-in_room=$(ok ana item create --type ticket@4 --in "$room" --set "f_title=in the room $w" | j .item.name)
-in_inner=$(ok ana item create --type ticket@4 --in "$inner" --set "f_title=in the inner room $w" | j .item.name)
+in_room=$(ok ana item create --type ticket@5 --in "$room" --set "f_title=in the room $w" | j .item.name)
+in_inner=$(ok ana item create --type ticket@5 --in "$inner" --set "f_title=in the inner room $w" | j .item.name)
 outside=$(new_ticket ana)
 
 step "triage-bot starts a session for ana, scoped to the room only"
@@ -350,6 +437,10 @@ scope=$(meta scope)
 expect "NEEDS_APPROVAL's scope" "$scope" "$in_room"
 expect "NEEDS_APPROVAL's audience" "$(meta audience)" "restricted"
 
+step "a link is a write to both ends: from the inner room to the wider one needs approval on the target's side"
+refuse triage-bot "PERMISSION_DENIED NEEDS_APPROVAL" item link "$in_inner" blocks "$in_room"
+expect "NEEDS_APPROVAL names the target" "$(meta scope)" "$in_room"
+
 step "AUDIENCE_CHANGED: approving for an audience that is not the one at commit"
 refuse ana "FAILED_PRECONDITION AUDIENCE_CHANGED" agent approve "$session" "$scope" --expect-audience namespace --yes
 expect "audience" "$(meta audience)" "restricted"
@@ -360,6 +451,7 @@ step "ana approves (pli says who will see the content); the agent's retry works"
 ok ana agent approve "$session" "$scope" --yes >/dev/null
 err_has "Content from this agent session will become visible to the readers of $scope"
 ok triage-bot item update "$in_room" --set f_priority=1 >/dev/null
+ok triage-bot item link "$in_inner" blocks "$in_room" >/dev/null
 
 # ---------------------------------------------------------------------------
 # Another namespace: carol, in globex, reaches nothing of acme, on every
@@ -371,16 +463,19 @@ refuse carol "NOT_FOUND NOT_FOUND" item get "$t1"
 refuse carol "NOT_FOUND NOT_FOUND" item update "$t1" --set f_priority=9
 refuse carol "NOT_FOUND NOT_FOUND" item transition "$t1" --to resolved --set f_resolution=fixed
 refuse carol "NOT_FOUND NOT_FOUND" item list "$board"
+refuse carol "NOT_FOUND NOT_FOUND" item link "$t1" blocks "$t3"
+refuse carol "NOT_FOUND NOT_FOUND" item unlink "$x" blocks "$y"
+refuse carol "NOT_FOUND NOT_FOUND" item search --linked "in:blocked_by=$x"
 refuse carol "NOT_FOUND NOT_FOUND" item history "$t1"
 refuse carol "NOT_FOUND NOT_FOUND" item search --type namespaces/acme/types/ticket
-refuse carol "NOT_FOUND NOT_FOUND" item create --type namespaces/acme/types/ticket/versions/4
-refuse carol "NOT_FOUND NOT_FOUND" item create --type ticket@4 --in "$board"
-refuse carol "NOT_FOUND NOT_FOUND" type get namespaces/acme/types/ticket/versions/4
+refuse carol "NOT_FOUND NOT_FOUND" item create --type namespaces/acme/types/ticket/versions/5
+refuse carol "NOT_FOUND NOT_FOUND" item create --type ticket@5 --in "$board"
+refuse carol "NOT_FOUND NOT_FOUND" type get namespaces/acme/types/ticket/versions/5
 refuse carol "NOT_FOUND NOT_FOUND" agent approve "$session" "$room" --yes
 # ListTypes names no namespace: it lists the caller's own.
 
 step "cross-namespace: acme on carol's Item"
-theirs=$(ok carol item create --type ticket@4 --set "f_title=globex $w" | j .item.name)
+theirs=$(ok carol item create --type ticket@5 --set "f_title=globex $w" | j .item.name)
 case $theirs in namespaces/globex/items/*) ;; *) fail "carol's Item is $theirs, want it in globex" ;; esac
 refuse ana "NOT_FOUND NOT_FOUND" item get "$theirs"
 refuse triage-bot "NOT_FOUND NOT_FOUND" agent start --for user:ana --scopes "$theirs" --powers read
@@ -392,7 +487,8 @@ refuse triage-bot "NOT_FOUND NOT_FOUND" agent start --for user:ana --scopes "$th
 step "every reachable refusal was seen"
 for reason in UNAUTHENTICATED SESSION_INVALID INVALID_REQUEST NOT_FOUND NOT_ALLOWED NEEDS_APPROVAL \
 	NO_TRANSITION MISSING_FIELDS GUARD_FAILED WIDEN_NOT_CONFIRMED STALE HELD \
-	IDEMPOTENCY_KEY_REUSED NOT_CAUGHT_UP AUDIENCE_CHANGED; do
+	IDEMPOTENCY_KEY_REUSED NOT_CAUGHT_UP AUDIENCE_CHANGED \
+	LINK_CARDINALITY ALREADY_LINKED NOT_LINKED LINK_TARGET_TYPE; do
 	case $seen in *" $reason "*) ;; *) fail "no step triggered $reason" ;; esac
 done
 cat <<'EOF'
