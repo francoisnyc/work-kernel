@@ -53,12 +53,24 @@ rejected with a reason.
 A Type is versioned YAML data that **names code but never contains it**.
 
 - Fields: stable ID, type, options, defaults, invariants as expressions.
+  Types: `string`, `int`, `bool`, `enum`, `principal`, `date` (an ISO 8601
+  calendar date, `2026-12-01`). A field may be `writable_by: kernel`: only the
+  internal door (a hook) writes it (see "Approval as a business state").
 - States: each has a category — `triage, backlog, todo, active, waiting, done, canceled, none`.
   `none` means "not work": work views leave it out. A Type that declares no
-  states gets one implicit state, `default`, with category `none`.
+  states gets one implicit state, `default`, with category `none`. A state may
+  declare `frozen: [fields]`: no write changes them while the Item is in it.
 - Transitions: from/to, guard expression, required fields, who may act, action references.
-  - Who may act is the transition's `allowed` list. An entry is `role:<name>`
-    or `principal:<id>`. Absent or empty means anyone who can see the Item.
+  - Who may act is the transition's `allowed` list. An entry is `role:<name>`,
+    `principal:<id>`, `field:<id>` (whoever a principal field holds when the
+    move runs) or `creator` (the requester: see below). Absent or empty means
+    anyone who can see the Item.
+  - Who may not act is its `except` list. It takes only `creator` for now,
+    and there it means anyone who took part in creating the Item. A match is
+    `ErrForbidden`, asked with `allowed`, after the guards.
+  - **Identity rules are declared, never written in CEL**, so the
+    effective-user logic lives in one place (package `policy`); guards keep
+    data rules (dates, days).
   - A timer acts as `system:timer` and gets no silent exemption: if the
     transition it uses has an `allowed` list, the list must include
     `principal:system:timer`, or the Type is refused at load.
@@ -67,7 +79,8 @@ A Type is versioned YAML data that **names code but never contains it**.
   `{id: in_progress, category: active, timer: {after: 48h, to: open}}`. `to` must
   be a transition the Type declares from that state, so a timer can never make a
   move a person couldn't. The timer counts from the event that entered the state.
-- Approvals: a waiting step completed by a token (later).
+- Approvals: a business state, decided by an ordinary transition; the kernel
+  has no approval concept (see "Approval as a business state").
 - Items stay on the Type version they were created with. Versioning rule:
   **pin the lifecycle, evolve the schema, float the policy.**
 
@@ -75,15 +88,21 @@ Guards are CEL expressions (`cel-go`), compiled when a Type loads. Every field
 is a variable named by its ID, typed by the schema and nullable: unset is
 `null`, so "is set" reads `f_x != null`. A guard that cannot be evaluated does
 not hold. A guard reads links as `links.<name>` (see "Links, containment and
-people").
+people"). A date field is a CEL timestamp at 00:00 UTC, and `today` is the
+date the write happens on, **in UTC** (the item service's clock; a user's
+local date can differ: Later). Who acts is not a guard variable: `caller`,
+`caller_on_behalf_of`, `created_by`, `created_on_behalf_of`, `today` and
+`links` are reserved names no field may take.
 
 Hooks (Step 6) are declared in the Type version, pinned with the lifecycle:
 `{id, on: enter, state}` for an **enrich** hook (reads some fields, calls out,
 writes others, never holds the Item, optional `fallback`), or `{id, on:
 transition, from, to}` for a **check**. Each names an action (code in
 `internal/hooks`, never in the Type) with `reads` and `writes`, matched to the
-action by position; the action's arity is checked at load. A transition may
-be an `escape` (cancel): it may leave a held state.
+action by position; the action's arity is checked at load. Besides fields,
+`reads` may name the kernel-set attributes `created_by` and
+`created_on_behalf_of`. A transition may be an `escape` (cancel): it may
+leave a held state.
 
 An **action** hook (Step 7) is `{id, on: enter, state, kind: action}`: a side
 effect outside the kernel (an invoice in the ERP). It writes at least one
@@ -313,7 +332,11 @@ client → item service (Go, stateless)
 - **Roles** live in `principal_roles(namespace_id, principal, role)`: the
   server's own record, read on every write that needs it, never claimed by a caller.
 - **On behalf of**: when an agent acts for a user, both must see the Item and
-  both must pass `allowed`.
+  both must pass `allowed`: every `role:`, `principal:` and `field:` entry is
+  judged for the agent and for its user. **Except `creator`**, which is judged
+  once for the principal as a whole (an agent acting for the requester is the
+  requester). A `field:` entry holding `user:bob` never matches `agent:x`, so
+  an agent acting for an approver cannot approve.
 - **Grants** widen explicitly (e.g. share one ticket with a customer). A grant
   attaches to a scope node. Effective readers = (parent readers narrowed by this
   node) + grants.
@@ -582,7 +605,7 @@ Follow the published conventions: Google's API design guides (AIPs) for
 resources, paging, errors; Stripe's model for idempotency keys.
 
 **No generic action call.** Every operation that isn't "change fields" or
-"move state" gets its own named, typed call (`ApproveHold`, `RankItem`), never
+"move state" gets its own named, typed call (`ApproveWiden`, `RankItem`), never
 a catch-all `Action(item, name, json)` (Unix's `ioctl` is the warning). Each
 new call passes the kernel membership test.
 
@@ -746,6 +769,8 @@ A rule's refusal answers with its code; every kernel rejection carries one
 | `ErrRejected`, an approval's audience changed since shown | `FAILED_PRECONDITION` | `AUDIENCE_CHANGED` (+ audience, expected_audience) |
 | `ErrRejected`, a max-one side of a link type already has its link | `FAILED_PRECONDITION` | `LINK_CARDINALITY` (+ link_type, side) |
 | `ErrRejected`, the link exists / does not exist / its target's Type is not allowed | `FAILED_PRECONDITION` | `ALREADY_LINKED` / `NOT_LINKED` / `LINK_TARGET_TYPE` |
+| `ErrForbidden`, a write names a field it may not write (kernel-written, or named by its transition's `allowed`) | `PERMISSION_DENIED` | `FIELD_NOT_WRITABLE` (+ fields) |
+| `ErrRejected`, a write names a field the Item's state freezes | `FAILED_PRECONDITION` | `FIELD_FROZEN` (+ fields, state) |
 | `ErrStale` | `ABORTED` | `STALE` |
 | `ErrHeld` | `ABORTED` | `HELD` (+ hold name) |
 | `ErrIdempotencyKeyReuse` | `ALREADY_EXISTS` | `IDEMPOTENCY_KEY_REUSED` |
@@ -873,6 +898,77 @@ then be a principal or `me`). Guards read it as a string. An agent may
 assign anyone; notifications, when they come, must pass through `Project`
 for their recipient.
 
+### Approval as a business state (proof of concept, Step 2, part 1)
+
+Decided 2026-11-16. A manager's decision is an **ordinary transition**
+(`submitted -> approved`, `submitted -> rejected`) restricted by `allowed`:
+no approval hold kind, no `ApproveHold`. The kernel gains only generic
+primitives; nothing in it is named "approval" (the membership test: approvals
+stay in Types).
+
+**Kernel-written fields.** `writable_by: kernel` on a field: only the
+internal door writes it (a hook declaring it in its `writes`). The public
+door refuses it on create, update and a transition's patch, held requests
+included: `PERMISSION_DENIED` / `FIELD_NOT_WRITABLE` (+ `fields`). Some hook
+must write it, or the Type is refused at load (in part 2, link reactions
+will count as writers; the attribute is an enum so link types can take it).
+
+**Frozen fields per state.** `frozen: [fields]` on a state: no write may name
+them while the Item is in that state, from any door (a hook included):
+`FAILED_PRECONDITION` / `FIELD_FROZEN` (+ `fields`, `state`). Naming a field
+is enough, even with its current value. A write is checked against the state
+it starts in, so the transition **entering** the state may set the fields (a
+check's correction on the way into `submitted`), and the one **leaving** it
+may not (recall first, then edit). Freezing the decided states too keeps what
+was approved what stands.
+
+**Order of a patch's refusals:** malformed (`INVALID_REQUEST`), not
+writable, frozen, then held (an open check's frozen reads).
+
+**`field:<id>` in `allowed`.** Matches the principal a principal field holds
+when the transition runs (the stored value); an empty field matches no one.
+**A transition's patch may not write a field its own `allowed` names**
+(`FIELD_NOT_WRITABLE`, before `allowed`), on every door; a check's
+correction is that transition's patch, so a check may not write such a
+field (refused at load). On an editable field, `field:` means "whoever the
+field names when the transition runs": anyone who may edit the field in an
+earlier write can change that.
+
+**`creator`: two meanings, side by side** (package `policy`, one function each):
+
+| Where | Function | Matches | Why |
+| --- | --- | --- | --- |
+| `allowed: [creator]` | `IsRequester` | the principal's effective user (its `on_behalf_of`, else its actor) equals the Item's effective creator (`created_on_behalf_of`, else `created_by`) | "This is the requester": only the person the Item is for, or an agent acting for them, acts as them |
+| `except: [creator]` | `TookPartInCreation` | the principal's actor **or** its effective user equals `created_by` **or** `created_on_behalf_of` | "Who must not complete it": separation of duties is conservative, so an agent that created a request for ana may not decide it, acting alone or for anyone |
+
+The kernel's own actors (`system:timer`, hooks) are neither. In `allowed`,
+`creator` is judged once for the principal; every other entry keeps the
+both-must-pass rule. `except` is asked with `allowed`, after the guards: a
+match is `NOT_ALLOWED`.
+
+**Who `allowed` and `except` judge, per door:** the token's principal (and
+its session's user) on the public door; `system:timer` or the hook on the
+internal door (never the creator); on `ResolveHold`'s re-check, the
+**original requester**, actor and `on_behalf_of`.
+
+**Agents cannot approve** (Step 2): a `field:` entry holding `user:<manager>`
+never matches `agent:<x>`, and the agent's user passing is not enough. An
+agent with a namespace-wide session and every power, acting for the
+approver, is `NOT_ALLOWED`.
+
+**Hooks read the creator.** A hook's `reads` may name `created_by` and
+`created_on_behalf_of` (set at create, never editable). The vacation
+request's HR check reads them, asks the HR directory for the requester's
+manager, and answers `correct` with `f_approver` (the Item enters
+`submitted` with it, in the same write) or `deny` (`unknown_employee`, or
+`no_eligible_approver` when someone manages themselves).
+
+**Constraints kept open for parts 2 and 3:** `writable_by` extends to link
+types; reactions will declare which fields they write on a target Type; an
+`add` op on ints and a compensating refund arrive in part 2; a field-less
+reminder event will need an explicit `ErrHeld` exemption, and timers refused
+as held will be deferred, not spent, in part 3.
+
 ## Spike build order
 
 A step is a unit of work, not a calendar day: it is finished when its "done when"
@@ -951,6 +1047,11 @@ step's "done when" needs; the rest is direction, not scope.
   any change makes it stale. No declaration falls back to `item_seq`. The
   requester and the Item's creator cannot complete it; an agent acting for a
   user counts as that user. People and agents complete it the same way.
+  *As built (proof of concept, Step 2, part 1):* no token. Approval is a
+  business state; what it covers is the state's `frozen` fields, which no
+  write may change while the decision is pending, nor after it; the
+  requester and anyone who took part in creating the Item are refused by
+  `except: [creator]`. See "Approval as a business state".
 - **`ApproveWiden` narrows to one held write** in the product: the held write
   stores its payload hash, and the approval completes that write only. If the
   Item moved on, it is stale and the user is asked again.
@@ -977,10 +1078,13 @@ in the journal.
 | --- | --- | --- |
 | 0 (**done**) | Public API v1 server (`cmd/itemservice`, connect-go) and the `pli` CLI (`cmd/pli`) over what exists: create, get, update (patch, readers, move), transition with `wait`, search with filters, list by container, item history, Types read-only, agent sessions with required scopes and powers. Dev-token auth, the error table, paging, `request_id`, `etag`, plain-JSON field values. `buf lint` and `buf breaking` in CI. `docker compose up` runs Postgres, Temporal, a one-shot `migrate`, the item service, relay, worker and `connstub` (the stub CRM and ERP) | A scripted `pli` session creates, edits, moves (including a held approve with `wait`), searches with filters, lists a container and reads history, acting as two users; every named refusal comes back with its code and reason; an agent session refused outside its scopes; a cross-namespace attempt fails on every operation; a stranger can run it from the README. **Done 2026-11-16**: [journal, Step 0, part 3](journal.md#2026-11-16--step-0-proof-of-concept-part-3-one-command-stack-scenario-readme-finished) |
 | 1 (**done**) | Link types and principal fields | Declared link types with cardinality, inverse and allowed targets, enforced; link changes are events with etags; guards and search see links; principal fields checked. **Done 2026-11-16**: [journal, Step 1](journal.md#2026-11-16--step-1-proof-of-concept-link-types-and-principal-fields-finished) |
-| 2+ | Vacation request: human approvals, acting timers, link reactions (the balance), a stub email connector; then the Jira scenarios | Planned per step when reached |
+| 2, part 1 (**done**) | Vacation request: approval as a business state, its primitives, the HR check | Draft -> submitted -> approved/rejected through pli, the approver set by the HR check and never by the requester, the submitted dates frozen, no self-approval, agents unable to approve, every refusal named; through the API, pli and the scenario. **Done 2026-11-16**: [journal, Step 2, part 1](journal.md#2026-11-16--step-2-proof-of-concept-part-1-approval-primitives-and-the-hr-check-finished) |
+| 2, part 2 | Link reactions, the leave balance, the held deduction and its compensation | Planned |
+| 2, part 3 | Acting timers, timers deferred during holds, the stub email connector, the full scenario | Planned |
+| 3+ | The Jira scenarios | Planned per step when reached |
 
 ## Out of scope for the spike
 
 Real UI, email intake, business-hours calendars, multi-tenancy (the
 `namespace_id` column exists, with one default namespace), a dedicated search
-engine, SLA objects beyond one timer, approvals (stretch only).
+engine, SLA objects beyond one timer.

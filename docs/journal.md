@@ -239,6 +239,27 @@ Ideas noted during the spike, not built yet.
   (0.7 ms). `RegisterType` checks link inverses but not targets; only the
   directory load at start does, and only it and the bench register Types.
   (Step 1, EXPLAIN)
+- `today` in guards is the UTC date; a user's local date can differ (a
+  request "starting today" late in the evening in New York). Take the
+  namespace's or the requester's time zone. (Step 2, part 1)
+- Named guard codes: a guard refusal says only GUARD_FAILED. A transition
+  could carry several guards, each with its own code (`end_before_start`,
+  `starts_in_the_past`). (Step 2, part 1)
+- `except` takes only `creator`. Wider forms (a role, a field) need a rule
+  for which of actor and on_behalf_of must match. (Step 2, part 1)
+- Anyone who sees a draft vacation request can edit its fields: updates have
+  no `allowed`. Field-level or per-state writers would close it. (Step 2,
+  part 1)
+- A narrowed request its approver cannot see cannot be approved: `field:`
+  grants nothing. Either the approver joins the readers when named, or
+  narrowing is refused while a principal field names an outsider. (Step 2,
+  part 1)
+- `f_days` is not checked against the dates (working days, holidays). (Step
+  2, part 1)
+- After a recall to draft, `f_approver` keeps the last HR answer until the
+  next submit corrects it; a denied resubmission leaves it stale in draft.
+  Harmless (deciding needs `submitted`), but misleading to read. (Step 2,
+  part 1)
 
 ## 2026-11-12 — Step 1 (finished)
 
@@ -1163,3 +1184,58 @@ the held approve 1,204 and 1,198 ms, the denied one 1,149 and 1,195 ms (the ERP 
 **Open:** Later has nine new items. **Next session:** proof-of-concept Step 2 (the vacation
 request: human approvals, acting timers, link reactions, a stub email connector), once this PR
 is merged.
+
+## 2026-11-16 — Step 2 (proof of concept), part 1: approval primitives and the HR check (finished)
+
+**Built:** the vacation request (`vacation_request@1`) goes draft -> submitted -> approved or
+rejected through the API, pli and the scenario. Approval is a business state decided by an ordinary
+transition; the kernel gained only generic primitives. Submitting is held by the HR check
+(`hr.manager_of`, against a stub HR directory), which reads who the request is for and writes
+`f_approver` on the way into submitted, or denies `unknown_employee` / `no_eligible_approver`.
+The terms and the approver are frozen in submitted, approved and rejected. Submit, recall and
+withdraw are `allowed: [creator]`; approve and reject `allowed: [field:f_approver]`,
+`except: [creator]`. No identity guard is left; guards keep the dates and the days.
+
+**Kernel changes, counted:** (1) the `date` field type (a CEL timestamp in guards). (2)
+`writable_by: kernel`, refused on the public door, some hook must write it. (3) `frozen` per
+state, `lifecycle.CheckFrozen`, checked against the state a write starts in. (4) `field:<id>` in
+`allowed`, and no transition's patch (nor its check's correction, at load) may write a field its
+`allowed` names. (5) `creator` in `allowed` (`policy.IsRequester`) and `except: [creator]`
+(`policy.TookPartInCreation`), through `policy.MayTransition`. (6) `today` as a guard variable,
+from `Options.Now`; `lifecycle.Input` / `TransitionWith`; reserved names. (7) Hooks may read
+`created_by` and `created_on_behalf_of` (`HookInput`). (8) The item service checks a patch
+(not writable, frozen, then held) on create, update, transition and `ResolveHold`'s correction,
+and judges `allowed`/`except` with the stored fields and the creator, for the original requester
+on the re-check. (9) API: `FIELD_NOT_WRITABLE`, `FIELD_FROZEN`. Proto, additive (buf breaking
+green): `FIELD_TYPE_DATE`, `Field.writable_by` (`FieldWriter`), `State.frozen`,
+`Transition.except`. No migration. App side: the HR action and stub, `--hr-listen`/`--hr-directory`,
+`HR_URL`, compose, the Type, two dev users (dana, erin) and bob's grant to triage-bot.
+
+**Review rework (tests changed or removed, with approval):** identity moved out of CEL. The
+lifecycle tables `TestApproveGuard_NoSelfApproval` and `TestRequesterGuard_RecallAndWithdraw`
+became policy tests (every row kept); `TestApproveGuard_WithoutWhoFailsSafe` went (no identity
+guard is left); `TestGuardVariables_Compile` became `_OnlyToday`; the five `TestGuardCaller_*`
+became `TestCreator_*`; the requester's self-approval and other people's recall or withdraw
+became `NOT_ALLOWED` instead of `GUARD_FAILED`. Then `except` widened: `TestIsCreator` became
+`TestIsRequester`, `TestTookPartInCreation` was added, and the agent-alone row (named approver)
+flipped to refused, also in the item service. Three tests pinning the Types in `types/` gained
+`vacation_request@1`. One scenario step of mine expected `NOT_ALLOWED` before a failing guard.
+
+**Surprises:** my CEL requester guard started with `caller == created_by`, so the agent that
+created ana's request passed it while acting for bob; the review moved identity to declared
+rules, computed in one place. `creator` then needed two meanings: the requester in `allowed`,
+anyone who took part in creating the Item in `except` (separation of duties is conservative).
+Guards run before `allowed`, so a refusal test must hold the data valid to reach `allowed`.
+cel-go takes a Go `time.Time` as a timestamp, and a null `today` makes a guard fail to evaluate,
+which is the fail-safe wanted for callers that pass no date. Docker Hub answered 429 again
+(images from `mirror.gcr.io`), the Docker daemon died and left a stale pid file, and image
+builds used the module cache served over HTTP as `GOPROXY`.
+
+**Numbers:** scenario, two runs in a row on a fresh stack: 7.7 s and 7.8 s; the held submit
+(`--wait 5s`, HR answers at once) 127 and 231 ms; the ticket's held approve 1,155 and 1,147 ms
+(the ERP stub takes 1 s). `go test -race ./...` green, no data race.
+
+**Open:** Later has seven new items (UTC today, named guard codes, wider `except`, editing
+others' drafts, approvers outside the readers, days against dates, a stale approver in draft).
+**Next session:** proof-of-concept Step 2, part 2 (link reactions, the leave balance, the held
+deduction and its compensation), once this PR is merged.
