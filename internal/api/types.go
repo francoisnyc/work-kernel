@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"errors"
+	"maps"
+	"slices"
 
 	"connectrpc.com/connect"
 
@@ -50,27 +52,54 @@ func typeOut(ns string, t *typedef.Type) *kernelv1.Type {
 	for _, f := range t.Fields {
 		out.Fields = append(out.Fields, &kernelv1.Field{
 			Id: f.ID, Type: fieldTypes[f.Type], Options: f.Options, WritableBy: fieldWriters[f.WritableBy],
+			WritableByRoles: f.WritableByRoles,
 		})
 	}
 	for _, s := range t.States {
 		out.States = append(out.States, &kernelv1.State{Id: s.ID, Category: categories[s.Category], Frozen: s.Frozen})
 	}
 	for _, tr := range t.Transitions {
-		// Whether a check holds the move is the lifecycle's knowledge.
+		// Whether a check or a held reaction holds the move is the
+		// lifecycle's knowledge.
 		_, checked := lifecycle.CheckFor(t, tr.From, tr.To)
+		if _, held := lifecycle.HeldReaction(t, tr.From, tr.To); held {
+			checked = true
+		}
 		out.Transitions = append(out.Transitions, &kernelv1.Transition{
 			FromState: tr.From, ToState: tr.To, Guard: tr.Guard, Required: tr.Required,
 			Allowed: tr.Allowed, Except: tr.Except, Escape: tr.Escape, Checked: checked,
 		})
 	}
 	for _, l := range t.Links {
-		lt := &kernelv1.LinkType{Name: l.Name, Inverse: l.Inverse, MaxOne: l.SourceSingle(), InverseMaxOne: l.TargetSingle()}
+		lt := &kernelv1.LinkType{Name: l.Name, Inverse: l.Inverse, MaxOne: l.SourceSingle(), InverseMaxOne: l.TargetSingle(),
+			WritableBy: fieldWriters[l.WritableBy]}
+		if r := l.Resolve; r != nil {
+			lt.Resolve = &kernelv1.LinkResolve{OnEnter: r.OnEnter, Field: r.Field, Equals: r.Equals, State: r.State}
+		}
 		for _, target := range l.Targets {
 			lt.Targets = append(lt.Targets, namespaceName(ns)+"/types/"+target)
 		}
 		out.LinkTypes = append(out.LinkTypes, lt)
 	}
+	for _, inv := range t.Invariants {
+		out.Invariants = append(out.Invariants, &kernelv1.Invariant{Id: inv.ID, Rule: inv.Rule})
+	}
+	for _, r := range t.Reactions {
+		out.Reactions = append(out.Reactions, &kernelv1.Reaction{
+			Id: r.ID, Kind: reactionKinds[r.Kind], State: r.State, FromStates: r.From,
+			LinkType: r.Link, Add: r.Add, Undoes: r.Undoes,
+		})
+	}
+	for _, key := range slices.Sorted(maps.Keys(t.AcceptsReactions)) {
+		out.AcceptsReactions = append(out.AcceptsReactions,
+			&kernelv1.AcceptedReaction{Reaction: key, Fields: t.AcceptsReactions[key]})
+	}
 	return out
+}
+
+var reactionKinds = map[typedef.ReactionKind]kernelv1.ReactionKind{
+	typedef.ReactionHeld:  kernelv1.ReactionKind_REACTION_KIND_HELD,
+	typedef.ReactionAfter: kernelv1.ReactionKind_REACTION_KIND_AFTER,
 }
 
 func (s *server) GetType(ctx context.Context, req *connect.Request[kernelv1.GetTypeRequest]) (*connect.Response[kernelv1.GetTypeResponse], error) {
