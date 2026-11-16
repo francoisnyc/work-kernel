@@ -12,6 +12,11 @@ import (
 // variable named by its ID, typed by the schema and nullable: an unset field
 // is null. So "the assignee is set" reads `f_assignee != null`, and a guard
 // that compares a field with a literal of the wrong type is refused at load.
+// A date field is a timestamp at 00:00 UTC, and `today` is one too.
+//
+// Who acts is never a guard variable: identity rules are declared, in a
+// transition's `allowed` and `except` (creator), and judged by package
+// policy in one place.
 //
 // Links (proof of concept, Step 1): links.<name> is the list of Items linked
 // under that name, each a map with only "state" and "category" (a guard
@@ -32,6 +37,8 @@ func celType(t FieldType) *cel.Type {
 		return cel.NullableType(cel.IntType)
 	case Bool:
 		return cel.NullableType(cel.BoolType)
+	case Date:
+		return cel.NullableType(cel.TimestampType)
 	default: // String, Enum, Principal
 		return cel.NullableType(cel.StringType)
 	}
@@ -45,7 +52,9 @@ var linkedItems = cel.ListType(cel.MapType(cel.StringType, cel.StringType))
 // declared as it is written; CEL resolves links.blocks to it, and links
 // alone is no variable at all.
 func newGuardEnv(t *Type) (*cel.Env, error) {
-	opts := make([]cel.EnvOption, 0, len(t.Fields))
+	opts := make([]cel.EnvOption, 0, len(t.Fields)+1)
+	// today is a date (00:00 UTC), set by the caller; never null.
+	opts = append(opts, cel.Variable(VarToday, cel.TimestampType))
 	for _, f := range t.Fields {
 		opts = append(opts, cel.Variable(f.ID, celType(f.Type)))
 	}

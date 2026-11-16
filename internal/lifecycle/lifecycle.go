@@ -46,25 +46,36 @@ type Input struct {
 	Today time.Time
 }
 
-// TransitionWith is TransitionLinked with everything a guard may read.
-// Contract stub (Step 2, part 1, Phase B): it ignores today.
-func TransitionWith(t *typedef.Type, current string, in Input, to string) (Result, error) {
-	return TransitionLinked(t, current, in.Fields, in.Links, to)
-}
-
-// CheckFrozen decides whether a write in state may name these fields: the
-// state's frozen fields may not be written. It returns a *Rejection with
-// FieldFrozen naming them. Contract stub (Phase B): it allows everything.
-func CheckFrozen(t *typedef.Type, state string, fieldIDs []string) error {
-	return nil
-}
-
 func (r *Rejection) Error() string { return r.Reason }
 
 // Result describes the state an Item enters.
 type Result struct {
 	State    string
 	Category string
+}
+
+// CheckFrozen decides whether a write made while the Item is in state may
+// name these fields: the state's frozen fields may not be written, by any
+// door. A transition is checked against the state it leaves, so the one
+// entering a state may set what that state freezes. The refusal names the
+// state and the frozen fields among those named, sorted.
+func CheckFrozen(t *typedef.Type, state string, fieldIDs []string) error {
+	s, _ := t.State(state)
+	var frozen []string
+	for _, id := range fieldIDs {
+		if slices.Contains(s.Frozen, id) {
+			frozen = append(frozen, id)
+		}
+	}
+	if len(frozen) == 0 {
+		return nil
+	}
+	slices.Sort(frozen)
+	frozen = slices.Compact(frozen)
+	return &Rejection{
+		Code: FieldFrozen, State: state, Frozen: frozen,
+		Reason: fmt.Sprintf("fields %s are frozen in state %q", strings.Join(frozen, ", "), state),
+	}
 }
 
 // Transition decides whether an Item of Type t, in state current with the
@@ -81,9 +92,16 @@ func Transition(t *typedef.Type, current string, fields map[string]any, to strin
 }
 
 // TransitionLinked is Transition with the linked Items the guard may read
-// (see Links). It is the one pure lifecycle function.
+// (see Links). Without a date, a guard reading today does not hold.
 func TransitionLinked(t *typedef.Type, current string, fields map[string]any, links Links,
 	to string) (Result, error) {
+	return TransitionWith(t, current, Input{Fields: fields, Links: links}, to)
+}
+
+// TransitionWith is the one pure lifecycle function: Transition with
+// everything a guard may read (Input).
+func TransitionWith(t *typedef.Type, current string, in Input, to string) (Result, error) {
+	fields, links := in.Fields, in.Links
 	tr, ok := t.Transition(current, to)
 	if !ok {
 		return Result{}, &Rejection{
@@ -106,7 +124,7 @@ func TransitionLinked(t *typedef.Type, current string, fields map[string]any, li
 		}
 	}
 
-	if !guardHolds(t, tr, fields, links) {
+	if !guardHolds(t, tr, fields, links, in.Today) {
 		return Result{}, &Rejection{
 			Code: GuardFailed, From: current, To: to,
 			Reason: fmt.Sprintf("transition from %q to %q: guard not satisfied: %s", current, to, tr.Guard),
@@ -124,7 +142,7 @@ func TransitionLinked(t *typedef.Type, current string, fields map[string]any, li
 //
 // The reason given for a failed guard is the guard's own text, never the
 // values it saw: those may be personal data.
-func guardHolds(t *typedef.Type, tr typedef.Transition, fields map[string]any, links Links) bool {
+func guardHolds(t *typedef.Type, tr typedef.Transition, fields map[string]any, links Links, today time.Time) bool {
 	if tr.Program == nil {
 		return true // no guard
 	}
@@ -132,7 +150,15 @@ func guardHolds(t *typedef.Type, tr typedef.Transition, fields map[string]any, l
 	if len(tr.GuardLinks) > 0 && links == nil {
 		return false
 	}
-	vars := make(map[string]any, len(t.Fields)+len(tr.GuardLinks))
+	vars := make(map[string]any, len(t.Fields)+len(tr.GuardLinks)+1)
+	// today is a date: 00:00 UTC of the caller's day. Unknown (zero), it is
+	// null, and a guard reading it cannot be evaluated: it does not hold.
+	if today.IsZero() {
+		vars[typedef.VarToday] = types.NullValue
+	} else {
+		u := today.UTC()
+		vars[typedef.VarToday] = time.Date(u.Year(), u.Month(), u.Day(), 0, 0, 0, 0, time.UTC)
+	}
 	for _, name := range tr.GuardLinks {
 		// A linked Item is its state and category, and nothing else.
 		list := make([]map[string]string, 0, len(links[name]))
@@ -151,6 +177,14 @@ func guardHolds(t *typedef.Type, tr typedef.Transition, fields map[string]any, l
 				v = n
 			}
 			vars[f.ID] = v
+		case f.Type == typedef.Date:
+			// A stored date that does not parse cannot be compared: the
+			// guard reading it does not hold.
+			if d, ok := typedef.ParseDate(v); ok {
+				vars[f.ID] = d
+			} else {
+				vars[f.ID] = v
+			}
 		default:
 			vars[f.ID] = v
 		}

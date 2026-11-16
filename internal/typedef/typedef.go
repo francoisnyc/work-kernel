@@ -64,6 +64,16 @@ const (
 	VarCallerOnBehalfOf = "caller_on_behalf_of"
 )
 
+// reservedNames may not be field IDs: guard variables, the creator
+// attributes a hook may read, and the links prefix.
+var reservedNames = []string{VarToday, VarCaller, VarCallerOnBehalfOf, AttrCreatedBy, AttrCreatedOnBehalfOf, "links"}
+
+// IsAttribute reports whether name is an Item attribute a hook may read
+// besides its fields: created_by or created_on_behalf_of.
+func IsAttribute(name string) bool {
+	return name == AttrCreatedBy || name == AttrCreatedOnBehalfOf
+}
+
 // categories are the fixed state categories from the design. "none" means
 // "not work": views of work leave it out, so a chat message never shows up as
 // active or done work.
@@ -253,8 +263,16 @@ func (t *Type) check() error {
 			return fail("duplicate field %q", f.ID)
 		}
 		seen[f.ID] = true
+		if slices.Contains(reservedNames, f.ID) {
+			return fail("field %s: %q is a reserved name (guard variables, creator attributes, links)", f.ID, f.ID)
+		}
+		switch f.WritableBy {
+		case WritableByAnyone, WritableByKernel:
+		default:
+			return fail("field %s: writable_by %q: the only value is kernel", f.ID, f.WritableBy)
+		}
 		switch f.Type {
-		case String, Int, Bool, Principal:
+		case String, Int, Bool, Principal, Date:
 			if len(f.Options) > 0 {
 				return fail("field %s: only enum fields take options", f.ID)
 			}
@@ -290,6 +308,16 @@ func (t *Type) check() error {
 		if !slices.Contains(categories, s.Category) {
 			return fail("state %s: unknown category %q", s.ID, s.Category)
 		}
+		frozen := map[string]bool{}
+		for _, id := range s.Frozen {
+			if _, ok := t.Field(id); !ok {
+				return fail("state %s: frozen field %q is not declared", s.ID, id)
+			}
+			if frozen[id] {
+				return fail("state %s: frozen field %q is listed twice", s.ID, id)
+			}
+			frozen[id] = true
+		}
 	}
 	if _, ok := t.State(t.InitialState); !ok {
 		return fail("initial_state %q is not a declared state", t.InitialState)
@@ -322,13 +350,24 @@ func (t *Type) check() error {
 			}
 		}
 		for _, entry := range tr.Allowed {
+			if entry == AllowedCreator {
+				continue
+			}
+			if id, ok := strings.CutPrefix(entry, AllowedFieldPrefix); ok {
+				f, declared := t.Field(id)
+				if id == "" || !declared || f.Type != Principal {
+					return fail("transition %s: allowed entry %q must name a declared principal field", name, entry)
+				}
+				continue
+			}
 			// CutPrefix returns the rest of the string and whether the prefix was there.
 			who, ok := strings.CutPrefix(entry, AllowedRolePrefix)
 			if !ok {
 				who, ok = strings.CutPrefix(entry, AllowedPrincipalPrefix)
 			}
 			if !ok {
-				return fail("transition %s: allowed entry %q must be role:<name> or principal:<id>", name, entry)
+				return fail("transition %s: allowed entry %q must be role:<name>, principal:<id>, field:<id> or creator",
+					name, entry)
 			}
 			if who == "" {
 				return fail("transition %s: allowed entry %q names nothing", name, entry)
@@ -345,6 +384,11 @@ func (t *Type) check() error {
 				hookType != t.ID {
 				return fail("transition %s: allowed entry %q names a hook of Type %q; a hook acts only on its own Type",
 					name, entry, hookType)
+			}
+		}
+		for _, entry := range tr.Except {
+			if entry != AllowedCreator {
+				return fail("transition %s: except entry %q: except takes only creator for now", name, entry)
 			}
 		}
 		prg, links, err := compileGuard(guards, tr.Guard)
@@ -392,7 +436,67 @@ func (t *Type) check() error {
 	}
 
 	// Hooks last: they name states, transitions and fields checked above.
-	return t.checkHooks()
+	if err := t.checkHooks(); err != nil {
+		return err
+	}
+	// A field only the kernel writes needs a writer: a hook that writes it.
+	// (Link reactions will count too, when they exist.)
+	for _, f := range t.Fields {
+		if f.WritableBy != WritableByKernel {
+			continue
+		}
+		written := slices.ContainsFunc(t.Hooks, func(h Hook) bool { return slices.Contains(h.Writes, f.ID) })
+		if !written {
+			return fail("field %s is writable_by kernel, but no hook writes it", f.ID)
+		}
+	}
+	return nil
+}
+
+// isDate reports whether s is an ISO 8601 calendar date, YYYY-MM-DD, of a
+// real day.
+func isDate(s string) bool {
+	if len(s) != len(time.DateOnly) {
+		return false
+	}
+	d, err := time.Parse(time.DateOnly, s)
+	return err == nil && d.Format(time.DateOnly) == s
+}
+
+// ParseDate reads a date field's value as a time at 00:00 UTC.
+func ParseDate(v any) (time.Time, bool) {
+	s, ok := v.(string)
+	if !ok || !isDate(s) {
+		return time.Time{}, false
+	}
+	d, _ := time.Parse(time.DateOnly, s)
+	return d, true
+}
+
+// KernelWritten returns the fields among ids that only the kernel may
+// write, sorted.
+func (t *Type) KernelWritten(ids []string) []string {
+	var out []string
+	for _, id := range ids {
+		if f, ok := t.Field(id); ok && f.WritableBy == WritableByKernel {
+			out = append(out, id)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// AllowedFields returns the fields among ids that the transition's own
+// `allowed` names through field:<id>, sorted: its patch may not write them.
+func (tr Transition) AllowedFields(ids []string) []string {
+	var out []string
+	for _, id := range ids {
+		if slices.Contains(tr.Allowed, AllowedFieldPrefix+id) {
+			out = append(out, id)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // maxExactInt is the largest integer a JSON number (a float64) holds exactly.
@@ -486,6 +590,10 @@ func (t *Type) CheckFields(values map[string]any, allowNull bool) error {
 		case Principal:
 			if !checkPrincipalValue(v) {
 				return fail("field %s: want a principal, user:<id> or agent:<id>", id)
+			}
+		case Date:
+			if s, ok := v.(string); !ok || !isDate(s) {
+				return fail("field %s: want a date, YYYY-MM-DD", id)
 			}
 		}
 	}

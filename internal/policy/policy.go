@@ -8,10 +8,12 @@
 package policy
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -120,10 +122,23 @@ func AuthorizeTransition(principal string, roles []string, tr typedef.Transition
 }
 
 // AuthorizeTransitionOn is AuthorizeTransition with the Item's fields, so a
-// field:<id> entry matches the principal that field holds. Contract stub
-// (Step 2, part 1, Phase B): field entries match no one.
+// field:<id> entry matches the principal that field holds when the move is
+// made; an unset or empty field matches no one. It judges one principal; a
+// creator entry is not judged here (see MayTransition).
 func AuthorizeTransitionOn(principal string, roles []string, tr typedef.Transition, fields map[string]any) bool {
-	return AuthorizeTransition(principal, roles, tr)
+	if AuthorizeTransition(principal, roles, tr) {
+		return true
+	}
+	for _, entry := range tr.Allowed {
+		id, ok := strings.CutPrefix(entry, typedef.AllowedFieldPrefix)
+		if !ok {
+			continue
+		}
+		if held, _ := fields[id].(string); held != "" && held == principal {
+			return true
+		}
+	}
+	return false
 }
 
 // Who is the principal asking for a transition, with the roles each part
@@ -147,16 +162,37 @@ type ItemFacts struct {
 // effective user (on_behalf_of if set, else the actor) is the Item's
 // effective creator (created_on_behalf_of if set, else created_by). The
 // kernel's own actors (system:, hook:) never are. It is the one place this
-// is computed. Contract stub (Step 2, part 1, Phase B): never.
+// is computed.
 func IsCreator(actor, onBehalfOf, createdBy, createdOnBehalfOf string) bool {
-	return false
+	if item.IsKind(actor, item.KindSystem, item.KindHook) {
+		return false
+	}
+	user, creator := cmp.Or(onBehalfOf, actor), cmp.Or(createdOnBehalfOf, createdBy)
+	return user != "" && user == creator
 }
 
 // MayTransition answers "may this principal make this move?" from the
-// transition's `allowed` and `except`. Contract stub (Phase B): it asks
-// AuthorizeTransitionOn for the actor and the on_behalf_of user, and
-// ignores creator and except.
+// transition's `allowed` and `except`. Whether the move is legal at all is
+// lifecycle's question, asked before.
+//
+//   - except: [creator] refuses the creator, whatever `allowed` says.
+//   - An empty `allowed` lets anyone in.
+//   - creator in `allowed` is judged once, for the principal as a whole:
+//     an agent acting for the creator matches.
+//   - Every other entry (role:, principal:, field:) is judged for the actor
+//     and for the user it acts for, and both must pass: an agent has its
+//     user's rights only where it also has its own.
 func MayTransition(tr typedef.Transition, who Who, it ItemFacts) bool {
+	creator := IsCreator(who.Actor, who.OnBehalfOf, it.CreatedBy, it.CreatedOnBehalfOf)
+	if creator && slices.Contains(tr.Except, typedef.AllowedCreator) {
+		return false
+	}
+	if len(tr.Allowed) == 0 {
+		return true
+	}
+	if creator && slices.Contains(tr.Allowed, typedef.AllowedCreator) {
+		return true
+	}
 	if !AuthorizeTransitionOn(who.Actor, who.ActorRoles, tr, it.Fields) {
 		return false
 	}
