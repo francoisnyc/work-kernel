@@ -11,7 +11,8 @@ syntax = "proto3";
 // - Every write takes a required request_id (the idempotency key) and returns
 //   the Item after the write, with item_seq and commit_seq.
 // - Errors carry a standard code and a google.rpc.ErrorInfo with a stable
-//   reason (domain "pli.dev"); see the error table in docs/design.md.
+//   reason (domain "pli.francoisnyc.github.io", frozen); see the error table
+//   in docs/design.md.
 //
 // - Reads page: page_size (default 50, max 500; more is read as 500),
 //   page_token from the previous page's next_page_token, no offsets and no
