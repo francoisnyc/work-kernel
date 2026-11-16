@@ -175,6 +175,12 @@ type UndoStatus struct {
 // MaxUndoErrorLen bounds UndoStatus.LastError.
 const MaxUndoErrorLen = 200
 
+// UndoAttemptsPerRun bounds the history a stuck undo adds to one run (each
+// attempt is an activity and a timer). After this many undo attempts the
+// run continues as new, carrying its pending undos with their attempts and
+// last errors.
+const UndoAttemptsPerRun = 100
+
 // ReactionInput is what RunReaction, ResolveReaction and Undo need: the
 // reaction, the hold, and the cause. Opaque IDs only. The item service
 // derives the keys itself.

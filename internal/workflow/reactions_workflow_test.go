@@ -21,10 +21,13 @@
 //   - A stuck undo is visible: the query QueryUndos reports each undo not
 //     yet done with its attempts and last error, and a Snapshot carries
 //     them, so continuing as new resets neither the count nor the backoff.
+//     After UndoAttemptsPerRun undo attempts a run continues as new, so a
+//     long-stuck undo does not grow one run's history without bound.
 package workflow_test
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"sync"
@@ -32,7 +35,9 @@ import (
 	"time"
 
 	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/temporal"
+	sdk "go.temporal.io/sdk/workflow"
 
 	wf "github.com/francoisnyc/work-kernel/internal/workflow"
 )
@@ -457,5 +462,62 @@ func TestReactions_StuckUndo_CountCarriesOver(t *testing.T) {
 	if gap := at[1].Sub(at[0]); gap < 30*time.Second {
 		t.Errorf("pause after the eighth failure = %v, want the backoff where it was (about %v), not a restart",
 			gap, wf.UndoMaxInterval)
+	}
+}
+
+// A long-stuck undo crosses continue-as-new: after UndoAttemptsPerRun
+// attempts the run hands over, carrying the undo with its attempts and
+// last error; the next run goes on, and when the failure passes the undo
+// succeeds once, and nothing runs after it.
+func TestReactions_StuckUndo_ContinuesAsNewAndRefundsOnce(t *testing.T) {
+	h := newReactionHarness(t, leaveSnapshot("submitted", 5, 5))
+	h.undoFails[hold1] = 1 << 20
+	h.deliver(0, approvalRequest(6, hold1))
+	h.deliver(time.Minute, reactionClose(7, "transition_failed", "", hold1))
+	err := h.run(wf.Input{ItemID: itemID})
+
+	var next *sdk.ContinueAsNewError
+	if !errors.As(err, &next) {
+		t.Fatalf("first run ended with %v, want continue-as-new after %d undo attempts", err, wf.UndoAttemptsPerRun)
+	}
+	if n := len(h.attemptTimes(hold1)); n != wf.UndoAttemptsPerRun {
+		t.Errorf("undo attempts in the first run = %d, want %d", n, wf.UndoAttemptsPerRun)
+	}
+	var in wf.Input
+	if err := converter.GetDefaultDataConverter().FromPayloads(next.Input, &in); err != nil {
+		t.Fatalf("decode the next run's input: %v", err)
+	}
+	if in.Carried == nil || len(in.Carried.PendingUndos) != 1 {
+		t.Fatalf("carried = %+v, want one pending undo", in.Carried)
+	}
+	u := in.Carried.PendingUndos[0]
+	if u.ReactionID != "refund" || u.HoldID != hold1 || u.CauseSeq != 7 || u.Hop != 1 ||
+		u.Attempts != wf.UndoAttemptsPerRun || !strings.Contains(u.LastError, "connector is down") {
+		t.Errorf("carried undo = %+v, want refund of %s (cause 7, hop 1) with %d attempts and the last error",
+			u, hold1, wf.UndoAttemptsPerRun)
+	}
+	if in.Carried.Hold != nil || in.Carried.LastAppliedSeq != 7 {
+		t.Errorf("carried hold %+v, last applied %d; want none and 7", in.Carried.Hold, in.Carried.LastAppliedSeq)
+	}
+
+	// The next run: 30 more failures, then the failure passes.
+	h2 := newReactionHarness(t, wf.Snapshot{})
+	h2.undoFails[hold1] = 30
+	if err := h2.run(wf.Input{ItemID: itemID, Carried: in.Carried}); err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if h2.loads != 0 {
+		t.Errorf("the second run loaded from Postgres %d times, want none (it was handed a snapshot)", h2.loads)
+	}
+	if n := len(h2.attemptTimes(hold1)); n != 31 {
+		t.Errorf("undo attempts in the second run = %d, want 31: thirty failures, then the one that succeeds", n)
+	}
+	for _, c := range h2.undos {
+		if c.In != reactionInput("refund", hold1, 7, "corr-7", 2) {
+			t.Errorf("Undo input = %+v, want the carried undo's", c.In)
+		}
+	}
+	if len(h.failed)+len(h2.failed) != 0 {
+		t.Errorf("ReactionFailed = %+v %+v, want none", h.failed, h2.failed)
 	}
 }
