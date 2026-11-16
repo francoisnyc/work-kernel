@@ -74,7 +74,8 @@ A Type is versioned YAML data that **names code but never contains it**.
 Guards are CEL expressions (`cel-go`), compiled when a Type loads. Every field
 is a variable named by its ID, typed by the schema and nullable: unset is
 `null`, so "is set" reads `f_x != null`. A guard that cannot be evaluated does
-not hold.
+not hold. A guard reads links as `links.<name>` (see "Links, containment and
+people").
 
 Hooks (Step 6) are declared in the Type version, pinned with the lifecycle:
 `{id, on: enter, state}` for an **enrich** hook (reads some fields, calls out,
@@ -393,8 +394,9 @@ client → item service (Go, stateless)
   nothing. A write by the agent must land at or below every recorded scope.
   Otherwise it is `ErrNeedsApproval`, naming the target scope. Writes are field
   updates, transitions with fields, creates (target: the container's scope, or
-  the root), moves (target: the destination's scope) and policy changes that
-  widen readers, `Inherit` included. A plain transition puts no content anywhere.
+  the root), moves (target: the destination's scope), policy changes that
+  widen readers, `Inherit` included, and links added or removed (targets:
+  both ends' scopes, the source first). A plain transition puts no content anywhere.
   - Approval is a separate act by the human, not a flag the agent could set:
     `ApproveWiden(user, session, scope)` records an audited row in
     `agent_session_approvals` for that one scope. It counts only when the
@@ -549,6 +551,17 @@ create table item_holds   (id uuid primary key, item_id uuid not null references
                            reason text, resolved_seq bigint, created_at timestamptz not null default now(),
                            resolved_at timestamptz, foreign key (item_id, requested_seq) references item_events);
 create unique index item_holds_one_open on item_holds (item_id) where status = 'open';
+create table links        (namespace_id text not null, source_id uuid not null references items,
+                           source_type_id text not null, link_type text not null,  -- the declared name
+                           target_id uuid not null references items,
+                           src_single boolean not null, dst_single boolean not null,  -- snapshots of the source Type
+                           created_at timestamptz not null default now(),
+                           primary key (source_id, link_type, target_id));
+create unique index links_src_single on links (source_id, link_type) where src_single;
+create unique index links_dst_single on links (target_id, source_type_id, link_type) where dst_single;
+create index links_target on links (target_id, link_type, source_id);
+create index links_source_order on links (source_id, created_at, link_type, target_id);
+create index links_target_order on links (target_id, created_at, link_type, source_id);
 ```
 
 ## Public API (v1)
@@ -697,7 +710,8 @@ fields it names; JSON `null` clears one. No field masks.
   30,000 matches): a known cost, in the journal's Later with its fixes.
 - Filters on `SearchItems` and `ListItems`: Type, state, category, field
   equality and ranges, principal fields ("assigned to me"), links ("linked to
-  X as `sprint`"). A filter alone is a valid search.
+  X as `sprint`"). A filter alone is a valid search. Link conditions and "me"
+  are described in "Links, containment and people" (Step 1).
 - `min_seq` on search for read-your-writes; `UNAVAILABLE` / `NOT_CAUGHT_UP`
   after 2 s. `GetItem` always reads the latest state.
 - Every read goes through `Project`. `Watch` comes later, after the sequencer.
@@ -730,6 +744,8 @@ A rule's refusal answers with its code; every kernel rejection carries one
 | `ErrNeedsApproval` | `PERMISSION_DENIED` | `NEEDS_APPROVAL` (+ scope, audience) |
 | `ErrRejected` | `FAILED_PRECONDITION` | the rule's code, e.g. `GUARD_FAILED` |
 | `ErrRejected`, an approval's audience changed since shown | `FAILED_PRECONDITION` | `AUDIENCE_CHANGED` (+ audience, expected_audience) |
+| `ErrRejected`, a max-one side of a link type already has its link | `FAILED_PRECONDITION` | `LINK_CARDINALITY` (+ link_type, side) |
+| `ErrRejected`, the link exists / does not exist / its target's Type is not allowed | `FAILED_PRECONDITION` | `ALREADY_LINKED` / `NOT_LINKED` / `LINK_TARGET_TYPE` |
 | `ErrStale` | `ABORTED` | `STALE` |
 | `ErrHeld` | `ABORTED` | `HELD` (+ hold name) |
 | `ErrIdempotencyKeyReuse` | `ALREADY_EXISTS` | `IDEMPOTENCY_KEY_REUSED` |
@@ -769,6 +785,93 @@ the base branch; from Step 0, part 3 on, `main` is the baseline.
   real principal; search can filter by it. A person's profile is a `person`
   Item tied to its principal, with `manager` and team links, written only by
   HR or a sync; identity, roles and groups never live in Items.
+
+### Links and principal fields as built (proof of concept, Step 1)
+
+**Declaring.** `links: [{name: blocks, inverse: blocked_by, targets: [ticket],
+max: many, inverse_max: many}]`. `max` is per source, `inverse_max` per
+target; unwritten is `many`. Names and inverses are lower-case identifiers,
+unique among the Type's names and inverses. Targets are Type IDs, any version;
+they must exist in the set loaded at start (`ParseDir`). **A link name keeps
+its inverse across a Type's versions**: a version that gives a declared name
+another inverse is refused at load and by `RegisterType`, naming the Type, the
+link and both inverses, so (source Type, name) always names one inverse.
+
+**Writing.** `Link` and `Unlink` (`LinkItems`, `UnlinkItems`) take the
+declared name, never the inverse, a `request_id` and an optional etag, both
+the source's. One event on the **source only** (`link_added` /
+`link_removed`, payload `{link_type, target}`, opaque IDs), with `item_seq`;
+the target gets no event and no new `item_seq`. So the target's etag does
+not change when it gains or loses an incoming link: a client holding it may
+meet a guard that differs from what it saw. One Item per write; no initial
+links on create.
+- The caller must see both ends (else `NOT_FOUND`); for an agent both are in
+  its session's scopes, it holds a write power, and the write rule runs
+  against **both** ends' scopes, the source first (a link changes the
+  target's behavior through guards).
+- Locks: the source FOR UPDATE and the targets FOR KEY SHARE, all in UUID
+  order (one helper, `lockLinkEnds`).
+- Cardinality is the database's: each row carries `src_single` and
+  `dst_single`, snapshots of the source Type at write time, under partial
+  unique indexes. A violation is `LINK_CARDINALITY` with `link_type` and
+  `side`; it never names the Item holding the slot. **A target-side refusal
+  still tells the caller that some source, possibly one they cannot see,
+  holds the target's single slot.** Accepted, for the same reason as guards
+  (below): the rule must hold for everyone.
+- Links may change while a hold is open: checks read fields, not links.
+
+**Reading.** `GetItem` and every write's answer show links both ways, as
+`{link_type, direction, item}`: the declared name outgoing, the inverse
+incoming. Search and List results carry none. The order is fixed: outgoing
+before incoming; within a direction by the link's `created_at`, then the
+**declared** name (`link_type` as stored, also for incoming links, which are
+shown by their inverse), then the other end's ID (the target outgoing, the
+source incoming). At most 200 per direction, restricted ones included, then
+`links_truncated`; the full list pages through a link filter.
+- An outgoing link to an Item the caller cannot see (or outside an agent's
+  session) is **restricted** (no ID); an incoming link from one is
+  **omitted**, since the target has no event that could show it.
+- **Someone who sees a restricted outgoing link cannot remove it** (they
+  cannot see its target), and **the hidden target may keep the source's own
+  guard failing** for them. Accepted: links never widen visibility.
+- Listing links (Get, history) records no agent read: a link carries only an
+  ID. If a link listing ever shows titles or fields, it must record the read.
+
+**Guards.** `links.<name>` is a list of `{state, category}`, never fields.
+The names a Type's guards see are its declared names (outgoing) and the
+inverses of its link types that target the Type itself (incoming); incoming
+links declared by other Types are not visible yet. Each transition records
+the names its guard reads (from the CEL AST); only those transitions read and
+lock linked Items. Guards evaluate linked Items whatever the caller can see:
+**so a refusal caused by a hidden blocker tells the caller that something
+they cannot see blocks the move**, though the refusal names nothing.
+Accepted: a rule must hold for everyone.
+- Locking, on all three doors (public transition, timers, a hold's re-check):
+  read the Item and its link set unlocked; lock the Item FOR UPDATE and the
+  linked rows FOR SHARE together in UUID order; read the link set again and
+  start the transaction again (`errRetry`) if it changed. FOR SHARE blocks
+  every state change of a linked Item until the commit. `write()` also
+  retries Postgres deadlocks (40P01) and serialization failures (40001).
+- Links that were not read fail safe: a guard that reads links does not hold.
+
+**Search.** A link condition `{link_type, direction, item}` names the link as
+the **result** Items see it: outgoing takes a declared name (Items that block
+X), incoming an inverse name (Items blocked by X). It matches every Type that
+declares the name in that direction; a name no Type declares in that
+direction is `INVALID_ARGUMENT` (Types only grow, so a refused name can only
+start working later). The condition's Item must be visible (else
+`NOT_FOUND`); results are only Items the caller sees.
+
+**Principal fields.** `type: principal` holds `user:<id>` or `agent:<id>`
+(`group:` is reserved; kernel actors are refused); no existence check until
+person Items. A principal field grants nothing. In an equality filter, `me`
+is the caller: the user an agent acts for, else the agent; `me` is accepted
+only on principal fields (a stored value always has a kind prefix, so it
+cannot collide). **A field that is a string in one version and a principal in
+another counts as one stored type for equality filters** (the value must
+then be a principal or `me`). Guards read it as a string. An agent may
+assign anyone; notifications, when they come, must pass through `Project`
+for their recipient.
 
 ## Spike build order
 
@@ -873,7 +976,7 @@ in the journal.
 | Step | Build | Done when |
 | --- | --- | --- |
 | 0 (**done**) | Public API v1 server (`cmd/itemservice`, connect-go) and the `pli` CLI (`cmd/pli`) over what exists: create, get, update (patch, readers, move), transition with `wait`, search with filters, list by container, item history, Types read-only, agent sessions with required scopes and powers. Dev-token auth, the error table, paging, `request_id`, `etag`, plain-JSON field values. `buf lint` and `buf breaking` in CI. `docker compose up` runs Postgres, Temporal, a one-shot `migrate`, the item service, relay, worker and `connstub` (the stub CRM and ERP) | A scripted `pli` session creates, edits, moves (including a held approve with `wait`), searches with filters, lists a container and reads history, acting as two users; every named refusal comes back with its code and reason; an agent session refused outside its scopes; a cross-namespace attempt fails on every operation; a stranger can run it from the README. **Done 2026-11-16**: [journal, Step 0, part 3](journal.md#2026-11-16--step-0-proof-of-concept-part-3-one-command-stack-scenario-readme-finished) |
-| 1 | Link types and principal fields | Declared link types with cardinality, inverse and allowed targets, enforced; link changes are events with etags; guards and search see links; principal fields checked |
+| 1 (**done**) | Link types and principal fields | Declared link types with cardinality, inverse and allowed targets, enforced; link changes are events with etags; guards and search see links; principal fields checked. **Done 2026-11-16**: [journal, Step 1](journal.md#2026-11-16--step-1-proof-of-concept-link-types-and-principal-fields-finished) |
 | 2+ | Vacation request: human approvals, acting timers, link reactions (the balance), a stub email connector; then the Jira scenarios | Planned per step when reached |
 
 ## Out of scope for the spike
