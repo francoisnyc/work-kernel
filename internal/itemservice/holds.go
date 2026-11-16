@@ -147,7 +147,7 @@ func checkHookWrite(ty *typedef.Type, kc *kernelCause, fields map[string]any) er
 // requestHold writes a transition request: the patch (if any), a
 // transition_requested event, and the hold. The Item stays in its state.
 func requestHold(ctx context.Context, tx pgx.Tx, ty *typedef.Type, id uuid.UUID, it lockedItem,
-	check typedef.Hook, to string, p item.Principal, recorded item.Principal, attr item.Attribution,
+	decider string, to string, p item.Principal, recorded item.Principal, attr item.Attribution,
 	merged, set, cleared map[string]any) (WriteResult, error) {
 
 	holdID, err := uuid.NewV7()
@@ -171,7 +171,7 @@ func requestHold(ctx context.Context, tx pgx.Tx, ty *typedef.Type, id uuid.UUID,
 		`insert into item_holds (id, item_id, hook, from_state, to_state, requested_seq,
 		                         requester, requester_on_behalf_of, requester_agent_session)
 		 values ($1, $2, $3, $4, $5, $6, $7, nullif($8, ''), nullif($9, ''))`,
-		holdID, id, check.ID, it.State, to, itemSeq, p.Actor, p.OnBehalfOf, p.AgentSession)
+		holdID, id, decider, it.State, to, itemSeq, p.Actor, p.OnBehalfOf, p.AgentSession)
 	if err != nil {
 		return WriteResult{}, fmt.Errorf("open hold: %w", err)
 	}
@@ -219,11 +219,15 @@ func (in *Internal) ResolveHold(ctx context.Context, req ResolveHoldRequest) (Wr
 	if err != nil {
 		return WriteResult{}, err
 	}
-	if kc.hookID == "" {
-		return WriteResult{}, fmt.Errorf("%w: only the hold's check hook resolves it, not %s", ErrInvalid, req.Principal.Actor)
+	if kc.decider() == "" {
+		return WriteResult{}, fmt.Errorf("%w: only the hold's check hook or held reaction resolves it, not %s",
+			ErrInvalid, req.Principal.Actor)
 	}
 	if err := checkVerdict(req); err != nil {
 		return WriteResult{}, err
+	}
+	if kc.reactionID != "" && req.Verdict == VerdictCorrect {
+		return WriteResult{}, fmt.Errorf("%w: a reaction allows, denies or errs; it corrects nothing", ErrInvalid)
 	}
 	if req.Principal, err = k.inItemsNamespace(ctx, req.Principal, req.ItemID); err != nil {
 		return WriteResult{}, err
@@ -243,7 +247,7 @@ func (in *Internal) ResolveHold(ctx context.Context, req ResolveHoldRequest) (Wr
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return WriteResult{}, fmt.Errorf("read hold: %w", err)
 		}
-		it, links, err := k.lockForTransition(ctx, tx, nsOf(req.Principal), req.ItemID, heldTo)
+		it, links, resolutions, err := k.lockForTransition(ctx, tx, nsOf(req.Principal), req.ItemID, heldTo)
 		if err != nil {
 			return WriteResult{}, err
 		}
@@ -270,8 +274,8 @@ func (in *Internal) ResolveHold(ctx context.Context, req ResolveHoldRequest) (Wr
 		if err != nil {
 			return WriteResult{}, fmt.Errorf("read hold: %w", err)
 		}
-		if hook != kc.hookID {
-			return WriteResult{}, fmt.Errorf("%w: hold %s is checked by %s, not %s", ErrInvalid, req.HoldID, hook, kc.hookID)
+		if hook != kc.decider() {
+			return WriteResult{}, fmt.Errorf("%w: hold %s is decided by %s, not %s", ErrInvalid, req.HoldID, hook, kc.decider())
 		}
 		if kc.causeSeq != requestedSeq {
 			return WriteResult{}, fmt.Errorf("%w: a resolution is caused by the request (event %d), not event %d",
@@ -293,7 +297,7 @@ func (in *Internal) ResolveHold(ctx context.Context, req ResolveHoldRequest) (Wr
 		// A correction travels with the move out of the held state: it may
 		// not write what that state freezes. (What the transition's allowed
 		// names, it may not write either: refused at load.)
-		if err := checkPatch(ty, it.State, nil, req.Fields, false); err != nil {
+		if err := checkPatch(ty, it.State, nil, req.Fields, nil); err != nil {
 			return WriteResult{}, err
 		}
 
@@ -307,6 +311,19 @@ func (in *Internal) ResolveHold(ctx context.Context, req ResolveHoldRequest) (Wr
 			// have changed since they asked, and the fields may have too.
 			if reason, err = recheckRequester(ctx, tx, ty, it, requester, from, to, merged, links, k.today()); err != nil {
 				return WriteResult{}, err
+			}
+			// The correction keeps the invariants, and entering the state
+			// sets the links it resolves; else the hold is denied, named.
+			if reason == "" && len(req.Fields) > 0 {
+				var rej *RejectedError
+				if err := checkInvariants(ty, merged); errors.As(err, &rej) {
+					reason = rej.Metadata["invariant"]
+				} else if err != nil {
+					return WriteResult{}, err
+				}
+			}
+			if r, bad := unresolved(resolutions); reason == "" && bad {
+				reason = r.code()
 			}
 			if reason != "" {
 				verdict, merged, set = VerdictDeny, it.Fields, nil
@@ -322,6 +339,9 @@ func (in *Internal) ResolveHold(ctx context.Context, req ResolveHoldRequest) (Wr
 			op, holdStatus, state = "transition", item.HoldAllowed, to
 			payload["to"] = to
 			addFieldIDs(payload, set, nil)
+			if err := applyResolutions(ctx, tx, nsOf(req.Principal), ty, req.ItemID, resolutions, payload); err != nil {
+				return WriteResult{}, err
+			}
 		case VerdictDeny:
 			op, holdStatus = lifecycle.OpTransitionDenied, item.HoldDenied
 			payload["requested_to"], payload["reason"] = to, reason

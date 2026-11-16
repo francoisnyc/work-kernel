@@ -234,6 +234,7 @@ func (f Field) checkRoles() error {
 // checkKernelLinks validates a link type's writable_by and resolve. States
 // are known; the resolve's target Type is checked by CheckReactions.
 func (t *Type) checkKernelLinks(fail func(string, ...any) error) error {
+	resolvedOn := map[string]string{} // on_enter -> the link set there
 	for _, l := range t.Links {
 		where := "link " + l.Name
 		switch l.WritableBy {
@@ -266,6 +267,11 @@ func (t *Type) checkKernelLinks(fail func(string, ...any) error) error {
 		if r.Field == "" || r.State == "" {
 			return fail("%s: resolve needs a field and a state of the target", where)
 		}
+		// One per state: the entering event records the one link it set.
+		if other, dup := resolvedOn[r.OnEnter]; dup {
+			return fail("%s: link %s is already set on entering %s; one resolved link per state", where, other, r.OnEnter)
+		}
+		resolvedOn[r.OnEnter] = l.Name
 	}
 	return nil
 }

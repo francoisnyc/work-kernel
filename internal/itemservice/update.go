@@ -11,6 +11,7 @@ import (
 
 	"github.com/francoisnyc/work-kernel/internal/item"
 	"github.com/francoisnyc/work-kernel/internal/lifecycle"
+	"github.com/francoisnyc/work-kernel/internal/policy"
 )
 
 // UpdateRequest changes field values on an Item. Fields is a patch: a value
@@ -116,7 +117,13 @@ func (k *Service) update(ctx context.Context, req UpdateRequest, kc *kernelCause
 			return WriteResult{}, err
 		}
 		// Not writable, then frozen: before an open hold is asked.
-		if err := checkPatch(ty, it.State, nil, req.Fields, kc == nil); err != nil {
+		var writer *policy.Who
+		if kc == nil {
+			if writer, err = publicWriter(ctx, tx, ty, req.Principal, req.Fields); err != nil {
+				return WriteResult{}, err
+			}
+		}
+		if err := checkPatch(ty, it.State, nil, req.Fields, writer); err != nil {
 			return WriteResult{}, err
 		}
 		// While a hold is open, the fields its check reads are frozen: the
@@ -175,6 +182,13 @@ func (k *Service) update(ctx context.Context, req UpdateRequest, kc *kernelCause
 						return WriteResult{}, err
 					}
 				}
+			}
+		}
+
+		// Last: the fields as the write leaves them keep the invariants.
+		if len(req.Fields) > 0 {
+			if err := checkInvariants(ty, merged); err != nil {
+				return WriteResult{}, err
 			}
 		}
 
