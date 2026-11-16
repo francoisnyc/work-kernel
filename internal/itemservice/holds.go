@@ -234,7 +234,16 @@ func (in *Internal) ResolveHold(ctx context.Context, req ResolveHoldRequest) (Wr
 	}
 
 	return k.write(ctx, req.Principal, req.IdempotencyKey, hash, func(tx pgx.Tx) (WriteResult, error) {
-		it, err := lockItem(ctx, tx, nsOf(req.Principal), req.ItemID)
+		// The state the hold asks for never changes, so it can be read before
+		// the lock; the guards into it may read links, which are locked with
+		// the Item (lockForTransition).
+		var heldTo string
+		err := tx.QueryRow(ctx, `select to_state from item_holds where id = $1 and item_id = $2`,
+			req.HoldID, req.ItemID).Scan(&heldTo)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return WriteResult{}, fmt.Errorf("read hold: %w", err)
+		}
+		it, links, err := k.lockForTransition(ctx, tx, nsOf(req.Principal), req.ItemID, heldTo)
 		if err != nil {
 			return WriteResult{}, err
 		}
@@ -290,7 +299,7 @@ func (in *Internal) ResolveHold(ctx context.Context, req ResolveHoldRequest) (Wr
 			// The hold applies the requester's transition, so it is the
 			// requester who is checked again: their access and roles may
 			// have changed since they asked, and the fields may have too.
-			if reason, err = recheckRequester(ctx, tx, ty, it, requester, from, to, merged); err != nil {
+			if reason, err = recheckRequester(ctx, tx, ty, it, requester, from, to, merged, links); err != nil {
 				return WriteResult{}, err
 			}
 			if reason != "" {
@@ -360,7 +369,7 @@ func checkVerdict(req ResolveHoldRequest) error {
 // recheckRequester asks again what was asked when the hold was requested.
 // It returns the reason the transition may no longer be made, or "".
 func recheckRequester(ctx context.Context, tx pgx.Tx, ty *typedef.Type, it lockedItem, requester item.Principal,
-	from, to string, fields map[string]any) (string, error) {
+	from, to string, fields map[string]any, links lifecycle.Links) (string, error) {
 	visible, err := policy.CanSee(ctx, tx, requester, it.ScopeID)
 	if err != nil {
 		return "", err
@@ -368,7 +377,7 @@ func recheckRequester(ctx context.Context, tx pgx.Tx, ty *typedef.Type, it locke
 	if !visible {
 		return "requester_lost_access", nil
 	}
-	if _, err := lifecycle.Transition(ty, from, fields, to); err != nil {
+	if _, err := lifecycle.TransitionLinked(ty, from, fields, links, to); err != nil {
 		var rej *lifecycle.Rejection
 		if errors.As(err, &rej) {
 			return string(rej.Code), nil

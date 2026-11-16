@@ -71,7 +71,7 @@ func (k *Service) Search(ctx context.Context, req SearchRequest) (SearchResult, 
 	if err != nil {
 		return SearchResult{}, err
 	}
-	filter, err := k.resolveFilter(ctx, req.Filter)
+	filter, err := k.resolveFilter(ctx, req.Principal, req.Filter)
 	if err != nil {
 		return SearchResult{}, err
 	}

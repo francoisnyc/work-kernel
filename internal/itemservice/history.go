@@ -182,6 +182,8 @@ type eventPayload struct {
 	ContainerID    *uuid.UUID      `json:"container_id"`
 	ContainerFrom  json.RawMessage `json:"container_from"`
 	ContainerTo    json.RawMessage `json:"container_to"`
+	LinkType       string          `json:"link_type"`
+	LinkTarget     *uuid.UUID      `json:"target"`
 }
 
 // withPayload fills the event from its stored payload and values.
@@ -233,6 +235,12 @@ func (e Event) withPayload(ctx context.Context, payload, values []byte, refs *re
 	var err error
 	if pl.ContainerID != nil {
 		if e.Container, err = refs.ref(ctx, *pl.ContainerID); err != nil {
+			return e, err
+		}
+	}
+	if pl.LinkTarget != nil {
+		e.LinkType = pl.LinkType
+		if e.LinkTarget, err = refs.ref(ctx, *pl.LinkTarget); err != nil {
 			return e, err
 		}
 	}

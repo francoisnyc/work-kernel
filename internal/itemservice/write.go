@@ -16,10 +16,12 @@ import (
 )
 
 // errRetry is returned from inside a write when it lost a race it cannot
-// finish without risking a deadlock; write runs the whole transaction again.
+// finish without risking a deadlock, or when the links a guard read changed
+// before they were locked; write runs the whole transaction again, as it
+// does after a deadlock or serialization failure (retryable).
 var errRetry = errors.New("itemservice: retry the transaction")
 
-// maxRetries bounds how often write reruns a transaction that hit errRetry.
+// maxRetries bounds how often write reruns a transaction (see retryable).
 const maxRetries = 3
 
 // write runs one write operation in one transaction, wrapped in the
@@ -66,6 +68,9 @@ func (k *Service) write(ctx context.Context, p item.Principal, key, hash string,
 			return err
 		}
 
+		if err := callTestHook(ctx, tx, "write"); err != nil {
+			return err
+		}
 		res, err = apply(tx)
 		if err != nil {
 			return err
@@ -78,13 +83,14 @@ func (k *Service) write(ctx context.Context, p item.Principal, key, hash string,
 		}
 		return nil
 	}
-	// A transaction that lost a race it cannot finish safely (errRetry)
+	// A transaction that lost a race it cannot finish safely (errRetry),
+	// or that Postgres aborted for a deadlock or a serialization failure,
 	// is rolled back and run again from the start: everything it read is
 	// read afresh, and its idempotency key was released with the rollback.
 	var err error
 	for attempt := 0; ; attempt++ {
 		err = pgx.BeginFunc(ctx, k.pool, run)
-		if !errors.Is(err, errRetry) || attempt == maxRetries {
+		if !retryable(err) || attempt == maxRetries {
 			break
 		}
 	}

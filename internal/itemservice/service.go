@@ -295,6 +295,11 @@ func (k *Service) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item
 	if err := recordReads(ctx, k.pool, p, []*uuid.UUID{policyScope}); err != nil {
 		return item.Item{}, err
 	}
+	// Links both ways, each end passed through visibility. They name other
+	// Items by ID only, so they record no read.
+	if it.Links, it.LinksTruncated, err = k.itemLinks(ctx, p, id); err != nil {
+		return item.Item{}, err
+	}
 	return it, nil
 }
 
