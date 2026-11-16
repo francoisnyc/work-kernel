@@ -394,7 +394,7 @@ func TestAgent_ApprovalByTheSessionUser_UnlocksThatScopeOnly(t *testing.T) {
 	assertNeedsApproval(t, err, target)
 
 	if err := w.k.ApproveWiden(testCtx(t), itemservice.ApproveWidenRequest{IdempotencyKey: newKey(),
-		Principal: w.user, Session: w.agent.AgentSession, Scope: target,
+		Principal: w.user, Session: w.agent.AgentSession, Scope: target, ExpectedAudience: &openAudience,
 	}); err != nil {
 		t.Fatalf("ApproveWiden: %v", err)
 	}
@@ -425,7 +425,7 @@ func TestAgent_ApprovalRules(t *testing.T) {
 	target := scopeOf(t, w.open)
 
 	err := w.k.ApproveWiden(testCtx(t), itemservice.ApproveWidenRequest{IdempotencyKey: newKey(),
-		Principal: w.agent, Session: w.agent.AgentSession, Scope: target,
+		Principal: w.agent, Session: w.agent.AgentSession, Scope: target, ExpectedAudience: &openAudience,
 	})
 	if !errors.Is(err, itemservice.ErrInvalid) {
 		t.Errorf("an agent approving: error = %v, want ErrInvalid", err)
@@ -433,7 +433,7 @@ func TestAgent_ApprovalRules(t *testing.T) {
 
 	stranger := person("stranger")
 	if err := w.k.ApproveWiden(testCtx(t), itemservice.ApproveWidenRequest{IdempotencyKey: newKey(),
-		Principal: stranger, Session: w.agent.AgentSession, Scope: target,
+		Principal: stranger, Session: w.agent.AgentSession, Scope: target, ExpectedAudience: &openAudience,
 	}); err != nil {
 		t.Fatalf("ApproveWiden by another user: %v", err)
 	}
@@ -445,6 +445,7 @@ func TestAgent_ApprovalRules(t *testing.T) {
 	hidden := createAs(t, w.k, stranger, "stranger only", &itemservice.Narrow{Readers: readers(stranger)}, nil)
 	err = w.k.ApproveWiden(testCtx(t), itemservice.ApproveWidenRequest{IdempotencyKey: newKey(),
 		Principal: w.user, Session: w.agent.AgentSession, Scope: scopeOf(t, hidden.ItemID),
+		ExpectedAudience: &restrictedAudience,
 	})
 	if !errors.Is(err, itemservice.ErrNotFound) {
 		t.Errorf("approving a scope the user cannot see: error = %v, want ErrNotFound", err)

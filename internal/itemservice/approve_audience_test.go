@@ -133,3 +133,24 @@ func TestApproveWiden_ReplayIsNotCheckedAgain(t *testing.T) {
 		t.Errorf("approvals recorded = %d, want 1", n)
 	}
 }
+
+// The kernel enforces it, not only the API: a real approval without the
+// audience its approver was shown is ErrInvalid, and records nothing.
+// (ApprovalAudience, which only answers the audience, needs none.)
+func TestApproveWiden_ExpectedAudienceIsRequired(t *testing.T) {
+	w := newCapWorld(t)
+	agent := scoped(t, w.k, w.user, []uuid.UUID{uuid.Nil}, allPowers...)
+	key := newKey()
+	err := w.k.ApproveWiden(testCtx(t), itemservice.ApproveWidenRequest{
+		IdempotencyKey: key, Principal: w.user, Session: agent.AgentSession, ScopeItem: &w.b,
+	})
+	if !errors.Is(err, itemservice.ErrInvalid) {
+		t.Errorf("no ExpectedAudience: error = %v, want ErrInvalid", err)
+	}
+	if n := approvals(t, agent); n != 0 {
+		t.Errorf("approvals recorded = %d, want 0", n)
+	}
+	if n := count(t, `select count(*) from idempotency where actor = $1 and key = $2`, w.user.Actor, key); n != 0 {
+		t.Errorf("idempotency rows for the key = %d, want 0", n)
+	}
+}
