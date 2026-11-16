@@ -44,3 +44,55 @@ func TestHookParts(t *testing.T) {
 		}
 	}
 }
+
+// --- proof of concept, Step 2, part 2: reaction principals ---
+
+// A link reaction acts as reaction:<type>:<id>, a kind of its own, with no
+// version (the version is on originating_hook, reaction:<type>@v<n>:<id>).
+func TestKindOf_Reaction(t *testing.T) {
+	for _, id := range []string{"reaction:vacation_request:deduct", "reaction:vacation_request:refund"} {
+		if k, ok := item.KindOf(id); !ok || k != item.KindReaction {
+			t.Errorf("KindOf(%q) = %q, %v; want %q, true", id, k, ok, item.KindReaction)
+		}
+	}
+	bad := []string{
+		"reaction:",                           // nothing after the kind
+		"reaction:vacation_request",           // no reaction ID
+		"reaction:vacation_request:",          // empty reaction ID
+		"reaction::deduct",                    // empty Type
+		"reaction:vacation_request@v2:deduct", // the version belongs on originating_hook
+		"reaction:vacation_request:deduct:x",  // one Type, one reaction ID, nothing more
+	}
+	for _, id := range bad {
+		if k, ok := item.KindOf(id); ok {
+			t.Errorf("KindOf(%q) = %q, true; want not a valid principal", id, k)
+		}
+	}
+}
+
+func TestReactionParts(t *testing.T) {
+	typeID, reactionID, ok := item.ReactionParts("reaction:vacation_request:deduct")
+	if !ok || typeID != "vacation_request" || reactionID != "deduct" {
+		t.Errorf("ReactionParts = %q, %q, %v; want vacation_request, deduct, true", typeID, reactionID, ok)
+	}
+	for _, id := range []string{"user:alice", "hook:vacation_request:deduct", "reaction:vacation_request", "vacation_request:deduct"} {
+		if _, _, ok := item.ReactionParts(id); ok {
+			t.Errorf("ReactionParts(%q) ok = true, want false", id)
+		}
+	}
+}
+
+// A reaction is a well-formed actor (which door it may use is the item
+// service's rule). It is never a valid on_behalf_of: that is the human at
+// the root.
+func TestPrincipalValid_Reaction(t *testing.T) {
+	if !(item.Principal{Actor: "reaction:vacation_request:deduct"}).Valid() {
+		t.Error("a reaction actor is not valid")
+	}
+	if (item.Principal{Actor: "user:ana", OnBehalfOf: "reaction:vacation_request:deduct"}).Valid() {
+		t.Error("a reaction as on_behalf_of is valid")
+	}
+	if (item.Principal{Actor: "reaction:vacation_request:deduct", AgentSession: "s1"}).Valid() {
+		t.Error("a reaction with an agent session is valid")
+	}
+}
