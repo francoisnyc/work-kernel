@@ -21,10 +21,18 @@ const (
 
 // ReactionParts splits a reaction principal, reaction:<type>:<id>, into its
 // Type and reaction ID. ok is false for anything else.
-//
-// Phase B stub: not implemented yet.
 func ReactionParts(id string) (typeID, reactionID string, ok bool) {
-	return "", "", false
+	rest, found := strings.CutPrefix(id, KindReaction+":")
+	if !found {
+		return "", "", false
+	}
+	return hookParts(rest)
+}
+
+// IsKernelActor reports whether id is one of the kernel's own actors:
+// system:, hook: or reaction:. They create nothing and are nobody's user.
+func IsKernelActor(id string) bool {
+	return IsKind(id, KindSystem, KindHook, KindReaction)
 }
 
 // KindOf returns the kind of a typed principal ID. ok is false for an
@@ -38,7 +46,7 @@ func KindOf(id string) (kind string, ok bool) {
 	switch kind {
 	case KindUser, KindAgent, KindGroup, KindSystem:
 		return kind, true
-	case KindHook:
+	case KindHook, KindReaction:
 		if _, _, ok := hookParts(rest); ok {
 			return kind, true
 		}
@@ -56,7 +64,7 @@ func HookParts(id string) (typeID, hookID string, ok bool) {
 	return hookParts(rest)
 }
 
-// hookParts splits "<type>:<hook-id>". Both parts are non-empty and hold
+// hookParts splits "<type>:<hook-id>" (or "<type>:<reaction-id>"). Both parts are non-empty and hold
 // no further colon, and no "@": a version belongs on originating_hook.
 func hookParts(rest string) (typeID, hookID string, ok bool) {
 	typeID, hookID, found := strings.Cut(rest, ":")
@@ -87,7 +95,7 @@ func IsKind(id string, kinds ...string) bool {
 // the database by the item service. Which door a kind may use (public or
 // internal) is the item service's rule, not this one.
 func (p Principal) Valid() bool {
-	if !IsKind(p.Actor, KindUser, KindAgent, KindSystem, KindHook) {
+	if !IsKind(p.Actor, KindUser, KindAgent, KindSystem, KindHook, KindReaction) {
 		return false
 	}
 	if p.OnBehalfOf != "" && !IsKind(p.OnBehalfOf, KindUser) {

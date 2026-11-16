@@ -169,13 +169,14 @@ type ItemFacts struct {
 //     duties, and those rules must be conservative: an agent that created a
 //     request for ana must not complete it, whoever it acts for now.
 //
-// The kernel's own actors (system:, hook:) are neither: they create nothing.
+// The kernel's own actors (system:, hook:, reaction:) are neither: they
+// create nothing, and a reaction's on_behalf_of is attribution only.
 
 // IsRequester reports whether the principal is the requester: its effective
 // user (on_behalf_of if set, else the actor) is the Item's effective
 // creator (created_on_behalf_of if set, else created_by).
 func IsRequester(actor, onBehalfOf, createdBy, createdOnBehalfOf string) bool {
-	if item.IsKind(actor, item.KindSystem, item.KindHook) {
+	if item.IsKernelActor(actor) {
 		return false
 	}
 	user, creator := cmp.Or(onBehalfOf, actor), cmp.Or(createdOnBehalfOf, createdBy)
@@ -186,7 +187,7 @@ func IsRequester(actor, onBehalfOf, createdBy, createdOnBehalfOf string) bool {
 // the Item: its actor or its effective user is created_by or
 // created_on_behalf_of.
 func TookPartInCreation(actor, onBehalfOf, createdBy, createdOnBehalfOf string) bool {
-	if item.IsKind(actor, item.KindSystem, item.KindHook) {
+	if item.IsKernelActor(actor) {
 		return false
 	}
 	for _, who := range []string{actor, cmp.Or(onBehalfOf, actor)} {
@@ -232,8 +233,15 @@ func MayTransition(tr typedef.Transition, who Who, it ItemFacts) bool {
 // of the roles and, when it acts for a user, so does the user (an agent has
 // its user's rights only where it also has its own). A field without roles
 // is anyone's; a kernel-written field is not this function's question.
-//
-// Phase B stub: not implemented yet.
 func MayWriteRoleField(f typedef.Field, who Who) bool {
-	return true
+	if len(f.WritableByRoles) == 0 {
+		return true
+	}
+	holds := func(roles []string) bool {
+		return slices.ContainsFunc(f.WritableByRoles, func(r string) bool { return slices.Contains(roles, r) })
+	}
+	if !holds(who.ActorRoles) {
+		return false
+	}
+	return who.OnBehalfOf == "" || holds(who.OnBehalfOfRoles)
 }
