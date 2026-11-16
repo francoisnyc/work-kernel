@@ -118,6 +118,11 @@ func (w *watchedKernel) ApproveWiden(ctx context.Context, r itemservice.ApproveW
 	return w.Kernel.ApproveWiden(ctx, r)
 }
 
+func (w *watchedKernel) ApprovalAudience(ctx context.Context, r itemservice.ApproveWidenRequest) (itemservice.Audience, error) {
+	w.record("ApprovalAudience", r.Principal)
+	return w.Kernel.ApprovalAudience(ctx, r)
+}
+
 // Every operation, for callers in both namespaces (sam in each): every
 // kernel call carries exactly the token's principal and namespace.
 func TestKernelCalls_CarryTheTokensNamespace(t *testing.T) {

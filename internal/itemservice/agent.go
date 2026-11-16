@@ -204,6 +204,11 @@ type ApproveWidenRequest struct {
 	// passes what NEEDS_APPROVAL named); nil with a zero Scope is the
 	// namespace's root scope.
 	ScopeItem *uuid.UUID
+	// ExpectedAudience is the audience the approver was shown. When set, the
+	// approval commits only if the audience is still that, checked in the
+	// same transaction; otherwise it is a RejectedError with code
+	// audience_changed and nothing is recorded. Nil checks nothing.
+	ExpectedAudience *Audience
 }
 
 // ApproveWiden records a user's approval for an agent session to write into

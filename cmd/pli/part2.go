@@ -255,6 +255,8 @@ func (c *cli) agentApprove(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("agent approve", flag.ContinueOnError)
 	requestID := fs.String("request-id", newRequestID(), "idempotency key")
 	yes := fs.Bool("yes", false, "approve without asking (required when not at a terminal)")
+	// Step 0, part 3 (stub): the flag exists; nothing reads it yet.
+	_ = fs.String("expect-audience", "", "approve only for this audience (namespace or restricted), without asking the server first")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err

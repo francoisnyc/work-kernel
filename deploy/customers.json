@@ -1,0 +1,4 @@
+{
+  "cust-good": {"plan": "pro", "credit_limit": 1000},
+  "cust-hold": {"plan": "free", "on_hold": true, "credit_limit": 1000}
+}

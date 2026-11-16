@@ -23,6 +23,10 @@ type Token struct {
 	Token     string `yaml:"token"`     // the bearer token
 	Principal string `yaml:"principal"` // user:<id> or agent:<id>
 	Namespace string `yaml:"namespace"` // the namespace the principal acts in
+	// Roles the principal holds in that namespace (approver, without the
+	// "role:" prefix). The item service adds them at start, in dev-token
+	// mode only; it never removes one.
+	Roles []string `yaml:"roles,omitempty"`
 }
 
 type file struct {

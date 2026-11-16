@@ -51,8 +51,12 @@ func run(ctx context.Context, args []string, getenv func(string) string, stderr 
 	tokensPath := fs.String("dev-tokens", "", "dev-token file (proof of concept only; required)")
 	typesDir := fs.String("types", "types", "directory of Type files to load at start")
 	listen := fs.String("listen", ":8080", "address to listen on")
+	probeURL := fs.String("probe", "", "check a running server's /healthz URL and exit (for container health checks)")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *probeURL != "" {
+		return probe(ctx, *probeURL)
 	}
 	if *tokensPath == "" {
 		return errors.New("refusing to start without auth: pass --dev-tokens FILE (dev tokens are the only auth in the proof of concept)")
@@ -124,4 +128,19 @@ func run(ctx context.Context, args []string, getenv func(string) string, stderr 
 		defer cancel()
 		return srv.Shutdown(shutdown)
 	}
+}
+
+// errNotBuilt marks what Step 0, part 3 has not built yet.
+var errNotBuilt = errors.New("itemservice: not built yet (Step 0, part 3)")
+
+// healthz answers 200 when ping succeeds and 503 when it fails, with no
+// body either way: no error text, nothing about the database.
+func healthz(ping func(context.Context) error) http.Handler {
+	return http.NotFoundHandler()
+}
+
+// probe gets url and returns nil on 200, an error otherwise. The images
+// have no shell or curl, so the binary checks itself.
+func probe(ctx context.Context, url string) error {
+	return errNotBuilt
 }

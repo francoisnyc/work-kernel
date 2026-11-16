@@ -423,6 +423,12 @@ message ApproveWidenRequest {
   // Check the approval and answer its audience, recording nothing
   // (AIP-163). request_id is not needed then.
   bool validate_only = 5;
+  // The audience the approver was shown, as a validate_only call answered
+  // it: "namespace" or "restricted". Required unless validate_only (ignored
+  // then). If the audience is different when the approval commits, nothing
+  // is approved: FAILED_PRECONDITION / AUDIENCE_CHANGED, with the current
+  // "audience" and this "expected_audience" in metadata.
+  string expected_audience = 6;
 }
 
 message ApproveWidenResponse {
