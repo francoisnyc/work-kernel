@@ -553,7 +553,7 @@ expect "submit's outcome" "$(j .outcome <<<"$sub")" "TRANSITION_OUTCOME_APPLIED"
 expect "state" "$(j .item.state <<<"$sub")" "submitted"
 expect "the approver, from HR" "$(j .item.fields.f_approver <<<"$sub")" "user:bob"
 expect "the balance, set by the kernel" \
-	"$(j '[.item.links[] | select(.link_type == "balance") | .item.name] | join(" ")' <<<"$sub")" "$abal"
+	"$(j '[.item.links[]? | select(.link_type == "balance") | .item.name] | join(" ")' <<<"$sub")" "$abal"
 
 step "vacation: only the requester submits; the dates and days must make sense (GUARD_FAILED)"
 v0=$(new_leave ana)
