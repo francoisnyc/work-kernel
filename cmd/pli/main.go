@@ -13,7 +13,7 @@
 //	  type get TYPE
 //	  type list
 //	  agent start [--for USER] --scopes S,S --powers P,P
-//	  agent approve SESSION SCOPE [--yes] [--request-id ID]  (run it --as the user who approves)
+//	  agent approve SESSION SCOPE [--expect-audience A] [--yes] [--request-id ID]  (run it --as the user who approves)
 //
 //	FILTERS: [--type TYPE]... [--state S]... [--category C]... [--where F=V|F>V|F>=V|F<V|F<=V]...
 //	PAGING:  [--page-size N] [--page-token T]
@@ -30,17 +30,21 @@
 // move, comment, outbound.
 //
 // Agents: "agent start", called --as an agent, starts a session and saves
-// its ID for that --as name in pli's config directory (os.UserConfigDir,
-// pli/sessions); every later command --as that name sends it in the
+// its ID for that --as name in pli's config directory ($XDG_CONFIG_HOME on
+// every OS when set, else os.UserConfigDir; then pli/sessions); every later
+// command --as that name sends it in the
 // Pli-Agent-Session header. --session ID sends another. "agent approve" is
 // run --as the user the agent acts for: the approver is whoever the token
 // says, never a flag. It first says who will see the agent's content
 // (everyone in the namespace, or the readers of the scope's Item) and needs
-// --yes to go on from a script.
+// --yes to go on from a script. It sends that audience, and the server
+// approves only if it is still the audience (else AUDIENCE_CHANGED).
+// --expect-audience A (namespace or restricted) names the audience instead
+// of asking the server for it first.
 //
 // Each response is printed as JSON (protobuf's JSON mapping, with the proto
 // field names). An API error goes to stderr as "error: CODE REASON: message"
-// and exits 1; a usage error exits 2.
+// and exits 1; a usage error exits 2. After SESSION_INVALID pli adds a hint.
 package main
 
 import (
@@ -98,7 +102,7 @@ const usage = `usage: pli [--server URL] [--tokens FILE] --as NAME [--session ID
   type get TYPE
   type list
   agent start [--for USER] --scopes S,S --powers P,P
-  agent approve SESSION SCOPE [--yes] [--request-id ID]  (run it --as the user who approves)
+  agent approve SESSION SCOPE [--expect-audience A] [--yes] [--request-id ID]  (run it --as the user who approves)
 
 FILTERS: [--type TYPE]... [--state S]... [--category C]... [--where F=V|F>V|F>=V|F<V|F<=V]...
 PAGING:  [--page-size N] [--page-token T]`
@@ -228,7 +232,8 @@ func bearer(token, session string) connect.UnaryInterceptorFunc {
 }
 
 // printAPIError writes "error: CODE REASON: message", then the ErrorInfo's
-// metadata and any field violations, one per line.
+// metadata and any field violations, one per line, then a hint where one
+// helps.
 func printAPIError(w io.Writer, ce *connect.Error) {
 	reason := "UNKNOWN"
 	var lines []string
@@ -252,6 +257,10 @@ func printAPIError(w io.Writer, ce *connect.Error) {
 	fmt.Fprintf(w, "error: %s %s: %s\n", strings.ToUpper(ce.Code().String()), reason, ce.Message())
 	for _, l := range lines {
 		fmt.Fprintln(w, l)
+	}
+	if reason == "SESSION_INVALID" {
+		fmt.Fprintln(w, "hint: the saved agent session is gone, or belongs to another namespace or user; "+
+			`run "pli agent start" again`)
 	}
 }
 

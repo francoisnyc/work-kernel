@@ -171,11 +171,17 @@ func (c *cli) itemHistory(ctx context.Context, args []string) error {
 
 // --- agent sessions ---
 
-// sessionPath is where the session of an --as name is saved.
+// sessionPath is where the session of an --as name is saved: under
+// $XDG_CONFIG_HOME when it is set to an absolute path, on every OS (so a
+// script can keep sessions out of the user's config; os.UserConfigDir reads
+// it on Linux only), else under os.UserConfigDir.
 func sessionPath(as string) (string, error) {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
+	dir := os.Getenv("XDG_CONFIG_HOME")
+	if dir == "" || !filepath.IsAbs(dir) {
+		var err error
+		if dir, err = os.UserConfigDir(); err != nil {
+			return "", err
+		}
 	}
 	return filepath.Join(dir, "pli", "sessions", filepath.Base(as)), nil
 }
@@ -249,14 +255,15 @@ func (c *cli) agentStart(ctx context.Context, args []string) error {
 
 // agentApprove approves one scope for an agent session. Approving an Item
 // approves its audience, so pli first asks the server who that is
-// (validate_only), says it, and goes on only with --yes, or a "y" typed at a
-// terminal.
+// (validate_only), or takes it from --expect-audience, says it, and goes on
+// only with --yes, or a "y" typed at a terminal. It sends the audience it
+// said, and the server approves only for that audience.
 func (c *cli) agentApprove(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("agent approve", flag.ContinueOnError)
 	requestID := fs.String("request-id", newRequestID(), "idempotency key")
 	yes := fs.Bool("yes", false, "approve without asking (required when not at a terminal)")
-	// Step 0, part 3 (stub): the flag exists; nothing reads it yet.
-	_ = fs.String("expect-audience", "", "approve only for this audience (namespace or restricted), without asking the server first")
+	expect := fs.String("expect-audience", "",
+		"approve only for this audience (namespace or restricted), without asking the server for it first")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -265,19 +272,35 @@ func (c *cli) agentApprove(ctx context.Context, args []string) error {
 		return usagef("want SESSION SCOPE (the scope a NEEDS_APPROVAL named); " +
 			"run it --as the user who approves: the approver is whoever the token says")
 	}
-	req := &kernelv1.ApproveWidenRequest{
-		Parent: "namespaces/" + c.ns, Session: pos[0], Scope: c.scopeRef(pos[1]), ValidateOnly: true,
+	switch *expect {
+	case "", "namespace", "restricted":
+	default:
+		return usagef("--expect-audience wants namespace or restricted, not %q", *expect)
 	}
-	check, err := c.c.ApproveWiden(ctx, connect.NewRequest(req))
-	if err != nil {
-		return err
+	req := &kernelv1.ApproveWidenRequest{
+		Parent: "namespaces/" + c.ns, Session: pos[0], Scope: c.scopeRef(pos[1]),
+	}
+	// The audience pli says, and sends: the server commits the approval only
+	// if it is still the audience then (else AUDIENCE_CHANGED).
+	aud := *expect
+	if aud == "" {
+		req.ValidateOnly = true
+		check, err := c.c.ApproveWiden(ctx, connect.NewRequest(req))
+		if err != nil {
+			return err
+		}
+		aud = check.Msg.Audience
 	}
 	who := "everyone in namespace " + c.ns
-	if check.Msg.Audience != "namespace" {
+	if aud != "namespace" {
 		who = "the readers of " + req.Scope
 	}
-	fmt.Fprintf(c.stderr, "Content from this agent session will become visible to %s.\n", who)
+	said := fmt.Sprintf("Content from this agent session will become visible to %s.\n", who)
+	// Without --yes pli says the audience before it asks (or refuses to go
+	// on from a script). With --yes it says it once the server has approved
+	// for it; a refusal's metadata names the audience sent instead.
 	if !*yes {
+		fmt.Fprint(c.stderr, said)
 		if !interactive() {
 			return usagef("not approved: pass --yes to approve from a script")
 		}
@@ -287,10 +310,13 @@ func (c *cli) agentApprove(ctx context.Context, args []string) error {
 			return usagef("not approved")
 		}
 	}
-	req.ValidateOnly, req.RequestId = false, *requestID
+	req.ValidateOnly, req.RequestId, req.ExpectedAudience = false, *requestID, aud
 	res, err := c.c.ApproveWiden(ctx, connect.NewRequest(req))
 	if err != nil {
 		return err
+	}
+	if *yes {
+		fmt.Fprint(c.stderr, said)
 	}
 	return c.print(res.Msg)
 }
