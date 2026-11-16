@@ -30,6 +30,20 @@ service is healthy. Two ports are published:
 - `http://localhost:8080`: the public API (Connect, gRPC and gRPC-Web).
 - `http://localhost:8233`: the Temporal UI.
 
+## How it fits together
+
+- **migrate** applies the migrations, then exits; the services below start
+  only once it has succeeded.
+- **itemservice** is the only program that reads and writes Items, and serves
+  the public API on 8080. Its health check asks `/healthz`, which answers 200
+  while the database answers (it is outside the API contract).
+- **relay** delivers the outbox (what changed) to Temporal; **worker** runs the
+  Item workflows and their hooks, which call **connstub**'s CRM and ERP and
+  write back through the item service. The relay and the worker have no health
+  check: they serve no port and nothing waits on them; they start once
+  Postgres, Temporal (and, for the worker, connstub) are healthy.
+- **postgres** holds everything; **temporal** is the dev server, in memory.
+
 ## Build pli
 
 ```sh

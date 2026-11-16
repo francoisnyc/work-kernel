@@ -10,8 +10,7 @@ FROM golang:${GO_VERSION}-alpine AS build
 WORKDIR /src
 # Never download another toolchain: build with this image's Go.
 ENV CGO_ENABLED=0 GOTOOLCHAIN=local
-# A module mirror, if the build cannot reach proxy.golang.org; empty is
-# Go's default.
+# A Go module mirror for builds that cannot reach proxy.golang.org; empty means Go's default.
 ARG GOPROXY
 # Modules first, so a code change does not download them again.
 COPY go.mod go.sum ./
