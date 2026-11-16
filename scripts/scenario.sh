@@ -15,7 +15,8 @@
 # Environment: PLI_SERVER (http://localhost:8080), PLI_TOKENS
 # (dev-tokens.example.yaml), PLI (a pli binary; default: build one).
 #
-# Written for bash 3.2 (macOS's): no associative arrays, no EPOCHREALTIME.
+# Written for bash 3.2 (macOS's): no associative arrays, no EPOCHREALTIME;
+# milliseconds come from perl's Time::HiRes when there is one.
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
@@ -127,6 +128,14 @@ random_uuid() {
 	printf '%s-%s-%s-%s-%s\n' "${h:0:8}" "${h:8:4}" "${h:12:4}" "${h:16:4}" "${h:20:12}"
 }
 
+# now_ms: the time in milliseconds, for the timings this script prints.
+if perl -MTime::HiRes -e 1 2>/dev/null; then
+	now_ms() { perl -MTime::HiRes=time -e 'printf "%d\n", time() * 1000'; }
+else
+	echo "note: no perl with Time::HiRes here; timings are in whole seconds"
+	now_ms() { echo $(($(date +%s) * 1000)); }
+fi
+
 # This run's word: every title carries it, so searches see only this run.
 w="run$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
 
@@ -172,18 +181,19 @@ step "ana writes with the etag she read before: STALE"
 refuse ana "ABORTED STALE" item update "$t1" --set f_priority=3 --etag "$etag1"
 
 step "bob approves with --wait 5s: the ERP check (1 s) holds it, then allows (APPLIED)"
-began=$SECONDS
+began=$(now_ms)
 approved=$(ok bob item transition "$t1" --to approved --wait 5s)
-took=$((SECONDS - began))
-expect "held approve's outcome (took ${took}s)" "$(j .outcome <<<"$approved")" "TRANSITION_OUTCOME_APPLIED"
+took=$(($(now_ms) - began))
+expect "held approve's outcome (took ${took} ms)" "$(j .outcome <<<"$approved")" "TRANSITION_OUTCOME_APPLIED"
 expect "state after approve" "$(j .item.state <<<"$approved")" "approved"
-echo "    the held approve answered in about ${took}s"
+echo "    the held approve answered in ${took} ms"
 
 step "a second ticket: bob approves with --wait 0s (PENDING); ana's write meanwhile is HELD"
 t2=$(new_ticket ana --set f_customer_id=cust-good --set f_amount=200 --set f_assignee=bob)
 ok bob item transition "$t2" --to open >/dev/null
 ok bob item transition "$t2" --to in_progress >/dev/null
 pending=$(ok bob item transition "$t2" --to approved --wait 0s)
+pending_at=$(now_ms)
 expect "outcome" "$(j .outcome <<<"$pending")" "TRANSITION_OUTCOME_PENDING"
 hold=$(j .hold <<<"$pending")
 case $hold in "$t2"/holds/*) ;; *) fail "PENDING names hold '$hold', want one under $t2" ;; esac
@@ -194,18 +204,39 @@ step "a third ticket over the credit limit: the check denies it (DENIED is an an
 t3=$(new_ticket ana --set f_customer_id=cust-good --set f_amount=5000 --set f_assignee=bob)
 ok bob item transition "$t3" --to open >/dev/null
 ok bob item transition "$t3" --to in_progress >/dev/null
+began=$(now_ms)
 denied=$(ok bob item transition "$t3" --to approved --wait 5s)
+echo "    the denied approve answered in $(($(now_ms) - began)) ms"
 expect "outcome" "$(j .outcome <<<"$denied")" "TRANSITION_OUTCOME_DENIED"
 last_seq=$(j .commit_seq <<<"$denied")
 
 step "search with filters (read-your-writes with --min-seq)"
+# t1 is approved and t3 is not; t2's held approve is decided by the ERP in
+# the background (about 1 s after it was asked), so it may be either here.
 found=$(ok ana item search "$w" --state approved --min-seq "$last_seq")
-expect "approved tickets" "$(names <<<"$found")" "$t1"
+case " $(names <<<"$found") " in *" $t1 "*) ;; *) fail "approved tickets do not include t1: $(names <<<"$found")" ;; esac
+case " $(names <<<"$found") " in *" $t3 "*) fail "approved tickets include t3, which was denied" ;; esac
 found=$(ok bob item search --type ticket --where "f_title=$w" --where 'f_amount>=150' --min-seq "$last_seq")
 expect "tickets titled with the run's word, amount >= 150" "$(names <<<"$found")" "$(sorted "$t2" "$t3")"
-# Active: approved (t1), and in_progress (t2 held, t3 after its denial).
+# Active: approved (t1), in_progress (t3 after its denial), and t2 either way
+# (in_progress while held, approved once the ERP allows it).
 found=$(ok bob item search "$w" --category active --type ticket)
 expect "active tickets" "$(names <<<"$found")" "$(sorted "$t1" "$t2" "$t3")"
+
+step "the PENDING approve completes: the worker finishes t2's held transition"
+# This tests the asynchronous outcome of PENDING, not a retry: nothing is sent
+# again. The worker asks the ERP (1 s) and finishes the held transition; the
+# script only reads t2, at most every 250 ms, until it is approved, and fails
+# if that takes more than 5 s.
+began=$(now_ms)
+while :; do
+	state=$(ok ana item get "$t2" | j .item.state)
+	[ "$state" = approved ] && break
+	elapsed=$(($(now_ms) - began))
+	[ "$elapsed" -lt 5000 ] || fail "t2 is still '$state' after ${elapsed} ms of reading it; want approved within 5 s"
+	sleep 0.25
+done
+echo "    t2 was approved $(($(now_ms) - pending_at)) ms after its PENDING answer"
 
 step "list a container, one page at a time"
 board=$(ok ana item create --type channel@1 --set "f_name=board $w" | j .item.name)
