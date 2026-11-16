@@ -1,5 +1,5 @@
 // Package connstub runs stub HTTP servers that stand in for a CRM and an ERP
-// in tests and the bench. Each has a configurable latency, error rate and
+// in tests, the bench and the compose stack (cmd/connstub). Each has a configurable latency, error rate and
 // outage, and a table of customers the test fills in.
 //
 // Endpoints:
@@ -10,6 +10,7 @@
 //	                                  → {"verdict": "allow"|"deny"|"correct", "reason", "cost_center"}
 //	ERP  POST /invoices               {"customer_id", "amount"}, header Idempotency-Key
 //	                                  → {"invoice_id": "INV-…"}
+//	both GET  /healthz                → 200, no body, never delayed
 //
 // An unknown customer is 404, an outage 503, an injected error 500, all
 // before any effect.
@@ -26,6 +27,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -83,21 +85,49 @@ type invoiceRec struct {
 	id       string
 }
 
-// NewCRM starts a stub CRM.
+// NewCRM starts a stub CRM on a free loopback port.
 func NewCRM() *Server {
 	s := newServer()
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /customers/{id}/plan", s.wrap(func(w http.ResponseWriter, _ *http.Request, _ string, c Customer, _ int64) {
-		writeJSON(w, map[string]any{"plan": c.Plan})
-	}))
-	s.start(mux)
+	s.start(s.crmHandler())
 	return s
 }
 
-// NewERP starts a stub ERP.
+// NewERP starts a stub ERP on a free loopback port.
 func NewERP() *Server {
 	s := newServer()
+	s.start(s.erpHandler())
+	return s
+}
+
+// ServeCRM starts a stub CRM listening on addr (":8081"), for cmd/connstub.
+func ServeCRM(addr string) (*Server, error) {
+	s := newServer()
+	return s, s.startOn(addr, s.crmHandler())
+}
+
+// ServeERP starts a stub ERP listening on addr (":8082"), for cmd/connstub.
+func ServeERP(addr string) (*Server, error) {
+	s := newServer()
+	return s, s.startOn(addr, s.erpHandler())
+}
+
+// healthz answers 200 with no body, at once: no latency, outage or errors.
+func healthz(mux *http.ServeMux) {
+	mux.HandleFunc("GET /healthz", func(http.ResponseWriter, *http.Request) {})
+}
+
+func (s *Server) crmHandler() http.Handler {
 	mux := http.NewServeMux()
+	healthz(mux)
+	mux.HandleFunc("GET /customers/{id}/plan", s.wrap(func(w http.ResponseWriter, _ *http.Request, _ string, c Customer, _ int64) {
+		writeJSON(w, map[string]any{"plan": c.Plan})
+	}))
+	return mux
+}
+
+func (s *Server) erpHandler() http.Handler {
+	mux := http.NewServeMux()
+	healthz(mux)
 	mux.HandleFunc("GET /customers/{id}/credit", s.wrap(func(w http.ResponseWriter, _ *http.Request, _ string, c Customer, _ int64) {
 		writeJSON(w, map[string]any{"on_hold": c.OnHold})
 	}))
@@ -114,8 +144,7 @@ func NewERP() *Server {
 		}
 	}))
 	mux.HandleFunc("POST /invoices", s.wrap(s.invoice))
-	s.start(mux)
-	return s
+	return mux
 }
 
 func newServer() *Server {
@@ -184,6 +213,21 @@ func (s *Server) count(n *int) {
 func (s *Server) start(h http.Handler) {
 	s.srv = httptest.NewServer(h)
 	s.URL = s.srv.URL
+}
+
+// startOn serves h on addr. httptest.Server is reused for its Close, which
+// waits for requests in flight; only its listener changes.
+func (s *Server) startOn(addr string, h http.Handler) error {
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	s.srv = httptest.NewUnstartedServer(h)
+	s.srv.Listener.Close()
+	s.srv.Listener = l
+	s.srv.Start()
+	s.URL = s.srv.URL
+	return nil
 }
 
 // Close stops the server.
