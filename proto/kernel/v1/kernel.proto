@@ -532,6 +532,18 @@ message Field {
   FieldType type = 2;
   // Enum fields only: the allowed names.
   repeated string options = 3;
+  // Who may write the field. UNSPECIFIED: anyone who may write the Item.
+  FieldWriter writable_by = 4;
+}
+
+// Who may write a field.
+enum FieldWriter {
+  // Anyone who may write the Item, through the public API.
+  FIELD_WRITER_UNSPECIFIED = 0;
+  // Only the kernel (hooks, through the internal door): the public API
+  // refuses it on create, update and a transition's patch
+  // (PERMISSION_DENIED / FIELD_NOT_WRITABLE).
+  FIELD_WRITER_KERNEL = 1;
 }
 
 enum FieldType {
@@ -542,11 +554,17 @@ enum FieldType {
   FIELD_TYPE_ENUM = 4;
   // A principal: user:<id> or agent:<id>. It grants nothing.
   FIELD_TYPE_PRINCIPAL = 5;
+  // A calendar date, as an ISO 8601 string: 2026-12-01.
+  FIELD_TYPE_DATE = 6;
 }
 
 message State {
   string id = 1;
   StateCategory category = 2;
+  // Field IDs no write may change while an Item is in this state
+  // (FAILED_PRECONDITION / FIELD_FROZEN). The transition entering the state
+  // may set them.
+  repeated string frozen = 3;
 }
 
 enum StateCategory {
@@ -569,8 +587,9 @@ message Transition {
   string guard = 3;
   // Field IDs that must be set.
   repeated string required = 4;
-  // Who may make the move: role:<name> or principal:<id>. Empty: anyone who
-  // can see the Item.
+  // Who may make the move: role:<name>, principal:<id>, or field:<id> (the
+  // principal a principal field holds when the move is made). Empty: anyone
+  // who can see the Item.
   repeated string allowed = 5;
   // May leave a state while a hold is open on it (it cancels the hold).
   bool escape = 6;

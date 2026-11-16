@@ -112,6 +112,36 @@ func ServeERP(addr string) (*Server, error) {
 }
 
 // healthz answers 200 with no body, at once: no latency, outage or errors.
+// NewHR starts a stub HR directory on a free local port. Contract stub
+// (Step 2, part 1, Phase B): it answers only /healthz.
+//
+//	HR   GET  /employees/{id}/manager → {"manager": "user:bob"}; 404 for an unknown employee
+func NewHR() *Server {
+	s := newServer()
+	mux := http.NewServeMux()
+	healthz(mux)
+	s.start(mux)
+	return s
+}
+
+// ServeHR serves a stub HR directory on addr. Contract stub (Phase B).
+func ServeHR(addr string) (*Server, error) {
+	s := newServer()
+	mux := http.NewServeMux()
+	healthz(mux)
+	return s, s.startOn(addr, mux)
+}
+
+// SetManager records who an employee's manager is (principal IDs). Contract
+// stub (Phase B): it records nothing.
+func (s *Server) SetManager(employee, manager string) {}
+
+// LoadDirectory reads an HR directory file: a JSON object mapping each
+// employee to their manager, both principal IDs. Contract stub (Phase B).
+func LoadDirectory(path string) (map[string]string, error) {
+	return nil, fmt.Errorf("connstub: LoadDirectory: not implemented")
+}
+
 func healthz(mux *http.ServeMux) {
 	mux.HandleFunc("GET /healthz", func(http.ResponseWriter, *http.Request) {})
 }

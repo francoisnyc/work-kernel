@@ -69,6 +69,7 @@ var catalog = map[string]action{
 	"erp.get_credit_status": {reads: 1, writes: 1, run: getCreditStatus},
 	"erp.check_credit":      {reads: 2, writes: 1, run: checkCredit},
 	"erp.create_invoice":    {reads: 2, writes: 1, sideEffect: true, run: createInvoice},
+	"hr.manager_of":         {reads: 2, writes: 1, run: managerOf},
 }
 
 // Arity reports how many reads and writes an action takes. ok is false for
@@ -82,6 +83,7 @@ func Arity(name string) (reads, writes int, ok bool) {
 // Connection with its own credential; in the spike, a base URL.
 type Connectors struct {
 	crm, erp string
+	hr       string // the HR directory; set with WithHR
 	http     *http.Client
 	noKeys   bool // the control run: never send the idempotency key
 }
@@ -91,6 +93,13 @@ func NewConnectors(crmURL, erpURL string) *Connectors {
 	// No client timeout: every call follows its context's deadline, which
 	// the activity sets.
 	return &Connectors{crm: crmURL, erp: erpURL, http: &http.Client{}}
+}
+
+// WithHR returns connectors that also call the HR directory at this base URL.
+func (c *Connectors) WithHR(hrURL string) *Connectors {
+	withHR := *c
+	withHR.hr = hrURL
+	return &withHR
 }
 
 // WithoutKeys returns connectors that never send an idempotency key. It is
@@ -216,6 +225,13 @@ func createInvoice(ctx context.Context, c *Connectors, key string, args []any) (
 		return Result{}, errors.New("erp.create_invoice: the answer names no invoice")
 	}
 	return Result{Values: []any{body.InvoiceID}}, nil
+}
+
+// managerOf is the HR check: given the requester (created_on_behalf_of,
+// else created_by) it answers correct with their manager as the approver,
+// or deny. Contract stub (Step 2, part 1, Phase B).
+func managerOf(context.Context, *Connectors, string, []any) (Result, error) {
+	return Result{}, errors.New("hr.manager_of: not implemented")
 }
 
 // --- plumbing ---

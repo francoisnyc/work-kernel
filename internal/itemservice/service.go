@@ -117,6 +117,9 @@ type Options struct {
 	// MaxWait caps TransitionRequest.Wait; zero means MaxWait (5 s). Tests
 	// set a short cap so they can test it without waiting 5 s.
 	MaxWait time.Duration
+	// Now is the clock guards read `today` from (as a UTC date); nil means
+	// time.Now. Tests set a fixed clock.
+	Now func() time.Time
 }
 
 // New returns a Service that uses the given connection pool, with the Type

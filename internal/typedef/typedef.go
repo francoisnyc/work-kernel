@@ -30,6 +30,37 @@ const (
 	Int    FieldType = "int"
 	Bool   FieldType = "bool"
 	Enum   FieldType = "enum"
+	// Date is a calendar date, stored as an ISO 8601 string (2026-12-01).
+	// Guards see it as a CEL timestamp at 00:00 UTC.
+	Date FieldType = "date"
+)
+
+// WritableBy says who may write a field. The zero value is anyone who may
+// write the Item. It is a named type, not a bool, so link types (part 2) can
+// take the same attribute and later writers (link reactions) can be added.
+type WritableBy string
+
+const (
+	WritableByAnyone WritableBy = ""
+	// WritableByKernel: only the internal door (hooks) writes the field; the
+	// public door refuses it on create, update and a transition's patch.
+	WritableByKernel WritableBy = "kernel"
+)
+
+// Item attributes a hook may read besides fields: set by the kernel at
+// create and never editable. They are also guard variables.
+const (
+	AttrCreatedBy         = "created_by"
+	AttrCreatedOnBehalfOf = "created_on_behalf_of"
+)
+
+// Guard variables that are not fields: who is acting, who created the
+// Item, and today's date (UTC). They are reserved: no field may take one
+// of these IDs, nor "links".
+const (
+	VarCaller           = "caller"
+	VarCallerOnBehalfOf = "caller_on_behalf_of"
+	VarToday            = "today"
 )
 
 // categories are the fixed state categories from the design. "none" means
@@ -55,6 +86,9 @@ const TimerPrincipal = "system:timer"
 const (
 	AllowedRolePrefix      = "role:"
 	AllowedPrincipalPrefix = "principal:"
+	// AllowedFieldPrefix names a principal field: the entry matches the
+	// principal the field holds when the transition runs.
+	AllowedFieldPrefix = "field:"
 )
 
 // The struct tags (the text in backquotes) tell the YAML and JSON libraries
@@ -65,6 +99,8 @@ type Field struct {
 	ID      string    `yaml:"id" json:"id"`
 	Type    FieldType `yaml:"type" json:"type"`
 	Options []string  `yaml:"options" json:"options,omitempty"` // enum only
+	// WritableBy limits who may write the field; empty is anyone.
+	WritableBy WritableBy `yaml:"writable_by" json:"writable_by,omitempty"`
 }
 
 // State is one lifecycle state. Every state has a category.
@@ -74,6 +110,9 @@ type State struct {
 	// Timer is nil for a state without one. A pointer field plays the role of
 	// an Optional here; omitempty leaves it out of the stored JSON when nil.
 	Timer *Timer `yaml:"timer" json:"timer,omitempty"`
+	// Frozen are the fields no write may change while an Item is in this
+	// state. The transition entering the state may set them.
+	Frozen []string `yaml:"frozen" json:"frozen,omitempty"`
 }
 
 // Timer moves an Item out of a state it has stayed in for too long. It is a

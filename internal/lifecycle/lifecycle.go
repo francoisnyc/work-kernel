@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"cel.dev/cel-go/common/types"
 
@@ -17,6 +18,7 @@ const (
 	NoTransition  Code = "no_transition"  // the Type declares no such move
 	MissingFields Code = "missing_fields" // a required field is not set
 	GuardFailed   Code = "guard_failed"   // the guard does not hold
+	FieldFrozen   Code = "field_frozen"   // a write names a field the current state freezes
 )
 
 // Rejection is the error returned for an illegal transition. Any type with
@@ -29,6 +31,37 @@ type Rejection struct {
 	// facts as Reason, as data a caller can act on.
 	From, To string
 	Missing  []string
+	// For FieldFrozen: the state that freezes them and the fields named.
+	State  string
+	Frozen []string
+}
+
+// Input is what a transition's guards see besides the Type: the fields as
+// the write would leave them, the linked Items, who is acting, who created
+// the Item, and today's date. Empty strings are null to a guard.
+type Input struct {
+	Fields map[string]any
+	Links  Links
+	// Caller is the actor whose permissions are checked; CallerOnBehalfOf
+	// the user an agent acts for (empty for timers and hooks).
+	Caller, CallerOnBehalfOf string
+	// CreatedBy and CreatedOnBehalfOf are kernel-set at create.
+	CreatedBy, CreatedOnBehalfOf string
+	// Today is a date (UTC); the time of day is ignored.
+	Today time.Time
+}
+
+// TransitionWith is TransitionLinked with everything a guard may read.
+// Contract stub (Step 2, part 1, Phase B): it ignores who and today.
+func TransitionWith(t *typedef.Type, current string, in Input, to string) (Result, error) {
+	return TransitionLinked(t, current, in.Fields, in.Links, to)
+}
+
+// CheckFrozen decides whether a write in state may name these fields: the
+// state's frozen fields may not be written. It returns a *Rejection with
+// FieldFrozen naming them. Contract stub (Phase B): it allows everything.
+func CheckFrozen(t *typedef.Type, state string, fieldIDs []string) error {
+	return nil
 }
 
 func (r *Rejection) Error() string { return r.Reason }

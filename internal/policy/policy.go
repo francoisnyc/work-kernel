@@ -118,3 +118,10 @@ func AuthorizeTransition(principal string, roles []string, tr typedef.Transition
 	}
 	return false
 }
+
+// AuthorizeTransitionOn is AuthorizeTransition with the Item's fields, so a
+// field:<id> entry matches the principal that field holds. Contract stub
+// (Step 2, part 1, Phase B): field entries match no one.
+func AuthorizeTransitionOn(principal string, roles []string, tr typedef.Transition, fields map[string]any) bool {
+	return AuthorizeTransition(principal, roles, tr)
+}
