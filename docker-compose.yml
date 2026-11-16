@@ -1,5 +1,17 @@
-# Local development stack: Postgres and the Temporal dev server.
-# The Temporal dev server keeps its state in memory; it is not for production.
+# The whole proof-of-concept stack: docker compose up -d --build --wait
+#
+# Postgres, the Temporal dev server, a one-shot migration, the item service
+# (the public API), the relay, the worker, and stub CRM/ERP connectors. Only
+# the API (8080) and the Temporal UI (8233) are published; compose.dev.yaml
+# also publishes Postgres and Temporal's gRPC port for work on the code.
+#
+# The Temporal dev server keeps its state in memory: reset the stack as a
+# whole (docker compose down -v), never one service.
+name: pli
+
+x-database: &database
+  DATABASE_URL: postgres://kernel:kernel@postgres:5432/kernel?sslmode=disable
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -7,8 +19,6 @@ services:
       POSTGRES_USER: kernel
       POSTGRES_PASSWORD: kernel
       POSTGRES_DB: kernel
-    ports:
-      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U kernel -d kernel"]
       interval: 2s
@@ -16,10 +26,77 @@ services:
       retries: 30
 
   temporal:
-    # The image's entrypoint is the `temporal` CLI, so this runs
+    # The image's entrypoint is the temporal CLI: this runs
     # `temporal server start-dev`.
     image: temporalio/temporal:1.10.0 # CLI 1.10.0, Server 1.32.2
     command: ["server", "start-dev", "--ip", "0.0.0.0"]
     ports:
-      - "7233:7233" # gRPC
       - "8233:8233" # Web UI
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "localhost:7233"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+
+  # Applies the migrations, then exits; the services below start only once
+  # it has succeeded.
+  migrate:
+    build: {context: ., target: migrate}
+    environment: *database
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: "no"
+
+  itemservice:
+    build: {context: ., target: itemservice}
+    # Dev tokens are the proof of concept's only auth: the server warns about
+    # them on every start. The file is mounted read-only.
+    command: ["--dev-tokens", "/etc/pli/dev-tokens.yaml", "--types", "/types", "--listen", ":8080"]
+    volumes:
+      - ./dev-tokens.example.yaml:/etc/pli/dev-tokens.yaml:ro
+    environment: *database
+    ports:
+      - "8080:8080" # the public API
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "/itemservice", "--probe", "http://localhost:8080/healthz"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  relay:
+    build: {context: ., target: relay}
+    environment:
+      <<: *database
+      TEMPORAL_ADDRESS: temporal:7233
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      temporal: {condition: service_healthy}
+
+  worker:
+    build: {context: ., target: worker}
+    environment:
+      <<: *database
+      TEMPORAL_ADDRESS: temporal:7233
+      CRM_URL: http://connstub:8081
+      ERP_URL: http://connstub:8082
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      temporal: {condition: service_healthy}
+      connstub: {condition: service_healthy}
+
+  # Stub CRM (8081) and ERP (8082) for the ticket's hooks. The ERP answers
+  # after 1 s, so a held approve stays held long enough to see.
+  connstub:
+    build: {context: ., target: connstub}
+    command: ["--crm-listen", ":8081", "--erp-listen", ":8082", "--erp-latency", "1s",
+              "--customers", "/etc/connstub/customers.json"]
+    volumes:
+      - ./deploy/customers.json:/etc/connstub/customers.json:ro
+    healthcheck:
+      test: ["CMD", "/connstub", "--probe", "http://localhost:8082/healthz"]
+      interval: 2s
+      timeout: 5s
+      retries: 30

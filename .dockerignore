@@ -1,0 +1,8 @@
+# The build needs go.mod, go.sum, the Go sources, migrations/ and types/.
+.git
+.github
+docs
+scripts
+deploy
+bin
+*.md

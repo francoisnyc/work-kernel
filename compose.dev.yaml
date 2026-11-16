@@ -1,0 +1,12 @@
+# For work on the code: also publish Postgres and Temporal's gRPC port, so
+# tools on the host (go run ./cmd/relay or ./cmd/worker, a SQL client, goose)
+# reach them. Opt in with -f; it is never loaded on its own:
+#
+#   docker compose -f docker-compose.yml -f compose.dev.yaml up -d --build --wait
+services:
+  postgres:
+    ports:
+      - "5432:5432"
+  temporal:
+    ports:
+      - "7233:7233"
