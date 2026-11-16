@@ -282,12 +282,34 @@ func requestHash(op string, req any) (string, error) {
 // Get returns the Item as the principal may see it. An Item they may not see
 // is ErrNotFound, exactly like one that does not exist.
 func (k *Service) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item.Item, error) {
-	if err := checkPublicPrincipal(p); err != nil {
+	it, policyScope, err := k.visibleItem(ctx, p, id)
+	if err != nil {
 		return item.Item{}, err
+	}
+	// The scope was found readable; Project is still the one door out.
+	it, ok := policy.Project(p, []uuid.UUID{*it.ScopeID}, it)
+	if !ok {
+		return item.Item{}, ErrNotFound
+	}
+	// An agent's read is recorded for the write rule (narrowing scopes only).
+	if err := recordReads(ctx, k.pool, p, []*uuid.UUID{policyScope}); err != nil {
+		return item.Item{}, err
+	}
+	return it, nil
+}
+
+// visibleItem reads an Item if the principal may see it: in the principal's
+// namespace, visible to them, and inside an agent session's scopes; else
+// ErrNotFound. It records no read, so it can also tell whether a name may be
+// shown (history) without counting as reading that Item. It returns the
+// Item, not yet projected, and its policy scope (nil when open).
+func (k *Service) visibleItem(ctx context.Context, p item.Principal, id uuid.UUID) (item.Item, *uuid.UUID, error) {
+	if err := checkPublicPrincipal(p); err != nil {
+		return item.Item{}, nil, err
 	}
 	c, err := loadCaps(ctx, k.pool, p)
 	if err != nil {
-		return item.Item{}, err
+		return item.Item{}, nil, err
 	}
 	// One statement reads the Item and decides visibility from its scope,
 	// so the two always agree. Nothing is cached: a change of readers takes
@@ -318,38 +340,29 @@ func (k *Service) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item
 		&it.CreatedAt, &it.CreatedBy, &it.CreatedOnBehalfOf,
 		&policyScope, &visible, &hold.id, &hold.hook, &hold.from, &hold.to, &hold.status, &hold.reason)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return item.Item{}, ErrNotFound
+		return item.Item{}, nil, ErrNotFound
 	}
 	if err != nil {
-		return item.Item{}, fmt.Errorf("read item: %w", err)
+		return item.Item{}, nil, fmt.Errorf("read item: %w", err)
 	}
 	if !visible {
-		return item.Item{}, ErrNotFound
+		return item.Item{}, nil, ErrNotFound
 	}
 	// Outside an agent session's scopes the Item does not exist for it.
 	if c != nil {
 		in, err := inScopes(ctx, k.pool, c.scopes, &id)
 		if err != nil {
-			return item.Item{}, err
+			return item.Item{}, nil, err
 		}
 		if !in {
-			return item.Item{}, ErrNotFound
+			return item.Item{}, nil, ErrNotFound
 		}
 	}
 	if hold.id != nil {
 		it.Hold = &item.Hold{ID: *hold.id, Hook: *hold.hook, From: *hold.from, To: *hold.to,
 			Status: *hold.status, Reason: *hold.reason}
 	}
-	// The scope was found readable above; Project is still the one door out.
-	it, ok := policy.Project(p, []uuid.UUID{*it.ScopeID}, it)
-	if !ok {
-		return item.Item{}, ErrNotFound
-	}
-	// An agent's read is recorded for the write rule (narrowing scopes only).
-	if err := recordReads(ctx, k.pool, p, []*uuid.UUID{policyScope}); err != nil {
-		return item.Item{}, err
-	}
-	return it, nil
+	return it, policyScope, nil
 }
 
 // StateEntry says which state an Item is in and which event put it there.
