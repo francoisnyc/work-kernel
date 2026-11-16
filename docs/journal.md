@@ -1156,8 +1156,9 @@ list, the jq helper); fixed with approval. Get returned an empty, non-nil link s
 two equality tests: no links is nil. The Docker daemon in this container stopped twice between
 commands; images were built through a module mirror served from the local cache, as in Step 0.
 
-**Numbers:** scenario, two runs on a fresh stack: 6.5 s and 6.2 s; the held approve 1,246 ms and
-the denied one 1,096 ms (the ERP stub answers in 1 s), as in Step 0.
+**Numbers:** scenario, two runs in a row on a fresh stack with the final images: 6.4 s and 6.3 s;
+the held approve 1,204 and 1,198 ms, the denied one 1,149 and 1,195 ms (the ERP stub answers in
+1 s), as in Step 0. `go test -race ./...` green, no data race.
 
 **Open:** Later has nine new items. **Next session:** proof-of-concept Step 2 (the vacation
 request: human approvals, acting timers, link reactions, a stub email connector), once this PR
