@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"time"
 
 	"go.temporal.io/sdk/temporal"
@@ -224,7 +225,8 @@ type HookSpec struct {
 // OpenHold is an open hold: which check to run, caused by which request.
 type OpenHold struct {
 	ID            string
-	Hook          string
+	Hook          string // the check hook, or the held reaction (Reaction)
+	Reaction      bool
 	From          string
 	RequestedTo   string
 	RequestedSeq  int64  // the transition_requested event
@@ -368,6 +370,14 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 		running      int                 // hook coroutines still running
 		checkStarted bool                // the open hold's check has been started
 		cancelCheck  workflow.CancelFunc // cancels the running check, if any
+
+		// Undos (Step 2, part 2). undoing marks the undos a coroutine is
+		// working on, by undoKey; undoAttempts counts this run's attempts,
+		// and undoCapped says the run reached UndoAttemptsPerRun and should
+		// continue as new once the coroutines have stopped.
+		undoing      = map[string]bool{}
+		undoAttempts int
+		undoCapped   bool
 	)
 
 	apply := func(ctx workflow.Context, ev Event) (ApplyResult, error) {
@@ -386,17 +396,33 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 		s.LastAppliedSeq = ev.Seq
 		changes++
 		wake++
+		enteredBy := "" // the hold whose allowed resolution this event is
 		switch {
 		case ev.Op == lifecycle.OpTransitionRequested:
+			move := ev.From + "->" + ev.RequestedTo
 			s.Hold = &OpenHold{
-				ID: ev.HoldID, Hook: s.Checks[ev.From+"->"+ev.RequestedTo],
+				ID: ev.HoldID, Hook: s.Checks[move],
 				From: ev.From, RequestedTo: ev.RequestedTo, RequestedSeq: ev.Seq,
 				CorrelationID: ev.CorrelationID, Hop: ev.Hop,
+			}
+			if r, ok := s.HeldReactions[move]; ok && s.Hold.Hook == "" {
+				s.Hold.Hook, s.Hold.Reaction = r, true
 			}
 			checkStarted = false
 		case ev.HoldID != "" && s.Hold != nil && ev.HoldID == s.Hold.ID:
 			// The hold is closed (resolved, or canceled by an escape). A
 			// check still running has nothing left to decide.
+			allowed := ev.Op == "transition" && ev.To == s.Hold.RequestedTo
+			if allowed {
+				enteredBy = s.Hold.ID
+			} else if undo := s.Undos[s.Hold.Hook]; s.Hold.Reaction && undo != "" {
+				// Closed any other way than allowed: what the reaction may
+				// have taken is given back (a no-op if it took nothing).
+				s.PendingUndos = append(s.PendingUndos, PendingUndo{
+					ReactionID: undo, HoldID: s.Hold.ID, CauseSeq: ev.Seq,
+					CorrelationID: ev.CorrelationID, Hop: ev.Hop,
+				})
+			}
 			s.Hold = nil
 			if cancelCheck != nil {
 				cancelCheck()
@@ -404,6 +430,15 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 			}
 		}
 		if ev.To != "" {
+			// Leaving the state by an undo's trigger gives back what the
+			// hold that entered it took.
+			if undo := s.UndoOnEntry[ev.From+"->"+ev.To]; undo != "" && s.EnteredHold != "" {
+				s.PendingUndos = append(s.PendingUndos, PendingUndo{
+					ReactionID: undo, HoldID: s.EnteredHold, CauseSeq: ev.Seq,
+					CorrelationID: ev.CorrelationID, Hop: ev.Hop,
+				})
+			}
+			s.EnteredHold = enteredBy
 			s.State = ev.To
 			s.EnteredSeq, s.EnteredAt = ev.Seq, ev.At
 			s.CorrelationID, s.Hop = ev.CorrelationID, ev.Hop
@@ -433,6 +468,18 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 			return gapError(ev.Seq, s.LastAppliedSeq)
 		}
 		return nil
+	}
+	// The undos not yet done, with their attempts and last errors, so a
+	// stuck refund is visible. A query adds nothing to the history.
+	if err := workflow.SetQueryHandler(ctx, QueryUndos, func() ([]UndoStatus, error) {
+		out := make([]UndoStatus, 0, len(s.PendingUndos))
+		for _, u := range s.PendingUndos {
+			out = append(out, UndoStatus{ReactionID: u.ReactionID, HoldID: u.HoldID, CauseSeq: u.CauseSeq,
+				Attempts: u.Attempts, LastError: u.LastError})
+		}
+		return out, nil
+	}); err != nil {
+		return err
 	}
 	err := workflow.SetUpdateHandlerWithOptions(ctx, UpdateApply, apply,
 		workflow.UpdateHandlerOptions{Validator: validate})
@@ -491,6 +538,91 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 		})
 	}
 
+	reactionInput := func(reaction, holdID string, causeSeq int64, corr string, hop int) ReactionInput {
+		return ReactionInput{
+			ItemID: in.ItemID, TypeID: s.TypeID, TypeVersion: s.TypeVersion, ReactionID: reaction,
+			HoldID: holdID, CauseSeq: causeSeq, CorrelationID: corr, Hop: hop,
+		}
+	}
+
+	// startReaction runs a held reaction for the open hold, like a check:
+	// within the hook budget, called off when the hold closes. The activity
+	// resolves the hold itself; when the reaction gives up, the hold
+	// resolves as error (budget_exhausted, or reaction_failed when it
+	// failed for good).
+	startReaction := func(h OpenHold) {
+		rin := reactionInput(h.Hook, h.ID, h.RequestedSeq, h.CorrelationID, h.Hop+1)
+		cctx, cancel := workflow.WithCancel(ctx)
+		cancelCheck = cancel
+		running++
+		workflow.Go(cctx, func(gctx workflow.Context) {
+			defer func() { running--; wake++ }()
+			err := workflow.ExecuteActivity(workflow.WithActivityOptions(gctx, hookOptions(budget, s.HookAttemptTimeout)),
+				ActivityRunReaction, rin).Get(gctx, nil)
+			if err == nil || gctx.Err() != nil || !reactionGaveUp(err) {
+				return
+			}
+			reason := "budget_exhausted"
+			var appErr *temporal.ApplicationError
+			if errors.As(err, &appErr) && appErr.NonRetryable() {
+				reason = "reaction_failed"
+			}
+			_ = workflow.ExecuteActivity(gctx, ActivityResolveReaction,
+				ResolveReactionInput{Reaction: rin, Reason: reason}).Get(gctx, nil)
+		})
+	}
+
+	// startUndo runs one pending undo until it is done, in a coroutine
+	// nothing cancels: a refund must happen. Each attempt is one activity
+	// try; a failure that may pass is counted, kept as LastError, and tried
+	// again after a pause that doubles from a second up to UndoMaxInterval,
+	// without limit. A refusal is recorded once (ReactionFailed) and ends
+	// it. After UndoAttemptsPerRun attempts in this run the coroutine stops
+	// and the run continues as new, carrying the undo as it stands.
+	startUndo := func(key string) {
+		undoing[key] = true
+		running++
+		workflow.Go(ctx, func(gctx workflow.Context) {
+			defer func() { running--; wake++; delete(undoing, key) }()
+			// The first attempt of a run goes at once; then the pause
+			// follows the undo's attempts, carried across runs.
+			for first := true; ; first = false {
+				i := slices.IndexFunc(s.PendingUndos, func(u PendingUndo) bool { return undoKey(u) == key })
+				if i < 0 {
+					return
+				}
+				u := s.PendingUndos[i]
+				if !first && u.Attempts > 0 {
+					pause := min(time.Second<<min(u.Attempts-1, 16), UndoMaxInterval)
+					if err := workflow.Sleep(gctx, pause); err != nil {
+						return
+					}
+				}
+				if undoCapped {
+					return
+				}
+				rin := reactionInput(u.ReactionID, u.HoldID, u.CauseSeq, u.CorrelationID, u.Hop+1)
+				err := workflow.ExecuteActivity(workflow.WithActivityOptions(gctx, undoOptions), ActivityUndo, rin).Get(gctx, nil)
+				undoAttempts++
+				if done, reason := undoFinished(err); done {
+					if reason != "" {
+						_ = workflow.ExecuteActivity(gctx, ActivityReactionFailed,
+							ReactionFailedInput{Reaction: rin, Reason: reason}).Get(gctx, nil)
+					}
+					s.PendingUndos = slices.DeleteFunc(s.PendingUndos, func(p PendingUndo) bool { return undoKey(p) == key })
+					return
+				}
+				j := slices.IndexFunc(s.PendingUndos, func(p PendingUndo) bool { return undoKey(p) == key })
+				s.PendingUndos[j].Attempts++
+				s.PendingUndos[j].LastError = undoError(err)
+				if undoAttempts >= UndoAttemptsPerRun {
+					undoCapped = true
+					return
+				}
+			}
+		})
+	}
+
 	// startCheck runs the open hold's check in a coroutine that the hold's
 	// closing cancels. When the budget runs out, or the check fails for
 	// good, it resolves the hold as error, under the same key as the check.
@@ -499,6 +631,10 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 		checkStarted = true
 		if h.Hook == "" {
 			log.Error("no check is known for this hold", "item", in.ItemID, "hold", h.ID)
+			return
+		}
+		if h.Reaction {
+			startReaction(h)
 			return
 		}
 		hin := hookInput(h.Hook, h.RequestedSeq, h.CorrelationID, h.Hop+1)
@@ -548,7 +684,8 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 
 	handlersDone := func() bool { return workflow.AllHandlersFinished(ctx) }
 	busy := func() bool {
-		return running > 0 || s.Hold != nil || len(s.PendingEnrich) > 0 || len(s.PendingActions) > 0
+		return running > 0 || s.Hold != nil || len(s.PendingEnrich) > 0 || len(s.PendingActions) > 0 ||
+			len(s.PendingUndos) > 0
 	}
 
 	for {
@@ -573,6 +710,24 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 			for _, pa := range actions {
 				startAction(pa)
 			}
+			if !undoCapped {
+				for _, u := range s.PendingUndos {
+					if !undoing[undoKey(u)] {
+						startUndo(undoKey(u))
+					}
+				}
+			}
+		}
+
+		// A stuck undo has added UndoAttemptsPerRun attempts to this run:
+		// hand over to a fresh one, carrying the undos (their attempts and
+		// last errors), once nothing runs and no update is half-handled.
+		if undoCapped && running == 0 {
+			if err := workflow.Await(ctx, handlersDone); err != nil {
+				return err
+			}
+			carried := s
+			return workflow.NewContinueAsNewError(ctx, Name, Input{ItemID: in.ItemID, Carried: &carried})
 		}
 
 		// A long history is slow to replay. When the server suggests it,
@@ -697,6 +852,18 @@ func hookGaveUp(err error) bool {
 	return !temporal.IsCanceledError(err)
 }
 
+// reactionGaveUp says whether a held reaction could not decide its hold:
+// its budget ran out, or it failed for good (the hold then resolves as
+// error, so it does not stay open). Only the Item being gone, or the
+// reaction being called off, leaves nothing to resolve.
+func reactionGaveUp(err error) bool {
+	var appErr *temporal.ApplicationError
+	if errors.As(err, &appErr) && appErr.Type() == ErrTypeNotFound {
+		return false
+	}
+	return !temporal.IsCanceledError(err)
+}
+
 // actionFailure says whether an action hook's error should be recorded as
 // hook_failed, and with which reason. Its budget ran out or it failed for
 // good: yes. The Item is gone, or the workflow was canceled: there is
@@ -729,4 +896,51 @@ func logHookEnd(log interface{ Info(string, ...any) }, in HookInput, err error) 
 
 func gapError(seq, lastApplied int64) error {
 	return fmt.Errorf("gap: event %d arrived but the last applied is %d", seq, lastApplied)
+}
+
+// undoOptions: one try per activity call; the undo's own loop retries, so
+// it can count attempts and keep the last error (startUndo).
+var undoOptions = workflow.ActivityOptions{
+	StartToCloseTimeout: 30 * time.Second,
+	RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
+}
+
+func undoKey(u PendingUndo) string { return u.HoldID + "/" + u.ReactionID }
+
+// undoFinished says whether an undo attempt ends the undo, and the code to
+// record with ReactionFailed when it ends refused. Done (nothing left to
+// give back, or given back) ends it with no code; the Item gone ends it
+// too, with nothing to record on; a refusal (non-retryable Rejected or
+// Invalid) ends it with its code. Anything else may pass: try again.
+func undoFinished(err error) (done bool, reason string) {
+	if err == nil {
+		return true, ""
+	}
+	var appErr *temporal.ApplicationError
+	if !errors.As(err, &appErr) || !appErr.NonRetryable() {
+		return false, ""
+	}
+	switch appErr.Type() {
+	case ErrTypeNotFound:
+		return true, ""
+	case ErrTypeRejected, ErrTypeInvalid:
+		reason = "reaction_failed"
+		var code string
+		if appErr.HasDetails() && appErr.Details(&code) == nil && code != "" {
+			reason = code
+		}
+		return true, reason
+	}
+	return false, ""
+}
+
+// undoError is an attempt's failure as the query shows it: its message,
+// cut to MaxUndoErrorLen bytes. Kernel errors name IDs and codes, never
+// field values.
+func undoError(err error) string {
+	msg := err.Error()
+	if len(msg) > MaxUndoErrorLen {
+		msg = msg[:MaxUndoErrorLen]
+	}
+	return msg
 }
