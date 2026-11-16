@@ -206,7 +206,7 @@ func (t *Type) check() error {
 		}
 		seen[f.ID] = true
 		switch f.Type {
-		case String, Int, Bool:
+		case String, Int, Bool, Principal:
 			if len(f.Options) > 0 {
 				return fail("field %s: only enum fields take options", f.ID)
 			}
@@ -247,6 +247,9 @@ func (t *Type) check() error {
 		return fail("initial_state %q is not a declared state", t.InitialState)
 	}
 
+	if err := t.checkLinks(fail); err != nil {
+		return err
+	}
 	guards, err := newGuardEnv(t)
 	if err != nil {
 		return fail("%v", err)
@@ -296,11 +299,11 @@ func (t *Type) check() error {
 					name, entry, hookType)
 			}
 		}
-		prg, err := compileGuard(guards, tr.Guard)
+		prg, links, err := compileGuard(guards, tr.Guard)
 		if err != nil {
 			return fail("transition %s: guard %q: %v", name, tr.Guard, err)
 		}
-		tr.Program = prg
+		tr.Program, tr.GuardLinks = prg, links
 	}
 
 	// Timers come last: each must name a transition checked above.
@@ -431,6 +434,10 @@ func (t *Type) CheckFields(values map[string]any, allowNull bool) error {
 			s, ok := v.(string)
 			if !ok || !slices.Contains(f.Options, s) {
 				return fail("field %s: want one of %s", id, strings.Join(f.Options, ", "))
+			}
+		case Principal:
+			if !checkPrincipalValue(v) {
+				return fail("field %s: want a principal, user:<id> or agent:<id>", id)
 			}
 		}
 	}

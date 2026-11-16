@@ -5,7 +5,6 @@
 #   - f_assignee holds a principal (user:<id> or agent:<id>), not free text.
 #   - A ticket cannot be resolved while something that is neither done nor
 #     canceled blocks it.
-# Phase B keeps this file in testdata/; Phase C moves it to types/.
 id: ticket
 version: 5
 initial_state: triage

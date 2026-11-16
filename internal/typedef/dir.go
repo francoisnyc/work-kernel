@@ -40,6 +40,14 @@ func ParseDir(dir string) ([]*Type, error) {
 		from[key] = path
 		types = append(types, t)
 	}
+	// Links name other Types, and keep their inverses across versions:
+	// both are only known once every file is read.
+	if err := CheckLinkTargets(types); err != nil {
+		return nil, err
+	}
+	if err := CheckLinkInverses(types); err != nil {
+		return nil, err
+	}
 	// cmp.Or picks the first non-zero comparison: by ID, then by version.
 	slices.SortFunc(types, func(a, b *Type) int {
 		return cmp.Or(strings.Compare(a.ID, b.ID), cmp.Compare(a.Version, b.Version))
