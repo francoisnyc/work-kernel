@@ -1,8 +1,12 @@
-// Command connstub runs the stub CRM and ERP (internal/connstub) as a
-// service, for the compose stack: the worker's hooks call them as they
-// would call real ones.
+// Command connstub runs the stub CRM, ERP and (with --hr-listen) HR
+// directory (internal/connstub) as a service, for the compose stack: the
+// worker's hooks call them as they would call real ones.
+//
+// --hr-directory is a JSON object mapping each employee to their manager,
+// both user principal IDs (deploy/hr-directory.json).
 //
 //	connstub [--crm-listen :8081] [--erp-listen :8082] [--erp-latency 1s] [--customers FILE]
+//	         [--hr-listen :8083 [--hr-directory FILE]]
 //	connstub --probe URL
 //
 // --customers is a JSON object of customers by ID; an unknown key is an
@@ -57,6 +61,8 @@ func run(ctx context.Context, args []string, stderr io.Writer) error {
 	erpAddr := fs.String("erp-listen", ":8082", "the ERP's address")
 	erpLatency := fs.Duration("erp-latency", 0, "how long the ERP waits before every answer")
 	customersPath := fs.String("customers", "", "JSON file of customers by ID")
+	hrAddr := fs.String("hr-listen", "", "the HR directory's address (none: no HR directory)")
+	hrPath := fs.String("hr-directory", "", "JSON file mapping each employee to their manager (principal IDs)")
 	probeURL := fs.String("probe", "", "check a running stub's /healthz URL and exit (for container health checks)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -93,6 +99,23 @@ func run(ctx context.Context, args []string, stderr io.Writer) error {
 		sc := connstub.Customer{Plan: c.Plan, OnHold: c.OnHold, CreditLimit: c.CreditLimit, CostCenter: c.CostCenter}
 		crm.SetCustomer(id, sc)
 		erp.SetCustomer(id, sc)
+	}
+	if *hrAddr != "" {
+		directory := map[string]string{}
+		if *hrPath != "" {
+			if directory, err = connstub.LoadDirectory(*hrPath); err != nil {
+				return err
+			}
+		}
+		hr, err := connstub.ServeHR(*hrAddr)
+		if err != nil {
+			return fmt.Errorf("hr: %w", err)
+		}
+		defer hr.Close()
+		for employee, manager := range directory {
+			hr.SetManager(employee, manager)
+		}
+		slog.Info("connstub serving HR", "hr", *hrAddr, "employees", len(directory))
 	}
 	slog.Info("connstub serving", "crm", *crmAddr, "erp", *erpAddr, "erp_latency", *erpLatency, "customers", len(customers))
 	<-ctx.Done()

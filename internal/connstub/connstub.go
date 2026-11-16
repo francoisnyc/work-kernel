@@ -1,5 +1,6 @@
-// Package connstub runs stub HTTP servers that stand in for a CRM and an ERP
-// in tests, the bench and the compose stack (cmd/connstub). Each has a configurable latency, error rate and
+// Package connstub runs stub HTTP servers that stand in for a CRM, an ERP
+// and an HR directory in tests, the bench and the compose stack
+// (cmd/connstub). Each has a configurable latency, error rate and
 // outage, and a table of customers the test fills in.
 //
 // Endpoints:
@@ -10,7 +11,8 @@
 //	                                  → {"verdict": "allow"|"deny"|"correct", "reason", "cost_center"}
 //	ERP  POST /invoices               {"customer_id", "amount"}, header Idempotency-Key
 //	                                  → {"invoice_id": "INV-…"}
-//	both GET  /healthz                → 200, no body, never delayed
+//	HR   GET  /employees/{id}/manager → {"manager": "user:bob"}; 404 for an unknown employee
+//	all  GET  /healthz                → 200, no body, never delayed
 //
 // An unknown customer is 404, an outage 503, an injected error 500, all
 // before any effect.
@@ -30,6 +32,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -52,6 +56,7 @@ type Server struct {
 	// A sync.Mutex guards the fields below; handlers run on many goroutines.
 	mu        sync.Mutex
 	customers map[string]Customer
+	managers  map[string]string // HR only: employee -> manager
 	latency   time.Duration
 	errorRate float64
 	outage    bool
@@ -111,37 +116,51 @@ func ServeERP(addr string) (*Server, error) {
 	return s, s.startOn(addr, s.erpHandler())
 }
 
-// healthz answers 200 with no body, at once: no latency, outage or errors.
-// NewHR starts a stub HR directory on a free local port. Contract stub
-// (Step 2, part 1, Phase B): it answers only /healthz.
-//
-//	HR   GET  /employees/{id}/manager → {"manager": "user:bob"}; 404 for an unknown employee
+// NewHR starts a stub HR directory on a free loopback port.
 func NewHR() *Server {
 	s := newServer()
-	mux := http.NewServeMux()
-	healthz(mux)
-	s.start(mux)
+	s.start(s.hrHandler())
 	return s
 }
 
-// ServeHR serves a stub HR directory on addr. Contract stub (Phase B).
+// ServeHR starts a stub HR directory listening on addr (":8083"), for
+// cmd/connstub.
 func ServeHR(addr string) (*Server, error) {
 	s := newServer()
-	mux := http.NewServeMux()
-	healthz(mux)
-	return s, s.startOn(addr, mux)
+	return s, s.startOn(addr, s.hrHandler())
 }
 
-// SetManager records who an employee's manager is (principal IDs). Contract
-// stub (Phase B): it records nothing.
-func (s *Server) SetManager(employee, manager string) {}
+// SetManager records who an employee's manager is, both principal IDs
+// (user:ana reports to user:bob).
+func (s *Server) SetManager(employee, manager string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.managers[employee] = manager
+}
 
 // LoadDirectory reads an HR directory file: a JSON object mapping each
-// employee to their manager, both principal IDs. Contract stub (Phase B).
+// employee to their manager, both user principal IDs. Anything else is an
+// error naming the file, never an empty directory.
 func LoadDirectory(path string) (map[string]string, error) {
-	return nil, fmt.Errorf("connstub: LoadDirectory: not implemented")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var dir map[string]string
+	if err := json.Unmarshal(data, &dir); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	for employee, manager := range dir {
+		for _, id := range []string{employee, manager} {
+			if rest, ok := strings.CutPrefix(id, "user:"); !ok || rest == "" {
+				return nil, fmt.Errorf("%s: %q is not a user principal (user:<id>)", path, id)
+			}
+		}
+	}
+	return dir, nil
 }
 
+// healthz answers 200 with no body, at once: no latency, outage or errors.
 func healthz(mux *http.ServeMux) {
 	mux.HandleFunc("GET /healthz", func(http.ResponseWriter, *http.Request) {})
 }
@@ -179,8 +198,8 @@ func (s *Server) erpHandler() http.Handler {
 
 func newServer() *Server {
 	return &Server{
-		customers: map[string]Customer{},
-		invoices:  map[string][]string{}, byKey: map[string]invoiceRec{}, seen: map[string]bool{},
+		customers: map[string]Customer{}, managers: map[string]string{},
+		invoices: map[string][]string{}, byKey: map[string]invoiceRec{}, seen: map[string]bool{},
 		arrivals: map[string][]Arrival{},
 	}
 }
@@ -356,26 +375,7 @@ func (s *Server) DroppedAnswers() int {
 func (s *Server) wrap(serve func(w http.ResponseWriter, r *http.Request, id string, c Customer, amount int64)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		arrived := time.Now()
-		s.mu.Lock()
-		s.calls++
-		latency, outage, errorRate := s.latency, s.outage, s.errorRate
-		s.mu.Unlock()
-
-		if latency > 0 {
-			// select waits for whichever happens first: the latency, or the
-			// client giving up. A caller's deadline must not hang the stub.
-			select {
-			case <-time.After(latency):
-			case <-r.Context().Done():
-				return
-			}
-		}
-		if outage {
-			http.Error(w, "outage", http.StatusServiceUnavailable)
-			return
-		}
-		if errorRate > 0 && rand.Float64() < errorRate {
-			http.Error(w, "injected error", http.StatusInternalServerError)
+		if !s.knobs(w, r) {
 			return
 		}
 
@@ -401,6 +401,54 @@ func (s *Server) wrap(serve func(w http.ResponseWriter, r *http.Request, id stri
 		}
 		serve(w, r, id, c, amount)
 	}
+}
+
+// knobs counts the call and applies latency, outage and injected errors.
+// It reports whether the request should be served; if not, it has answered.
+func (s *Server) knobs(w http.ResponseWriter, r *http.Request) bool {
+	s.mu.Lock()
+	s.calls++
+	latency, outage, errorRate := s.latency, s.outage, s.errorRate
+	s.mu.Unlock()
+
+	if latency > 0 {
+		// select waits for whichever happens first: the latency, or the
+		// client giving up. A caller's deadline must not hang the stub.
+		select {
+		case <-time.After(latency):
+		case <-r.Context().Done():
+			return false
+		}
+	}
+	if outage {
+		http.Error(w, "outage", http.StatusServiceUnavailable)
+		return false
+	}
+	if errorRate > 0 && rand.Float64() < errorRate {
+		http.Error(w, "injected error", http.StatusInternalServerError)
+		return false
+	}
+	return true
+}
+
+// hrHandler serves the HR directory: an employee's manager, or 404.
+func (s *Server) hrHandler() http.Handler {
+	mux := http.NewServeMux()
+	healthz(mux)
+	mux.HandleFunc("GET /employees/{id}/manager", func(w http.ResponseWriter, r *http.Request) {
+		if !s.knobs(w, r) {
+			return
+		}
+		s.mu.Lock()
+		manager, ok := s.managers[r.PathValue("id")]
+		s.mu.Unlock()
+		if !ok {
+			http.Error(w, "no such employee", http.StatusNotFound)
+			return
+		}
+		writeJSON(w, map[string]any{"manager": manager})
+	})
+	return mux
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

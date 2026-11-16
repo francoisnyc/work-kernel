@@ -44,6 +44,10 @@ type Result struct {
 // bad inputs, an unknown customer. Every other error is worth retrying.
 var ErrPermanent = errors.New("hooks: permanent failure")
 
+// errNotFound is a 404 from a connector: permanent, and an action may turn
+// it into an answer (HR does not know someone).
+var errNotFound = fmt.Errorf("%w: not found", ErrPermanent)
+
 // ErrKeyConflict is the connector saying that an idempotency key came back
 // with a different request. It is permanent too: errors.Is finds both.
 var ErrKeyConflict = fmt.Errorf("hooks: idempotency key used with a different request (%w)", ErrPermanent)
@@ -79,8 +83,9 @@ func Arity(name string) (reads, writes int, ok bool) {
 	return a.reads, a.writes, ok
 }
 
-// Connectors calls the CRM and the ERP. In the product each would be a
-// Connection with its own credential; in the spike, a base URL.
+// Connectors calls the CRM, the ERP and the HR directory. In the product
+// each would be a Connection with its own credential; in the spike, a base
+// URL.
 type Connectors struct {
 	crm, erp string
 	hr       string // the HR directory; set with WithHR
@@ -227,11 +232,50 @@ func createInvoice(ctx context.Context, c *Connectors, key string, args []any) (
 	return Result{Values: []any{body.InvoiceID}}, nil
 }
 
-// managerOf is the HR check: given the requester (created_on_behalf_of,
-// else created_by) it answers correct with their manager as the approver,
-// or deny. Contract stub (Step 2, part 1, Phase B).
-func managerOf(context.Context, *Connectors, string, []any) (Result, error) {
-	return Result{}, errors.New("hr.manager_of: not implemented")
+// managerOf is the HR check. It reads who the request was created for and
+// who created it (created_on_behalf_of, created_by): the requester is the
+// first if set, else the second. It answers correct with the requester's
+// manager (for the hook's one write, the approver), or deny:
+// unknown_employee when HR does not know the requester (an agent acting for
+// itself included), no_eligible_approver when the requester manages
+// themselves. The manager is HR's data; who may approve stays the Type's
+// rule (except: [creator]).
+func managerOf(ctx context.Context, c *Connectors, _ string, args []any) (Result, error) {
+	if c.hr == "" {
+		return Result{}, permanent("hr.manager_of: no HR directory is configured")
+	}
+	onBehalfOf, ok := args[0].(string)
+	if args[0] != nil && !ok {
+		return Result{}, permanent("hr.manager_of: created_on_behalf_of must be a principal ID")
+	}
+	createdBy, ok := args[1].(string)
+	if args[1] != nil && !ok {
+		return Result{}, permanent("hr.manager_of: created_by must be a principal ID")
+	}
+	requester := onBehalfOf
+	if requester == "" {
+		requester = createdBy
+	}
+	if requester == "" {
+		return Result{}, permanent("hr.manager_of: no requester")
+	}
+	var body struct {
+		Manager string `json:"manager"`
+	}
+	err := c.call(ctx, "", http.MethodGet, c.hr+"/employees/"+url.PathEscape(requester)+"/manager", nil, &body)
+	if errors.Is(err, errNotFound) {
+		return Result{Verdict: Deny, Reason: "unknown_employee"}, nil
+	}
+	if err != nil {
+		return Result{}, err
+	}
+	if body.Manager == "" {
+		return Result{}, errors.New("hr.manager_of: the answer names no manager")
+	}
+	if body.Manager == requester {
+		return Result{Verdict: Deny, Reason: "no_eligible_approver"}, nil
+	}
+	return Result{Verdict: Correct, Values: []any{body.Manager}}, nil
 }
 
 // --- plumbing ---
@@ -264,7 +308,9 @@ func (c *Connectors) call(ctx context.Context, key, method, target string, in, o
 	switch {
 	case resp.StatusCode == http.StatusConflict:
 		return fmt.Errorf("%w: %s %s", ErrKeyConflict, method, req.URL.Path)
-	case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusBadRequest:
+	case resp.StatusCode == http.StatusNotFound:
+		return fmt.Errorf("%w: %s %s", errNotFound, method, req.URL.Path)
+	case resp.StatusCode == http.StatusBadRequest:
 		return permanent("%s %s: %s", method, req.URL.Path, resp.Status)
 	case resp.StatusCode != http.StatusOK:
 		return fmt.Errorf("%s %s: %s", method, req.URL.Path, resp.Status)
