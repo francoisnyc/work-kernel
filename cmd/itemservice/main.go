@@ -2,10 +2,16 @@
 // the Connect protocol, gRPC and gRPC-Web, on one port.
 //
 //	itemservice --dev-tokens dev-tokens.yaml [--types types] [--listen :8080]
+//	itemservice --probe http://localhost:8080/healthz
 //
 // The database is DATABASE_URL. Migrations are not run here: apply them first
 // (make migrate). At start the server loads every Type in --types and makes
-// every namespace the token file names.
+// every namespace the token file names, and adds the roles it names (it
+// never removes one; a role it no longer names is kept, with a warning).
+//
+// GET /healthz answers 200 while the database answers, 503 when it does
+// not, with no body. --probe gets a URL and exits 0 on 200: the image has no
+// shell or curl, so the container's health check runs the binary itself.
 //
 // Dev tokens are the only auth in the proof of concept, so the server refuses
 // to start without --dev-tokens, and warns on every start that uses it.
@@ -21,6 +27,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 	"time"
 
@@ -103,10 +110,14 @@ func run(ctx context.Context, args []string, getenv func(string) string, stderr 
 			return err
 		}
 	}
+	if err := ensureRoles(ctx, k, tokens, *tokensPath, stderr); err != nil {
+		return err
+	}
 
 	path, handler := api.NewHandler(k, api.Options{Tokens: tokens, Grants: grants})
 	mux := http.NewServeMux()
 	mux.Handle(path, handler)
+	mux.Handle("GET /healthz", healthz(pool.Ping))
 	// gRPC needs HTTP/2. Without TLS that is "h2c", which net/http serves
 	// when asked through Protocols (Go 1.24+), so no extra library is needed.
 	protocols := new(http.Protocols)
@@ -130,17 +141,64 @@ func run(ctx context.Context, args []string, getenv func(string) string, stderr 
 	}
 }
 
-// errNotBuilt marks what Step 0, part 3 has not built yet.
-var errNotBuilt = errors.New("itemservice: not built yet (Step 0, part 3)")
-
 // healthz answers 200 when ping succeeds and 503 when it fails, with no
 // body either way: no error text, nothing about the database.
 func healthz(ping func(context.Context) error) http.Handler {
-	return http.NotFoundHandler()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := ping(ctx); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
 }
 
 // probe gets url and returns nil on 200, an error otherwise. The images
 // have no shell or curl, so the binary checks itself.
 func probe(ctx context.Context, url string) error {
-	return errNotBuilt
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("probe: %w", err)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("probe: %w", err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("probe: %s answered %d", url, res.StatusCode)
+	}
+	return nil
+}
+
+// ensureRoles adds the roles the token file names (dev-token mode only),
+// logging each one it adds, and warns about roles of the file's namespaces
+// that the file no longer names. It never removes one.
+func ensureRoles(ctx context.Context, k *itemservice.Service, tokens []devtoken.Token, path string, stderr io.Writer) error {
+	var namespaces []string
+	var roles []itemservice.Role
+	for _, t := range tokens {
+		if !slices.Contains(namespaces, t.Namespace) {
+			namespaces = append(namespaces, t.Namespace)
+		}
+		for _, r := range t.Roles {
+			roles = append(roles, itemservice.Role{Namespace: t.Namespace, Principal: t.Principal, Role: r})
+		}
+	}
+	res, err := k.EnsureRoles(ctx, namespaces, roles)
+	if err != nil {
+		return fmt.Errorf("roles from %s: %w", path, err)
+	}
+	for _, r := range res.Added {
+		fmt.Fprintf(stderr, "dev tokens: role added: namespace %s, %s holds %s\n", r.Namespace, r.Principal, r.Role)
+	}
+	for _, r := range res.Unlisted {
+		fmt.Fprintf(stderr, "WARNING: dev tokens: role not in %s, kept: namespace %s, %s holds %s\n",
+			path, r.Namespace, r.Principal, r.Role)
+	}
+	return nil
 }
