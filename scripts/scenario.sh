@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# The proof of concept's scenario (Steps 0 and 1): a scripted session against
-# the public API, through pli only, as two users (ana and bob), an agent
-# (triage-bot, for ana) and a user in another namespace (carol). It is the
-# proof of concept's end-to-end test. Step 1 added links (blocks /
-# blocked_by, duplicate_of) and the principal field f_assignee, on ticket v5.
+# The proof of concept's scenario (Steps 0 to 2): a scripted session against
+# the public API, through pli only, as users (ana and bob; dana and erin for
+# the vacation request), an agent (triage-bot, for ana and for bob) and a
+# user in another namespace (carol). It is the proof of concept's end-to-end
+# test. Step 1 added links (blocks / blocked_by, duplicate_of) and the
+# principal field f_assignee, on ticket v5. Step 2, part 1 added the vacation
+# request: an approval as a business state, with the HR check.
 #
 #   scripts/scenario.sh          (or: make scenario, which starts the stack first)
 #
@@ -478,6 +480,98 @@ ok triage-bot item update "$in_room" --set f_priority=1 >/dev/null
 ok triage-bot item link "$in_inner" blocks "$in_room" >/dev/null
 
 # ---------------------------------------------------------------------------
+# Step 2, part 1: the vacation request. Approval is a business state: the HR
+# check names the approver on the way into submitted, the terms freeze, and
+# the manager decides by an ordinary transition. ana reports to bob, dana to
+# herself; erin is not in the HR directory (deploy/hr-directory.json).
+# ---------------------------------------------------------------------------
+
+new_leave() { # WHO [--set ...]...: a vacation request, five days from 2099-07-01; prints its name
+	local who=$1
+	shift
+	ok "$who" item create --type vacation_request@1 --set f_start=2099-07-01 --set f_end=2099-07-05 \
+		--set f_days=5 --set f_leave_type=annual --set "f_comment=$w" "$@" | j .item.name
+}
+
+# submit_leave WHO NAME: submits and waits for the HR check; prints the answer.
+submit_leave() { ok "$1" item transition "$2" --to submitted --wait 5s; }
+
+step "vacation: ana submits (--wait); the HR check names bob on the way into submitted (APPLIED)"
+v1=$(new_leave ana)
+expect "a new request's state" "$(ok ana item get "$v1" | j .item.state)" "draft"
+began=$(now_ms)
+sub=$(submit_leave ana "$v1")
+echo "    the HR check answered in $(($(now_ms) - began)) ms"
+expect "submit's outcome" "$(j .outcome <<<"$sub")" "TRANSITION_OUTCOME_APPLIED"
+expect "state" "$(j .item.state <<<"$sub")" "submitted"
+expect "the approver, from HR" "$(j .item.fields.f_approver <<<"$sub")" "user:bob"
+
+step "vacation: ana cannot name the approver herself (FIELD_NOT_WRITABLE)"
+refuse ana "PERMISSION_DENIED FIELD_NOT_WRITABLE" item create --type vacation_request@1 \
+	--set f_start=2099-07-01 --set f_end=2099-07-05 --set f_days=5 --set f_leave_type=annual --set f_approver=user:ana
+expect "the refused field" "$(meta fields)" "f_approver"
+v2=$(new_leave ana)
+refuse ana "PERMISSION_DENIED FIELD_NOT_WRITABLE" item update "$v2" --set f_approver=user:ana
+refuse ana "PERMISSION_DENIED FIELD_NOT_WRITABLE" item transition "$v2" --to submitted --set f_approver=user:ana
+expect "no hold opened" "$(ok ana item get "$v2" | j '.item.hold // "none"')" "none"
+
+step "vacation: the submitted terms are frozen (FIELD_FROZEN); the comment is not"
+refuse ana "FAILED_PRECONDITION FIELD_FROZEN" item update "$v1" --set f_days=20
+expect "the frozen field" "$(meta fields)" "f_days"
+expect "the state that freezes it" "$(meta state)" "submitted"
+ok ana item update "$v1" --set "f_comment=$w, beach" >/dev/null
+
+step "vacation: ana approving her own request fails the guard; erin is not allowed"
+refuse ana "FAILED_PRECONDITION GUARD_FAILED" item transition "$v1" --to approved
+refuse erin "PERMISSION_DENIED NOT_ALLOWED" item transition "$v1" --to approved
+
+step "vacation: triage-bot acting for bob, with a namespace-wide session, is not allowed"
+ok triage-bot agent start --for user:bob --scopes namespaces/acme --powers 'read,transition:*' >/dev/null
+refuse triage-bot "PERMISSION_DENIED NOT_ALLOWED" item transition "$v1" --to approved
+refuse triage-bot "PERMISSION_DENIED NOT_ALLOWED" item transition "$v1" --to rejected
+
+step "vacation: bob approves; what was approved stays frozen"
+dec=$(ok bob item transition "$v1" --to approved)
+expect "approve's outcome" "$(j .outcome <<<"$dec")" "TRANSITION_OUTCOME_APPLIED"
+expect "state" "$(j .item.state <<<"$dec")" "approved"
+expect "category" "$(j .item.category <<<"$dec")" "STATE_CATEGORY_DONE"
+refuse ana "FAILED_PRECONDITION FIELD_FROZEN" item update "$v1" --set f_days=20
+expect "the state that freezes it" "$(meta state)" "approved"
+
+step "vacation: bob rejects another request"
+v3=$(new_leave ana)
+expect "submit's outcome" "$(submit_leave ana "$v3" | j .outcome)" "TRANSITION_OUTCOME_APPLIED"
+dec=$(ok bob item transition "$v3" --to rejected)
+expect "state" "$(j .item.state <<<"$dec")" "rejected"
+expect "category" "$(j .item.category <<<"$dec")" "STATE_CATEGORY_CANCELED"
+
+step "vacation: recall, edit, resubmit; withdraw"
+v4=$(new_leave ana)
+submit_leave ana "$v4" >/dev/null
+refuse bob "FAILED_PRECONDITION GUARD_FAILED" item transition "$v4" --to draft
+ok ana item transition "$v4" --to draft >/dev/null
+ok ana item update "$v4" --set f_days=3 --set f_end=2099-07-03 >/dev/null
+sub=$(submit_leave ana "$v4")
+expect "resubmit's outcome" "$(j .outcome <<<"$sub")" "TRANSITION_OUTCOME_APPLIED"
+expect "the new days" "$(j .item.fields.f_days <<<"$sub")" "3"
+expect "the approver, from HR again" "$(j .item.fields.f_approver <<<"$sub")" "user:bob"
+dec=$(ok ana item transition "$v4" --to withdrawn)
+expect "state" "$(j .item.state <<<"$dec")" "withdrawn"
+
+step "vacation: dana manages herself; HR answers no_eligible_approver (DENIED)"
+v5=$(new_leave dana)
+sub=$(submit_leave dana "$v5")
+expect "outcome" "$(j .outcome <<<"$sub")" "TRANSITION_OUTCOME_DENIED"
+expect "reason" "$(j .reason <<<"$sub")" "NO_ELIGIBLE_APPROVER"
+expect "state" "$(j .item.state <<<"$sub")" "draft"
+
+step "vacation: erin is not in the HR directory; HR answers unknown_employee (DENIED)"
+v6=$(new_leave erin)
+sub=$(submit_leave erin "$v6")
+expect "outcome" "$(j .outcome <<<"$sub")" "TRANSITION_OUTCOME_DENIED"
+expect "reason" "$(j .reason <<<"$sub")" "UNKNOWN_EMPLOYEE"
+
+# ---------------------------------------------------------------------------
 # Another namespace: carol, in globex, reaches nothing of acme, on every
 # operation that can name acme; and acme reaches nothing of hers.
 # ---------------------------------------------------------------------------
@@ -512,7 +606,8 @@ step "every reachable refusal was seen"
 for reason in UNAUTHENTICATED SESSION_INVALID INVALID_REQUEST NOT_FOUND NOT_ALLOWED NEEDS_APPROVAL \
 	NO_TRANSITION MISSING_FIELDS GUARD_FAILED WIDEN_NOT_CONFIRMED STALE HELD \
 	IDEMPOTENCY_KEY_REUSED NOT_CAUGHT_UP AUDIENCE_CHANGED \
-	LINK_CARDINALITY ALREADY_LINKED NOT_LINKED LINK_TARGET_TYPE; do
+	LINK_CARDINALITY ALREADY_LINKED NOT_LINKED LINK_TARGET_TYPE \
+	FIELD_NOT_WRITABLE FIELD_FROZEN; do
 	case $seen in *" $reason "*) ;; *) fail "no step triggered $reason" ;; esac
 done
 cat <<'EOF'
