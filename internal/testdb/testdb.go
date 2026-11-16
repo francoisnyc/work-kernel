@@ -47,6 +47,28 @@ func Start(ctx context.Context) (*pgxpool.Pool, func(), error) {
 	return pool, func() { pool.Close(); stop() }, nil
 }
 
+// StartEmpty starts a throwaway Postgres with no migrations applied, for
+// testing the migration itself. It returns the database URL and a function
+// that shuts it down.
+func StartEmpty(ctx context.Context) (string, func(), error) {
+	pg, err := postgres.Run(ctx, "postgres:17-alpine",
+		postgres.WithDatabase("kernel"),
+		postgres.WithUsername("kernel"),
+		postgres.WithPassword("kernel"),
+		postgres.BasicWaitStrategies(),
+	)
+	if err != nil {
+		return "", nil, fmt.Errorf("start postgres: %w", err)
+	}
+	stop := func() { _ = testcontainers.TerminateContainer(pg) }
+	dsn, err := pg.ConnectionString(ctx, "sslmode=disable")
+	if err != nil {
+		stop()
+		return "", nil, fmt.Errorf("connection string: %w", err)
+	}
+	return dsn, stop, nil
+}
+
 func migrate(ctx context.Context, dsn string) error {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {

@@ -31,6 +31,8 @@ var projectExempt = map[string]string{
 	// Step 0, part 2: the API learns who an agent acts for.
 	"ApprovalAudience": "returns whether a scope is open, no Item data",
 	"AgentSession":     "returns the session's agent, user, namespace, scopes (opaque Item IDs the session was granted) and powers; no Item data",
+	// Step 0, part 3: the item service's start in dev-token mode.
+	"EnsureRoles": "returns roles (namespace, principal ID, role name) the server's own config named; no Item data",
 }
 
 // noItemData are the result types that carry no Item data. A

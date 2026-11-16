@@ -13,10 +13,9 @@ import (
 )
 
 // ErrorDomain is the ErrorInfo domain of every error this API returns.
-// Clients identify an error by (reason, domain), so this must not change
-// once someone depends on it: docs/journal.md, Later, confirms it before
-// Step 0, part 3 sets the buf breaking baseline.
-const ErrorDomain = "pli.dev"
+// Clients identify an error by (reason, domain), so it is frozen from Step 0,
+// part 3 on (a test holds it). It is a label only, never resolved.
+const ErrorDomain = "pli.francoisnyc.github.io"
 
 // messages are the one fixed message of each ErrorInfo reason (PR #18
 // review). Every error the API returns carries exactly its reason's
@@ -44,6 +43,7 @@ var messages = map[string]string{
 	"NOT_INITIAL_STATE":   "the Type does not start in that state",
 	"HOP_LIMIT":           "the chain of kernel writes went too deep",
 	"WIDEN_NOT_CONFIRMED": "the move lets more people see; confirm it",
+	"AUDIENCE_CHANGED":    "the approval's audience changed since it was shown",
 }
 
 // ReasonMessage returns the one fixed message of an ErrorInfo reason, and
@@ -102,10 +102,7 @@ func notFound() *connect.Error {
 // audience is who an approval would open an agent session's content to:
 // everyone in the namespace (an open scope) or the scope's readers.
 func audience(open bool) string {
-	if open {
-		return "namespace"
-	}
-	return "restricted"
+	return itemservice.AudienceName(open)
 }
 
 // errorFor maps a kernel error to the error table in docs/design.md. itemName

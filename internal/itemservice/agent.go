@@ -204,6 +204,12 @@ type ApproveWidenRequest struct {
 	// passes what NEEDS_APPROVAL named); nil with a zero Scope is the
 	// namespace's root scope.
 	ScopeItem *uuid.UUID
+	// ExpectedAudience is the audience the approver was shown; required on
+	// ApproveWiden (ApprovalAudience ignores it). The approval commits only
+	// if the audience is still that, checked in the write's own transaction;
+	// otherwise it is a RejectedError with code audience_changed, and nothing
+	// is recorded.
+	ExpectedAudience *Audience
 }
 
 // ApproveWiden records a user's approval for an agent session to write into
@@ -217,8 +223,10 @@ type ApproveWidenRequest struct {
 // another namespace than the approver's, is ErrNotFound.
 func (k *Service) ApproveWiden(ctx context.Context, req ApproveWidenRequest) error {
 	if req.IdempotencyKey == "" || !item.IsKind(req.Principal.Actor, item.KindUser) ||
-		req.Principal.AgentSession != "" || req.Principal.OnBehalfOf != "" || req.Session == "" {
-		return fmt.Errorf("%w: an approval is given by a user, for an agent session, with an idempotency key", ErrInvalid)
+		req.Principal.AgentSession != "" || req.Principal.OnBehalfOf != "" || req.Session == "" ||
+		req.ExpectedAudience == nil {
+		return fmt.Errorf("%w: an approval is given by a user, for an agent session, with an idempotency key "+
+			"and the audience the user was shown", ErrInvalid)
 	}
 	hash, err := requestHash("approve_widen", req)
 	if err != nil {
@@ -228,6 +236,23 @@ func (k *Service) ApproveWiden(ctx context.Context, req ApproveWidenRequest) err
 		scope, err := checkApproval(ctx, tx, req)
 		if err != nil {
 			return WriteResult{}, err
+		}
+		// The audience is read in this transaction, so what the user was
+		// shown is what the approval opens the content to, or nothing is
+		// approved (the review of Step 0, part 2: it used to be read in a
+		// transaction of its own, before this one).
+		open, err := scopeOpen(ctx, tx, scope)
+		if err != nil {
+			return WriteResult{}, err
+		}
+		if want := req.ExpectedAudience.Open; open != want {
+			return WriteResult{}, &RejectedError{
+				Code:   CodeAudienceChanged,
+				Reason: "the scope's audience is not the one the approver was shown",
+				Metadata: map[string]string{
+					"audience": AudienceName(open), "expected_audience": AudienceName(want),
+				},
+			}
 		}
 		_, err = tx.Exec(ctx,
 			`insert into agent_session_approvals (session, scope_id, approved_by) values ($1, $2, $3)
@@ -245,6 +270,15 @@ type Audience struct {
 	// Open: everyone in the namespace (the scope is open); else only the
 	// readers of the scope's Item.
 	Open bool
+}
+
+// AudienceName is how the API names an audience: "namespace" (open) or
+// "restricted" (the readers of the scope's Item).
+func AudienceName(open bool) string {
+	if open {
+		return "namespace"
+	}
+	return "restricted"
 }
 
 // ApprovalAudience checks an approval as ApproveWiden would (a user, a

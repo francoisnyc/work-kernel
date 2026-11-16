@@ -301,7 +301,7 @@ func TestAgentSession_NeedsApprovalAndApproveWiden(t *testing.T) {
 
 	approve := func(who, parent, scope string) error {
 		_, err := as(who).ApproveWiden(ctx, connect.NewRequest(&kernelv1.ApproveWidenRequest{RequestId: newID(),
-			Parent: parent, Session: session, Scope: scope,
+			Parent: parent, Session: session, Scope: scope, ExpectedAudience: "namespace",
 		}))
 		return err
 	}
@@ -311,12 +311,12 @@ func TestAgentSession_NeedsApprovalAndApproveWiden(t *testing.T) {
 	notFound(t, "approval naming acme from globex", approve("bea", "namespaces/acme", open))
 	notFound(t, "approval of an unknown session", func() error {
 		_, err := as("ana").ApproveWiden(ctx, connect.NewRequest(&kernelv1.ApproveWidenRequest{RequestId: newID(),
-			Parent: "namespaces/acme", Session: "ses_made-up", Scope: open,
+			Parent: "namespaces/acme", Session: "ses_made-up", Scope: open, ExpectedAudience: "namespace",
 		}))
 		return err
 	}())
 	_, err = asAgent("bot", session).ApproveWiden(ctx, connect.NewRequest(&kernelv1.ApproveWidenRequest{RequestId: newID(),
-		Parent: "namespaces/acme", Session: session, Scope: open,
+		Parent: "namespaces/acme", Session: session, Scope: open, ExpectedAudience: "namespace",
 	}))
 	malformed(t, "an agent approving", err)
 	invalid(t, "a malformed scope", approve("ana", "namespaces/acme", "open"), "scope")
@@ -346,7 +346,7 @@ func TestAgentSession_ApproveWidenTakesARequestID(t *testing.T) {
 	session := startSession(t, "bot", "user:ana", []string{"namespaces/acme"}, "read")
 	approve := func(id, scope string) error {
 		_, err := as("ana").ApproveWiden(ctx, connect.NewRequest(&kernelv1.ApproveWidenRequest{
-			Parent: "namespaces/acme", Session: session, Scope: scope, RequestId: id,
+			Parent: "namespaces/acme", Session: session, Scope: scope, RequestId: id, ExpectedAudience: "namespace",
 		}))
 		return err
 	}
@@ -395,6 +395,7 @@ func TestAgentSession_NeedsApprovalNamesTheAudience(t *testing.T) {
 	approve := func(scope string, validateOnly bool) (*kernelv1.ApproveWidenResponse, error) {
 		res, err := as("ana").ApproveWiden(ctx, connect.NewRequest(&kernelv1.ApproveWidenRequest{
 			Parent: "namespaces/acme", Session: session, Scope: scope, RequestId: newID(), ValidateOnly: validateOnly,
+			ExpectedAudience: "namespace", // its one real approval is of an open Item
 		}))
 		if err != nil {
 			return nil, err

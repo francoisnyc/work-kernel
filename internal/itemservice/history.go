@@ -258,9 +258,12 @@ func (r *refResolver) ref(ctx context.Context, id uuid.UUID) (*ItemRef, error) {
 		return ref, nil
 	}
 	ref := &ItemRef{ID: id}
-	// Seeing an Item named in a history is reading it: Get decides, and
-	// records an agent's read like any other.
-	_, err := r.k.Get(ctx, r.p, id)
+	// Naming an Item in a history is not reading it: visibility decides
+	// whether its ID is shown (namespace, readers, an agent session's
+	// scopes), but no read is recorded, so a history never makes an agent's
+	// later write need approval. (Review of Step 0, part 2: this used Get,
+	// which recorded the read.)
+	_, _, err := r.k.visibleItem(ctx, r.p, id)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		ref = &ItemRef{Restricted: true}

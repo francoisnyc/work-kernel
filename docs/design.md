@@ -562,6 +562,9 @@ match.
 bots, agents through an MCP server, other people's apps); nothing reaches Items
 any other way, and the internal door never goes over the network. Served with
 connect-go, so every operation answers gRPC, gRPC-Web and JSON over HTTP.
+The item service also answers `GET /healthz` (200 while its database
+answers, else 503, with no body) for container health checks; it is
+outside the API contract: not in the proto, not versioned.
 Follow the published conventions: Google's API design guides (AIPs) for
 resources, paging, errors; Stripe's model for idempotency keys.
 
@@ -579,6 +582,12 @@ new call passes the kernel membership test.
   (`ana -> user:ana`); `pli --as ana` picks a token. The server refuses
   dev-token mode unless started with an explicit flag, and warns on every
   start. Real sign-on (OIDC) later replaces only the interceptor.
+  **Roles from the dev-token file** (Step 0, part 3): an entry may name the
+  roles its principal holds in its namespace (`roles: [approver]`, bare
+  names). In dev-token mode only, the server adds them at start
+  (`EnsureRoles`, one transaction), logging each one it adds; it never
+  removes a role, and warns about roles of the file's namespaces that the
+  file no longer names. Real sign-on brings roles from elsewhere.
 - Agents (in practice an LLM with tools) start sessions in **capability mode**:
   `StartAgentSession` takes the agent's token, the user it acts for
   (`acting_for`: who must have granted the agent; empty for the agent
@@ -617,8 +626,16 @@ new call passes the kernel membership test.
 - `ApproveWiden` and future approvals take the approver from the token. It
   takes a required `request_id`, like every write, and `validate_only`
   (AIP-163): check the approval and answer its `audience`, recording
-  nothing. `pli agent approve`, run as the user, prints who will see the
-  agent's content and approves only after a "y" at a terminal or `--yes`.
+  nothing. A real approval also takes **`expected_audience`**, required in
+  the API and in the kernel (Step 0, part 3): the audience the approver was
+  shown (`namespace` or `restricted`). The kernel reads the scope's audience
+  in the approval's own transaction and commits only for that audience;
+  otherwise `FAILED_PRECONDITION` / `AUDIENCE_CHANGED`, nothing recorded,
+  the `request_id` unused. A replay answers from the stored result, with
+  the audience its request committed for. `pli agent approve`, run as the
+  user, says who will see the agent's content, sends that audience, and
+  approves only after a "y" at a terminal or `--yes`;
+  `--expect-audience` names the audience without asking the server first.
 - Timers and hooks never use the network API.
 
 ### Resources and operations
@@ -670,6 +687,14 @@ fields it names; JSON `null` clears one. No field masks.
 
 - Paging everywhere: `page_size` (default 50, max 500), `page_token`,
   `next_page_token`. Opaque tokens, no offsets, no exact totals.
+- Paging is keyset on `(created_at desc, id desc)` (history: `item_seq`),
+  never an offset. A page token is bound to its request (filters, words,
+  container), its caller and its namespace: used with anything else it is
+  `INVALID_ARGUMENT` (decided in Step 0, part 2).
+- A filter with one value (one Type, one state) is `=` in SQL, which walks
+  the index in order and reads one page. Several values are `= any(...)`,
+  which on Postgres 17 sorts every match before the page (26-36 ms at
+  30,000 matches): a known cost, in the journal's Later with its fixes.
 - Filters on `SearchItems` and `ListItems`: Type, state, category, field
   equality and ranges, principal fields ("assigned to me"), links ("linked to
   X as `sprint`"). A filter alone is a valid search.
@@ -680,13 +705,17 @@ fields it names; JSON `null` clears one. No field masks.
 ### Errors
 
 Every error has a standard code and an `ErrorInfo` with a stable reason
-(AIP-193); metadata never names anything the caller can't see.
+(AIP-193); metadata never names anything the caller can't see. The
+ErrorInfo domain is `pli.francoisnyc.github.io`, **frozen** from Step 0,
+part 3 (clients match on reason and domain; a test holds it). It is a
+label, never resolved.
 
 **Messages are fixed.** Each reason has one message, the same every time;
 dynamic values go in ErrorInfo metadata, never in a message: `hold` (HELD),
-`scope` and `audience` (NEEDS_APPROVAL), `from_state` and `to_state` (a
-transition rule's refusal), `fields` (MISSING_FIELDS, comma-separated IDs),
-`header` (a misused header). A field violation's description may name the
+`scope` and `audience` (NEEDS_APPROVAL), `audience` and `expected_audience`
+(AUDIENCE_CHANGED), `from_state` and `to_state` (a transition rule's
+refusal), `fields` (MISSING_FIELDS, comma-separated IDs), `header` (a
+misused header). A field violation's description may name the
 field, never a value or an ID. A test fails if a message contains an ID.
 A rule's refusal answers with its code; every kernel rejection carries one
 (a test walks the source), and one without a code is a bug: `INTERNAL`.
@@ -700,6 +729,7 @@ A rule's refusal answers with its code; every kernel rejection carries one
 | `ErrForbidden` | `PERMISSION_DENIED` | `NOT_ALLOWED` |
 | `ErrNeedsApproval` | `PERMISSION_DENIED` | `NEEDS_APPROVAL` (+ scope, audience) |
 | `ErrRejected` | `FAILED_PRECONDITION` | the rule's code, e.g. `GUARD_FAILED` |
+| `ErrRejected`, an approval's audience changed since shown | `FAILED_PRECONDITION` | `AUDIENCE_CHANGED` (+ audience, expected_audience) |
 | `ErrStale` | `ABORTED` | `STALE` |
 | `ErrHeld` | `ABORTED` | `HELD` (+ hold name) |
 | `ErrIdempotencyKeyReuse` | `ALREADY_EXISTS` | `IDEMPOTENCY_KEY_REUSED` |
@@ -716,6 +746,11 @@ and `buf breaking` (against `main`) run in CI. Clients ignore unknown enum
 values and fields; every enum keeps `UNSPECIFIED = 0`. Until the proof of
 concept is done and someone else depends on v1, breaking changes are allowed
 but listed in the journal.
+
+`buf breaking` uses **WIRE_JSON** (`buf.yaml`): beyond wire numbers and
+types, it holds JSON field names and enum value names, since clients send
+and match them (pli speaks JSON). CI runs it on pull requests only, against
+the base branch; from Step 0, part 3 on, `main` is the baseline.
 
 ## Links, containment and people (decided 2026-11-15)
 
@@ -837,7 +872,7 @@ in the journal.
 
 | Step | Build | Done when |
 | --- | --- | --- |
-| 0 | Public API v1 server (`cmd/itemservice`, connect-go) and the `pli` CLI (`cmd/pli`) over what exists: create, get, update (patch, readers, move), transition with `wait`, search with filters, list by container, item history, Types read-only, agent sessions with required scopes and powers. Dev-token auth, the error table, paging, `request_id`, `etag`, plain-JSON field values. `buf lint` and `buf breaking` in CI. `docker compose up` runs Postgres, Temporal, the item service, relay and worker | A scripted `pli` session creates, edits, moves (including a held approve with `wait`), searches with filters, lists a container and reads history, acting as two users; every named refusal comes back with its code and reason; an agent session refused outside its scopes; a cross-namespace attempt fails on every operation; a stranger can run it from the README |
+| 0 (**done**) | Public API v1 server (`cmd/itemservice`, connect-go) and the `pli` CLI (`cmd/pli`) over what exists: create, get, update (patch, readers, move), transition with `wait`, search with filters, list by container, item history, Types read-only, agent sessions with required scopes and powers. Dev-token auth, the error table, paging, `request_id`, `etag`, plain-JSON field values. `buf lint` and `buf breaking` in CI. `docker compose up` runs Postgres, Temporal, a one-shot `migrate`, the item service, relay, worker and `connstub` (the stub CRM and ERP) | A scripted `pli` session creates, edits, moves (including a held approve with `wait`), searches with filters, lists a container and reads history, acting as two users; every named refusal comes back with its code and reason; an agent session refused outside its scopes; a cross-namespace attempt fails on every operation; a stranger can run it from the README. **Done 2026-11-16**: [journal, Step 0, part 3](journal.md#2026-11-16--step-0-proof-of-concept-part-3-one-command-stack-scenario-readme-finished) |
 | 1 | Link types and principal fields | Declared link types with cardinality, inverse and allowed targets, enforced; link changes are events with etags; guards and search see links; principal fields checked |
 | 2+ | Vacation request: human approvals, acting timers, link reactions (the balance), a stub email connector; then the Jira scenarios | Planned per step when reached |
 

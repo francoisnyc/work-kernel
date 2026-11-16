@@ -15,7 +15,8 @@
 // - Every write takes a required request_id (the idempotency key) and returns
 //   the Item after the write, with item_seq and commit_seq.
 // - Errors carry a standard code and a google.rpc.ErrorInfo with a stable
-//   reason (domain "pli.dev"); see the error table in docs/design.md.
+//   reason (domain "pli.francoisnyc.github.io", frozen); see the error table
+//   in docs/design.md.
 //
 // - Reads page: page_size (default 50, max 500; more is read as 500),
 //   page_token from the previous page's next_page_token, no offsets and no
@@ -2356,9 +2357,15 @@ type ApproveWidenRequest struct {
 	RequestId string `protobuf:"bytes,4,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	// Check the approval and answer its audience, recording nothing
 	// (AIP-163). request_id is not needed then.
-	ValidateOnly  bool `protobuf:"varint,5,opt,name=validate_only,json=validateOnly,proto3" json:"validate_only,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	ValidateOnly bool `protobuf:"varint,5,opt,name=validate_only,json=validateOnly,proto3" json:"validate_only,omitempty"`
+	// The audience the approver was shown, as a validate_only call answered
+	// it: "namespace" or "restricted". Required unless validate_only (ignored
+	// then). If the audience is different when the approval commits, nothing
+	// is approved: FAILED_PRECONDITION / AUDIENCE_CHANGED, with the current
+	// "audience" and this "expected_audience" in metadata.
+	ExpectedAudience string `protobuf:"bytes,6,opt,name=expected_audience,json=expectedAudience,proto3" json:"expected_audience,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ApproveWidenRequest) Reset() {
@@ -2424,6 +2431,13 @@ func (x *ApproveWidenRequest) GetValidateOnly() bool {
 		return x.ValidateOnly
 	}
 	return false
+}
+
+func (x *ApproveWidenRequest) GetExpectedAudience() string {
+	if x != nil {
+		return x.ExpectedAudience
+	}
+	return ""
 }
 
 type ApproveWidenResponse struct {
@@ -3135,14 +3149,15 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\n" +
 	"acting_for\x18\x04 \x01(\tR\tactingFor\x12\x16\n" +
 	"\x06scopes\x18\x05 \x03(\tR\x06scopes\x12\x16\n" +
-	"\x06powers\x18\x06 \x03(\tR\x06powers\"\xa1\x01\n" +
+	"\x06powers\x18\x06 \x03(\tR\x06powers\"\xce\x01\n" +
 	"\x13ApproveWidenRequest\x12\x16\n" +
 	"\x06parent\x18\x01 \x01(\tR\x06parent\x12\x18\n" +
 	"\asession\x18\x02 \x01(\tR\asession\x12\x14\n" +
 	"\x05scope\x18\x03 \x01(\tR\x05scope\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x04 \x01(\tR\trequestId\x12#\n" +
-	"\rvalidate_only\x18\x05 \x01(\bR\fvalidateOnly\"2\n" +
+	"\rvalidate_only\x18\x05 \x01(\bR\fvalidateOnly\x12+\n" +
+	"\x11expected_audience\x18\x06 \x01(\tR\x10expectedAudience\"2\n" +
 	"\x14ApproveWidenResponse\x12\x1a\n" +
 	"\baudience\x18\x01 \x01(\tR\baudience\"\xff\x01\n" +
 	"\x04Type\x12\x12\n" +

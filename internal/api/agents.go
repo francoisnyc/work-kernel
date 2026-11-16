@@ -118,16 +118,29 @@ func (s *server) ApproveWiden(ctx context.Context, req *connect.Request[kernelv1
 	kreq := itemservice.ApproveWidenRequest{
 		IdempotencyKey: m.RequestId, Principal: p, Session: m.Session, ScopeItem: scopeItem,
 	}
-	// Approving an Item approves its audience: the answer says who that is,
-	// and validate_only asks only that.
-	aud, err := s.k.ApprovalAudience(ctx, kreq)
-	if err != nil {
-		return nil, errorIn(err, p.Namespace, "")
-	}
-	if !m.ValidateOnly {
-		if err := s.k.ApproveWiden(ctx, kreq); err != nil {
+	// Approving an Item approves its audience. validate_only asks who that
+	// is, and records nothing.
+	if m.ValidateOnly {
+		aud, err := s.k.ApprovalAudience(ctx, kreq)
+		if err != nil {
 			return nil, errorIn(err, p.Namespace, "")
 		}
+		return connect.NewResponse(&kernelv1.ApproveWidenResponse{Audience: audience(aud.Open)}), nil
 	}
-	return connect.NewResponse(&kernelv1.ApproveWidenResponse{Audience: audience(aud.Open)}), nil
+	// A real approval names the audience its approver was shown, and the
+	// kernel commits it only for that audience, in one transaction. Its
+	// answer is that audience: on success, and on a replay, which answers
+	// for the request first committed.
+	switch m.ExpectedAudience {
+	case "namespace", "restricted":
+	case "":
+		return nil, badField("expected_audience", "required: the audience the approver was shown")
+	default:
+		return nil, badField("expected_audience", "want namespace or restricted")
+	}
+	kreq.ExpectedAudience = &itemservice.Audience{Open: m.ExpectedAudience == "namespace"}
+	if err := s.k.ApproveWiden(ctx, kreq); err != nil {
+		return nil, errorIn(err, p.Namespace, "")
+	}
+	return connect.NewResponse(&kernelv1.ApproveWidenResponse{Audience: m.ExpectedAudience}), nil
 }

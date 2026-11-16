@@ -465,7 +465,7 @@ func TestAgentScopes_NeedsApprovalNamesTheScopeItem(t *testing.T) {
 
 	// The user approves B by its Item, as the API will; the retry works.
 	if err := w.k.ApproveWiden(testCtx(t), itemservice.ApproveWidenRequest{IdempotencyKey: newKey(),
-		Principal: w.user, Session: agent.AgentSession, ScopeItem: &w.b,
+		Principal: w.user, Session: agent.AgentSession, ScopeItem: &w.b, ExpectedAudience: &openAudience,
 	}); err != nil {
 		t.Fatalf("ApproveWiden by the scope's Item: %v", err)
 	}
@@ -485,11 +485,11 @@ func TestAgentScopes_ApprovalStaysInTheSessionsNamespace(t *testing.T) {
 	sameNameElsewhere := in(w.user, ns)
 
 	err := w.k.ApproveWiden(testCtx(t), itemservice.ApproveWidenRequest{IdempotencyKey: newKey(),
-		Principal: sameNameElsewhere, Session: agent.AgentSession, ScopeItem: &w.b,
+		Principal: sameNameElsewhere, Session: agent.AgentSession, ScopeItem: &w.b, ExpectedAudience: &openAudience,
 	})
 	assertNotFound(t, "approver in another namespace", err)
 	err = w.k.ApproveWiden(testCtx(t), itemservice.ApproveWidenRequest{IdempotencyKey: newKey(),
-		Principal: w.user, Session: "ses_" + uuid.NewString(), ScopeItem: &w.b,
+		Principal: w.user, Session: "ses_" + uuid.NewString(), ScopeItem: &w.b, ExpectedAudience: &openAudience,
 	})
 	assertNotFound(t, "unknown session", err)
 	if n := count(t, `select count(*) from agent_session_approvals where session = $1`, agent.AgentSession); n != 0 {
@@ -506,6 +506,7 @@ func TestAgentScopes_ApprovalTakesAnIdempotencyKey(t *testing.T) {
 	approve := func(key string, scope *uuid.UUID) error {
 		return w.k.ApproveWiden(testCtx(t), itemservice.ApproveWidenRequest{
 			IdempotencyKey: key, Principal: w.user, Session: agent.AgentSession, ScopeItem: scope,
+			ExpectedAudience: &openAudience, // A and B are open
 		})
 	}
 	if err := approve("", &w.b); !errors.Is(err, itemservice.ErrInvalid) {

@@ -55,8 +55,53 @@ jobs:
             exit 1
           fi
 
+      # Pull requests only: kernel.v1 only grows. WIRE_JSON (buf.yaml) also
+      # holds JSON field names and enum names, which clients match.
+      - name: The proto stays compatible with the base branch
+        if: github.event_name == 'pull_request'
+        env:
+          GOTOOLCHAIN: auto
+          BASE: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags --depth=1 origin "+refs/heads/$BASE:refs/remotes/origin/$BASE"
+          make breaking BREAKING_AGAINST=".git#ref=refs/remotes/origin/$BASE"
+
       - name: Vet
         run: go vet ./...
 
       - name: Test (with race detector)
         run: go test -race -count=1 ./...
+
+  # The Step 0 scenario against the whole compose stack, through pli only.
+  scenario:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: The images build with go.mod's Go
+        run: |
+          want=$(awk '$1 == "go" { print $2 }' go.mod)
+          got=$(sed -n 's/^ARG GO_VERSION=//p' Dockerfile)
+          if [ "$want" != "$got" ]; then
+            echo "Dockerfile has GO_VERSION=$got, go.mod has go $want"
+            exit 1
+          fi
+
+      - name: Start the stack
+        run: docker compose up -d --build --wait
+
+      - name: Run the scenario
+        run: ./scripts/scenario.sh
+
+      - name: Stack logs
+        if: failure()
+        run: docker compose logs --no-color --timestamps
+
+      - name: Stop the stack
+        if: always()
+        run: docker compose down -v

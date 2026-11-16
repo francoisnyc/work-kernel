@@ -23,6 +23,10 @@ type Token struct {
 	Token     string `yaml:"token"`     // the bearer token
 	Principal string `yaml:"principal"` // user:<id> or agent:<id>
 	Namespace string `yaml:"namespace"` // the namespace the principal acts in
+	// Roles the principal holds in that namespace (approver, without the
+	// "role:" prefix). The item service adds them at start, in dev-token
+	// mode only; it never removes one.
+	Roles []string `yaml:"roles,omitempty"`
 }
 
 type file struct {
@@ -113,6 +117,10 @@ func scopeIn(scope, ns string) bool {
 	return m != nil && m[1] == ns
 }
 
+// roleName matches the item service's role names (EnsureRoles), repeated
+// here for the same reason as namespaceName.
+var roleName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
+
 // namespaceName matches itemservice.ValidNamespace. It is repeated here so
 // pli does not import the item service.
 var namespaceName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
@@ -162,6 +170,11 @@ func Parse(data []byte) ([]Token, error) {
 			return nil, fail("token %q is used twice", t.Token)
 		case names[t.Name]:
 			return nil, fail("name %q is used twice", t.Name)
+		}
+		for _, r := range t.Roles {
+			if !roleName.MatchString(r) {
+				return nil, fail("role %q must be a bare name such as approver (no role: prefix)", r)
+			}
 		}
 		tokens[t.Token], names[t.Name] = true, true
 	}

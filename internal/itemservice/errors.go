@@ -26,6 +26,7 @@ const (
 	CodeNotInitialState   = "not_initial_state"             // a create names a state the Type does not start in
 	CodeHopLimit          = "hop_limit"                     // a chain of kernel writes went too deep
 	CodeWidenNotConfirmed = "widen_not_confirmed"           // a move widens who can see; the caller must confirm it
+	CodeAudienceChanged   = "audience_changed"              // an approval's audience is not the one the approver was shown
 )
 
 // RejectedError is an ErrRejected with its code: the request is well formed

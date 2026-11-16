@@ -168,9 +168,10 @@ Ideas noted during the spike, not built yet.
   for the earlier tests; that is exactly how a forgotten path would leak
   across namespaces. The API's tests fail on any kernel call without one,
   but the kernel itself still accepts it. (Step 0, part 1)
-- Confirm the ErrorInfo domain (`pli.dev`, one constant, `api.ErrorDomain`)
+- ~~Confirm the ErrorInfo domain (`pli.dev`, one constant, `api.ErrorDomain`)
   before Part 3 sets the `buf breaking` baseline: clients match on
-  (reason, domain), so changing it later breaks them. (Step 0, part 1)
+  (reason, domain), so changing it later breaks them. (Step 0, part 1)~~
+  Done in Step 0, part 3: frozen as `pli.francoisnyc.github.io`, held by a test.
 - `UpdateItem` and `TransitionItem` read the Item before writing, to convert
   field values against its Type (ints as strings): one extra query per write,
   and for an agent one more recorded read. Move the conversion into the
@@ -194,6 +195,19 @@ Ideas noted during the spike, not built yet.
   move out of the session's scopes should deny it. (Step 0, part 2)
 - Agent sessions never expire. Add an expiry (and a way to end one) before
   real agents. (Step 0, part 2)
+- The relay and the worker have no health check: they serve no port. A
+  worker that starts but cannot poll Temporal is only noticed when holds stay
+  open. Give both a small health endpoint (or a heartbeat file) if the stack
+  grows a supervisor. (Step 0, part 3)
+- `EnsureRoles` only adds: a role taken out of the dev-token file stays in
+  the database, with a warning at every start. Real sign-on will bring roles
+  from elsewhere; until then removing one is a SQL statement. (Step 0, part 3)
+- `cmd/connstub` serves through `httptest.Server` (reused for its Close).
+  Fine for a stub; a real connector service would use `http.Server`.
+  (Step 0, part 3)
+- Postgres in the compose stack keeps its data in an anonymous volume:
+  `docker compose down` without `-v` leaves one behind each time. Name the
+  volume if the stack starts being kept between sessions. (Step 0, part 3)
 
 ## 2026-11-12 — Step 1 (finished)
 
@@ -983,3 +997,68 @@ direct dependency added in this part, approved); CI's gofmt check skips the gene
 **Next session:** Step 0, part 3: `docker compose up` for the whole stack, `buf breaking`, the README
 and the scenario script. The script's agent session must start on one container inside a
 namespace-wide grant, so it exercises capability mode, and must pass `--yes` to `agent approve`.
+
+## 2026-11-16 — Step 0 (proof of concept), part 3: one-command stack, scenario, README (finished)
+
+**Built:** `docker compose up -d --build --wait` runs the whole stack: Postgres, the Temporal dev
+server, a one-shot `migrate` (every service waits for it to succeed), the item service with the
+example dev tokens mounted read-only, the relay, the worker and `connstub` (stub CRM and ERP, the ERP
+at 1 s). Health checks and `depends_on` conditions, no sleep loops; only 8080 (API) and 8233 (Temporal
+UI) are published, and `compose.dev.yaml` (opt in with `-f`) adds 5432 and 7233. One Dockerfile: a
+builder on go.mod's Go (CI checks they agree), static binaries, one distroless nonroot stage per
+service. New commands: `cmd/migrate` (the embedded migrations, no default `DATABASE_URL`) and
+`cmd/connstub` (customers from `deploy/customers.json`, unknown keys refused). The item service gained
+`GET /healthz` (200 or 503, no body, outside the contract) and `--probe`, for images with no shell.
+`scripts/scenario.sh` (`make scenario`, and a CI job that always runs `down -v`) drives only pli: two
+users, every refusal a client can cause (15 reasons, each code and reason checked, metadata where it
+carries any), an agent session on one room inside a namespace-wide grant (NOT_FOUND outside,
+NEEDS_APPROVAL, AUDIENCE_CHANGED, approve, retry), every operation across namespaces, and the PENDING
+approve's asynchronous outcome; it prints the five reasons it cannot cause. README, with a walkthrough
+run command by command against the stack. `buf breaking` with WIRE_JSON on pull requests. Review
+fixes: 6a `errNotBuilt` removed; 6b one-transaction approvals with `expected_audience`; 6c history
+names without recorded reads; 6d pli's SESSION_INVALID hint. pli: `XDG_CONFIG_HOME` on every OS,
+`--expect-audience`. The ErrorInfo domain is frozen as `pli.francoisnyc.github.io`.
+
+**Kernel changes, counted:** (1) `ApproveWiden` requires `ExpectedAudience` and reads the scope's
+audience in its own transaction; a different one is a `RejectedError` (`audience_changed`, both
+audiences in metadata), nothing recorded; `AudienceName`. (2) `Get` split: `visibleItem` (namespace,
+readers, session scopes; no read recorded), used by history's name resolution. (3) `EnsureRoles`
+(adds only; reports roles a list no longer names; validates all before writing). Proto: one additive
+field, `ApproveWidenRequest.expected_audience`.
+
+**Numbers** (this container: Xeon 2.1 GHz, 4 CPUs; images already built; the ERP stub answers after
+1 s, so about 1 s of every approve is the stub):
+
+| Measure | Value |
+| --- | --- |
+| Images (distroless static) | connstub 15.8 MB, migrate 20.2 MB, item service 32.2 MB, relay 47.0 MB, worker 49.4 MB |
+| Build, all five images (modules cached) | 34 s |
+| `docker compose up -d --wait`, fresh volumes, until every service is healthy | 6.4-6.6 s |
+| Held approve, `--wait 5s` → APPLIED, first on a cold stack | 1136 ms, 1189 ms (two cold stacks) |
+| Held approve, warm | 1038-1238 ms (5 runs) |
+| Denied approve, `--wait 5s` → DENIED | 1081-1137 ms |
+| PENDING approve → approved, seen by `item get` | 1205-1282 ms after the PENDING answer |
+| Scenario, whole run (pli build cached; includes the ~2 s NOT_CAUGHT_UP wait) | 5.5-6.0 s |
+
+Seven passing runs: five in a row on one stack, then two on a second fresh one. Reruns never collide
+(each run tags its Items with its own word). No difference between a cold and a warm first approve.
+
+**Surprises:** the script's first version expected only t1 approved at search time, but t2's PENDING
+approve is allowed in the background about 1.2 s later, before the search; the fix checks t1 in and t3
+out, and a new step waits for t2's outcome on purpose. Two of my Phase B test helpers hung for the
+whole 10-minute test timeout when the server stopped at start (the cleanup waited on a channel the
+loop had already drained). In this container, builds in Docker cannot use the session's TLS proxy:
+the Dockerfile has an optional `ARG GOPROXY`, and I built through a mirror served from the local
+module cache (compose's bake also refused host networking). The local `main` here was stale (PR #9),
+so `buf breaking` against it listed a dozen false breaks; `make breaking` now compares against
+`origin/main`, and CI fetches the base with an explicit refspec, since a shallow single-branch clone's
+`git fetch origin main` updates only `FETCH_HEAD`. On macOS `os.UserConfigDir` ignores
+`XDG_CONFIG_HOME`, and the go command keeps its own settings in the config directory, so the script
+builds pli before it sets one. `docker compose up --wait` treats the one-shot migrate's exit 0 as done.
+
+**Open:** Later has four new items (no health check on relay and worker, roles never removed,
+connstub on `httptest.Server`, Postgres's anonymous volume).
+
+**Next session:** Step 0 is done when the PR's CI is green (the scenario job and `buf breaking`
+included): `main` then becomes the `buf breaking` baseline. Then proof-of-concept Step 1: link types and
+principal fields.
