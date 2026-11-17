@@ -38,6 +38,9 @@ type Activities struct {
 	// scaled: hook budgets, the undo backoff and every operational timeout
 	// keep real time. LoadItem records it in the Snapshot.
 	DevDay time.Duration
+	// DevTypes are the Types DevDay applies to; every other Type keeps
+	// real time. DevDay without DevTypes scales nothing.
+	DevTypes []string
 }
 
 // LoadItem reads what a new run needs to know about its Item: where it is,
@@ -209,6 +212,8 @@ type WorkerOptions struct {
 	// DevDay: see Activities.DevDay. cmd/worker sets it only from its
 	// --dev-time-scale flag, which it refuses without the explicit dev flag.
 	DevDay time.Duration
+	// DevTypes: see Activities.DevTypes (--dev-time-scale-types).
+	DevTypes []string
 }
 
 // NewWorker returns a worker, not yet started, that runs Item workflows and

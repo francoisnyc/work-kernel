@@ -40,7 +40,7 @@ func newMailStack(t *testing.T) *mailStack {
 	t.Cleanup(m.mail.Close)
 	m.stopWorker()
 	m.worker = wf.NewWorker(tc, m.queue, m.k, wf.WorkerOptions{
-		Connectors: m.connectors(), HookBudget: testBudget, DevDay: e2eDay,
+		Connectors: m.connectors(), HookBudget: testBudget, DevDay: e2eDay, DevTypes: []string{"vacation_request"},
 	})
 	if err := m.worker.Start(); err != nil {
 		t.Fatalf("start worker: %v", err)
@@ -132,7 +132,8 @@ func TestActivities_LoadItem_ScaledClock(t *testing.T) {
 	m.balance(25)
 	id := m.submittedByHandV3(t, 5)
 
-	scaled := &wf.Activities{Items: m.k, HookBudget: 15 * time.Minute, DevDay: 2 * time.Second}
+	scaled := &wf.Activities{Items: m.k, HookBudget: 15 * time.Minute, DevDay: 2 * time.Second,
+		DevTypes: []string{"vacation_request"}}
 	snap, err := scaled.LoadItem(serverCtx(t), id.String())
 	if err != nil {
 		t.Fatalf("LoadItem: %v", err)

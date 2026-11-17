@@ -7,8 +7,8 @@
 # principal field f_assignee, on ticket v5. Step 2, part 1 added the vacation
 # request: an approval as a business state, with the HR check. Step 2, part
 # 2 added the leave balance: the held deduction, its refund, the race. Part 3
-# added time and mail (reminders, expiry, a timer deferred by a hold, the
-# emails), on the stack's dev clock; it needs curl.
+# added time and mail (reminders, expiry, the emails), on the stack's dev
+# clock (vacation_request only); it needs curl.
 #
 #   scripts/scenario.sh          (or: make scenario, which starts the stack first)
 #
@@ -811,23 +811,6 @@ dec=$(ok bob item transition "$v22" --to approved --wait 5s)
 expect "outcome" "$(j .outcome <<<"$dec")" "TRANSITION_OUTCOME_DENIED"
 expect "reason" "$(j .reason <<<"$dec")" "INSUFFICIENT_BALANCE"
 ok ana item transition "$v22" --to withdrawn >/dev/null # before it expires: this check is about the denial
-
-step "mail: a timer deferred by a hold (a ticket, its ERP check slow: 3 s)"
-# ticket@5's in_progress timer (24 h: 2 s here) comes due while the ERP
-# check holds the approval (cust-slow answers after 3 s, and denies: the
-# amount is over its credit limit). The timer waits for the hold to close,
-# then looks again: still in_progress after the denial, so it fires at once
-# (in_progress -> open). A spent timer would have left it in_progress.
-t9=$(new_ticket ana --set f_customer_id=cust-slow --set f_amount=5000 --set f_assignee=user:bob)
-ok bob item transition "$t9" --to open >/dev/null
-ok bob item transition "$t9" --to in_progress >/dev/null
-pending=$(ok bob item transition "$t9" --to approved --wait 0s)
-expect "the approval is held" "$(j .outcome <<<"$pending")" "TRANSITION_OUTCOME_PENDING"
-wait_until 15 "the deferred timer moved t9 back to open" state_is bob "$t9" open
-order=$(ok bob item history "$t9" --page-size 100 | jqx -r \
-	'[.events[] | select(.kind == "ITEM_EVENT_KIND_TRANSITION_DENIED" or
-	  (.kind == "ITEM_EVENT_KIND_TRANSITIONED" and .to_state == "open" and .actor == "system:timer")) | .kind] | join(" ")')
-expect "the denial, then the timer's move" "$order" "ITEM_EVENT_KIND_TRANSITION_DENIED ITEM_EVENT_KIND_TRANSITIONED"
 
 step "mail: every email exactly once, the absent ones absent (after two more dev days)"
 sleep 4

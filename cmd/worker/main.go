@@ -77,6 +77,8 @@ type config struct {
 	// DevDay is the length of a day for the durations Types declare (state
 	// and acting timers), zero for real time. Dev only.
 	DevDay time.Duration
+	// DevTypes are the Types the scale applies to; required with it.
+	DevTypes []string
 }
 
 // The dev clock's flags. --dev-time-scale takes the length a day lasts
@@ -85,7 +87,17 @@ type config struct {
 const (
 	flagTimeScale = "dev-time-scale"
 	flagDevClock  = "dev-clock-i-know-this-is-not-production"
+	// flagTimeScaleTypes lists the Types the scale applies to (comma
+	// separated); every other Type keeps real time.
+	flagTimeScaleTypes = "dev-time-scale-types"
 )
+
+// checkDevTypes refuses a scale naming a Type that is not loaded.
+//
+// Phase B stub: not implemented yet.
+func checkDevTypes(c config, loaded []string) error {
+	return nil
+}
 
 // parseConfig reads the worker's flags.
 //
