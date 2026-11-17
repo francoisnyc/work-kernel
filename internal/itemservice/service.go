@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/francoisnyc/work-kernel/internal/item"
+	"github.com/francoisnyc/work-kernel/internal/lifecycle"
 	"github.com/francoisnyc/work-kernel/internal/policy"
 	"github.com/francoisnyc/work-kernel/internal/typedef"
 )
@@ -513,7 +514,38 @@ func (k *Service) StateEntry(ctx context.Context, id uuid.UUID) (StateEntry, err
 	if se.PendingUndos, err = k.pendingUndos(ctx, id, ty); err != nil {
 		return StateEntry{}, err
 	}
+	if se.ActingRuns, err = k.actingRuns(ctx, id, se.EnteredSeq); err != nil {
+		return StateEntry{}, err
+	}
 	return se, nil
+}
+
+// actingRuns counts, per acting timer, the runs completed for one entry:
+// hook_ran or hook_failed naming the timer, caused by the entering event.
+func (k *Service) actingRuns(ctx context.Context, id uuid.UUID, entered int64) (map[string]int, error) {
+	rows, err := k.pool.Query(ctx,
+		`select payload ->> 'timer', count(distinct payload ->> 'run') from item_events
+		 where item_id = $1 and causation_id = $2 and op in ($3, $4) and payload ? 'timer'
+		 group by 1`, id, fmt.Sprintf("%s:%d", id, entered), lifecycle.OpHookRan, lifecycle.OpHookFailed)
+	if err != nil {
+		return nil, fmt.Errorf("read acting runs: %w", err)
+	}
+	type count struct {
+		timer string
+		n     int
+	}
+	counts, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (count, error) {
+		var c count
+		return c, r.Scan(&c.timer, &c.n)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read acting runs: %w", err)
+	}
+	out := map[string]int{}
+	for _, c := range counts {
+		out[c.timer] = c.n
+	}
+	return out, nil
 }
 
 // Type returns a registered Type version.

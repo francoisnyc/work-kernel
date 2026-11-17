@@ -608,13 +608,21 @@ func (k *Service) pendingUndos(ctx context.Context, id uuid.UUID, ty *typedef.Ty
 		if !ok {
 			continue // nothing was taken
 		}
-		var done bool
+		// Done once the refund committed and, when hooks run on it (the
+		// refund email), once reaction_applied recorded it too: a crash
+		// between the two leaves the undo pending, and the new run's Undo
+		// (a no-op under its key) records it.
+		keys := []string{resv.key + ":" + undo.ID}
+		if len(lifecycle.ReactionHooks(ty, undo.ID)) > 0 {
+			keys = append(keys, resv.key+":"+undo.ID+":applied")
+		}
+		var found int
 		if err := k.pool.QueryRow(ctx,
-			`select exists (select 1 from idempotency where namespace_id = $1 and actor = $2 and key = $3)`,
-			ns, item.KindReaction+":"+ty.ID+":"+undo.ID, resv.key+":"+undo.ID).Scan(&done); err != nil {
+			`select count(*) from idempotency where namespace_id = $1 and actor = $2 and key = any($3)`,
+			ns, item.KindReaction+":"+ty.ID+":"+undo.ID, keys).Scan(&found); err != nil {
 			return nil, fmt.Errorf("read the undo's key: %w", err)
 		}
-		if done {
+		if found == len(keys) {
 			continue
 		}
 		p := PendingUndo{Reaction: undo.ID, HoldID: h.id, CauseSeq: cause}

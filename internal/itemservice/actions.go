@@ -3,6 +3,7 @@ package itemservice
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -90,12 +91,18 @@ func (in *Internal) HookFailed(ctx context.Context, req HookFailedRequest) (Writ
 			return WriteResult{}, fmt.Errorf("%w: %s is a %s hook; only an action hook records hook_failed",
 				ErrInvalid, kc.hookID, h.Kind)
 		}
+		if err := checkRun(ty, h, req.Timer, req.Run); err != nil {
+			return WriteResult{}, err
+		}
 		itemSeq := it.ItemSeq + 1
 		if _, err := tx.Exec(ctx,
 			`update items set item_seq = $2, updated_at = now() where id = $1`, req.ItemID, itemSeq); err != nil {
 			return WriteResult{}, fmt.Errorf("update item: %w", err)
 		}
 		payload := map[string]any{"hook": h.ID, "reason": req.Reason}
+		if req.Timer != "" {
+			payload["timer"], payload["run"] = req.Timer, req.Run
+		}
 		return appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, req.Attribution, lifecycle.OpHookFailed, payload, nil)
 	})
 }
@@ -167,16 +174,44 @@ func (k *Service) pendingActions(ctx context.Context, id uuid.UUID, ty *typedef.
 		completed[d] = true
 	}
 
+	// Every applied undo that runs hooks (on: reaction), oldest first: each
+	// is an entry of those hooks, as entering a state is of an action's.
+	rows, err = k.pool.Query(ctx,
+		`select item_seq, coalesce(payload->>'reaction', ''), coalesce(correlation_id, ''), hop
+		 from item_events
+		 where item_id = $1 and op = $2
+		 order by item_seq`, id, lifecycle.OpReactionApplied)
+	if err != nil {
+		return nil, fmt.Errorf("read applied reactions: %w", err)
+	}
+	applied, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (entry, error) {
+		var e entry
+		return e, r.Scan(&e.seq, &e.state, &e.corr, &e.hop)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read applied reactions: %w", err)
+	}
+
 	var out []PendingAction
+	pending := func(h typedef.Hook, e entry) {
+		key := done{
+			origin: fmt.Sprintf("hook:%s@v%d:%s", ty.ID, ty.Version, h.ID),
+			cause:  fmt.Sprintf("%s:%d", id, e.seq),
+		}
+		if !completed[key] {
+			out = append(out, PendingAction{Hook: h.ID, CauseSeq: e.seq, CorrelationID: e.corr, Hop: e.hop})
+		}
+	}
 	for _, e := range entries {
 		for _, h := range lifecycle.ActionHooks(ty, e.state) {
-			key := done{
-				origin: fmt.Sprintf("hook:%s@v%d:%s", ty.ID, ty.Version, h.ID),
-				cause:  fmt.Sprintf("%s:%d", id, e.seq),
-			}
-			if !completed[key] {
-				out = append(out, PendingAction{Hook: h.ID, CauseSeq: e.seq, CorrelationID: e.corr, Hop: e.hop})
-			}
+			pending(h, e)
+		}
+	}
+	for _, e := range applied {
+		// The payload names the reaction as <type>:<reaction>.
+		_, reaction, _ := strings.Cut(e.state, ":")
+		for _, h := range lifecycle.ReactionHooks(ty, reaction) {
+			pending(h, e)
 		}
 	}
 	return out, nil
