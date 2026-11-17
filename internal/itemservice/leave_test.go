@@ -74,6 +74,20 @@ func (w leaveWorld) balance(t *testing.T, owner item.Principal, allowance int) u
 	return res.ItemID
 }
 
+// visibleBalance: hana creates a balance for owner that everyone in the
+// namespace can see (not narrowed).
+func (w leaveWorld) visibleBalance(t *testing.T, owner item.Principal, allowance int) uuid.UUID {
+	t.Helper()
+	res, err := w.k.Create(testCtx(t), itemservice.CreateRequest{
+		IdempotencyKey: newKey(), Principal: w.hana, TypeID: "leave_balance", TypeVersion: 1,
+		Fields: map[string]any{"f_owner": owner.Actor, "f_allowance": allowance},
+	})
+	if err != nil {
+		t.Fatalf("hana creates a visible balance for %s: %v", owner.Actor, err)
+	}
+	return res.ItemID
+}
+
 func (w leaveWorld) closeBalance(t *testing.T, id uuid.UUID) {
 	t.Helper()
 	if _, err := w.k.Transition(testCtx(t), itemservice.TransitionRequest{
@@ -252,6 +266,13 @@ func TestLeaveBalance_HRCreatesAndSetsTheAllowance(t *testing.T) {
 	}
 }
 
+// inDefault places a principal in the default namespace, which reads
+// (ListEvents) require.
+func inDefault(p item.Principal) item.Principal {
+	p.Namespace = "default"
+	return p
+}
+
 func updateFields(t *testing.T, k *itemservice.Service, p item.Principal, id uuid.UUID, fields map[string]any) error {
 	t.Helper()
 	_, err := k.Update(testCtx(t), itemservice.UpdateRequest{IdempotencyKey: newKey(), Principal: p, ItemID: id, Fields: fields})
@@ -279,19 +300,27 @@ func TestLeaveBalance_OnlyHRWritesOwnerAndAllowance(t *testing.T) {
 	assertNotWritable(t, "ana raises her allowance", updateFields(t, w.k, w.ana, bal, map[string]any{"f_allowance": 99}), "f_allowance")
 	assertNotWritable(t, "ana gives her balance away", updateFields(t, w.k, w.ana, bal, map[string]any{"f_owner": w.bob.Actor}), "f_owner")
 
-	// An agent acting for hana: the agent lacks the role, so no.
+	// The role check comes after visibility: an agent that cannot see the
+	// balance (narrowed to ana and hana) finds nothing, whatever its roles.
 	agent := withSession(t, w.k, item.Principal{Actor: "agent:" + uuid.NewString()[:8], OnBehalfOf: w.hana.Actor})
+	if err := updateFields(t, w.k, agent, bal, map[string]any{"f_allowance": 26}); !errors.Is(err, itemservice.ErrNotFound) {
+		t.Errorf("an agent that cannot see the balance: %v, want ErrNotFound before the role check", err)
+	}
+
+	// The role rows, on a balance the agent can see (not narrowed).
+	open := w.visibleBalance(t, w.ana, 25)
+	// An agent acting for hana: the agent lacks the role, so no.
 	assertNotWritable(t, "an agent without the role, for hana",
-		updateFields(t, w.k, agent, bal, map[string]any{"f_allowance": 26}), "f_allowance")
+		updateFields(t, w.k, agent, open, map[string]any{"f_allowance": 26}), "f_allowance")
 	// Both hold it: yes.
 	grantRole(t, item.Principal{Actor: agent.Actor}, "hr_admin")
-	if err := updateFields(t, w.k, agent, bal, map[string]any{"f_allowance": 26}); err != nil {
+	if err := updateFields(t, w.k, agent, open, map[string]any{"f_allowance": 26}); err != nil {
 		t.Errorf("an agent with the role, for hana: %v", err)
 	}
 	// The agent has it, its user does not: no.
 	forAna := withSession(t, w.k, item.Principal{Actor: agent.Actor, OnBehalfOf: w.ana.Actor})
 	assertNotWritable(t, "an agent with the role, for ana",
-		updateFields(t, w.k, forAna, bal, map[string]any{"f_allowance": 99}), "f_allowance")
+		updateFields(t, w.k, forAna, open, map[string]any{"f_allowance": 99}), "f_allowance")
 	assertUsed(t, w, bal, 0)
 }
 
@@ -366,7 +395,7 @@ func TestBalanceLink_SetOnEnteringSubmitted(t *testing.T) {
 		t.Errorf("links = %+v, want %+v", it.Links, want)
 	}
 	// History shows it on the transition.
-	page, err := w.k.ListEvents(testCtx(t), itemservice.ListEventsRequest{Principal: w.ana, ItemID: id})
+	page, err := w.k.ListEvents(testCtx(t), itemservice.ListEventsRequest{Principal: inDefault(w.ana), ItemID: id})
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
@@ -478,7 +507,7 @@ func TestBalanceLink_ResubmitKeepsOrReplaces(t *testing.T) {
 	if got := balanceLinks(t, id); !slices.Equal(got, []uuid.UUID{second}) {
 		t.Errorf("after the replacement: links %v, want only [%s]", got, second)
 	}
-	page, err := w.k.ListEvents(testCtx(t), itemservice.ListEventsRequest{Principal: w.ana, ItemID: id})
+	page, err := w.k.ListEvents(testCtx(t), itemservice.ListEventsRequest{Principal: inDefault(w.ana), ItemID: id})
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}

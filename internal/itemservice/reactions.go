@@ -34,11 +34,11 @@ import (
 
 // Rejection codes of reactions, link resolution and invariants.
 const (
-	CodeInvariantFailed     = "invariant_failed"      // a write would break an invariant; metadata invariant
-	CodeLinkUnresolved      = "link_unresolved"       // entering a resolve state found 0 or >1 targets; metadata link_type, reason
-	CodeReactionNotAccepted = "reaction_not_accepted" // the target's Type version does not accept the reaction for those fields
-	CodeNotUndoable         = "not_undoable"          // Undo of a hold that is open, or allowed and not left by the undo's trigger
-	CodeReactionFailed      = "reaction_failed"       // a reaction's add cannot be evaluated on the source (a null amount)
+	CodeInvariantFailed       = "invariant_failed"        // a write would break an invariant; metadata invariant
+	CodeLinkUnresolved        = "link_unresolved"         // entering a resolve state found 0 or >1 targets; metadata link_type, reason
+	CodeReactionNotAccepted   = "reaction_not_accepted"   // the target's Type version does not accept the reaction for those fields
+	CodeNotUndoable           = "not_undoable"            // Undo of a hold that is open, or allowed and not left by the undo's trigger
+	CodeReactionAmountInvalid = "reaction_amount_invalid" // a held reaction's add cannot be evaluated on the source (a null amount)
 )
 
 // LinkNotWritableError is an ErrForbidden: the public door may not add or
@@ -147,7 +147,7 @@ func (in *Internal) React(ctx context.Context, req ReactRequest) (ReactResult, e
 		}
 		adds, err := lifecycle.ReactionAdds(r, srcFields)
 		if err != nil {
-			return WriteResult{}, rejected(CodeReactionFailed, "%v", err)
+			return WriteResult{}, rejected(CodeReactionAmountInvalid, "%v", err)
 		}
 		recorded, err := causeRoot(ctx, tx, req.Principal, req.SourceID, kc.causeSeq)
 		if err != nil {

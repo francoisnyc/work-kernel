@@ -352,9 +352,11 @@ func (h *reactionHarness) attemptTimes(hold string) []time.Time {
 	return out
 }
 
-// An undo that keeps failing is retried for hours: the pause doubles from
-// about a second and never exceeds UndoMaxInterval; it never gives up, and
-// once the failure passes it succeeds, with no ReactionFailed.
+// An undo that keeps failing is retried: the pause doubles from about a
+// second and never exceeds UndoMaxInterval; it never gives up, and once the
+// failure passes it succeeds, with no ReactionFailed. 80 minutes stay in
+// one run (under UndoAttemptsPerRun); hours cross runs, in
+// TestReactions_StuckUndo_ContinuesAsNewAndRefundsOnce.
 func TestReactions_StuckUndo_BacksOffToAMinuteAndNeverGivesUp(t *testing.T) {
 	h := newReactionHarness(t, leaveSnapshot("submitted", 5, 5))
 	h.undoFails[hold1] = 1 << 20
@@ -363,16 +365,16 @@ func TestReactions_StuckUndo_BacksOffToAMinuteAndNeverGivesUp(t *testing.T) {
 	h.env.RegisterDelayedCallback(func() {
 		h.mu2.Lock()
 		defer h.mu2.Unlock()
-		h.undoFails[hold1] = 0 // the failure passes after four hours
-	}, 4*time.Hour)
+		h.undoFails[hold1] = 0 // the failure passes after 80 minutes
+	}, 80*time.Minute)
 	h.runToCompletion()
 
 	at := h.attemptTimes(hold1)
 	if len(at) < 10 {
-		t.Fatalf("Undo attempts = %d, want many over four hours", len(at))
+		t.Fatalf("Undo attempts = %d, want many over 80 minutes", len(at))
 	}
-	if last := at[len(at)-1]; last.Before(t0.Add(4 * time.Hour)) {
-		t.Errorf("last attempt at %v, want after the failure passed (four hours): it must not give up", last)
+	if last := at[len(at)-1]; last.Before(t0.Add(80 * time.Minute)) {
+		t.Errorf("last attempt at %v, want after the failure passed (80 minutes): it must not give up", last)
 	}
 	const slack = 5 * time.Second
 	var prev time.Duration

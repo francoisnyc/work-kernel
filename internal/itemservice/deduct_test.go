@@ -233,7 +233,7 @@ func TestDeduct_ApprovalDeductsOnce(t *testing.T) {
 	}
 
 	// History shows the result and the delta.
-	page, err := w.k.ListEvents(testCtx(t), itemservice.ListEventsRequest{Principal: w.hana, ItemID: bal})
+	page, err := w.k.ListEvents(testCtx(t), itemservice.ListEventsRequest{Principal: inDefault(w.hana), ItemID: bal})
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
@@ -895,7 +895,7 @@ func TestUndo_RefusedByTheTarget_RecordedAsReactionFailed(t *testing.T) {
 	if w.state(t, id) != "withdrawn" {
 		t.Errorf("state = %s, want withdrawn (reaction_failed changes no state)", w.state(t, id))
 	}
-	page, err := w.k.ListEvents(testCtx(t), itemservice.ListEventsRequest{Principal: w.ana, ItemID: id})
+	page, err := w.k.ListEvents(testCtx(t), itemservice.ListEventsRequest{Principal: inDefault(w.ana), ItemID: id})
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}

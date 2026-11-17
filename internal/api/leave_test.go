@@ -213,7 +213,7 @@ func TestLeave_PublicRefusals(t *testing.T) {
 }
 
 // History: the transition into submitted names the link; the deduction
-// shows the result and the delta.
+// shows the result and the delta (ints as strings, as every field value).
 func TestLeave_History(t *testing.T) {
 	bal := openBalanceFor(t, "user:ana", 25)
 	name := submittedV2(t, 5)
@@ -238,12 +238,13 @@ func TestLeave_History(t *testing.T) {
 	events = history(t, "hana", bal)
 	last = events[len(events)-1]
 	if last.Kind != kernelv1.ItemEventKind_ITEM_EVENT_KIND_UPDATED || last.Actor != deductP.Actor ||
-		last.Fields.GetFields()["f_used"].GetNumberValue() != 5 || last.Added.GetFields()["f_used"].GetNumberValue() != 5 {
-		t.Errorf("the deduction = %v, want UPDATED by deduct, f_used 5, added 5", last)
+		last.Fields.GetFields()["f_used"].GetStringValue() != "5" || last.Added.GetFields()["f_used"].GetStringValue() != "5" {
+		t.Errorf("the deduction = %v, want UPDATED by deduct, f_used \"5\", added \"5\" (ints as strings)", last)
 	}
 }
 
-// reaction_failed is REACTION_FAILED, naming the reaction and its code.
+// reaction_failed is REACTION_FAILED, naming the reaction and its code
+// (upper-cased, as every reason in history).
 func TestLeave_History_ReactionFailed(t *testing.T) {
 	openBalanceFor(t, "user:ana", 25)
 	name := submittedV2(t, 5)
@@ -259,7 +260,7 @@ func TestLeave_History_ReactionFailed(t *testing.T) {
 	events := history(t, "ana", name)
 	last := events[len(events)-1]
 	if last.Kind != kernelv1.ItemEventKind_ITEM_EVENT_KIND_REACTION_FAILED || last.Reaction != "vacation_request:refund" ||
-		last.Reason != "reaction_not_accepted" {
+		last.Reason != "REACTION_NOT_ACCEPTED" {
 		t.Errorf("event = %v, want REACTION_FAILED naming vacation_request:refund and its code", last)
 	}
 }
