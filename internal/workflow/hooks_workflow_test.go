@@ -19,6 +19,7 @@ import (
 
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
+	"go.temporal.io/sdk/workflow"
 
 	wf "github.com/francoisnyc/work-kernel/internal/workflow"
 )
@@ -331,12 +332,17 @@ func held() error {
 	return temporal.NewNonRetryableApplicationError("held by an open hold", wf.ErrTypeHeld, nil)
 }
 
-// A timer whose move is refused because the Item is held is spent: unlike
-// stale, it does not fire again after the next event.
-func TestHooks_TimerRefusedAsHeld_IsSpent(t *testing.T) {
+// The old rule, kept by a run started before Step 2, part 3's change
+// (timer-waits-for-hold at DefaultVersion): a timer whose move is refused
+// because the Item is held is spent: unlike stale, it does not fire again
+// after the next event. The replay test proves old histories replay; this
+// proves such a run keeps the old rule when its held timer fires after the
+// upgrade. TestTimer_HeldIsNotSpent is the new rule.
+func TestHooks_TimerRefusedAsHeld_OldVersionIsSpent(t *testing.T) {
 	s := orderSnapshot("open", 5, 5)
 	s.Timers = map[string]wf.TimerSpec{"open": {After: time.Hour, To: "new"}}
 	h := newHookHarness(t, s)
+	h.env.OnGetVersion("timer-waits-for-hold", workflow.DefaultVersion, 1).Return(workflow.DefaultVersion)
 	h.fireErrs = []error{held()}
 	h.deliver(2*time.Hour, updateEvent(6))
 	done := h.deliver(3*time.Hour, transitionEvent(7, "open", "approved"))

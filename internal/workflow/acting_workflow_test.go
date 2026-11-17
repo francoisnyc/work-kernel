@@ -163,10 +163,11 @@ func TestActing_OneOverdueRunThenTheSchedule(t *testing.T) {
 // by the new entry.
 func TestActing_ANewEntryCountsAgain(t *testing.T) {
 	snap := v3Snapshot("submitted", 5, 5, t0)
-	snap.Timers = map[string]wf.TimerSpec{}
+	// No expiry; a long draft timer keeps the run alive between the two.
+	snap.Timers = map[string]wf.TimerSpec{"draft": {After: 1000 * time.Hour, To: "submitted"}}
 	h := newMailHarness(t, snap)
-	h.deliver(time.Hour, wf.Event{Seq: 6, Op: "transition", From: "submitted", To: "draft"})
-	h.deliver(2*time.Hour, wf.Event{Seq: 7, Op: "transition", From: "draft", To: "submitted"})
+	h.deliver(time.Hour, wf.Event{Seq: 6, Op: "transition", From: "submitted", To: "draft", CorrelationID: "corr-1"})
+	h.deliver(2*time.Hour, wf.Event{Seq: 7, Op: "transition", From: "draft", To: "submitted", CorrelationID: "corr-1"})
 	h.runToCompletion()
 	runs := h.runsOf("remind_approver")
 	if len(runs) != 2 || runs[0].In != remindInput(7, 1, 1) || runs[1].In != remindInput(7, 2, 1) ||
@@ -274,10 +275,11 @@ func TestTimer_HeldIsNotSpent(t *testing.T) {
 // --- the refund email ---
 
 // reaction_applied runs the refund email, in a final state with no timer,
-// one hop below it, keyed by that event.
+// one hop below it, keyed by that event. The event starts the run (as the
+// relay does), so it arrives with the start.
 func TestReactionApplied_RunsTheRefundEmail(t *testing.T) {
 	h := newMailHarness(t, v3Snapshot("withdrawn", 8, 8, t0))
-	h.deliver(time.Minute, wf.Event{Seq: 9, Op: "reaction_applied", Reaction: "refund", CorrelationID: "corr-r", Hop: 1})
+	h.deliver(0, wf.Event{Seq: 9, Op: "reaction_applied", Reaction: "refund", CorrelationID: "corr-r", Hop: 1})
 	h.runToCompletion()
 	want := wf.HookInput{ItemID: itemID, TypeID: "vacation_request", TypeVersion: 3, HookID: "refund_email",
 		CauseSeq: 9, CorrelationID: "corr-r", Hop: 2, IdempotencyKey: fmt.Sprintf("hook:%s:9:refund_email", itemID)}
