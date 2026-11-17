@@ -120,7 +120,8 @@ Ideas noted during the spike, not built yet.
 - A timer that comes due while a hold is open is refused as "held" and spent:
   it does not fire again after the hold resolves. Revisit with real SLA
   objects, together with the open question: does the SLA clock pause during a
-  hold? (Step 6)
+  hold? (Step 6) Done in Step 2, part 3 (proof of concept): it waits for the
+  hold, behind `GetVersion`; the clock keeps running. Pausing is still open.
 - Once hooks are real, every hook must be declared, including on Types that
   declare none today. For the spike, a Type without a `hooks` section still
   accepts writes from any hook of its own Type (part 1's tests rely on it).
@@ -153,7 +154,8 @@ Ideas noted during the spike, not built yet.
 - A timer that comes due while a hold is open should be deferred until the
   hold resolves, then fire if the Item is still in its state, not be spent
   as it is today. The SLA clock keeps running during a hold by default; a
-  real SLA object may declare `pause_while: held`. (Step 7 write-up)
+  real SLA object may declare `pause_while: held`. (Step 7 write-up) Deferral
+  done in Step 2, part 3 (proof of concept); `pause_while` is still Later.
 - After a worker dies (SIGKILL), its action attempts are only retried once
   their attempt timeout (StartToClose) runs out: 21 s with a 20 s timeout in
   the bench, while a graceful stop reports the attempts and they retry at
@@ -287,6 +289,28 @@ Ideas noted during the spike, not built yet.
 - Recall during the approval hold is `HELD` (only withdraw is an escape):
   with the worker down, ana waits up to the hook budget to recall.
   (Step 2, part 2)
+- An acting timer's last run time is not carried across continue-as-new (or
+  a crash): the next run then counts from the schedule, so an overdue one
+  fires at once. Still never more than one at once. (Step 2, part 3)
+- A run of an acting timer that gave up (`hook_failed`) is not tried again;
+  only the next run comes. A missed reminder may matter for a real SLA.
+  (Step 2, part 3)
+- The dev clock is per worker. Workers on one task queue with different
+  scales would give one Item mixed durations, and a running workflow keeps
+  the durations it loaded until its next run. Record the scale per Type in
+  the stack, or refuse a mismatch. (Step 2, part 3)
+- Email is a stub: the template is the hook's ID and the recipient a
+  principal. A real connector needs addresses from a directory, rendering
+  outside the kernel (no free text in events), bounces, and a rate limit.
+  (Step 2, part 3)
+- `StartsWorkflow` starts a workflow for any `reaction_applied` of a Type
+  with reaction hooks, not only for the reaction that has hooks. Harmless
+  (the run finds nothing to do), but it could filter by reaction. (Step 2,
+  part 3)
+- Test harness: a delivered event reaches the same run even when the real
+  system would start a new one (the run had finished). Two of this step's
+  tests assumed a run stays alive in a state with nothing to do. A harness
+  that refuses updates after completion would catch it. (Step 2, part 3)
 
 ## 2026-11-12 — Step 1 (finished)
 
@@ -1340,3 +1364,69 @@ per person, after reactions with patches, the `reaction_failed` hold reason, the
 lookup at scale, manager revocation, recall during the approval hold).
 **Next session:** proof-of-concept Step 2, part 3 (acting timers, timers deferred during holds,
 the stub email connector, the full scenario), once this PR is merged.
+
+## 2026-11-17 — Step 2 (proof of concept), part 3: acting timers, deferred timers and the email stub (finished)
+
+**Built:** `vacation_request@3` reminds its approver (48 h, then 24 h later, two runs), expires
+after 120 h when nobody decides, and emails the requester when approved, rejected, expired or
+refunded, through a stub email connector. A state timer due during a hold now waits for it. The
+compose stack runs `vacation_request` on a dev clock (a day lasts 2 s), so the scenario watches
+reminders and the expiry in about 10 s. design.md has the section ("Time and mail").
+
+**Kernel changes, counted:** (1) typedef: acting timers on states (`{id, after, every, max,
+hook}`, load rules), hooks `on: timer` and `on: reaction`, an action hook may write nothing when
+its action writes nothing, the `creator` attribute. (2) lifecycle: `ActingTimers`,
+`ReactionHooks`; an acting timer is behavior (`NeedsWorkflow`); `reaction_applied` starts the
+workflow for a Type with reaction hooks. (3) hooks: `email.notify` (`Call`, `RunCall`).
+(4) itemservice: `Internal().HookRan` (`hook_ran`), `Internal().ReactionApplied`
+(`reaction_applied`, `not_applied`), `creator` in hook inputs, `hook_failed` naming the timer
+and run, `StateEntry.ActingRuns`, reaction hooks in `PendingActions`, a pending undo done only
+once both refund and `reaction_applied` exist (Types with reaction hooks), timer and run in
+history. (5) workflow: acting timer coroutines, reaction hooks run on `reaction_applied`, state
+timers deferred during a hold and `Held` not final behind `GetVersion("timer-waits-for-hold")`,
+LoadItem scaling only the listed Types' declared durations and recording `DevDay`, Undo writing
+`reaction_applied`. (6) relay: the reaction of `reaction_applied`. (7) API and proto, additive
+(buf breaking green): `State.acting`, `ActingTimer`, `ItemEvent.timer` and `run`, `HOOK_RAN`,
+`REACTION_APPLIED`. App side: the v3 Type, the email stub and its read-only port, a per-customer
+ERP latency, the worker's dev clock flags, compose, README (curl), the scenario.
+
+**Test changes (approved):** after Phase B, four fixes of my own new tests (a helper renamed
+`vr3Cause`, `mailWorld.get` added, the `expired` event delivered after FireTimer, an index
+guard). For the dev-clock decision (option 2): the worker flag tests rewritten for
+`--dev-time-scale-types` (missing, empty, an empty name, without a scale, unknown at start),
+`DevTypes` added to the two mail e2e worker configs, a new e2e test of the deferral on the real
+stack (`deferral_e2e_test.go`), the scenario's ticket deferral step removed. After Phase C:
+(1) Step 6's `TestHooks_TimerRefusedAsHeld_IsSpent` asserted the old rule; renamed
+`…_OldVersionIsSpent` and pinned to `DefaultVersion` with `OnGetVersion`, its assertion kept;
+(2) `TestActing_ANewEntryCountsAgain` keeps its run alive in draft (a long timer) and carries
+`corr-1` on both events; (3) `TestReactionApplied_RunsTheRefundEmail` delivers the event with
+the start. `cust-slow` left `deploy/customers.json`.
+
+**Surprises:** two of my tests assumed a run stays alive in a state with nothing to do (draft,
+withdrawn); the real system starts a new run for the next event, but the test harness happily
+delivers to the finished one (Later). A Step 6 test encoded the old held-timer rule; versioning
+the change let it stay, as the test of the old branch. Acting timers had to be coroutines, not
+part of the main loop's timer: an `AwaitWithTimeout` woken early cancels its timer, a command,
+so any change to the main loop's waits would have broken the old histories' replay. Scaling a
+duration by `d * day / 24h` overflows int64 in nanoseconds (120 h × 2 s); it is computed in
+float. The `reaction_applied` payload's `target` (`<item>:<seq>`) collided with the link
+events' `target` (a UUID) in the history decoder, which then failed to read the whole page; it
+now reads `target` as a UUID only when it is one. The worker's dev clock checks names against
+the loaded Types, which the item service loads, so in compose the worker now waits for the item
+service. The Docker daemon died twice again.
+
+**Numbers:** scenario, two runs in a row on a fresh stack: 28.4 s and 27.1 s (stack up 7.8 s
+and 7.4 s); part 2 was 10.5 s, and the rest is the dev clock. Vacation steps, run 1 / run 2:
+reminders twice then the expiry 10.45 / 10.44 s (five dev days are 10 s); approve and its email
+0.78 / 0.58 s; withdraw, refund and its email 0.46 / 0.44 s; the denied approval 0.49 / 0.49 s;
+the final check of every email 4.07 / 4.07 s (two more dev days, waited on purpose). The worker
+logged its dev clock warning on start. Go: 57 new test functions; the deferral e2e tests 8.3 s
+(allowed: the timer does nothing) and 7.4 s (denied: the timer moves the ticket after the
+denial). `go test -race ./...` green in 154 s, no data race; the three histories recorded from
+main replay. The flaky `TestDroppedAnswer_DefaultConnectors_NetHTTPResends` did not show.
+
+**Open:** Later has six new items (acting runs across continue-as-new, a given-up reminder not
+retried, a per-worker dev clock, a real email connector, `StartsWorkflow` per reaction, the
+harness delivering to a finished run); two older ones (the held timer spent) are marked done.
+**Next session:** proof-of-concept Step 3 (the Jira scenarios), once this PR is merged; plan
+it per step as the build order says.
