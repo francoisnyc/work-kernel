@@ -36,6 +36,11 @@ var recordedHistories = []string{
 	"ticket_v3_hold_and_timer.json",     // enrich hooks, a 24h timer armed, an approve held by erp_check, allowed
 	"vacation_request_v1_hr_check.json", // submit held by hr_check, corrected with f_approver
 	"job_timer_fires.json",              // a 2s timer fires and moves the Item back
+	// Recorded from main at b0f92a4 (after Step 2, part 3), before the
+	// consolidation's Canceled flag: an approval hold decided by a held
+	// reaction, canceled by an escape (withdrawn), whose event carries
+	// canceled_hold_id.
+	"vacation_request_v3_canceled_hold.json",
 }
 
 // Every history recorded from main replays on today's workflow code without
@@ -96,6 +101,32 @@ func TestRecordHistories(t *testing.T) {
 		}
 		h.waitCompleted(id)
 		saveHistory(t, id, "vacation_request_v1_hr_check.json")
+	})
+
+	// The run waits in submitted (real time: its timers are days away) when
+	// the approval is asked for and then withdrawn, both while the worker is
+	// down, so the restarted worker reads both events in this run: the hold
+	// opened, then canceled by the escape (canceled_hold_id).
+	t.Run("canceled", func(t *testing.T) {
+		m := newMailStack(t)
+		m.stopWorker()
+		m.worker = wf.NewWorker(tc, m.queue, m.k, wf.WorkerOptions{Connectors: m.connectors(), HookBudget: testBudget})
+		if err := m.worker.Start(); err != nil {
+			t.Fatalf("start worker: %v", err)
+		}
+		m.balance(25)
+		id := m.submittedV3(5)
+		m.stopWorker()
+		if res := m.transition(m.bob, id, "approved", 0); res.Outcome != itemservice.OutcomePending {
+			t.Fatalf("approve = %+v, want pending", res)
+		}
+		m.transition(m.ana, id, "withdrawn", 0)
+		m.worker = wf.NewWorker(tc, m.queue, m.k, wf.WorkerOptions{Connectors: m.connectors(), HookBudget: testBudget})
+		if err := m.worker.Start(); err != nil {
+			t.Fatalf("start worker: %v", err)
+		}
+		m.waitCompleted(id)
+		saveHistory(t, id, "vacation_request_v3_canceled_hold.json")
 	})
 
 	t.Run("job", func(t *testing.T) {
