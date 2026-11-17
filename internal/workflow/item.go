@@ -321,6 +321,11 @@ type Event struct {
 	HoldID      string
 	// Reaction: a reaction_applied event's reaction (Step 2, part 3).
 	Reaction string
+	// Canceled: the event closes HoldID by canceling it (an escape,
+	// canceled_hold_id), never by allowing it (consolidation, item 5).
+	//
+	// Phase B stub: carried, not read yet.
+	Canceled bool
 }
 
 // ApplyResult answers one delivered event.
