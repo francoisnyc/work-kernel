@@ -474,9 +474,14 @@ func (in *Internal) HookInput(ctx context.Context, req HookInputRequest) (map[st
 		return nil, ErrNotFound
 	}
 	// A hook may also read who created the Item (an unset attribute is
-	// left out, like an unset field).
+	// left out, like an unset field); creator is who it was created for.
+	creator := projected.CreatedOnBehalfOf
+	if creator == "" {
+		creator = projected.CreatedBy
+	}
 	attrs := map[string]string{
 		typedef.AttrCreatedBy: projected.CreatedBy, typedef.AttrCreatedOnBehalfOf: projected.CreatedOnBehalfOf,
+		typedef.AttrCreator: creator,
 	}
 	out := map[string]any{}
 	for _, id := range h.Reads {

@@ -6,7 +6,9 @@
 # test. Step 1 added links (blocks / blocked_by, duplicate_of) and the
 # principal field f_assignee, on ticket v5. Step 2, part 1 added the vacation
 # request: an approval as a business state, with the HR check. Step 2, part
-# 2 added the leave balance: the held deduction, its refund, the race.
+# 2 added the leave balance: the held deduction, its refund, the race. Part 3
+# added time and mail (reminders, expiry, the emails), on the stack's dev
+# clock (vacation_request only); it needs curl.
 #
 #   scripts/scenario.sh          (or: make scenario, which starts the stack first)
 #
@@ -63,7 +65,7 @@ check_failed() {
 	fi
 }
 
-for tool in jq go; do
+for tool in jq go curl; do
 	if [ "$tool" = go ] && [ -n "${PLI:-}" ]; then continue; fi
 	command -v "$tool" >/dev/null || fail "$tool is required (see the README's prerequisites)"
 done
@@ -485,7 +487,8 @@ ok triage-bot item link "$in_inner" blocks "$in_room" >/dev/null
 # check names the approver on the way into submitted, the terms freeze, and
 # the manager decides by an ordinary transition. ana reports to bob, dana to
 # herself; erin is not in the HR directory (deploy/hr-directory.json).
-# Since part 2 the requests are vacation_request@2: submitting links the
+# Since part 3 the requests are vacation_request@3 (part 2 added the
+# balance: v2; part 3 time and mail: v3). Submitting links the
 # request to the requester's open leave balance, approving deducts from it.
 # ---------------------------------------------------------------------------
 
@@ -536,7 +539,7 @@ expect "ana's f_used" "$(used "$abal")" "0"
 new_leave() { # WHO [--set ...]...: a vacation request, five days from 2099-07-01; prints its name
 	local who=$1
 	shift
-	ok "$who" item create --type vacation_request@2 --set f_start=2099-07-01 --set f_end=2099-07-05 \
+	ok "$who" item create --type vacation_request@3 --set f_start=2099-07-01 --set f_end=2099-07-05 \
 		--set f_days=5 --set f_leave_type=annual --set "f_comment=$w" "$@" | j .item.name
 }
 
@@ -563,7 +566,7 @@ refuse ana "FAILED_PRECONDITION GUARD_FAILED" item transition "$v0" --to submitt
 	--set f_days=5 --set f_start=2000-01-03 --set f_end=2000-01-07
 
 step "vacation: ana cannot name the approver herself (FIELD_NOT_WRITABLE)"
-refuse ana "PERMISSION_DENIED FIELD_NOT_WRITABLE" item create --type vacation_request@2 \
+refuse ana "PERMISSION_DENIED FIELD_NOT_WRITABLE" item create --type vacation_request@3 \
 	--set f_start=2099-07-01 --set f_end=2099-07-05 --set f_days=5 --set f_leave_type=annual --set f_approver=user:ana
 expect "the refused field" "$(meta fields)" "f_approver"
 v2=$(new_leave ana)
@@ -719,6 +722,109 @@ expect "the denial's reason" \
 	"$(cat "$tmp/race1" "$tmp/race2" | jqx -rs '.[] | select(.outcome == "TRANSITION_OUTCOME_DENIED") | .reason')" \
 	"INSUFFICIENT_BALANCE"
 expect "ana's f_used, within the allowance" "$(used "$abal")" "20"
+
+# ---------------------------------------------------------------------------
+# Step 2, part 3: time and mail. The stack's worker runs on a dev clock (a
+# day lasts 2 s; docker-compose.yml, never production): a submitted request
+# reminds its approver at 2 and 3 days (4 s, 6 s) and expires at 5 days
+# (10 s). Emails go to the stub, whose read-only port the dev compose file
+# publishes ($mail); HOOK_RAN events in pli's history are the primary
+# evidence. Every email is checked exactly once, and the absent ones absent.
+# ---------------------------------------------------------------------------
+
+mail=${PLI_MAIL:-http://localhost:8085}
+
+# sent ITEM TEMPLATE: who the email stub sent TEMPLATE to for ITEM, one
+# principal per message, sorted, on one line ("" for none).
+sent() {
+	curl -fsS "$mail/messages?item=${1##*/}" | jqx -r --arg t "$2" \
+		'[.messages[]? | select(.template == $t) | .to] | sort | join(" ")'
+}
+
+# ran ITEM HOOK: how many HOOK_RAN events of HOOK ITEM's history has.
+ran() {
+	ok ana item history "$1" --page-size 100 | jqx -r --arg h "$2" \
+		'[.events[] | select(.kind == "ITEM_EVENT_KIND_HOOK_RAN" and .hook == $h)] | length'
+}
+
+# kinds ITEM: the history kinds of ITEM, for the kinds check at the end.
+kinds_seen=" "
+kinds() {
+	kinds_seen="$kinds_seen$(ok ana item history "$1" --page-size 100 | jqx -r '[.events[].kind] | unique | join(" ")') "
+}
+
+# wait_until SECONDS WHAT CMD...: polls CMD (every 0.25 s) until it
+# succeeds, failing after SECONDS.
+wait_until() {
+	local limit=$1 what=$2 i
+	shift 2
+	for i in $(seq 1 $((limit * 4))); do
+		if "$@" >/dev/null 2>&1; then return 0; fi
+		sleep 0.25
+	done
+	fail "$what: not within $limit s"
+}
+
+state_is() { [ "$(ok "$1" item get "$2" | j .item.state)" = "$3" ]; }
+sent_is() { [ "$(sent "$1" "$2")" = "$3" ]; }
+
+step "mail: hana gives ana 15 more days (40); the stub is reachable"
+ok hana item update "$abal" --set f_allowance=40 >/dev/null
+curl -fsS "$mail/messages" >/dev/null || fail "the email stub's reader does not answer at $mail"
+
+step "mail: a submitted request reminds bob twice, then expires; ana is told; no refund email"
+v20=$(new_leave ana)
+submit_leave ana "$v20" >/dev/null
+began=$(now_ms)
+wait_until 25 "the request expired" state_is ana "$v20" expired
+echo "    expired after $(($(now_ms) - began)) ms (5 days of 2 s)"
+wait_until 10 "the expiry email" sent_is "$v20" notify_expired user:ana
+expect "reminders, to bob, twice" "$(sent "$v20" remind_approver)" "user:bob user:bob"
+expect "the expiry email, to ana, once" "$(sent "$v20" notify_expired)" "user:ana"
+expect "no approval email" "$(sent "$v20" notify_approved)" ""
+expect "no refund email (no deduction can exist)" "$(sent "$v20" refund_email)" ""
+expect "HOOK_RAN reminders in the history" "$(ran "$v20" remind_approver)" "2"
+expect "HOOK_RAN expiry email in the history" "$(ran "$v20" notify_expired)" "1"
+expect "f_used unchanged" "$(used "$abal")" "20"
+kinds "$v20"
+
+step "mail: bob approves (the deduction holds it); ana is emailed"
+v21=$(new_leave ana)
+submit_leave ana "$v21" >/dev/null
+began=$(now_ms)
+dec=$(ok bob item transition "$v21" --to approved --wait 5s)
+echo "    the held approval answered in $(($(now_ms) - began)) ms"
+expect "outcome" "$(j .outcome <<<"$dec")" "TRANSITION_OUTCOME_APPLIED"
+expect "f_used" "$(used "$abal")" "25"
+wait_until 10 "the approval email" sent_is "$v21" notify_approved user:ana
+
+step "mail: ana withdraws; the refund commits, and she is emailed once"
+ok ana item transition "$v21" --to withdrawn >/dev/null
+wait_used "$abal" 20
+wait_until 10 "the refund email" sent_is "$v21" refund_email user:ana
+kinds "$v21"
+
+step "mail: an approval beyond the balance is DENIED; no refund email"
+v22=$(new_leave ana --set f_days=30)
+submit_leave ana "$v22" >/dev/null
+dec=$(ok bob item transition "$v22" --to approved --wait 5s)
+expect "outcome" "$(j .outcome <<<"$dec")" "TRANSITION_OUTCOME_DENIED"
+expect "reason" "$(j .reason <<<"$dec")" "INSUFFICIENT_BALANCE"
+ok ana item transition "$v22" --to withdrawn >/dev/null # before it expires: this check is about the denial
+
+step "mail: every email exactly once, the absent ones absent (after two more dev days)"
+sleep 4
+expect "v20 reminders" "$(sent "$v20" remind_approver)" "user:bob user:bob"
+expect "v20 expiry" "$(sent "$v20" notify_expired)" "user:ana"
+expect "v20 refund email" "$(sent "$v20" refund_email)" ""
+expect "v21 approval" "$(sent "$v21" notify_approved)" "user:ana"
+expect "v21 refund email" "$(sent "$v21" refund_email)" "user:ana"
+expect "v21 expiry (approved: none)" "$(sent "$v21" notify_expired)" ""
+expect "v22 refund email (denied: none)" "$(sent "$v22" refund_email)" ""
+expect "v22 approval email (denied: none)" "$(sent "$v22" notify_approved)" ""
+for kind in ITEM_EVENT_KIND_HOOK_RAN ITEM_EVENT_KIND_REACTION_APPLIED; do
+	case $kinds_seen in *" $kind "* | *" $kind"*) ;; *) fail "no history showed $kind" ;; esac
+done
 
 # ---------------------------------------------------------------------------
 # Another namespace: carol, in globex, reaches nothing of acme, on every

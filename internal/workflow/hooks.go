@@ -11,6 +11,7 @@ import (
 	"github.com/francoisnyc/work-kernel/internal/hooks"
 	"github.com/francoisnyc/work-kernel/internal/item"
 	"github.com/francoisnyc/work-kernel/internal/itemservice"
+	"github.com/francoisnyc/work-kernel/internal/lifecycle"
 	"github.com/francoisnyc/work-kernel/internal/typedef"
 )
 
@@ -71,7 +72,7 @@ func (a *Activities) run(ctx context.Context, c hookCall, key string) (hooks.Res
 	for i, f := range c.hook.Reads {
 		args[i] = values[f] // nil when unset; the action refuses it
 	}
-	res, err := a.Connectors.Run(ctx, c.hook.Action, key, args)
+	res, err := a.Connectors.RunCall(ctx, c.hook.Action, key, args, hooks.Call{HookID: c.hook.ID, ItemID: c.id.String()})
 	if errors.Is(err, hooks.ErrKeyConflict) { // before ErrPermanent, which it also is
 		return hooks.Result{}, temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeKeyConflict, err)
 	}
@@ -146,6 +147,15 @@ func (a *Activities) RunAction(ctx context.Context, in HookInput) error {
 	if err != nil {
 		return err
 	}
+	if len(c.hook.Writes) == 0 {
+		// It made nothing to write back (an email): hook_ran records that
+		// it ran, under the same key.
+		_, err = a.Items.Internal().HookRan(ctx, itemservice.HookRanRequest{
+			IdempotencyKey: in.IdempotencyKey, Principal: c.principal, ItemID: c.id,
+			Timer: in.Timer, Run: in.Run, Attribution: c.attr,
+		})
+		return kernelError(err)
+	}
 	_, err = a.Items.Internal().Update(ctx, itemservice.UpdateRequest{
 		IdempotencyKey: in.IdempotencyKey, Principal: c.principal, ItemID: c.id,
 		Fields: writes(c.hook, res.Values), Attribution: c.attr,
@@ -166,9 +176,13 @@ func (a *Activities) HookFailed(ctx context.Context, in HookFailedInput) error {
 	if err != nil {
 		return err
 	}
+	key := fmt.Sprintf("hook_failed:%s:%d:%s", in.Hook.ItemID, in.Hook.CauseSeq, in.Hook.HookID)
+	if in.Hook.Timer != "" {
+		key = "hook_failed:" + in.Hook.IdempotencyKey // one per run
+	}
 	_, err = a.Items.Internal().HookFailed(ctx, itemservice.HookFailedRequest{
-		IdempotencyKey: fmt.Sprintf("hook_failed:%s:%d:%s", in.Hook.ItemID, in.Hook.CauseSeq, in.Hook.HookID),
-		Principal:      c.principal, ItemID: c.id, Reason: in.Reason, Attribution: c.attr,
+		IdempotencyKey: key, Principal: c.principal, ItemID: c.id, Reason: in.Reason, Attribution: c.attr,
+		Timer: in.Hook.Timer, Run: in.Hook.Run,
 	})
 	if errors.Is(err, itemservice.ErrIdempotencyKeyReuse) {
 		return nil // already recorded for this entry
@@ -329,11 +343,32 @@ func (a *Activities) Undo(ctx context.Context, in ReactionInput) error {
 	if err != nil {
 		return err
 	}
-	_, err = a.Items.Internal().Undo(ctx, itemservice.UndoRequest{Principal: p, SourceID: id, HoldID: holdID, Attribution: attr})
-	if errors.Is(err, itemservice.ErrIdempotencyKeyReuse) {
-		return nil // undone already, under another cause
-	}
+	res, err := a.Items.Internal().Undo(ctx, itemservice.UndoRequest{Principal: p, SourceID: id, HoldID: holdID, Attribution: attr})
+	reused := errors.Is(err, itemservice.ErrIdempotencyKeyReuse) // undone already, under another cause
 	var rej *itemservice.RejectedError
+	switch {
+	case reused:
+	case errors.As(err, &rej):
+		return temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeRejected, err, rej.Code)
+	case err != nil:
+		return kernelError(err)
+	case !res.Undone:
+		return nil // nothing was taken: nothing given back, nothing to say
+	}
+	// Something was given back. When hooks run on it (the refund email),
+	// record it on the source; the undo stays pending until this is done.
+	ty, err := a.Items.Type(ctx, in.TypeID, in.TypeVersion)
+	if err != nil {
+		return err
+	}
+	if len(lifecycle.ReactionHooks(ty, in.ReactionID)) == 0 {
+		return nil
+	}
+	_, err = a.Items.Internal().ReactionApplied(ctx, itemservice.ReactionAppliedRequest{
+		Principal: p, SourceID: id, HoldID: holdID, Attribution: attr})
+	if errors.Is(err, itemservice.ErrIdempotencyKeyReuse) {
+		return nil // recorded already, under another cause
+	}
 	if errors.As(err, &rej) {
 		return temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeRejected, err, rej.Code)
 	}

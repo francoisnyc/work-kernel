@@ -60,6 +60,13 @@ const (
 	ErrTypeKeyConflict = "KeyConflict"
 )
 
+// versionTimerWaitsForHold is the workflow.GetVersion change ID of Step 2,
+// part 3: a state timer due during a hold waits for it to close, and a Held
+// answer is not final. Version 1 is that; DefaultVersion is the old rule
+// (fire anyway; Held spends the timer), which replays recorded before it
+// keep.
+const versionTimerWaitsForHold = "timer-waits-for-hold"
+
 // MaxRetryInterval caps the pause between two attempts of an activity. A
 // hook gives up when its next attempt cannot start within its budget, so it
 // may end up to this long before the budget runs out.
@@ -136,6 +143,28 @@ type Snapshot struct {
 	// leaving its state by the trigger) adds one. Nothing drops one.
 	EnteredHold  string
 	PendingUndos []PendingUndo
+
+	// Acting timers (Step 2, part 3), reduced like Timers: per state, its
+	// acting timers. ActingRuns counts, per acting timer of State, the runs
+	// already started for the current entry (LoadItem: completed); entering
+	// a state resets it. ReactionHooks maps an undo reaction to the action
+	// hooks its reaction_applied event runs.
+	Acting        map[string][]ActingSpec
+	ActingRuns    map[string]int
+	ReactionHooks map[string][]string
+	// DevDay is the length of a day the Type's durations were scaled to
+	// (zero: real time), recorded so the history shows the clock it ran on.
+	DevDay time.Duration
+}
+
+// ActingSpec is one acting timer, reduced to what the workflow needs (its
+// durations already scaled when DevDay is set).
+type ActingSpec struct {
+	ID    string
+	After time.Duration
+	Every time.Duration
+	Max   int
+	Hook  string
 }
 
 // PendingUndo is one undo to run: the undo reaction, the hold whose
@@ -245,6 +274,10 @@ type HookInput struct {
 	HoldID        string // check only
 	CorrelationID string
 	Hop           int
+	// Timer and Run: the acting timer's run that runs an action hook
+	// (Step 2, part 3); empty and 0 otherwise.
+	Timer string
+	Run   int
 	// IdempotencyKey: hook:<item>:<cause seq>:<hook> for an enrich hook (its
 	// own write and its fallback share it), hold:<hold> for a check (its
 	// resolution and the error resolution share it). Either way, one write.
@@ -286,6 +319,8 @@ type Event struct {
 	// other event that names it). Opaque IDs and state names only.
 	RequestedTo string
 	HoldID      string
+	// Reaction: a reaction_applied event's reaction (Step 2, part 3).
+	Reaction string
 }
 
 // ApplyResult answers one delivered event.
@@ -378,6 +413,14 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 		undoing      = map[string]bool{}
 		undoAttempts int
 		undoCapped   bool
+
+		// Acting timers (Step 2, part 3). Each acting timer of the current
+		// entry has a scheduler coroutine (actingLive counts them) that
+		// entering a state cancels (cancelActing); actingStarted says the
+		// current entry's schedulers were started.
+		actingLive    int
+		cancelActing  workflow.CancelFunc
+		actingStarted bool
 	)
 
 	apply := func(ctx workflow.Context, ev Event) (ApplyResult, error) {
@@ -428,8 +471,23 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 				cancelCheck()
 				cancelCheck = nil
 			}
+		case ev.Op == lifecycle.OpReactionApplied:
+			// An undo gave something back: its action hooks (the refund
+			// email) run, caused by this event, whatever the state.
+			for _, id := range s.ReactionHooks[ev.Reaction] {
+				s.PendingActions = append(s.PendingActions, PendingAction{
+					HookID: id, CauseSeq: ev.Seq, CorrelationID: ev.CorrelationID, Hop: ev.Hop,
+				})
+			}
 		}
 		if ev.To != "" {
+			// Leaving the state stops its acting timers; a new entry counts
+			// its runs from the start.
+			if cancelActing != nil {
+				cancelActing()
+				cancelActing = nil
+			}
+			s.ActingRuns, actingStarted = nil, false
 			// Leaving the state by an undo's trigger gives back what the
 			// hold that entered it took.
 			if undo := s.UndoOnEntry[ev.From+"->"+ev.To]; undo != "" && s.EnteredHold != "" {
@@ -661,12 +719,11 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 		})
 	}
 
-	// startAction runs one action hook in a coroutine, for one entry of its
-	// state. Nothing cancels it: once the state was entered, the action runs
+	// runAction runs one action hook in a coroutine, for one entry of its
+	// state (startAction), or one acting timer's run. Nothing cancels it: once the state was entered, the action runs
 	// to completion. If it cannot complete, it records hook_failed with the
 	// reason, through the item service, so the failure is visible on the Item.
-	startAction := func(pa PendingAction) {
-		hin := hookInput(pa.HookID, pa.CauseSeq, pa.CorrelationID, pa.Hop+1)
+	runAction := func(hin HookInput) {
 		running++
 		workflow.Go(ctx, func(gctx workflow.Context) {
 			defer func() { running--; wake++ }()
@@ -681,11 +738,53 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 			logHookEnd(log, hin, err)
 		})
 	}
+	startAction := func(pa PendingAction) {
+		runAction(hookInput(pa.HookID, pa.CauseSeq, pa.CorrelationID, pa.Hop+1))
+	}
+
+	// startActing runs one acting timer of the current entry in a
+	// coroutine that leaving the state cancels: run n is due After the
+	// entering event, then Every, Max runs in all (s.ActingRuns counts
+	// those started). An overdue run goes at once, and the next is due
+	// Every after it: never a burst. Each run is an action (runAction), which
+	// leaving the state does not cancel; it does not wait for a hold.
+	startActing := func(actx workflow.Context, spec ActingSpec) {
+		entered, enteredAt, corr, hop := s.EnteredSeq, s.EnteredAt, s.CorrelationID, s.Hop
+		actingLive++
+		workflow.Go(actx, func(gctx workflow.Context) {
+			defer func() { actingLive--; wake++ }()
+			var last time.Time // the previous run of this run's, if any
+			for gctx.Err() == nil && s.ActingRuns[spec.ID] < spec.Max {
+				n := s.ActingRuns[spec.ID] + 1
+				due := enteredAt.Add(spec.After + time.Duration(n-1)*spec.Every)
+				if next := last.Add(spec.Every); !last.IsZero() && next.After(due) {
+					due = next
+				}
+				if wait := due.Sub(workflow.Now(gctx)); wait > 0 {
+					if err := workflow.Sleep(gctx, wait); err != nil {
+						return // the state was left
+					}
+				}
+				if gctx.Err() != nil {
+					return
+				}
+				if s.ActingRuns == nil {
+					s.ActingRuns = map[string]int{}
+				}
+				s.ActingRuns[spec.ID] = n
+				last = workflow.Now(gctx)
+				hin := hookInput(spec.Hook, entered, corr, hop+1)
+				hin.Timer, hin.Run = spec.ID, n
+				hin.IdempotencyKey = fmt.Sprintf("timer:%s:%s:%d:%d", in.ItemID, spec.ID, entered, n)
+				runAction(hin)
+			}
+		})
+	}
 
 	handlersDone := func() bool { return workflow.AllHandlersFinished(ctx) }
 	busy := func() bool {
 		return running > 0 || s.Hold != nil || len(s.PendingEnrich) > 0 || len(s.PendingActions) > 0 ||
-			len(s.PendingUndos) > 0
+			len(s.PendingUndos) > 0 || actingLive > 0
 	}
 
 	for {
@@ -714,6 +813,16 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 				for _, u := range s.PendingUndos {
 					if !undoing[undoKey(u)] {
 						startUndo(undoKey(u))
+					}
+				}
+			}
+			if !actingStarted {
+				actingStarted = true
+				if specs := s.Acting[s.State]; len(specs) > 0 {
+					actx, cancel := workflow.WithCancel(ctx)
+					cancelActing = cancel
+					for _, spec := range specs {
+						startActing(actx, spec)
 					}
 				}
 			}
@@ -796,6 +905,17 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 			}
 		}
 
+		// Due while a hold is open: wait for the hold to close (or anything
+		// else to happen), then look again: if the Item left the state,
+		// this timer is gone; if not, it fires at once. Versioned: a run
+		// recorded before it fired at once, and was refused as held.
+		if s.Hold != nil && workflow.GetVersion(ctx, versionTimerWaitsForHold, workflow.DefaultVersion, 1) >= 1 {
+			if err := workflow.Await(ctx, changed); err != nil {
+				return err
+			}
+			continue
+		}
+
 		req := FireTimerInput{
 			ItemID: in.ItemID, TypeID: s.TypeID, TypeVersion: s.TypeVersion,
 			FromState: s.State, ToState: timer.To,
@@ -818,12 +938,20 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 				return err
 			}
 			continue
+		case errors.As(err, &appErr) && appErr.Type() == ErrTypeHeld &&
+			workflow.GetVersion(ctx, versionTimerWaitsForHold, workflow.DefaultVersion, 1) >= 1:
+			// A hold this run has not heard of yet: like stale, wait for
+			// the next event (its request, then its closing), then look again.
+			if err := workflow.Await(ctx, changed); err != nil {
+				return err
+			}
+			continue
 		case errors.As(err, &appErr) && (appErr.Type() == ErrTypeRejected || appErr.Type() == ErrTypeNotFound ||
 			appErr.Type() == ErrTypeInvalid || appErr.Type() == ErrTypeHeld):
 			// Final either way: the rules say no, the Item is gone, the
-			// request is malformed (a bug, which retrying cannot fix), or an
-			// open hold refuses the move. A held timer is spent: it does not
-			// fire again once the hold resolves (docs/journal.md, Later).
+			// request is malformed (a bug, which retrying cannot fix), or (in
+			// a run recorded before versionTimerWaitsForHold) an open hold
+			// refuses the move, and the held timer is spent.
 			log.Info("the item service refused a timer's move",
 				"item", in.ItemID, "from", req.FromState, "to", req.ToState, "reason", appErr.Message())
 		default:

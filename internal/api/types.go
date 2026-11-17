@@ -56,7 +56,11 @@ func typeOut(ns string, t *typedef.Type) *kernelv1.Type {
 		})
 	}
 	for _, s := range t.States {
-		out.States = append(out.States, &kernelv1.State{Id: s.ID, Category: categories[s.Category], Frozen: s.Frozen})
+		st := &kernelv1.State{Id: s.ID, Category: categories[s.Category], Frozen: s.Frozen}
+		for _, a := range s.Acting {
+			st.Acting = append(st.Acting, &kernelv1.ActingTimer{Id: a.ID, After: a.After, Every: a.Every, Max: int32(a.Max)})
+		}
+		out.States = append(out.States, st)
 	}
 	for _, tr := range t.Transitions {
 		// Whether a check or a held reaction holds the move is the

@@ -1,0 +1,103 @@
+# The vacation request, version 3 (proof of concept, Step 2, part 3):
+# version 2 plus time and mail. Versions 1 and 2 keep their own lifecycles.
+#
+# Changes from v2:
+#
+#   - A submitted request reminds its approver: two days after it entered
+#     submitted, and again a day later, two reminders at most per entry
+#     (the acting timer `remind`, which runs the hook remind_approver).
+#   - After five days in submitted it expires: the timer moves it to
+#     `expired` (category canceled), as system:timer. A timer that comes due
+#     while the approval's deduction holds the request waits for the hold
+#     to close, then looks again: approved, it does nothing; still
+#     submitted, it expires at once.
+#   - The requester is emailed when the request is approved, rejected or
+#     expired, and when a refund commits (on the reaction_applied event that
+#     a committed undo records, never otherwise). Each email is a field-less
+#     action: hook_ran records that it was sent.
+id: vacation_request
+version: 3
+initial_state: draft
+
+fields:
+  - {id: f_start,      type: date}
+  - {id: f_end,        type: date}
+  - {id: f_days,       type: int}
+  - {id: f_leave_type, type: enum, options: [annual, unpaid, other]}
+  - {id: f_approver,   type: principal, writable_by: kernel}
+  - {id: f_comment,    type: string}
+
+states:
+  - {id: draft,     category: todo}
+  - id: submitted
+    category: waiting
+    frozen: [f_start, f_end, f_days, f_leave_type, f_approver]
+    timer: {after: 120h, to: expired}
+    acting:
+      - {id: remind, after: 48h, every: 24h, max: 2, hook: remind_approver}
+  - id: approved
+    category: done
+    frozen: [f_start, f_end, f_days, f_leave_type, f_approver]
+  - id: rejected
+    category: canceled
+    frozen: [f_start, f_end, f_days, f_leave_type, f_approver]
+  - {id: withdrawn, category: canceled}
+  - {id: expired,   category: canceled}
+
+transitions:
+  - from: draft
+    to: submitted
+    allowed: [creator]
+    required: [f_start, f_end, f_days, f_leave_type]
+    guard: 'f_end >= f_start && f_start >= today && f_days > 0'
+  - {from: submitted, to: approved, allowed: ['field:f_approver'], except: [creator]}
+  - {from: submitted, to: rejected, allowed: ['field:f_approver'], except: [creator]}
+  - {from: submitted, to: draft,     allowed: [creator]}
+  - {from: submitted, to: withdrawn, allowed: [creator], escape: true}
+  - {from: draft,     to: withdrawn, allowed: [creator], escape: true}
+  # Expiry: only the timer.
+  - {from: submitted, to: expired,   allowed: ['principal:system:timer']}
+  - from: approved
+    to: withdrawn
+    allowed: [creator]
+    guard: 'f_start >= today'
+
+links:
+  - name: balance
+    inverse: requests
+    targets: [leave_balance]
+    max: one
+    writable_by: kernel
+    resolve: {on_enter: submitted, field: f_owner, equals: creator, state: open}
+
+hooks:
+  - id: hr_check
+    on: transition
+    from: draft
+    to: submitted
+    kind: check
+    action: hr.manager_of
+    reads: [created_on_behalf_of, created_by]
+    writes: [f_approver]
+  # Mail. email.notify sends one message to the principal it reads, with
+  # the hook's ID as the template; it writes nothing (hook_ran).
+  - {id: remind_approver, on: timer, kind: action, action: email.notify, reads: [f_approver]}
+  - {id: notify_approved, on: enter, state: approved, kind: action, action: email.notify, reads: [creator]}
+  - {id: notify_rejected, on: enter, state: rejected, kind: action, action: email.notify, reads: [creator]}
+  - {id: notify_expired,  on: enter, state: expired,  kind: action, action: email.notify, reads: [creator]}
+  - {id: refund_email, on: reaction, reaction: refund, kind: action, action: email.notify, reads: [creator]}
+
+reactions:
+  - id: deduct
+    kind: held
+    on: enter
+    state: approved
+    from: [submitted]
+    link: balance
+    add: {f_used: f_days}
+  - id: refund
+    kind: after
+    on: enter
+    state: withdrawn
+    from: [approved]
+    undoes: deduct

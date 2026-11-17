@@ -243,7 +243,9 @@ client → item service (Go, stateless)
   request and again at resolution.
 - While the hold is open, the fields the check reads are frozen, and only a
   declared escape leaves the state (it cancels the hold). Anything else is
-  `ErrHeld`, an `ErrStale`, naming the hold. A timer refused as held is spent.
+  `ErrHeld`, an `ErrStale`, naming the hold. A state timer due while a hold
+  is open waits for it to close, then looks again (Step 2, part 3; before
+  that, a timer refused as held was spent).
 - The check runs as an activity and calls `ResolveHold` under the key
   `hold:<id>`: **allow** and **correct** (allow with the hook's patch) apply the
   requester's transition after checking the requester again (still sees the
@@ -974,9 +976,9 @@ manager, and answers `correct` with `f_approver` (the Item enters
 
 **Built in part 2** (see "Link reactions, the leave balance and the saga"):
 `writable_by` on link types, reactions and their consent, `add`, the
-refund. **Still open for part 3:** a field-less reminder event needs an
-explicit `ErrHeld` exemption, and timers refused as held will be deferred,
-not spent.
+refund. **Built in part 3** (see "Time and mail"): the field-less
+reminder event (`hook_ran`, exempt from `ErrHeld` by construction), and
+timers due during a hold deferred, not spent.
 
 **Constraints that were kept open for parts 2 and 3:** `writable_by` extends to link
 types; reactions will declare which fields they write on a target Type; an
@@ -1104,6 +1106,92 @@ before the change (a ticket with a hold and a timer, a vacation request
 with the HR check, a timer that fires), and `TestReplay_HistoriesFromMain`
 replays them on today's code.
 
+### Time and mail (proof of concept, Step 2, part 3)
+
+Decided 2026-11-17, built 2026-11-17. `vacation_request@3` reminds its
+approver, expires when nobody decides, and emails the requester when it is
+approved, rejected or expired, and when a refund is given back. The kernel
+gained acting timers, field-less actions, `reaction_applied` and deferred
+timers; the email is a stub connector.
+
+**Acting timers.** A state declares `acting: [{id, after, every, max,
+hook}]`: the action hook `hook` (`on: timer`) runs `after` the event that
+entered the state, then every `every`, **`max` runs in all** (required, at
+least 1; `every` required when `max > 1`). Each `on: timer` hook is run by
+exactly one acting timer (refused at load otherwise). A run is keyed
+`timer:<item>:<timer>:<entry seq>:<n>`, caused by the entering event, one
+hop below it, and runs as its hook. Leaving the state stops further runs (a
+run already started finishes); a new entry counts from 1 again. Runs do not
+wait for a hold: a reminder during the approval hold is the point. A run
+that gives up records `hook_failed` naming the timer and run, and the next
+run still comes. After a crash, `StateEntry.ActingRuns` (runs with a
+`hook_ran` or `hook_failed`, per timer, for the current entry) says where to
+go on; overdue runs fire **one at once, then the schedule** from it, never
+a burst. In the workflow each acting timer is a coroutine canceled on
+leaving the state, so Types without acting timers issue the same commands
+as before (no `GetVersion`; the replay test proves it).
+
+**Field-less actions.** An action hook may write nothing only when its
+action writes nothing (`email.notify`). It records that it ran with
+`hook_ran` (`Internal().HookRan`): payload `{hook[, timer, run]}`, no
+field, no state change, under the hook's own key. Naming no field and no
+move, it is exempt from `ErrHeld` and frozen fields by construction. Only
+such a hook writes it; a timer hook must name its timer and a run within
+`max`, any other hook none. An action that makes something (an invoice)
+still proves it ran with its write-back. `Update` with no fields stays
+refused. Hooks may read `creator` (`created_on_behalf_of`, else
+`created_by`), a reserved name.
+
+**`reaction_applied`.** After an undo's write commits, the Undo activity
+records it on the source (`Internal().ReactionApplied`), under
+`<refund key>:applied`: payload `{reaction, target}` (`<type>:<undo>`, the
+target event). Without a committed refund it is refused `not_applied` and
+nothing is written, so nothing can follow a refund that did not happen.
+Action hooks `on: reaction` (`reaction: <undo>`) run on it: the refund
+email. It is written only for Types with such hooks, and for those a
+pending undo is done only once both the refund and its `reaction_applied`
+exist (a crash between them resumes the undo, a no-op under its key, then
+records it). The event starts the workflow even in a final state, and an
+action hook is pending from `reaction_applied` until its `hook_ran`
+(`StateEntry.PendingActions`), so a run after a crash sends it; a run never
+ends with a pending action.
+
+**Deferred state timers.** A state timer due while a hold is open waits
+for the hold to close, then looks again: the Item left the state, the
+timer is gone; still there, it fires at once. A `Held` answer (a hold the
+run has not heard of yet) is not final: like `Stale`, the timer looks again
+after the next event. Behind `workflow.GetVersion("timer-waits-for-hold")`:
+a run recorded before keeps the old rule (fire anyway; held is spent),
+tested by pinning the version to `DefaultVersion`. The SLA clock keeps
+running during a hold; `pause_while: held` on a real SLA object is Later.
+
+**The email stub** (`connstub`, `--email-listen :8084`): `POST /messages
+{to, template, item, key}`, the template being the hook's ID and `to` a
+user or agent principal; the same key and message is stored once, the same
+key with another message is 409 `key_conflict`. Opaque IDs only, no text.
+`--email-read-listen :8085` serves `GET /messages?item=` read-only; the
+compose stack publishes it (dev only) so the scenario can read what was
+sent.
+
+**The dev clock.** The worker's `--dev-time-scale <day>` (a day of a Type's
+**declared** durations, state and acting timers, lasts `<day>`) is refused
+without `--dev-clock-i-know-this-is-not-production` and an explicit
+`--dev-time-scale-types` list, each name checked against the loaded Types
+at start; never all Types by default. Hook budgets, the undo backoff, hold
+waits and every other timeout keep real time, and `today` is never scaled.
+The worker warns on every start, naming the Types; the scale is recorded in
+the run's Snapshot (`DevDay`). Only the compose stack (the dev stack, with
+dev tokens) sets it, for `vacation_request`, a day lasting 2 s. A timer
+deferred by a hold is proven by a Go end-to-end test with its own worker
+scaled for `ticket` and a slow ERP customer, not by the scenario.
+
+**`vacation_request@3`**: `submitted` reminds the approver after 48 h, then
+24 h later (`max: 2`), and expires after 120 h (`submitted -> expired`,
+allowed to `principal:system:timer` only; `expired` is canceled). Emails
+(`email.notify`, reading `f_approver` or `creator`): `remind_approver`,
+`notify_approved`, `notify_rejected`, `notify_expired`, and `refund_email`
+on `refund`.
+
 ## Spike build order
 
 A step is a unit of work, not a calendar day: it is finished when its "done when"
@@ -1215,7 +1303,7 @@ in the journal.
 | 1 (**done**) | Link types and principal fields | Declared link types with cardinality, inverse and allowed targets, enforced; link changes are events with etags; guards and search see links; principal fields checked. **Done 2026-11-16**: [journal, Step 1](journal.md#2026-11-16--step-1-proof-of-concept-link-types-and-principal-fields-finished) |
 | 2, part 1 (**done**) | Vacation request: approval as a business state, its primitives, the HR check | Draft -> submitted -> approved/rejected through pli, the approver set by the HR check and never by the requester, the submitted dates frozen, no self-approval, agents unable to approve, every refusal named; through the API, pli and the scenario. **Done 2026-11-16**: [journal, Step 2, part 1](journal.md#2026-11-16--step-2-proof-of-concept-part-1-approval-primitives-and-the-hr-check-finished) |
 | 2, part 2 (**done**) | Link reactions, the leave balance, the held deduction and its compensation | Approving a vacation request deducts its days from the requester's balance exactly once, or is DENIED insufficient_balance; two approvals racing never overdraw; every non-allow end of the hold after a deduction refunds it once, never without one; withdrawing an approved request refunds it; the requester never chooses or changes the balance; through the API, pli and the scenario. **Done 2026-11-17**: [journal, Step 2, part 2](journal.md#2026-11-17--step-2-proof-of-concept-part-2-link-reactions-the-leave-balance-the-saga-finished) |
-| 2, part 3 | Acting timers, timers deferred during holds, the stub email connector, the full scenario | Planned |
+| 2, part 3 (**done**) | Acting timers, timers deferred during holds, the stub email connector, the full scenario | A submitted request reminds its approver on schedule and expires when nobody decides, emailing the requester; approval and refund emails go out exactly once, none after a denial; a timer due during a hold waits for it; through the API, pli and the scenario on a dev clock. **Done 2026-11-17**: [journal, Step 2, part 3](journal.md#2026-11-17--step-2-proof-of-concept-part-3-acting-timers-deferred-timers-and-the-email-stub-finished) |
 | 3+ | The Jira scenarios | Planned per step when reached |
 
 ## Out of scope for the spike

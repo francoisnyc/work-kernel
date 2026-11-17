@@ -43,6 +43,16 @@ func StartsWorkflow(t *typedef.Type, ev Event) bool {
 	if ev.Op == OpTransitionRequested {
 		return true
 	}
+	// An undo applied runs its reaction hooks (the refund email), even in a
+	// final state with no other behavior.
+	if ev.Op == OpReactionApplied {
+		for _, h := range t.Hooks {
+			if h.On == typedef.OnReaction {
+				return true
+			}
+		}
+		return false
+	}
 	if ev.Entered == "" {
 		return false
 	}
@@ -243,4 +253,35 @@ func ReactionAdds(r typedef.Reaction, fields map[string]any) (map[string]int64, 
 		out[field] = n
 	}
 	return out, nil
+}
+
+// --- acting timers and field-less actions (proof of concept, Step 2, part 3) ---
+
+// The ops of a field-less action's record and of a committed undo's record
+// on its source.
+const (
+	OpHookRan         = "hook_ran"         // an action hook with no writes ran (for an acting timer: which run)
+	OpReactionApplied = "reaction_applied" // an undo committed: what it gave back, and where
+)
+
+// ActingTimers returns the acting timers of a state, in the order declared.
+func ActingTimers(t *typedef.Type, state string) []typedef.ActingTimer {
+	s, ok := t.State(state)
+	if !ok {
+		return nil
+	}
+	return s.Acting
+}
+
+// ReactionHooks returns the action hooks that run when the Item records
+// that its reaction `reaction` was applied (on: reaction), in the order
+// declared.
+func ReactionHooks(t *typedef.Type, reaction string) []typedef.Hook {
+	var out []typedef.Hook
+	for _, h := range t.Hooks {
+		if h.On == typedef.OnReaction && h.Reaction == reaction && h.Kind == typedef.HookAction {
+			out = append(out, h)
+		}
+	}
+	return out
 }

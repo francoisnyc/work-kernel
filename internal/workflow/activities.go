@@ -32,6 +32,15 @@ type Activities struct {
 	// HookAttemptTimeout bounds one attempt of a hook; zero means the
 	// default. Tests and the bench only, to force timeouts.
 	HookAttemptTimeout time.Duration
+	// DevDay (dev only, Step 2, part 3) is the length of a day for the
+	// durations a Type declares (state timers and acting timers), when the
+	// worker runs on a scaled clock; zero is real time. Nothing else is
+	// scaled: hook budgets, the undo backoff and every operational timeout
+	// keep real time. LoadItem records it in the Snapshot.
+	DevDay time.Duration
+	// DevTypes are the Types DevDay applies to; every other Type keeps
+	// real time. DevDay without DevTypes scales nothing.
+	DevTypes []string
 }
 
 // LoadItem reads what a new run needs to know about its Item: where it is,
@@ -117,6 +126,41 @@ func (a *Activities) LoadItem(ctx context.Context, itemID string) (Snapshot, err
 	if se.EnteredHold != uuid.Nil {
 		snap.EnteredHold = se.EnteredHold.String()
 	}
+	// Step 2, part 3: acting timers and reaction hooks. On a dev clock that
+	// names this Type, its declared durations are scaled (a day lasts
+	// DevDay); nothing else is (budgets, backoffs).
+	scale := func(d time.Duration) time.Duration { return d }
+	if a.DevDay > 0 && slices.Contains(a.DevTypes, ty.ID) {
+		snap.DevDay = a.DevDay
+		scale = func(d time.Duration) time.Duration {
+			return time.Duration(float64(d) * float64(a.DevDay) / float64(24*time.Hour))
+		}
+		for st, t := range snap.Timers {
+			t.After = scale(t.After)
+			snap.Timers[st] = t
+		}
+	}
+	for _, st := range ty.States {
+		for _, at := range lifecycle.ActingTimers(ty, st.ID) {
+			if snap.Acting == nil {
+				snap.Acting = map[string][]ActingSpec{}
+			}
+			snap.Acting[st.ID] = append(snap.Acting[st.ID], ActingSpec{
+				ID: at.ID, After: scale(at.AfterDuration), Every: scale(at.EveryDuration), Max: at.Max, Hook: at.Hook,
+			})
+		}
+	}
+	if len(se.ActingRuns) > 0 {
+		snap.ActingRuns = se.ActingRuns
+	}
+	for _, r := range ty.Reactions {
+		for _, h := range lifecycle.ReactionHooks(ty, r.ID) {
+			if snap.ReactionHooks == nil {
+				snap.ReactionHooks = map[string][]string{}
+			}
+			snap.ReactionHooks[r.ID] = append(snap.ReactionHooks[r.ID], h.ID)
+		}
+	}
 	for _, u := range se.PendingUndos {
 		snap.PendingUndos = append(snap.PendingUndos, PendingUndo{
 			ReactionID: u.Reaction, HoldID: u.HoldID.String(), CauseSeq: u.CauseSeq,
@@ -200,6 +244,11 @@ type WorkerOptions struct {
 	// HookAttemptTimeout bounds one attempt of a hook (StartToClose); zero
 	// means min(30 s, budget). Tests and the bench only: it forces timeouts.
 	HookAttemptTimeout time.Duration
+	// DevDay: see Activities.DevDay. cmd/worker sets it only from its
+	// --dev-time-scale flag, which it refuses without the explicit dev flag.
+	DevDay time.Duration
+	// DevTypes: see Activities.DevTypes (--dev-time-scale-types).
+	DevTypes []string
 }
 
 // NewWorker returns a worker, not yet started, that runs Item workflows and
@@ -214,7 +263,7 @@ func NewWorker(c client.Client, taskQueue string, k *itemservice.Service, opts W
 
 	// Registered by name, because the workflow calls them by name.
 	a := &Activities{Items: k, Connectors: opts.Connectors, HookBudget: opts.HookBudget,
-		HookAttemptTimeout: opts.HookAttemptTimeout}
+		HookAttemptTimeout: opts.HookAttemptTimeout, DevDay: opts.DevDay, DevTypes: opts.DevTypes}
 	w.RegisterActivityWithOptions(a.LoadItem, activity.RegisterOptions{Name: ActivityLoadItem})
 	w.RegisterActivityWithOptions(a.FireTimer, activity.RegisterOptions{Name: ActivityFireTimer})
 	w.RegisterActivityWithOptions(a.RunEnrich, activity.RegisterOptions{Name: ActivityRunEnrich})

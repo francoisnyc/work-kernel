@@ -425,7 +425,12 @@ message ItemEvent {
   // TRANSITIONED: the target a resolved link replaced.
   ItemRef link_replaced = 30;
   // REACTION_FAILED: the reaction, <type>:<id>; reason holds its code.
+  // Also REACTION_APPLIED: the reaction that committed.
   string reaction = 31;
+  // HOOK_RAN (and HOOK_FAILED) of an acting timer's run: the timer and the
+  // run, from 1.
+  string timer = 32;
+  int32 run = 33;
 }
 
 enum ItemEventKind {
@@ -445,6 +450,12 @@ enum ItemEventKind {
   // A link reaction could not be applied (an undo its target refused). It
   // is not retried.
   ITEM_EVENT_KIND_REACTION_FAILED = 10;
+  // An action hook that writes no field ran (an email sent): hook names
+  // it, and timer and run an acting timer's run. No field or state change.
+  ITEM_EVENT_KIND_HOOK_RAN = 11;
+  // An undo committed on another Item: reaction names it. No field or
+  // state change; action hooks may run on it (the refund email).
+  ITEM_EVENT_KIND_REACTION_APPLIED = 12;
 }
 
 message StartAgentSessionRequest {
@@ -652,6 +663,19 @@ message State {
   // (FAILED_PRECONDITION / FIELD_FROZEN). The transition entering the state
   // may set them.
   repeated string frozen = 3;
+  // Acting timers: each runs an action after a delay in the state, without
+  // a transition, and again every interval, at most max times per entry.
+  repeated ActingTimer acting = 4;
+}
+
+// An acting timer of a state.
+message ActingTimer {
+  string id = 1;
+  // Go durations as the Type declares them (48h).
+  string after = 2;
+  string every = 3;
+  // The total number of runs per entry into the state.
+  int32 max = 4;
 }
 
 enum StateCategory {

@@ -21,6 +21,8 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+
+	"github.com/francoisnyc/work-kernel/internal/item"
 )
 
 // Verdict is a check's answer.
@@ -64,6 +66,16 @@ type action struct {
 	reads, writes int
 	sideEffect    bool
 	run           func(ctx context.Context, c *Connectors, key string, args []any) (Result, error)
+	// runCall, when set, is used instead of run: the action needs to know
+	// which hook of which Item runs it (a message names both).
+	runCall func(ctx context.Context, c *Connectors, key string, args []any, call Call) (Result, error)
+}
+
+// Call says which hook of which Item runs an action. email.notify sends the
+// hook's ID as the message's template and the Item's ID with it.
+type Call struct {
+	HookID string
+	ItemID string
 }
 
 // catalog is every action a Type may name. A package-level map is fine here:
@@ -74,6 +86,10 @@ var catalog = map[string]action{
 	"erp.check_credit":      {reads: 2, writes: 1, run: checkCredit},
 	"erp.create_invoice":    {reads: 2, writes: 1, sideEffect: true, run: createInvoice},
 	"hr.manager_of":         {reads: 2, writes: 1, run: managerOf},
+	// email.notify (Step 2, part 3): one message to one principal, through
+	// the email stub. It reads the recipient and writes nothing: the
+	// hook_ran event records that it ran.
+	"email.notify": {reads: 1, writes: 0, sideEffect: true, runCall: notify},
 }
 
 // Arity reports how many reads and writes an action takes. ok is false for
@@ -89,6 +105,7 @@ func Arity(name string) (reads, writes int, ok bool) {
 type Connectors struct {
 	crm, erp string
 	hr       string // the HR directory; set with WithHR
+	email    string // the email service; set with WithEmail
 	http     *http.Client
 	noKeys   bool // the control run: never send the idempotency key
 }
@@ -105,6 +122,14 @@ func (c *Connectors) WithHR(hrURL string) *Connectors {
 	withHR := *c
 	withHR.hr = hrURL
 	return &withHR
+}
+
+// WithEmail returns connectors that also send messages through the email
+// service at this base URL.
+func (c *Connectors) WithEmail(emailURL string) *Connectors {
+	withEmail := *c
+	withEmail.email = emailURL
+	return &withEmail
 }
 
 // WithoutKeys returns connectors that never send an idempotency key. It is
@@ -132,6 +157,12 @@ func (c *Connectors) WithoutResend() *Connectors {
 // without one, since a retry could not be told from a new request.
 // Read-only actions ignore it.
 func (c *Connectors) Run(ctx context.Context, name, key string, args []any) (Result, error) {
+	return c.RunCall(ctx, name, key, args, Call{})
+}
+
+// RunCall is Run for a given hook of a given Item: actions that send a
+// message need both.
+func (c *Connectors) RunCall(ctx context.Context, name, key string, args []any, call Call) (Result, error) {
 	a, ok := catalog[name]
 	if !ok {
 		return Result{}, permanent("unknown action %q", name)
@@ -145,7 +176,35 @@ func (c *Connectors) Run(ctx context.Context, name, key string, args []any) (Res
 	if c.noKeys {
 		key = ""
 	}
+	if a.runCall != nil {
+		return a.runCall(ctx, c, key, args, call)
+	}
 	return a.run(ctx, c, key, args)
+}
+
+// notify sends one message: the recipient (a principal), the template (the
+// hook's ID), the Item and the key. A retry sends the same key, and the
+// service stores it once. Only people and agents get mail: a recipient
+// that is not a user or agent principal is permanent.
+func notify(ctx context.Context, c *Connectors, key string, args []any, call Call) (Result, error) {
+	if c.email == "" {
+		return Result{}, permanent("email.notify: no email service is configured")
+	}
+	to, _ := args[0].(string)
+	if kind, ok := item.KindOf(to); !ok || (kind != item.KindUser && kind != item.KindAgent) {
+		return Result{}, permanent("email.notify: the recipient must be a user or agent principal, got %v", args[0])
+	}
+	if call.HookID == "" || call.ItemID == "" {
+		return Result{}, permanent("email.notify: no hook or Item to send for")
+	}
+	req := map[string]any{"to": to, "template": call.HookID, "item": call.ItemID, "key": key}
+	var body struct {
+		ID string `json:"id"`
+	}
+	if err := c.call(ctx, key, http.MethodPost, c.email+"/messages", req, &body); err != nil {
+		return Result{}, err
+	}
+	return Result{}, nil
 }
 
 // --- the actions ---

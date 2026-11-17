@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -231,6 +232,7 @@ func (r *Relay) delivery(ctx context.Context, id uuid.UUID, ev pendingEvent) (De
 		RequestedTo    string `json:"requested_to"`     // transition_requested, _denied, _failed
 		HoldID         string `json:"hold_id"`          // every event that opens or closes a hold
 		CanceledHoldID string `json:"canceled_hold_id"` // an escape
+		Reaction       string `json:"reaction"`         // reaction_applied: <type>:<reaction>
 	}
 	if err := json.Unmarshal(ev.Payload, &shape); err != nil {
 		return Delivery{}, fmt.Errorf("decode payload of event %d: %w", ev.Seq, err)
@@ -248,6 +250,12 @@ func (r *Relay) delivery(ctx context.Context, id uuid.UUID, ev pendingEvent) (De
 	if holdID == "" {
 		holdID = shape.CanceledHoldID
 	}
+	// An applied undo names its reaction, for the hooks that run on it
+	// (the refund email); the workflow knows reactions by their own ID.
+	var reaction string
+	if ev.Op == lifecycle.OpReactionApplied {
+		_, reaction, _ = strings.Cut(shape.Reaction, ":")
+	}
 
 	ty, err := r.types.Load(ev.TypeID, ev.TypeVersion, func() (*typedef.Type, error) {
 		return r.loadType(ctx, ev.TypeID, ev.TypeVersion)
@@ -260,7 +268,7 @@ func (r *Relay) delivery(ctx context.Context, id uuid.UUID, ev pendingEvent) (De
 		UpdateID: fmt.Sprintf("%s:%d", id, ev.Seq),
 		Event: workflow.Event{
 			Seq: ev.Seq, Op: ev.Op, From: shape.From, To: entered, At: ev.At,
-			RequestedTo: shape.RequestedTo, HoldID: holdID,
+			RequestedTo: shape.RequestedTo, HoldID: holdID, Reaction: reaction,
 			CorrelationID: ev.CorrelationID, Hop: ev.Hop,
 		},
 		// The Type decides, in one place, whether this event needs a

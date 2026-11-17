@@ -82,7 +82,12 @@ type Event struct {
 	// Values holds the results). A cleared or erased value is in neither.
 	Added map[string]any
 	// Reaction: reaction_failed's reaction (<type>:<id>); Reason its code.
+	// Also reaction_applied's.
 	Reaction string
+	// Timer and Run: hook_ran and hook_failed of an acting timer's run
+	// (Step 2, part 3).
+	Timer string
+	Run   int
 }
 
 // ItemRef is another Item named by an event: its ID, or Restricted (and no
@@ -193,12 +198,16 @@ type eventPayload struct {
 	ContainerFrom  json.RawMessage `json:"container_from"`
 	ContainerTo    json.RawMessage `json:"container_to"`
 	LinkType       string          `json:"link_type"`
-	LinkTarget     *uuid.UUID      `json:"target"`
+	// target: a link's target (an Item ID), or reaction_applied's target
+	// event (<item>:<seq>), which history does not show.
+	Target string `json:"target"`
 	// A transition that set a kernel-resolved link; a reaction's write.
 	ResolvedTarget *uuid.UUID `json:"link_target"`
 	LinkReplaced   *uuid.UUID `json:"link_replaced"`
 	AddedIDs       []string   `json:"added_field_ids"`
 	Reaction       string     `json:"reaction"`
+	Timer          string     `json:"timer"` // hook_ran, hook_failed: an acting timer's run
+	Run            int        `json:"run"`
 }
 
 // withPayload fills the event from its stored payload and values.
@@ -220,6 +229,7 @@ func (e Event) withPayload(ctx context.Context, payload, values, deltas []byte, 
 		e.To = pl.State
 	}
 	e.Hook, e.Reason, e.Reaction = pl.Hook, pl.Reason, pl.Reaction
+	e.Timer, e.Run = pl.Timer, pl.Run
 	for _, h := range []string{pl.HoldID, pl.CanceledHoldID} {
 		if id, err := uuid.Parse(h); err == nil {
 			e.HoldID = &id
@@ -266,6 +276,10 @@ func (e Event) withPayload(ctx context.Context, payload, values, deltas []byte, 
 		}
 	}
 
+	var linkTarget *uuid.UUID
+	if id, err := uuid.Parse(pl.Target); err == nil {
+		linkTarget = &id
+	}
 	var err error
 	if pl.ContainerID != nil {
 		if e.Container, err = refs.ref(ctx, *pl.ContainerID); err != nil {
@@ -273,11 +287,11 @@ func (e Event) withPayload(ctx context.Context, payload, values, deltas []byte, 
 		}
 	}
 	if pl.ResolvedTarget != nil {
-		pl.LinkTarget = pl.ResolvedTarget
+		linkTarget = pl.ResolvedTarget
 	}
-	if pl.LinkTarget != nil {
+	if linkTarget != nil {
 		e.LinkType = pl.LinkType
-		if e.LinkTarget, err = refs.ref(ctx, *pl.LinkTarget); err != nil {
+		if e.LinkTarget, err = refs.ref(ctx, *linkTarget); err != nil {
 			return e, err
 		}
 	}
