@@ -300,6 +300,11 @@ func (a *Activities) RunReaction(ctx context.Context, in ReactionInput) error {
 	_, err = a.Items.Internal().React(ctx, itemservice.ReactRequest{Principal: p, SourceID: id, HoldID: holdID, Attribution: attr})
 	switch {
 	case err == nil:
+	case errors.Is(err, itemservice.ErrHeld):
+		// The target is held by its own open hold (checked before ErrStale,
+		// which it also is). That passes: retry within the budget; when the
+		// budget runs out, the source's hold resolves as error.
+		return fmt.Errorf("the target is held: %w", err)
 	case errors.Is(err, itemservice.ErrStale):
 		return nil // the hold closed first; an undo handles what is left
 	default:
