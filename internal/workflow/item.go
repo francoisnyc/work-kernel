@@ -136,6 +136,28 @@ type Snapshot struct {
 	// leaving its state by the trigger) adds one. Nothing drops one.
 	EnteredHold  string
 	PendingUndos []PendingUndo
+
+	// Acting timers (Step 2, part 3), reduced like Timers: per state, its
+	// acting timers. ActingRuns counts, per acting timer of State, the runs
+	// already started for the current entry (LoadItem: completed); entering
+	// a state resets it. ReactionHooks maps an undo reaction to the action
+	// hooks its reaction_applied event runs.
+	Acting        map[string][]ActingSpec
+	ActingRuns    map[string]int
+	ReactionHooks map[string][]string
+	// DevDay is the length of a day the Type's durations were scaled to
+	// (zero: real time), recorded so the history shows the clock it ran on.
+	DevDay time.Duration
+}
+
+// ActingSpec is one acting timer, reduced to what the workflow needs (its
+// durations already scaled when DevDay is set).
+type ActingSpec struct {
+	ID    string
+	After time.Duration
+	Every time.Duration
+	Max   int
+	Hook  string
 }
 
 // PendingUndo is one undo to run: the undo reaction, the hold whose
@@ -245,6 +267,10 @@ type HookInput struct {
 	HoldID        string // check only
 	CorrelationID string
 	Hop           int
+	// Timer and Run: the acting timer's run that runs an action hook
+	// (Step 2, part 3); empty and 0 otherwise.
+	Timer string
+	Run   int
 	// IdempotencyKey: hook:<item>:<cause seq>:<hook> for an enrich hook (its
 	// own write and its fallback share it), hold:<hold> for a check (its
 	// resolution and the error resolution share it). Either way, one write.
@@ -286,6 +312,8 @@ type Event struct {
 	// other event that names it). Opaque IDs and state names only.
 	RequestedTo string
 	HoldID      string
+	// Reaction: a reaction_applied event's reaction (Step 2, part 3).
+	Reaction string
 }
 
 // ApplyResult answers one delivered event.

@@ -420,6 +420,10 @@ type StateEntry struct {
 	// the entry was a held transition: an undo on leaving State reverses
 	// that hold's reservation, never an earlier one's.
 	EnteredHold uuid.UUID
+	// ActingRuns are, per acting timer of State, how many of its runs for
+	// this entry have completed (hook_ran or hook_failed) (Step 2, part 3):
+	// a run after a crash goes on from there.
+	ActingRuns map[string]int
 }
 
 // HoldEntry is an open hold, as the workflow needs it: opaque IDs, state

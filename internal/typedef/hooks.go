@@ -32,6 +32,12 @@ type HookOn string
 const (
 	OnEnter      HookOn = "enter"      // entering State
 	OnTransition HookOn = "transition" // the transition From -> To
+	// OnTimer: run by an acting timer of a state (Step 2, part 3); the
+	// timer names the hook. Action hooks only.
+	OnTimer HookOn = "timer"
+	// OnReaction: run when the Item records that its reaction Reaction (an
+	// undo) committed (the reaction_applied event). Action hooks only.
+	OnReaction HookOn = "reaction"
 )
 
 // Hook binds an action (code, named here, never contained) to a point in
@@ -53,6 +59,9 @@ type Hook struct {
 	Writes []string `yaml:"writes" json:"writes,omitempty"`
 	// Fallback is what an enrich hook writes when its budget runs out.
 	Fallback map[string]any `yaml:"fallback" json:"fallback,omitempty"`
+	// Reaction (on: reaction): the after reaction whose applied event runs
+	// the hook.
+	Reaction string `yaml:"reaction" json:"reaction,omitempty"`
 }
 
 // Hook returns the hook with the given ID.
@@ -130,6 +139,9 @@ func (t *Type) checkHooks() error {
 						"a hook never makes a checked move on its own authority", entry)
 				}
 			}
+		case OnTimer, OnReaction:
+			// Phase B stub: parsed so the repository's Types load; the
+			// rules for these attach points are not implemented yet.
 		default:
 			return fail("unknown attach point %q: want enter or transition", h.On)
 		}
@@ -157,7 +169,7 @@ func (t *Type) checkHooks() error {
 		if h.Kind == HookEnrich && len(h.Writes) == 0 {
 			return fail("an enrich hook writes at least one field")
 		}
-		if h.Kind == HookAction && len(h.Writes) == 0 {
+		if _, writes, ok := hooks.Arity(h.Action); h.Kind == HookAction && len(h.Writes) == 0 && !(ok && writes == 0) {
 			return fail("an action hook writes at least one field: what it made records that it ran")
 		}
 		if len(h.Fallback) > 0 {

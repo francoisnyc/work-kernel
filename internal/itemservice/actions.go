@@ -32,6 +32,10 @@ type HookFailedRequest struct {
 	ItemID         uuid.UUID
 	Reason         string
 	Attribution    item.Attribution
+	// Timer and Run (Step 2, part 3): the acting timer's run that gave up,
+	// recorded in the payload; empty and 0 for an action on entering a state.
+	Timer string
+	Run   int
 }
 
 // HookFailed writes a hook_failed event: the hook and the reason, nothing

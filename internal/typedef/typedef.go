@@ -52,6 +52,10 @@ const (
 const (
 	AttrCreatedBy         = "created_by"
 	AttrCreatedOnBehalfOf = "created_on_behalf_of"
+	// AttrCreator is who the Item was created for: created_on_behalf_of,
+	// else created_by (the same rule as allowed: [creator]). Hooks may read
+	// it (Step 2, part 3), e.g. to email the requester.
+	AttrCreator = "creator"
 )
 
 // VarToday is the one guard variable that is not a field: today's date
@@ -66,12 +70,12 @@ const (
 
 // reservedNames may not be field IDs: guard variables, the creator
 // attributes a hook may read, and the links prefix.
-var reservedNames = []string{VarToday, VarCaller, VarCallerOnBehalfOf, AttrCreatedBy, AttrCreatedOnBehalfOf, "links"}
+var reservedNames = []string{VarToday, VarCaller, VarCallerOnBehalfOf, AttrCreatedBy, AttrCreatedOnBehalfOf, AttrCreator, "links"}
 
 // IsAttribute reports whether name is an Item attribute a hook may read
 // besides its fields: created_by or created_on_behalf_of.
 func IsAttribute(name string) bool {
-	return name == AttrCreatedBy || name == AttrCreatedOnBehalfOf
+	return name == AttrCreatedBy || name == AttrCreatedOnBehalfOf || name == AttrCreator
 }
 
 // categories are the fixed state categories from the design. "none" means
@@ -135,6 +139,25 @@ type State struct {
 	// Frozen are the fields no write may change while an Item is in this
 	// state. The transition entering the state may set them.
 	Frozen []string `yaml:"frozen" json:"frozen,omitempty"`
+	// Acting are the state's acting timers (Step 2, part 3): each runs an
+	// action hook after a delay, without a transition, optionally again at
+	// an interval, at most Max times per entry into the state.
+	Acting []ActingTimer `yaml:"acting" json:"acting,omitempty"`
+}
+
+// ActingTimer runs its hook (an action hook with on: timer) After the event
+// that entered the state, then every Every, Max runs in all; leaving the
+// state stops it. Its runs are keyed timer:<item>:<timer>:<entry seq>:<n>.
+type ActingTimer struct {
+	ID    string `yaml:"id" json:"id"`
+	After string `yaml:"after" json:"after"`           // a Go duration, e.g. 48h
+	Every string `yaml:"every" json:"every,omitempty"` // a Go duration; required when Max > 1
+	Max   int    `yaml:"max" json:"max"`               // the total number of runs, at least 1
+	Hook  string `yaml:"hook" json:"hook"`             // an action hook of this Type, on: timer
+
+	// After and Every parsed, filled when the Type is loaded.
+	AfterDuration time.Duration `yaml:"-" json:"-"`
+	EveryDuration time.Duration `yaml:"-" json:"-"`
 }
 
 // Timer moves an Item out of a state it has stayed in for too long. It is a

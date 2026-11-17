@@ -32,6 +32,12 @@ type Activities struct {
 	// HookAttemptTimeout bounds one attempt of a hook; zero means the
 	// default. Tests and the bench only, to force timeouts.
 	HookAttemptTimeout time.Duration
+	// DevDay (dev only, Step 2, part 3) is the length of a day for the
+	// durations a Type declares (state timers and acting timers), when the
+	// worker runs on a scaled clock; zero is real time. Nothing else is
+	// scaled: hook budgets, the undo backoff and every operational timeout
+	// keep real time. LoadItem records it in the Snapshot.
+	DevDay time.Duration
 }
 
 // LoadItem reads what a new run needs to know about its Item: where it is,
@@ -200,6 +206,9 @@ type WorkerOptions struct {
 	// HookAttemptTimeout bounds one attempt of a hook (StartToClose); zero
 	// means min(30 s, budget). Tests and the bench only: it forces timeouts.
 	HookAttemptTimeout time.Duration
+	// DevDay: see Activities.DevDay. cmd/worker sets it only from its
+	// --dev-time-scale flag, which it refuses without the explicit dev flag.
+	DevDay time.Duration
 }
 
 // NewWorker returns a worker, not yet started, that runs Item workflows and

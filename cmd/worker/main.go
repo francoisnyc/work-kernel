@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"time"
@@ -69,4 +70,37 @@ func env(name, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// config is what the worker's flags say (Step 2, part 3).
+type config struct {
+	// DevDay is the length of a day for the durations Types declare (state
+	// and acting timers), zero for real time. Dev only.
+	DevDay time.Duration
+}
+
+// The dev clock's flags. --dev-time-scale takes the length a day lasts
+// (2s: a day of a Type's timers passes in two seconds). It is refused
+// unless the second flag is given too, and never defaulted.
+const (
+	flagTimeScale = "dev-time-scale"
+	flagDevClock  = "dev-clock-i-know-this-is-not-production"
+)
+
+// parseConfig reads the worker's flags.
+//
+// Phase B stub: not implemented yet.
+func parseConfig(args []string) (config, error) {
+	if len(args) > 0 {
+		return config{}, errors.New("worker: flags are not implemented")
+	}
+	return config{}, nil
+}
+
+// clockWarning is what the worker logs on every start that runs on a scaled
+// clock ("" on real time).
+//
+// Phase B stub: not implemented yet.
+func clockWarning(c config) string {
+	return ""
 }
