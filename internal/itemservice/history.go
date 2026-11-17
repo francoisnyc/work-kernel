@@ -82,7 +82,12 @@ type Event struct {
 	// Values holds the results). A cleared or erased value is in neither.
 	Added map[string]any
 	// Reaction: reaction_failed's reaction (<type>:<id>); Reason its code.
+	// Also reaction_applied's.
 	Reaction string
+	// Timer and Run: hook_ran and hook_failed of an acting timer's run
+	// (Step 2, part 3).
+	Timer string
+	Run   int
 }
 
 // ItemRef is another Item named by an event: its ID, or Restricted (and no
