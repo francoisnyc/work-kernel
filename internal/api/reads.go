@@ -202,6 +202,8 @@ var eventKinds = map[string]kernelv1.ItemEventKind{
 	"link_added":           kernelv1.ItemEventKind_ITEM_EVENT_KIND_LINK_ADDED,
 	"link_removed":         kernelv1.ItemEventKind_ITEM_EVENT_KIND_LINK_REMOVED,
 	"reaction_failed":      kernelv1.ItemEventKind_ITEM_EVENT_KIND_REACTION_FAILED,
+	"hook_ran":             kernelv1.ItemEventKind_ITEM_EVENT_KIND_HOOK_RAN,
+	"reaction_applied":     kernelv1.ItemEventKind_ITEM_EVENT_KIND_REACTION_APPLIED,
 }
 
 func (s *server) ListItemEvents(ctx context.Context, req *connect.Request[kernelv1.ListItemEventsRequest]) (*connect.Response[kernelv1.ListItemEventsResponse], error) {
@@ -244,6 +246,7 @@ func eventOut(ns, item string, ty *typedef.Type, e itemservice.Event) (*kernelv1
 		CausationId: e.CausationID, CorrelationId: e.CorrelationID, Hop: int32(e.Hop),
 		FromState: e.From, ToState: e.To, RequestedState: e.RequestedTo, Hook: e.Hook, Reaction: e.Reaction,
 		Reason: strings.ToUpper(e.Reason), ErasedFields: e.Erased, Inherit: e.Inherit, Moved: e.Moved,
+		Timer: e.Timer, Run: int32(e.Run),
 	}
 	if e.TypeID != "" {
 		out.Type = typeName(ns, e.TypeID, e.TypeVersion)

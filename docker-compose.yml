@@ -1,9 +1,15 @@
 # The whole proof-of-concept stack: docker compose up -d --build --wait
 #
 # Postgres, the Temporal dev server, a one-shot migration, the item service
-# (the public API), the relay, the worker, and stub CRM/ERP connectors. Only
-# the API (8080) and the Temporal UI (8233) are published; compose.dev.yaml
-# also publishes Postgres and Temporal's gRPC port for work on the code.
+# (the public API), the relay, the worker, and stub CRM/ERP/HR/email
+# connectors. Published: the API (8080), the Temporal UI (8233) and, dev
+# only, the email stub's read-only port (8085) for the scenario;
+# compose.dev.yaml also publishes Postgres and Temporal's gRPC port for work
+# on the code.
+#
+# This is a dev stack: its worker runs vacation_request on a DEV CLOCK (a
+# day of its timers lasts 2 s), so the scenario can watch reminders and an
+# expiry. It warns on every start. Never run a worker so in production.
 #
 # The Temporal dev server keeps its state in memory: reset the stack as a
 # whole (docker compose down -v), never one service.
@@ -77,25 +83,38 @@ services:
 
   worker:
     build: {context: ., target: worker}
+    # DEV ONLY: vacation_request's declared timers on a scaled clock (a day
+    # lasts 2 s); every other Type, and every budget, keeps real time.
+    command: ["--dev-time-scale", "2s", "--dev-clock-i-know-this-is-not-production",
+              "--dev-time-scale-types", "vacation_request"]
     environment:
       <<: *database
       TEMPORAL_ADDRESS: temporal:7233
       CRM_URL: http://connstub:8081
       ERP_URL: http://connstub:8082
       HR_URL: http://connstub:8083
+      EMAIL_URL: http://connstub:8084
     depends_on:
       migrate: {condition: service_completed_successfully}
       temporal: {condition: service_healthy}
       connstub: {condition: service_healthy}
+      # The dev clock checks the Types it names against those loaded.
+      itemservice: {condition: service_healthy}
 
   # Stub CRM (8081) and ERP (8082) for the ticket's hooks. The ERP answers
   # after 1 s, so a held approve stays held long enough to see. The stub HR
   # directory (8083), for the vacation request's HR check, answers at once.
+  # The email stub (8084) records the vacation request's emails; its
+  # read-only port (8085, GET /messages?item=) is published for the
+  # scenario, dev only: nothing outside the stack can send.
   connstub:
     build: {context: ., target: connstub}
     command: ["--crm-listen", ":8081", "--erp-listen", ":8082", "--erp-latency", "1s",
               "--customers", "/etc/connstub/customers.json",
-              "--hr-listen", ":8083", "--hr-directory", "/etc/connstub/hr-directory.json"]
+              "--hr-listen", ":8083", "--hr-directory", "/etc/connstub/hr-directory.json",
+              "--email-listen", ":8084", "--email-read-listen", ":8085"]
+    ports:
+      - "8085:8085" # dev only: the sent emails, read-only
     volumes:
       - ./deploy/customers.json:/etc/connstub/customers.json:ro
       - ./deploy/hr-directory.json:/etc/connstub/hr-directory.json:ro

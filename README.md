@@ -15,6 +15,7 @@ and what was learned is in [`docs/journal.md`](docs/journal.md).
 - **Docker** with **Compose v2** (`docker compose`), to run the stack.
 - **Go 1.26** or newer, to build `pli` (and to run the tests).
 - **jq**, for the walkthrough below and the scenario script.
+- **curl**, for the scenario script (it reads the emails the stack sent).
 
 ## Start the stack
 
@@ -24,12 +25,20 @@ docker compose up -d --build --wait     # or: make up
 
 This builds the images and starts Postgres, the Temporal dev server, a one-shot
 migration, the item service (the API), the relay, the worker, and stub CRM,
-ERP and HR directory servers (`connstub`) for the ticket's and the vacation
-request's hooks. `--wait` returns once every
-service is healthy. Two ports are published:
+ERP, HR directory and email servers (`connstub`) for the ticket's and the
+vacation request's hooks. `--wait` returns once every
+service is healthy. Three ports are published:
 
 - `http://localhost:8080`: the public API (Connect, gRPC and gRPC-Web).
 - `http://localhost:8233`: the Temporal UI.
+- `http://localhost:8085`: dev only, the emails the stack sent, read-only
+  (`GET /messages?item=<id>`), for the scenario. The email stub itself
+  (8084) is reachable inside the stack only.
+
+The stack is for development. Its worker runs `vacation_request` on a **dev
+clock**: a day of that Type's declared timers (reminders, expiry) lasts 2 s,
+and the worker warns so on every start. Every other Type, hook budgets and
+other timeouts keep real time. A production worker never gets these flags.
 
 ## How it fits together
 
@@ -39,11 +48,12 @@ service is healthy. Two ports are published:
   the public API on 8080. Its health check asks `/healthz`, which answers 200
   while the database answers (it is outside the API contract).
 - **relay** delivers the outbox (what changed) to Temporal; **worker** runs the
-  Item workflows and their hooks, which call **connstub**'s CRM, ERP and HR
-  directory (`deploy/hr-directory.json`) and
+  Item workflows and their hooks, which call **connstub**'s CRM, ERP, HR
+  directory (`deploy/hr-directory.json`) and email service, and
   write back through the item service. The relay and the worker have no health
   check: they serve no port and nothing waits on them; they start once
-  Postgres, Temporal (and, for the worker, connstub) are healthy.
+  Postgres, Temporal (and, for the worker, connstub and the item service,
+  whose loaded Types its dev clock checks) are healthy.
 - **postgres** holds everything; **temporal** is the dev server, in memory.
 
 ## Build pli
