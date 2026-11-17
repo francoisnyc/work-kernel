@@ -245,8 +245,10 @@ func (s *Server) invoice(w http.ResponseWriter, r *http.Request, customer string
 		// whether the invoice was made.
 		if hj, ok := w.(http.Hijacker); ok {
 			if conn, _, err := hj.Hijack(); err == nil {
-				_ = conn.Close()
+				// Counted before the close: the client's resend can finish,
+				// and a test read the count, as soon as the connection drops.
 				s.count(&s.dropped)
+				_ = conn.Close()
 				return
 			}
 		}
