@@ -212,11 +212,31 @@ func (a *Activities) RunCheck(ctx context.Context, in HookInput) error {
 		return temporal.NewNonRetryableApplicationError(fmt.Sprintf("unknown verdict %q", res.Verdict), ErrTypeHookFailed, nil)
 	}
 	req := a.resolveRequest(c, in, v, res.Reason)
-	if v == itemservice.VerdictCorrect {
-		req.Fields = writes(c.hook, res.Values)
+	if v != itemservice.VerdictCorrect {
+		return a.resolve(ctx, req)
 	}
-	return a.resolve(ctx, req)
+	req.Fields = writes(c.hook, res.Values)
+	_, err = a.Items.Internal().ResolveHold(ctx, req)
+	switch {
+	case err == nil, errors.Is(err, itemservice.ErrIdempotencyKeyReuse):
+		return nil
+	case errors.Is(err, itemservice.ErrInvalid), errors.Is(err, itemservice.ErrRejected),
+		errors.Is(err, itemservice.ErrForbidden):
+		// The kernel refuses the correction itself (a value of the wrong
+		// shape, a frozen field): asking again gets the same answer, and the
+		// hold must not stay open. It closes as error, under its own key,
+		// so a retry of this activity that sends the correction again
+		// (under hold:<id>) never collides with it.
+		refused := a.resolveRequest(c, in, itemservice.VerdictError, ReasonCorrectionRefused)
+		refused.IdempotencyKey = fmt.Sprintf("hold:%s:refused", in.HoldID)
+		return a.resolve(ctx, refused)
+	}
+	return kernelError(err)
 }
+
+// ReasonCorrectionRefused closes a hold whose check's correction the
+// kernel refused (consolidation after Step 2, item 2).
+const ReasonCorrectionRefused = "correction_refused"
 
 // ResolveHold resolves a hold as error, when its check could not answer.
 // Under the check's own key: if the check did resolve it after all, the key

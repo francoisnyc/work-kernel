@@ -124,6 +124,17 @@ func (t *Type) checkHooks() error {
 				return fail("transition %s already has the check %q", name, other)
 			}
 			checked[name] = h.ID
+			// The correction travels with the move out of the from-state:
+			// it may not write what that state freezes (else every
+			// resolution would be refused FIELD_FROZEN).
+			if from, ok := t.State(h.From); ok {
+				for _, id := range h.Writes {
+					if slices.Contains(from.Frozen, id) {
+						return fail("it writes %s, which state %s freezes: its correction leaves %s with the move",
+							id, h.From, h.From)
+					}
+				}
+			}
 			// A check's correction is the transition's patch, applied by
 			// ResolveHold: like any patch of the transition, it may not
 			// write a field the transition's `allowed` names.
