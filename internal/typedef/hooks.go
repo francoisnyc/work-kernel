@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/francoisnyc/work-kernel/internal/hooks"
 	"github.com/francoisnyc/work-kernel/internal/item"
@@ -87,6 +88,8 @@ func (t *Type) checkHooks() error {
 			where += fmt.Sprintf(" (on enter %s)", h.State)
 		case OnTransition:
 			where += fmt.Sprintf(" (on %s -> %s)", h.From, h.To)
+		case OnReaction:
+			where += fmt.Sprintf(" (on reaction %s)", h.Reaction)
 		}
 		fail := func(format string, args ...any) error {
 			return fmt.Errorf("typedef %s v%d: %s: %s", t.ID, t.Version, where, fmt.Sprintf(format, args...))
@@ -139,11 +142,37 @@ func (t *Type) checkHooks() error {
 						"a hook never makes a checked move on its own authority", entry)
 				}
 			}
-		case OnTimer, OnReaction:
-			// Phase B stub: parsed so the repository's Types load; the
-			// rules for these attach points are not implemented yet.
+		case OnTimer:
+			// Which state's timer runs it is the acting timer's to say
+			// (checkActing): each such hook is named by exactly one.
+			if h.State != "" || h.From != "" || h.To != "" {
+				return fail("a hook on: timer names no state or transition: the acting timer that runs it does")
+			}
+			if h.Kind != HookAction {
+				return fail("a hook on: timer must be kind action, not %q", h.Kind)
+			}
+		case OnReaction:
+			if h.State != "" || h.From != "" || h.To != "" {
+				return fail("a hook on: reaction names no state or transition: its reaction does")
+			}
+			if h.Reaction == "" {
+				return fail("a hook on: reaction needs `reaction`, the undo whose applied event runs it")
+			}
+			r, ok := t.Reaction(h.Reaction)
+			if !ok {
+				return fail("unknown reaction %q", h.Reaction)
+			}
+			if r.Kind != ReactionAfter || r.Undoes == "" {
+				return fail("reaction %q is not an undo (an after reaction): only an undo records that it was applied", h.Reaction)
+			}
+			if h.Kind != HookAction {
+				return fail("a hook on: reaction must be kind action, not %q", h.Kind)
+			}
 		default:
-			return fail("unknown attach point %q: want enter or transition", h.On)
+			return fail("unknown attach point %q: want enter, transition, timer or reaction", h.On)
+		}
+		if h.On != OnReaction && h.Reaction != "" {
+			return fail("only a hook on: reaction names a reaction")
 		}
 
 		if h.Action == "" {
@@ -193,6 +222,78 @@ func (t *Type) checkHooks() error {
 		if reads != len(h.Reads) || writes != len(h.Writes) {
 			return fail("action %s takes %d reads and %d writes; the hook declares %d and %d",
 				h.Action, reads, writes, len(h.Reads), len(h.Writes))
+		}
+	}
+	return t.checkActing()
+}
+
+// checkActing validates the states' acting timers against the hooks: each
+// names an action hook on: timer, and each such hook is named by exactly one
+// acting timer. It fills the parsed durations.
+func (t *Type) checkActing() error {
+	named := map[string]string{} // hook -> "state/timer" naming it
+	for i := range t.States {
+		s := &t.States[i]
+		ids := map[string]bool{}
+		for j := range s.Acting {
+			a := &s.Acting[j]
+			fail := func(format string, args ...any) error {
+				return fmt.Errorf("typedef %s v%d: state %s: acting timer %q: %s",
+					t.ID, t.Version, s.ID, a.ID, fmt.Sprintf(format, args...))
+			}
+			// The ID is part of the runs' idempotency keys (':' separated).
+			if a.ID == "" || strings.ContainsAny(a.ID, ":@") {
+				return fail("not a valid acting timer ID: it must be non-empty, without ':' or '@'")
+			}
+			if ids[a.ID] {
+				return fail("duplicate acting timer ID in the state")
+			}
+			ids[a.ID] = true
+			if a.Max < 1 {
+				return fail("needs `max`, the total number of runs, at least 1")
+			}
+			if a.After == "" {
+				return fail("needs `after`, such as 48h")
+			}
+			d, err := time.ParseDuration(a.After)
+			if err != nil {
+				return fail("`after`: %v", err)
+			}
+			if d <= 0 {
+				return fail("`after` must be more than zero")
+			}
+			a.AfterDuration = d
+			a.EveryDuration = 0
+			if a.Max > 1 && a.Every == "" {
+				return fail("runs %d times, so it needs `every`, the interval between runs", a.Max)
+			}
+			if a.Every != "" {
+				e, err := time.ParseDuration(a.Every)
+				if err != nil {
+					return fail("`every`: %v", err)
+				}
+				if e <= 0 {
+					return fail("`every` must be more than zero")
+				}
+				a.EveryDuration = e
+			}
+			h, ok := t.Hook(a.Hook)
+			if !ok {
+				return fail("unknown hook %q", a.Hook)
+			}
+			if h.On != OnTimer {
+				return fail("hook %q is not on: timer", a.Hook)
+			}
+			here := s.ID + "/" + a.ID
+			if other, dup := named[a.Hook]; dup {
+				return fail("hook %q is already run by acting timer %s: each timer hook belongs to one timer", a.Hook, other)
+			}
+			named[a.Hook] = here
+		}
+	}
+	for _, h := range t.Hooks {
+		if h.On == OnTimer && named[h.ID] == "" {
+			return fmt.Errorf("typedef %s v%d: hook %q (on: timer): no acting timer runs it", t.ID, t.Version, h.ID)
 		}
 	}
 	return nil

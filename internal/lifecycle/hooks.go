@@ -43,6 +43,16 @@ func StartsWorkflow(t *typedef.Type, ev Event) bool {
 	if ev.Op == OpTransitionRequested {
 		return true
 	}
+	// An undo applied runs its reaction hooks (the refund email), even in a
+	// final state with no other behavior.
+	if ev.Op == OpReactionApplied {
+		for _, h := range t.Hooks {
+			if h.On == typedef.OnReaction {
+				return true
+			}
+		}
+		return false
+	}
 	if ev.Entered == "" {
 		return false
 	}
@@ -255,17 +265,23 @@ const (
 )
 
 // ActingTimers returns the acting timers of a state, in the order declared.
-//
-// Phase B stub: not implemented yet.
 func ActingTimers(t *typedef.Type, state string) []typedef.ActingTimer {
-	return nil
+	s, ok := t.State(state)
+	if !ok {
+		return nil
+	}
+	return s.Acting
 }
 
 // ReactionHooks returns the action hooks that run when the Item records
 // that its reaction `reaction` was applied (on: reaction), in the order
 // declared.
-//
-// Phase B stub: not implemented yet.
 func ReactionHooks(t *typedef.Type, reaction string) []typedef.Hook {
-	return nil
+	var out []typedef.Hook
+	for _, h := range t.Hooks {
+		if h.On == typedef.OnReaction && h.Reaction == reaction && h.Kind == typedef.HookAction {
+			out = append(out, h)
+		}
+	}
+	return out
 }
