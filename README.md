@@ -136,7 +136,8 @@ users, every refusal of the error table a client can cause (each code and
 reason checked), an agent in capability mode, every operation across
 namespaces, and a vacation request from draft to approved or rejected (the
 approver set by the HR check, the terms frozen, no self-approval, agents
-unable to approve). It drives only `pli`, keeps its saved sessions in a temporary
+unable to approve) that deducts from a leave balance HR owns (refunded on
+withdrawal, never overdrawn, even by two approvals at once). It drives only `pli`, keeps its saved sessions in a temporary
 `XDG_CONFIG_HOME`, cleans up after itself, and stops at the first wrong
 outcome, naming the step. It can run any number of times on the same stack.
 

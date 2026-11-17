@@ -6,13 +6,15 @@
 # roles: what the principal holds in that namespace (added at start, never
 # removed). grants: what a user lets an agent do.
 tokens:
-  # acme: four users and an agent. In the HR directory
+  # acme: five users and an agent. In the HR directory
   # (deploy/hr-directory.json) ana reports to bob, bob to dana, and dana to
-  # herself; erin is not in it.
+  # herself; erin is not in it. hana is HR: she alone writes who owns a
+  # leave balance and its allowance (role hr_admin).
   - {name: ana, token: dev-ana-not-a-secret, principal: "user:ana", namespace: acme}
   - {name: bob, token: dev-bob-not-a-secret, principal: "user:bob", namespace: acme, roles: [approver]}
   - {name: dana, token: dev-dana-not-a-secret, principal: "user:dana", namespace: acme}
   - {name: erin, token: dev-erin-not-a-secret, principal: "user:erin", namespace: acme}
+  - {name: hana, token: dev-hana-not-a-secret, principal: "user:hana", namespace: acme, roles: [hr_admin]}
   - {name: triage-bot, token: dev-triage-bot-not-a-secret, principal: "agent:triage-bot", namespace: acme}
   # globex: another namespace, which sees nothing of acme.
   - {name: carol, token: dev-carol-not-a-secret, principal: "user:carol", namespace: globex}

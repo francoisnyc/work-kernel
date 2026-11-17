@@ -260,6 +260,33 @@ Ideas noted during the spike, not built yet.
   next submit corrects it; a denied resubmission leaves it stale in draft.
   Harmless (deciding needs `submitted`), but misleading to read. (Step 2,
   part 1)
+- `TestDroppedAnswer_DefaultConnectors_NetHTTPResends` (internal/hooks) is
+  flaky: it failed once on main (9cccd7f) and passed 7 reruns. Likely cause:
+  the ERP stub counts a dropped answer after closing the connection, so
+  net/http can resend, get the invoice and return before the count; count
+  before `conn.Close()`. Output and details: the Step 2, part 2 entry.
+  (Step 2, part 2)
+- A stuck undo is visible (the workflow's `undos` query) but alerts no one.
+  An undo or a `reaction_failed` must reach a person. (Step 2, part 2)
+- Nothing keeps a person to one open leave balance: two open balances make
+  every submit `ambiguous_balance`. A unique rule (per Type, field and state)
+  would prevent it; a concurrent create is a phantom the resolve's locks
+  cannot see. (Step 2, part 2)
+- `after` reactions with a patch of their own (only `undoes` is built), and
+  `set` besides `add`. (Step 2, part 2)
+- A held reaction that fails for good resolves its hold as error with the
+  reason `reaction_failed`, the name of the `REACTION_FAILED` event (a
+  refused undo). Rename it (e.g. `reaction_gave_up`); a workflow test pins
+  it today. Refusal codes no longer reuse event names. (Step 2, part 2)
+- Undo finds its reservation by an idempotency-key prefix (`starts_with`
+  over one actor's keys). Fine for the proof of concept; at scale, a
+  reservations table keyed by (source, hold) or a text_pattern_ops index.
+  (Step 2, part 2)
+- A manager revoking an approved request (approved -> withdrawn by
+  `field:f_approver`) is a separate business act, not built. (Step 2, part 2)
+- Recall during the approval hold is `HELD` (only withdraw is an escape):
+  with the worker down, ana waits up to the hook budget to recall.
+  (Step 2, part 2)
 
 ## 2026-11-12 — Step 1 (finished)
 
@@ -1239,3 +1266,77 @@ builds used the module cache served over HTTP as `GOPROXY`.
 others' drafts, approvers outside the readers, days against dates, a stale approver in draft).
 **Next session:** proof-of-concept Step 2, part 2 (link reactions, the leave balance, the held
 deduction and its compensation), once this PR is merged.
+
+## 2026-11-17 — Step 2 (proof of concept), part 2: link reactions, the leave balance, the saga (finished)
+
+**Built:** approving a `vacation_request@2` holds while the reaction `deduct` adds its `f_days`
+to the requester's `leave_balance@1` (`f_used`); the approval applies if that write commits, or is
+DENIED `insufficient_balance` (the balance's invariant). `refund` undoes it, by the recorded
+delta, once per deduction: when the hold closes any other way than allowed, and when an approved
+request is withdrawn. The request's `balance` link is set by the kernel on entering submitted
+(the unique open balance owned by the requester), never by the requester. HR (hana, `hr_admin`)
+owns and allots balances. Through the API, pli and the scenario. design.md has the section.
+
+**Kernel changes, counted:** (1) `reaction:` principals, a kernel actor, relaxed only where a
+reaction acts. (2) Reactions in typedef: held and after (undo), consent (`accepts_reactions`),
+load rules within and across Types. (3) Invariants (CEL over fields, last on every door).
+(4) `writable_by: [role:...]` (policy.MayWriteRoleField). (5) Kernel-set links: `writable_by:
+kernel` and `resolve` on a link type, LINK_NOT_WRITABLE, the resolution on entering a state with
+its one-pass lock order, LINK_UNRESOLVED, one per state. (6) Holds decided by a held reaction.
+(7) `Internal().React`, `Undo`, `ReactionFailed`, `DenyReason`; `add` with `field_deltas`
+(migration 00011). (8) `StateEntry.EnteredHold` and `PendingUndos`. (9) Workflow: RunReaction /
+ResolveReaction, undos never dropped (1 s to 1 min backoff, no limit), the `undos` query,
+continue-as-new after 100 undo attempts; the relay passes the state left. (10) API and proto,
+additive (buf breaking green): Type invariants, reactions, accepts_reactions, link writable_by
+and resolve, Field.writable_by_roles; ItemEvent added, link_replaced, reaction,
+REACTION_FAILED; INVARIANT_FAILED, LINK_NOT_WRITABLE, LINK_UNRESOLVED. App side: the two Types,
+hana in the dev tokens, the scenario on v2.
+
+**Test fixes after Phase C (approved):** (1) principals passed to `ListEvents` carry the
+namespace `default` (reads need one); (2) the agent rows of
+`TestLeaveBalance_OnlyHRWritesOwnerAndAllowance` run on a balance the agent can see, with one row
+kept: an agent that cannot see the narrowed balance gets NOT_FOUND before the role check;
+(3) `StuckUndo_BacksOff…` fails for 80 min in one run, under the 100-attempt cap (hours cross
+runs in `…_ContinuesAsNew…`); (4) history reasons are upper case (`REACTION_NOT_ACCEPTED`);
+(5) history ints are strings (`"5"`). Earlier, three tests pinning `types/` gained the two new
+Types. A refusal for an amount that cannot be evaluated is `reaction_amount_invalid`, so no
+refusal code reuses an event kind's name.
+
+**Surprises:** the undo cannot recompute its amount: `withdrawn` freezes nothing, so a
+requester could edit `f_days` before the refund ran; the delta must be stored. Writable-by-kernel
+on `f_owner` would have locked HR out too, hence role writers. A stuck undo is only visible if
+the workflow retries itself (Temporal's own retries happen out of its sight), which costs
+history, hence the continue-as-new cap. Reruns of the scenario would make every balance lookup
+ambiguous without a lifecycle on balances. An existing test that walks the source caught a refusal without a named code. In the
+scenario, the withdrawal during the approval hold always won (the deduction ran 0 times): the
+reverse order is covered by the Go race tests. The Docker daemon died twice; images were built by
+hand with the local module cache as `GOPROXY` and tagged for compose.
+
+**Numbers:** scenario, two runs in a row on a fresh stack: 10.5 s and 10.2 s; the held approval
+with the deduction (`--wait 5s`) 175 and 226 ms; the HR check 178 and 123 ms; the ticket's ERP
+check (1 s stub) 1,149 and 1,092 ms. The race of two 15-day approvals on 20 days left: one
+APPLIED, one DENIED `INSUFFICIENT_BALANCE`, `f_used` 20 of 25, both runs. Go: 5 rounds of 20
+concurrent deductions on 25 days gave exactly 5 each; 20 escape-versus-deduction races left as
+many refunds as deductions. `go test -race ./...` green, no data race; the three histories
+recorded from main replay.
+
+**Flaky test on main.** Before any change, the baseline `go test ./...` (9cccd7f) failed once in
+`internal/hooks`:
+
+```
+--- FAIL: TestDroppedAnswer_DefaultConnectors_NetHTTPResends (0.00s)
+    resend_test.go:36: result [INV-1], ERP invoices [INV-1], dropped 0; want one invoice, returned, after one dropped answer
+FAIL
+FAIL	github.com/francoisnyc/work-kernel/internal/hooks	0.124s
+```
+
+The invoice was made once and returned, but the stub reported no dropped answer; it passed 7
+reruns alone and every later full run. The stub (`connstub`) closes the connection and only then
+counts the drop, so the resend can finish, and the test read the counter, first. Not fixed here
+(Later). If it fails in CI on this PR, stop and report; no reruns until green.
+
+**Open:** Later has eight new items (the flaky test, alerting on a stuck undo, one open balance
+per person, after reactions with patches, the `reaction_failed` hold reason, the reservation
+lookup at scale, manager revocation, recall during the approval hold).
+**Next session:** proof-of-concept Step 2, part 3 (acting timers, timers deferred during holds,
+the stub email connector, the full scenario), once this PR is merged.

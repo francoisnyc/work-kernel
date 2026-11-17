@@ -48,6 +48,10 @@ func ParseDir(dir string) ([]*Type, error) {
 	if err := CheckLinkInverses(types); err != nil {
 		return nil, err
 	}
+	// Reactions and link resolution name other Types too.
+	if err := CheckReactions(types); err != nil {
+		return nil, err
+	}
 	// cmp.Or picks the first non-zero comparison: by ID, then by version.
 	slices.SortFunc(types, func(a, b *Type) int {
 		return cmp.Or(strings.Compare(a.ID, b.ID), cmp.Compare(a.Version, b.Version))

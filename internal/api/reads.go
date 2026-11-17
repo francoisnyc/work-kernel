@@ -201,6 +201,7 @@ var eventKinds = map[string]kernelv1.ItemEventKind{
 	"hook_failed":          kernelv1.ItemEventKind_ITEM_EVENT_KIND_HOOK_FAILED,
 	"link_added":           kernelv1.ItemEventKind_ITEM_EVENT_KIND_LINK_ADDED,
 	"link_removed":         kernelv1.ItemEventKind_ITEM_EVENT_KIND_LINK_REMOVED,
+	"reaction_failed":      kernelv1.ItemEventKind_ITEM_EVENT_KIND_REACTION_FAILED,
 }
 
 func (s *server) ListItemEvents(ctx context.Context, req *connect.Request[kernelv1.ListItemEventsRequest]) (*connect.Response[kernelv1.ListItemEventsResponse], error) {
@@ -241,7 +242,7 @@ func eventOut(ns, item string, ty *typedef.Type, e itemservice.Event) (*kernelv1
 		Kind: eventKinds[e.Op], CreateTime: timestamppb.New(e.CreatedAt),
 		Actor: e.Actor, OnBehalfOf: e.OnBehalfOf, OriginatingHook: e.OriginatingHook,
 		CausationId: e.CausationID, CorrelationId: e.CorrelationID, Hop: int32(e.Hop),
-		FromState: e.From, ToState: e.To, RequestedState: e.RequestedTo, Hook: e.Hook,
+		FromState: e.From, ToState: e.To, RequestedState: e.RequestedTo, Hook: e.Hook, Reaction: e.Reaction,
 		Reason: strings.ToUpper(e.Reason), ErasedFields: e.Erased, Inherit: e.Inherit, Moved: e.Moved,
 	}
 	if e.TypeID != "" {
@@ -257,6 +258,13 @@ func eventOut(ns, item string, ty *typedef.Type, e itemservice.Event) (*kernelv1
 		}
 		out.Fields = f
 	}
+	if len(e.Added) > 0 {
+		a, err := fieldsOut(ty, e.Added) // an amount reads like the field: an int as a string
+		if err != nil {
+			return nil, err
+		}
+		out.Added = a
+	}
 	if e.Readers != nil {
 		out.Readers = &kernelv1.Readers{Principals: e.Readers}
 	}
@@ -270,6 +278,6 @@ func eventOut(ns, item string, ty *typedef.Type, e itemservice.Event) (*kernelv1
 		return &kernelv1.ItemRef{Name: itemName(ns, r.ID)}
 	}
 	out.Container, out.ContainerFrom, out.ContainerTo = ref(e.Container), ref(e.ContainerFrom), ref(e.ContainerTo)
-	out.LinkType, out.LinkTarget = e.LinkType, ref(e.LinkTarget)
+	out.LinkType, out.LinkTarget, out.LinkReplaced = e.LinkType, ref(e.LinkTarget), ref(e.LinkReplaced)
 	return out, nil
 }

@@ -251,3 +251,107 @@ func kernelError(err error) error {
 	}
 	return err
 }
+
+// --- link reactions (proof of concept, Step 2, part 2) ---
+
+// reactionCall is what every reaction activity starts from: the source, the
+// reaction acting as itself, and its cause.
+func (in ReactionInput) call() (uuid.UUID, uuid.UUID, item.Principal, item.Attribution, error) {
+	id, err := uuid.Parse(in.ItemID)
+	if err != nil {
+		return uuid.Nil, uuid.Nil, item.Principal{}, item.Attribution{},
+			temporal.NewNonRetryableApplicationError(fmt.Sprintf("item id %q", in.ItemID), ErrTypeInvalid, err)
+	}
+	holdID, _ := uuid.Parse(in.HoldID) // a bad ID is uuid.Nil, which the item service refuses
+	p := item.Principal{Actor: fmt.Sprintf("%s:%s:%s", item.KindReaction, in.TypeID, in.ReactionID)}
+	a := item.Attribution{
+		OriginatingHook: fmt.Sprintf("%s:%s@v%d:%s", item.KindReaction, in.TypeID, in.TypeVersion, in.ReactionID),
+		CausationID:     fmt.Sprintf("%s:%d", in.ItemID, in.CauseSeq),
+		CorrelationID:   in.CorrelationID,
+		Hop:             in.Hop,
+	}
+	return id, holdID, p, a, nil
+}
+
+// RunReaction applies a held reaction to its target and resolves its hold:
+// allow if the write committed (or had committed: a retry), deny with the
+// target's refusal (DenyReason) if refused. A hold already closed is not an
+// error: there is nothing left to decide.
+func (a *Activities) RunReaction(ctx context.Context, in ReactionInput) error {
+	id, holdID, p, attr, err := in.call()
+	if err != nil {
+		return err
+	}
+	verdict, reason := itemservice.VerdictAllow, ""
+	_, err = a.Items.Internal().React(ctx, itemservice.ReactRequest{Principal: p, SourceID: id, HoldID: holdID, Attribution: attr})
+	switch {
+	case err == nil:
+	case errors.Is(err, itemservice.ErrStale):
+		return nil // the hold closed first; an undo handles what is left
+	default:
+		var ok bool
+		if reason, ok = itemservice.DenyReason(err); !ok {
+			return kernelError(err)
+		}
+		verdict = itemservice.VerdictDeny
+	}
+	return a.resolveReaction(ctx, id, holdID, p, attr, verdict, reason)
+}
+
+// ResolveReaction resolves a held reaction's hold as error, as the reaction.
+func (a *Activities) ResolveReaction(ctx context.Context, in ResolveReactionInput) error {
+	id, holdID, p, attr, err := in.Reaction.call()
+	if err != nil {
+		return err
+	}
+	return a.resolveReaction(ctx, id, holdID, p, attr, itemservice.VerdictError, in.Reason)
+}
+
+func (a *Activities) resolveReaction(ctx context.Context, id, holdID uuid.UUID, p item.Principal, attr item.Attribution,
+	v itemservice.Verdict, reason string) error {
+	_, err := a.Items.Internal().ResolveHold(ctx, itemservice.ResolveHoldRequest{
+		IdempotencyKey: "hold:" + holdID.String(), Principal: p, ItemID: id, HoldID: holdID,
+		Verdict: v, Reason: reason, Attribution: attr,
+	})
+	switch {
+	case errors.Is(err, itemservice.ErrIdempotencyKeyReuse):
+		return nil // the hold was already resolved under this key
+	case errors.Is(err, itemservice.ErrStale):
+		return nil // closed first (an escape): nothing left to decide
+	}
+	return kernelError(err)
+}
+
+// Undo reverses a hold's reservation, if one committed. A refusal is a
+// non-retryable Rejected with its code as the detail, for ReactionFailed.
+func (a *Activities) Undo(ctx context.Context, in ReactionInput) error {
+	id, holdID, p, attr, err := in.call()
+	if err != nil {
+		return err
+	}
+	_, err = a.Items.Internal().Undo(ctx, itemservice.UndoRequest{Principal: p, SourceID: id, HoldID: holdID, Attribution: attr})
+	if errors.Is(err, itemservice.ErrIdempotencyKeyReuse) {
+		return nil // undone already, under another cause
+	}
+	var rej *itemservice.RejectedError
+	if errors.As(err, &rej) {
+		return temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeRejected, err, rej.Code)
+	}
+	return kernelError(err)
+}
+
+// ReactionFailed records on the source that an undo gave up, once.
+func (a *Activities) ReactionFailed(ctx context.Context, in ReactionFailedInput) error {
+	id, _, p, attr, err := in.Reaction.call()
+	if err != nil {
+		return err
+	}
+	_, err = a.Items.Internal().ReactionFailed(ctx, itemservice.ReactionFailedRequest{
+		IdempotencyKey: fmt.Sprintf("reaction_failed:%s:%s:%s", in.Reaction.ItemID, in.Reaction.HoldID, in.Reaction.ReactionID),
+		Principal:      p, SourceID: id, Reason: in.Reason, Attribution: attr,
+	})
+	if errors.Is(err, itemservice.ErrIdempotencyKeyReuse) {
+		return nil
+	}
+	return kernelError(err)
+}

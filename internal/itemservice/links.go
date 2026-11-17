@@ -135,6 +135,11 @@ func (k *Service) linkWrite(ctx context.Context, req LinkRequest, add bool) (Wri
 			return WriteResult{}, &InvalidError{Path: "link_type",
 				Reason: fmt.Sprintf("type %s v%d declares no link type %q", ty.ID, ty.Version, req.LinkType)}
 		}
+		// A link only the kernel sets: refused to everyone, after NOT_FOUND
+		// (both ends were found visible above).
+		if lt.WritableBy == typedef.WritableByKernel {
+			return WriteResult{}, &LinkNotWritableError{LinkType: lt.Name}
+		}
 		if err := checkAgentWrite(ctx, tx, req.Principal, src.ScopeID, &req.SourceID); err != nil {
 			return WriteResult{}, err
 		}
@@ -310,73 +315,121 @@ func (s linkSet) ids() []uuid.UUID {
 
 // lockForTransition locks the Item a transition into `to` writes, and, when
 // the guards of transitions into `to` read links, the linked Items too, and
-// returns what those guards see of them (nil when they read none).
+// returns what those guards see of them (nil when they read none). When
+// entering `to` sets kernel-resolved links (resolve.go), it also locks their
+// candidates and current targets and returns what entering resolves.
 //
-// Without deadlocks: the Item and its link set are read unlocked; then the
-// Item is locked FOR UPDATE and the linked rows FOR SHARE, together in UUID
-// order; then the link set is read again, and if it changed the whole
-// transaction starts again (errRetry). FOR SHARE, not FOR KEY SHARE: every
-// state change takes the row FOR UPDATE, and a plain UPDATE takes FOR NO KEY
-// UPDATE, which only FOR SHARE (and stronger) blocks. So a linked Item
-// cannot change state between this guard and the commit. Links themselves
-// cannot change either: adding or removing one locks its source FOR UPDATE
-// and its target FOR KEY SHARE, and both conflict with the Item's FOR UPDATE.
+// Without deadlocks: the Item, its link set and the resolutions are read
+// unlocked; then the Item is locked FOR UPDATE, the linked rows and the
+// candidates FOR SHARE and the current targets FOR KEY SHARE, together in
+// UUID order; then all of it is read again, and if anything changed the
+// whole transaction starts again (errRetry). FOR SHARE, not FOR KEY SHARE:
+// every state change takes the row FOR UPDATE, and a plain UPDATE takes FOR
+// NO KEY UPDATE, which only FOR SHARE (and stronger) blocks. So a linked
+// Item cannot change state, nor a candidate its fields, between this read
+// and the commit. Links themselves cannot change either: adding or removing
+// one locks its source FOR UPDATE and its target FOR KEY SHARE, and both
+// conflict with the Item's FOR UPDATE.
 //
 // Guards read linked Items whoever the caller is (a rule must hold for
 // everyone), but only their state and category.
 func (k *Service) lockForTransition(ctx context.Context, tx pgx.Tx, ns string, id uuid.UUID,
-	to string) (lockedItem, lifecycle.Links, error) {
+	to string) (lockedItem, lifecycle.Links, []linkResolution, error) {
 	var typeID string
 	var version int
 	err := tx.QueryRow(ctx, `select type_id, type_version from items where id = $1 and namespace_id = $2`,
 		id, ns).Scan(&typeID, &version)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return lockedItem{}, nil, ErrNotFound
+		return lockedItem{}, nil, nil, ErrNotFound
 	}
 	if err != nil {
-		return lockedItem{}, nil, fmt.Errorf("read item: %w", err)
+		return lockedItem{}, nil, nil, fmt.Errorf("read item: %w", err)
 	}
 	ty, err := k.loadType(ctx, tx, typeID, version) // a Type version never changes
 	if err != nil {
-		return lockedItem{}, nil, err
+		return lockedItem{}, nil, nil, err
 	}
 	names := guardLinkNames(ty, to)
-	if len(names) == 0 {
+	if len(names) == 0 && len(resolvedOn(ty, to)) == 0 {
 		it, err := lockItem(ctx, tx, ns, id)
-		return it, nil, err
+		return it, nil, nil, err
 	}
 
 	before, err := readLinkSet(ctx, tx, ty, id, names)
 	if err != nil {
-		return lockedItem{}, nil, err
+		return lockedItem{}, nil, nil, err
 	}
 	if err := callTestHook(ctx, tx, "links_read"); err != nil {
-		return lockedItem{}, nil, err
+		return lockedItem{}, nil, nil, err
 	}
-	all := append(before.ids(), id)
+	resBefore, err := readResolutions(ctx, tx, ns, ty, id, to)
+	if err != nil {
+		return lockedItem{}, nil, nil, err
+	}
+	if resBefore != nil {
+		if err := callTestHook(ctx, tx, "resolve_candidates_read"); err != nil {
+			return lockedItem{}, nil, nil, err
+		}
+	}
+
+	// One pass, in UUID order, each row at the strongest lock it needs.
+	const (
+		keyShare = iota + 1
+		share
+	)
+	modes := map[uuid.UUID]int{}
+	want := func(other uuid.UUID, m int) { modes[other] = max(modes[other], m) }
+	for _, other := range before.ids() {
+		want(other, share)
+	}
+	for _, r := range resBefore {
+		for _, c := range r.candidates {
+			want(c, share)
+		}
+		for _, o := range r.old {
+			want(o, keyShare)
+		}
+	}
+	all := append(slices.Collect(maps.Keys(modes)), id)
 	slices.SortFunc(all, compareUUID)
 	all = slices.Compact(all)
 	var it lockedItem
 	for _, other := range all {
 		if other == id {
 			if it, err = lockItem(ctx, tx, ns, id); err != nil {
-				return lockedItem{}, nil, err
+				return lockedItem{}, nil, nil, err
 			}
 			continue
 		}
-		if _, err := tx.Exec(ctx, `select 1 from items where id = $1 for share`, other); err != nil {
-			return lockedItem{}, nil, fmt.Errorf("lock linked item: %w", err)
+		q := `select 1 from items where id = $1 for share`
+		if modes[other] == keyShare {
+			q = `select 1 from items where id = $1 for key share`
+		}
+		if _, err := tx.Exec(ctx, q, other); err != nil {
+			return lockedItem{}, nil, nil, fmt.Errorf("lock linked item: %w", err)
 		}
 	}
 	after, err := readLinkSet(ctx, tx, ty, id, names)
 	if err != nil {
-		return lockedItem{}, nil, err
+		return lockedItem{}, nil, nil, err
 	}
 	if !after.equal(before) {
-		return lockedItem{}, nil, errRetry // a link changed before the locks: read them again
+		return lockedItem{}, nil, nil, errRetry // a link changed before the locks: read them again
 	}
-	links, err := k.linkedItems(ctx, tx, after)
-	return it, links, err
+	resAfter, err := readResolutions(ctx, tx, ns, ty, id, to)
+	if err != nil {
+		return lockedItem{}, nil, nil, err
+	}
+	if !sameResolutions(resAfter, resBefore) {
+		return lockedItem{}, nil, nil, errRetry // a candidate or the current target changed: read again
+	}
+	var links lifecycle.Links
+	if len(names) > 0 {
+		if links, err = k.linkedItems(ctx, tx, after); err != nil {
+			return lockedItem{}, nil, nil, err
+		}
+	}
+	return it, links, resAfter, nil
 }
 
 // linkedItems reads the state and category of every Item in the set.

@@ -50,6 +50,9 @@ var messages = map[string]string{
 	"LINK_TARGET_TYPE":    "the link type does not allow a target of that Type",
 	"FIELD_NOT_WRITABLE":  "the caller may not write these fields",
 	"FIELD_FROZEN":        "these fields are frozen in the Item's state",
+	"INVARIANT_FAILED":    "the write would break one of the Type's invariants",
+	"LINK_NOT_WRITABLE":   "only the kernel sets links of this type",
+	"LINK_UNRESOLVED":     "entering the state sets a link, and no single target was found",
 }
 
 // ReasonMessage returns the one fixed message of an ErrorInfo reason, and
@@ -139,6 +142,7 @@ func errorWith(err error, item, readersPath, ns string) *connect.Error {
 		rejected *itemservice.RejectedError
 		approval *itemservice.NeedsApprovalError
 		fieldNW  *itemservice.FieldNotWritableError
+		linkNW   *itemservice.LinkNotWritableError
 	)
 	switch {
 	case errors.As(err, &held):
@@ -178,6 +182,9 @@ func errorWith(err error, item, readersPath, ns string) *connect.Error {
 	case errors.As(err, &fieldNW):
 		return apiError(connect.CodePermissionDenied, "FIELD_NOT_WRITABLE",
 			map[string]string{"fields": strings.Join(fieldNW.Fields, ",")})
+	case errors.As(err, &linkNW):
+		return apiError(connect.CodePermissionDenied, "LINK_NOT_WRITABLE",
+			map[string]string{"link_type": linkNW.LinkType})
 	case errors.Is(err, itemservice.ErrForbidden):
 		return apiError(connect.CodePermissionDenied, "NOT_ALLOWED", nil)
 	// A rule's refusal answers with its code. One without a code is a bug

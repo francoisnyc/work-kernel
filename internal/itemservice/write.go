@@ -187,7 +187,7 @@ func checkPublicPrincipal(p item.Principal) error {
 	if err := checkPrincipal(p); err != nil {
 		return err
 	}
-	if item.IsKind(p.Actor, item.KindSystem, item.KindHook) {
+	if item.IsKernelActor(p.Actor) {
 		return fmt.Errorf("%w: %s is a kernel actor; it does not use the public door", ErrInvalid, p.Actor)
 	}
 	return nil

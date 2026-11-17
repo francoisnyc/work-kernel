@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # The proof of concept's scenario (Steps 0 to 2): a scripted session against
 # the public API, through pli only, as users (ana and bob; dana and erin for
-# the vacation request), an agent (triage-bot, for ana and for bob) and a
+# the vacation request; hana, HR, for leave balances), an agent (triage-bot, for ana and for bob) and a
 # user in another namespace (carol). It is the proof of concept's end-to-end
 # test. Step 1 added links (blocks / blocked_by, duplicate_of) and the
 # principal field f_assignee, on ticket v5. Step 2, part 1 added the vacation
-# request: an approval as a business state, with the HR check.
+# request: an approval as a business state, with the HR check. Step 2, part
+# 2 added the leave balance: the held deduction, its refund, the race.
 #
 #   scripts/scenario.sh          (or: make scenario, which starts the stack first)
 #
@@ -484,12 +485,58 @@ ok triage-bot item link "$in_inner" blocks "$in_room" >/dev/null
 # check names the approver on the way into submitted, the terms freeze, and
 # the manager decides by an ordinary transition. ana reports to bob, dana to
 # herself; erin is not in the HR directory (deploy/hr-directory.json).
+# Since part 2 the requests are vacation_request@2: submitting links the
+# request to the requester's open leave balance, approving deducts from it.
 # ---------------------------------------------------------------------------
+
+# close_open_balances OWNER: hana closes OWNER's open leave balances, left by
+# earlier runs (a request finds its balance among the open ones only).
+close_open_balances() {
+	local b
+	for b in $(ok hana item search --type leave_balance --state open --where "f_owner=$1" --page-size 100 | names); do
+		ok hana item transition "$b" --to closed >/dev/null
+	done
+}
+
+# new_balance OWNER ALLOWANCE: hana opens a balance for OWNER, readable by
+# OWNER and hana only; prints its name.
+new_balance() {
+	ok hana item create --type leave_balance@1 --narrow "$1,user:hana" \
+		--set "f_owner=$1" --set "f_allowance=$2" | j .item.name
+}
+
+# used BALANCE: its f_used, as hana sees it (unset is 0).
+used() { ok hana item get "$1" | j '.item.fields.f_used // 0'; }
+
+# wait_used BALANCE WANT: waits up to 10 s for f_used to be WANT (a refund
+# runs after the withdrawal has committed).
+wait_used() {
+	local i got
+	for i in $(seq 1 100); do
+		got=$(used "$1")
+		[ "$got" = "$2" ] && return 0
+		sleep 0.1
+	done
+	fail "f_used of $1 is $got after 10 s, want $2"
+}
+
+# reactions BALANCE REQUEST REACTION: how many events REACTION (deduct or
+# refund) wrote on BALANCE for REQUEST.
+reactions() {
+	ok hana item history "$1" --page-size 100 | jqx -r --arg id "${2##*/}" --arg actor "reaction:vacation_request:$3" \
+		'[.events[] | select(.actor == $actor and (.causation_id | startswith($id)))] | length'
+}
+
+step "vacation: hana closes earlier runs' balances and opens ana's (25 days); bob has none yet"
+close_open_balances user:ana
+close_open_balances user:bob
+abal=$(new_balance user:ana 25)
+expect "ana's f_used" "$(used "$abal")" "0"
 
 new_leave() { # WHO [--set ...]...: a vacation request, five days from 2099-07-01; prints its name
 	local who=$1
 	shift
-	ok "$who" item create --type vacation_request@1 --set f_start=2099-07-01 --set f_end=2099-07-05 \
+	ok "$who" item create --type vacation_request@2 --set f_start=2099-07-01 --set f_end=2099-07-05 \
 		--set f_days=5 --set f_leave_type=annual --set "f_comment=$w" "$@" | j .item.name
 }
 
@@ -505,6 +552,8 @@ echo "    the HR check answered in $(($(now_ms) - began)) ms"
 expect "submit's outcome" "$(j .outcome <<<"$sub")" "TRANSITION_OUTCOME_APPLIED"
 expect "state" "$(j .item.state <<<"$sub")" "submitted"
 expect "the approver, from HR" "$(j .item.fields.f_approver <<<"$sub")" "user:bob"
+expect "the balance, set by the kernel" \
+	"$(j '[.item.links[]? | select(.link_type == "balance") | .item.name] | join(" ")' <<<"$sub")" "$abal"
 
 step "vacation: only the requester submits; the dates and days must make sense (GUARD_FAILED)"
 v0=$(new_leave ana)
@@ -514,7 +563,7 @@ refuse ana "FAILED_PRECONDITION GUARD_FAILED" item transition "$v0" --to submitt
 	--set f_days=5 --set f_start=2000-01-03 --set f_end=2000-01-07
 
 step "vacation: ana cannot name the approver herself (FIELD_NOT_WRITABLE)"
-refuse ana "PERMISSION_DENIED FIELD_NOT_WRITABLE" item create --type vacation_request@1 \
+refuse ana "PERMISSION_DENIED FIELD_NOT_WRITABLE" item create --type vacation_request@2 \
 	--set f_start=2099-07-01 --set f_end=2099-07-05 --set f_days=5 --set f_leave_type=annual --set f_approver=user:ana
 expect "the refused field" "$(meta fields)" "f_approver"
 v2=$(new_leave ana)
@@ -537,13 +586,14 @@ ok triage-bot agent start --for user:bob --scopes namespaces/acme --powers 'read
 refuse triage-bot "PERMISSION_DENIED NOT_ALLOWED" item transition "$v1" --to approved
 refuse triage-bot "PERMISSION_DENIED NOT_ALLOWED" item transition "$v1" --to rejected
 
-step "vacation: bob approves; what was approved stays frozen"
-dec=$(ok bob item transition "$v1" --to approved)
+step "vacation: bob approves (--wait: the deduction holds it); what was approved stays frozen"
+dec=$(ok bob item transition "$v1" --to approved --wait 5s)
 expect "approve's outcome" "$(j .outcome <<<"$dec")" "TRANSITION_OUTCOME_APPLIED"
 expect "state" "$(j .item.state <<<"$dec")" "approved"
 expect "category" "$(j .item.category <<<"$dec")" "STATE_CATEGORY_DONE"
 refuse ana "FAILED_PRECONDITION FIELD_FROZEN" item update "$v1" --set f_days=20
 expect "the state that freezes it" "$(meta state)" "approved"
+expect "ana's f_used after the approval" "$(used "$abal")" "5"
 
 step "vacation: bob rejects another request"
 v3=$(new_leave ana)
@@ -577,6 +627,98 @@ v6=$(new_leave erin)
 sub=$(submit_leave erin "$v6")
 expect "outcome" "$(j .outcome <<<"$sub")" "TRANSITION_OUTCOME_DENIED"
 expect "reason" "$(j .reason <<<"$sub")" "UNKNOWN_EMPLOYEE"
+
+# ---------------------------------------------------------------------------
+# Step 2, part 2: the leave balance. Only HR (hana) writes who owns a
+# balance and its allowance; only the kernel writes f_used, through two
+# link reactions of the request: deduct holds the approval, refund gives
+# the days back. ana's balance has 25 days; 5 are used by now.
+# ---------------------------------------------------------------------------
+
+step "leave: bob has no open balance; his submit is DENIED no_balance, then HR opens one"
+v10=$(new_leave bob)
+sub=$(submit_leave bob "$v10")
+expect "outcome" "$(j .outcome <<<"$sub")" "TRANSITION_OUTCOME_DENIED"
+expect "reason" "$(j .reason <<<"$sub")" "NO_BALANCE"
+expect "state" "$(j .item.state <<<"$sub")" "draft"
+bbal=$(new_balance user:bob 10)
+expect "resubmit's outcome" "$(submit_leave bob "$v10" | j .outcome)" "TRANSITION_OUTCOME_APPLIED"
+dec=$(ok dana item transition "$v10" --to approved --wait 5s)
+expect "dana approves bob's request" "$(j .outcome <<<"$dec")" "TRANSITION_OUTCOME_APPLIED"
+expect "bob's f_used" "$(used "$bbal")" "5"
+expect "ana's f_used is untouched" "$(used "$abal")" "5"
+
+step "leave: an approved request deducts its days"
+v7=$(new_leave ana)
+submit_leave ana "$v7" >/dev/null
+began=$(now_ms)
+dec=$(ok bob item transition "$v7" --to approved --wait 5s)
+echo "    the held approval answered in $(($(now_ms) - began)) ms"
+expect "outcome" "$(j .outcome <<<"$dec")" "TRANSITION_OUTCOME_APPLIED"
+expect "ana's f_used" "$(used "$abal")" "10"
+expect "ana sees her own balance" "$(ok ana item get "$abal" | j .item.fields.f_used)" "10"
+
+step "leave: a request beyond the balance is DENIED insufficient_balance"
+v8=$(new_leave ana --set f_days=16)
+submit_leave ana "$v8" >/dev/null
+dec=$(ok bob item transition "$v8" --to approved --wait 5s)
+expect "outcome" "$(j .outcome <<<"$dec")" "TRANSITION_OUTCOME_DENIED"
+expect "reason" "$(j .reason <<<"$dec")" "INSUFFICIENT_BALANCE"
+expect "state" "$(j .item.state <<<"$dec")" "submitted"
+expect "ana's f_used" "$(used "$abal")" "10"
+
+step "leave: withdrawing an approved request refunds it"
+ok ana item transition "$v7" --to withdrawn >/dev/null
+wait_used "$abal" 5
+expect "refunds for it" "$(reactions "$abal" "$v7" refund)" "1"
+
+step "leave: withdrawn during the approval hold, nothing extra is refunded (whichever wins)"
+v9=$(new_leave ana)
+submit_leave ana "$v9" >/dev/null
+ok bob item transition "$v9" --to approved --wait 0s >/dev/null
+ok ana item transition "$v9" --to withdrawn >/dev/null
+wait_used "$abal" 5
+deducted=$(reactions "$abal" "$v9" deduct)
+echo "    the deduction ran $deducted time(s) before the withdrawal won"
+expect "refunds for it, one per deduction" "$(reactions "$abal" "$v9" refund)" "$deducted"
+
+step "leave: the requester cannot link or unlink a balance (LINK_NOT_WRITABLE)"
+v11=$(new_leave ana)
+refuse ana "PERMISSION_DENIED LINK_NOT_WRITABLE" item link "$v11" balance "$abal"
+expect "the refused link type" "$(meta link_type)" "balance"
+refuse ana "PERMISSION_DENIED LINK_NOT_WRITABLE" item unlink "$v1" balance "$abal"
+
+step "leave: nobody edits f_used, hana included; only hana owns and allots (FIELD_NOT_WRITABLE)"
+refuse ana "PERMISSION_DENIED FIELD_NOT_WRITABLE" item update "$abal" --set f_used=0
+refuse hana "PERMISSION_DENIED FIELD_NOT_WRITABLE" item update "$abal" --set f_used=0
+expect "the refused field" "$(meta fields)" "f_used"
+refuse ana "PERMISSION_DENIED FIELD_NOT_WRITABLE" item update "$abal" --set f_allowance=99
+refuse ana "PERMISSION_DENIED FIELD_NOT_WRITABLE" item create --type leave_balance@1 \
+	--set f_owner=user:ana --set f_allowance=99
+
+step "leave: a balance without an owner and an allowance cannot exist (INVARIANT_FAILED)"
+refuse ana "FAILED_PRECONDITION INVARIANT_FAILED" item create --type leave_balance@1
+expect "the invariant" "$(meta invariant)" "balance_incomplete"
+refuse hana "FAILED_PRECONDITION INVARIANT_FAILED" item update "$abal" --set f_allowance=4
+expect "the invariant" "$(meta invariant)" "insufficient_balance"
+
+step "leave: two approvals race on 20 days left, 15 days each; one applies, one is DENIED"
+r1=$(new_leave ana --set f_days=15)
+r2=$(new_leave ana --set f_days=15)
+submit_leave ana "$r1" >/dev/null
+submit_leave ana "$r2" >/dev/null
+"$pli_bin" --server "$server" --tokens "$tokens" --as bob item transition "$r1" --to approved --wait 5s >"$tmp/race1" 2>&1 &
+p1=$!
+"$pli_bin" --server "$server" --tokens "$tokens" --as bob item transition "$r2" --to approved --wait 5s >"$tmp/race2" 2>&1 &
+p2=$!
+wait "$p1" || fail "the first racing approval failed: $(cat "$tmp/race1")"
+wait "$p2" || fail "the second racing approval failed: $(cat "$tmp/race2")"
+expect "the two outcomes" "$(cat "$tmp/race1" "$tmp/race2" | jqx -rs '[.[].outcome] | sort | join(" ")')" \
+	"TRANSITION_OUTCOME_APPLIED TRANSITION_OUTCOME_DENIED"
+expect "the denial's reason" \
+	"$(cat "$tmp/race1" "$tmp/race2" | jqx -rs '.[] | select(.outcome == "TRANSITION_OUTCOME_DENIED") | .reason')" \
+	"INSUFFICIENT_BALANCE"
+expect "ana's f_used, within the allowance" "$(used "$abal")" "20"
 
 # ---------------------------------------------------------------------------
 # Another namespace: carol, in globex, reaches nothing of acme, on every
@@ -614,13 +756,16 @@ for reason in UNAUTHENTICATED SESSION_INVALID INVALID_REQUEST NOT_FOUND NOT_ALLO
 	NO_TRANSITION MISSING_FIELDS GUARD_FAILED WIDEN_NOT_CONFIRMED STALE HELD \
 	IDEMPOTENCY_KEY_REUSED NOT_CAUGHT_UP AUDIENCE_CHANGED \
 	LINK_CARDINALITY ALREADY_LINKED NOT_LINKED LINK_TARGET_TYPE \
-	FIELD_NOT_WRITABLE FIELD_FROZEN; do
+	FIELD_NOT_WRITABLE FIELD_FROZEN INVARIANT_FAILED LINK_NOT_WRITABLE; do
 	case $seen in *" $reason "*) ;; *) fail "no step triggered $reason" ;; esac
 done
 cat <<'EOF'
     Not triggered here (a client cannot cause them; Go tests cover each):
       NOT_INITIAL_STATE  a create cannot name a state through the API
       HOP_LIMIT          only chains of hook writes reach it
+      LINK_UNRESOLVED    only a direct transition into a resolve state; the
+                         vacation request enters submitted through a hold, so
+                         a missing balance is DENIED no_balance (above)
       INTERNAL           a bug, by definition
       CANCELED           decided by the client, which then gets no answer
       DEADLINE_EXCEEDED  likewise; pli sets no deadline

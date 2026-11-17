@@ -74,6 +74,15 @@ type Event struct {
 
 	LinkType   string   // link_added, link_removed: the declared name
 	LinkTarget *ItemRef // link_added, link_removed: the target
+	// A transition that set a resolved link (Step 2, part 2) also names
+	// LinkType and LinkTarget; LinkReplaced is the target it replaced.
+	LinkReplaced *ItemRef
+
+	// Added: the fields a reaction added to, with the amounts (the delta;
+	// Values holds the results). A cleared or erased value is in neither.
+	Added map[string]any
+	// Reaction: reaction_failed's reaction (<type>:<id>); Reason its code.
+	Reaction string
 }
 
 // ItemRef is another Item named by an event: its ID, or Restricted (and no
@@ -120,7 +129,7 @@ func (k *Service) ListEvents(ctx context.Context, req ListEventsRequest) (ListEv
 	rows, err := k.pool.Query(ctx,
 		`select e.item_seq, e.commit_seq, e.op, e.created_at, e.actor, coalesce(e.on_behalf_of, ''),
 		        coalesce(e.originating_hook, ''), coalesce(e.causation_id, ''), coalesce(e.correlation_id, ''),
-		        e.hop, coalesce(e.payload, '{}'), v.field_values
+		        e.hop, coalesce(e.payload, '{}'), v.field_values, v.field_deltas
 		 from item_events e
 		 left join item_event_values v on v.item_id = e.item_id and v.item_seq = e.item_seq
 		 where e.item_id = $1 and e.item_seq > $2
@@ -133,12 +142,13 @@ func (k *Service) ListEvents(ctx context.Context, req ListEventsRequest) (ListEv
 		e       Event
 		payload []byte
 		values  []byte
+		deltas  []byte
 	}
 	found, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (raw, error) {
 		var r raw
 		r.e.ItemID = req.ItemID
 		err := row.Scan(&r.e.ItemSeq, &r.e.CommitSeq, &r.e.Op, &r.e.CreatedAt, &r.e.Actor, &r.e.OnBehalfOf,
-			&r.e.OriginatingHook, &r.e.CausationID, &r.e.CorrelationID, &r.e.Hop, &r.payload, &r.values)
+			&r.e.OriginatingHook, &r.e.CausationID, &r.e.CorrelationID, &r.e.Hop, &r.payload, &r.values, &r.deltas)
 		return r, err
 	})
 	if err != nil {
@@ -152,7 +162,7 @@ func (k *Service) ListEvents(ctx context.Context, req ListEventsRequest) (ListEv
 
 	refs := refResolver{k: k, p: req.Principal, seen: map[uuid.UUID]*ItemRef{}}
 	for _, r := range found {
-		e, err := r.e.withPayload(ctx, r.payload, r.values, &refs)
+		e, err := r.e.withPayload(ctx, r.payload, r.values, r.deltas, &refs)
 		if err != nil {
 			return ListEventsResult{}, err
 		}
@@ -184,10 +194,15 @@ type eventPayload struct {
 	ContainerTo    json.RawMessage `json:"container_to"`
 	LinkType       string          `json:"link_type"`
 	LinkTarget     *uuid.UUID      `json:"target"`
+	// A transition that set a kernel-resolved link; a reaction's write.
+	ResolvedTarget *uuid.UUID `json:"link_target"`
+	LinkReplaced   *uuid.UUID `json:"link_replaced"`
+	AddedIDs       []string   `json:"added_field_ids"`
+	Reaction       string     `json:"reaction"`
 }
 
 // withPayload fills the event from its stored payload and values.
-func (e Event) withPayload(ctx context.Context, payload, values []byte, refs *refResolver) (Event, error) {
+func (e Event) withPayload(ctx context.Context, payload, values, deltas []byte, refs *refResolver) (Event, error) {
 	var pl eventPayload
 	if err := json.Unmarshal(payload, &pl); err != nil {
 		return e, fmt.Errorf("read event payload: %w", err)
@@ -204,7 +219,7 @@ func (e Event) withPayload(ctx context.Context, payload, values []byte, refs *re
 	if e.Op == "create" {
 		e.To = pl.State
 	}
-	e.Hook, e.Reason = pl.Hook, pl.Reason
+	e.Hook, e.Reason, e.Reaction = pl.Hook, pl.Reason, pl.Reaction
 	for _, h := range []string{pl.HoldID, pl.CanceledHoldID} {
 		if id, err := uuid.Parse(h); err == nil {
 			e.HoldID = &id
@@ -231,6 +246,25 @@ func (e Event) withPayload(ctx context.Context, payload, values []byte, refs *re
 		e.Values[id] = nil
 	}
 	slices.Sort(e.Erased)
+	// Added: what a reaction added, from field_deltas, for the fields whose
+	// value is still there (an erased value takes its delta with it).
+	if len(pl.AddedIDs) > 0 && deltas != nil {
+		var ds map[string]any
+		if err := json.Unmarshal(deltas, &ds); err != nil {
+			return e, fmt.Errorf("read event deltas: %w", err)
+		}
+		for _, id := range pl.AddedIDs {
+			if _, kept := vals[id]; !kept {
+				continue
+			}
+			if d, ok := ds[id]; ok {
+				if e.Added == nil {
+					e.Added = map[string]any{}
+				}
+				e.Added[id] = d
+			}
+		}
+	}
 
 	var err error
 	if pl.ContainerID != nil {
@@ -238,9 +272,17 @@ func (e Event) withPayload(ctx context.Context, payload, values []byte, refs *re
 			return e, err
 		}
 	}
+	if pl.ResolvedTarget != nil {
+		pl.LinkTarget = pl.ResolvedTarget
+	}
 	if pl.LinkTarget != nil {
 		e.LinkType = pl.LinkType
 		if e.LinkTarget, err = refs.ref(ctx, *pl.LinkTarget); err != nil {
+			return e, err
+		}
+	}
+	if pl.LinkReplaced != nil {
+		if e.LinkReplaced, err = refs.ref(ctx, *pl.LinkReplaced); err != nil {
 			return e, err
 		}
 	}

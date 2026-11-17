@@ -1,0 +1,41 @@
+# The leave balance (proof of concept, Step 2, part 2): how many days of
+# leave a person has (f_allowance) and has used (f_used). Nothing in the
+# kernel is named "balance": it is an ordinary Type, written by two link
+# reactions of the vacation request.
+#
+#   - An HR admin (role hr_admin) creates a balance for someone and sets
+#     its allowance; nobody else may write f_owner or f_allowance.
+#   - f_used is written by the kernel only, and only by the vacation
+#     request's deduct and refund reactions (accepts_reactions). No one
+#     edits it through the public API, hr_admin included.
+#   - The invariants hold on every write, from every door. A held approval
+#     whose deduction would overdraw is denied insufficient_balance; a
+#     balance without an owner or an allowance cannot exist, so a non-admin
+#     (who may write neither) cannot create one.
+#   - A balance is open until HR closes it (a year ends, a person leaves).
+#     A request finds its balance among open balances only.
+id: leave_balance
+version: 1
+initial_state: open
+
+fields:
+  - {id: f_owner,     type: principal, writable_by: ['role:hr_admin']}
+  - {id: f_allowance, type: int,       writable_by: ['role:hr_admin']}
+  - {id: f_used,      type: int,       writable_by: kernel}
+
+states:
+  - {id: open,   category: active}
+  - {id: closed, category: done}
+
+transitions:
+  - {from: open, to: closed, allowed: ['role:hr_admin']}
+
+invariants:
+  - id: balance_incomplete
+    rule: 'f_owner != null && f_allowance != null && f_allowance >= 0 && (f_used == null || f_used >= 0)'
+  - id: insufficient_balance
+    rule: 'f_used == null || f_used <= f_allowance'
+
+accepts_reactions:
+  vacation_request:deduct: [f_used]
+  vacation_request:refund: [f_used]

@@ -33,15 +33,17 @@ func NeedsWorkflow(t *typedef.Type, state string) bool {
 // behavior, a workflow may be running, and it must hear every event.
 //
 // Today the only listener is the workflow, so this is "some state has a
-// timer, or the Type has hooks" (a check hook needs the workflow too, though
-// it is entered by no state). Link reactions and subscriptions will widen
-// it. Whatever they need must be added here, or their events are silently
-// never sent.
+// timer, or the Type has hooks or reactions" (a check hook or a held
+// reaction needs the workflow too, though it is entered by no state).
+// Subscriptions will widen it. Whatever they need must be added here, or
+// their events are silently never sent.
 //
 // Two readers do not need the outbox and are not counted: Watch reads
 // item_events directly, and search is a column of the Item's own row.
 func HasListeners(t *typedef.Type) bool {
-	if len(t.Hooks) > 0 {
+	// Hooks and reactions run in the workflow. (A Type that only accepts
+	// reactions needs none: the source's workflow writes to it.)
+	if len(t.Hooks) > 0 || len(t.Reactions) > 0 {
 		return true
 	}
 	for _, s := range t.States {

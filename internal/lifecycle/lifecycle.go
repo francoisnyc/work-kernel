@@ -34,6 +34,8 @@ type Rejection struct {
 	// For FieldFrozen: the state that freezes them and the fields named.
 	State  string
 	Frozen []string
+	// For InvariantFailed: the invariant's ID.
+	Invariant string
 }
 
 // Input is what a transition's guards see besides the Type: the fields as
@@ -167,6 +169,18 @@ func guardHolds(t *typedef.Type, tr typedef.Transition, fields map[string]any, l
 		}
 		vars[typedef.LinksPrefix+name] = list
 	}
+	addFieldVars(vars, t, fields)
+	out, _, err := tr.Program.Eval(vars)
+	if err != nil {
+		return false
+	}
+	ok, isBool := out.Value().(bool)
+	return isBool && ok
+}
+
+// addFieldVars sets one CEL variable per field of t: unset is null, ints
+// read back from JSON (float64) are ints, dates are timestamps.
+func addFieldVars(vars map[string]any, t *typedef.Type, fields map[string]any) {
 	for _, f := range t.Fields {
 		v := fields[f.ID]
 		switch {
@@ -179,7 +193,7 @@ func guardHolds(t *typedef.Type, tr typedef.Transition, fields map[string]any, l
 			vars[f.ID] = v
 		case f.Type == typedef.Date:
 			// A stored date that does not parse cannot be compared: the
-			// guard reading it does not hold.
+			// rule reading it does not hold.
 			if d, ok := typedef.ParseDate(v); ok {
 				vars[f.ID] = d
 			} else {
@@ -189,10 +203,4 @@ func guardHolds(t *typedef.Type, tr typedef.Transition, fields map[string]any, l
 			vars[f.ID] = v
 		}
 	}
-	out, _, err := tr.Program.Eval(vars)
-	if err != nil {
-		return false
-	}
-	ok, isBool := out.Value().(bool)
-	return isBool && ok
 }

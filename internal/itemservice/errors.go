@@ -86,6 +86,9 @@ func fromLifecycle(err error) error {
 		if rej.Code == lifecycle.FieldFrozen {
 			md["fields"], md["state"] = strings.Join(rej.Frozen, ","), rej.State
 		}
+		if rej.Code == lifecycle.InvariantFailed {
+			md = map[string]string{"invariant": rej.Invariant}
+		}
 		return &RejectedError{Code: string(rej.Code), Reason: rej.Reason, Metadata: md, cause: rej}
 	}
 	return err

@@ -87,7 +87,7 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		// under the row lock: no other write can slip in between check and write.
 		// When the guards into ToState read links, the linked Items are locked
 		// too (FOR SHARE), so they cannot change before this commits.
-		it, links, err := k.lockForTransition(ctx, tx, nsOf(req.Principal), req.ItemID, req.ToState)
+		it, links, resolutions, err := k.lockForTransition(ctx, tx, nsOf(req.Principal), req.ItemID, req.ToState)
 		if err != nil {
 			return WriteResult{}, err
 		}
@@ -119,7 +119,13 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		if tr, ok := ty.Transition(it.State, req.ToState); ok {
 			declared = &tr
 		}
-		if err := checkPatch(ty, it.State, declared, req.Fields, kc == nil); err != nil {
+		var writer *policy.Who
+		if kc == nil {
+			if writer, err = publicWriter(ctx, tx, ty, req.Principal, req.Fields); err != nil {
+				return WriteResult{}, err
+			}
+		}
+		if err := checkPatch(ty, it.State, declared, req.Fields, writer); err != nil {
 			return WriteResult{}, err
 		}
 		// While a hold is open, only an escape leaves the state, and it
@@ -155,12 +161,14 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		// The move is legal. Whether this principal may make it is policy's
 		// question, asked second, so ErrForbidden always means "legal, but
 		// not for you".
-		check, checked := lifecycle.CheckFor(ty, it.State, next.State)
+		// A held transition is decided by its check hook, or by its held
+		// reaction (Step 2, part 2); their IDs share one space.
+		decider, checked := holdDecider(ty, it.State, next.State)
 		if checked && kc != nil {
 			// Only ResolveHold applies a checked transition, for a requester:
 			// a kernel actor never makes one on its own authority.
 			return WriteResult{}, fmt.Errorf("%w: %s -> %s is checked by %s; only a requester may ask for it",
-				ErrForbidden, it.State, next.State, check.ID)
+				ErrForbidden, it.State, next.State, decider)
 		}
 		if err := authorize(ctx, tx, req.Principal, ty, it.State, next.State, facts(it)); err != nil {
 			return WriteResult{}, err
@@ -170,10 +178,22 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 				return WriteResult{}, err
 			}
 		}
+		// Last: the fields as the write leaves them keep the invariants
+		// (a held request's patch is written with the request).
+		if len(req.Fields) > 0 {
+			if err := checkInvariants(ty, merged); err != nil {
+				return WriteResult{}, err
+			}
+		}
 		if checked {
+			// The links entering the state sets are set when the hold allows
+			// the move, not now.
 			kind = holdOpened
-			return requestHold(ctx, tx, ty, req.ItemID, it, check, next.State, req.Principal, recorded, attr,
+			return requestHold(ctx, tx, ty, req.ItemID, it, decider, next.State, req.Principal, recorded, attr,
 				merged, set, cleared)
+		}
+		if r, bad := unresolved(resolutions); bad {
+			return WriteResult{}, linkUnresolvedError(r)
 		}
 		kind = holdNone
 
@@ -196,6 +216,9 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		}
 		if hold != nil { // an escape: it cancels the hold, in the same event
 			payload["canceled_hold_id"] = hold.id.String()
+		}
+		if err := applyResolutions(ctx, tx, nsOf(req.Principal), ty, req.ItemID, resolutions, payload); err != nil {
+			return WriteResult{}, err
 		}
 		res, err := appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, attr, "transition", payload, set)
 		if err != nil || hold == nil {

@@ -1,11 +1,13 @@
 package itemservice
 
 import (
+	"context"
 	"maps"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/francoisnyc/work-kernel/internal/item"
 	"github.com/francoisnyc/work-kernel/internal/lifecycle"
 	"github.com/francoisnyc/work-kernel/internal/policy"
 	"github.com/francoisnyc/work-kernel/internal/typedef"
@@ -26,14 +28,22 @@ import (
 // checkPatch applies both rules to a patch. tr is the transition the patch
 // travels with, nil for an update or a create; state is the Item's state
 // before the write ("" for a create, which enters its initial state).
-func checkPatch(ty *typedef.Type, state string, tr *typedef.Transition, fields map[string]any, public bool) error {
+// writer is who writes on the public door (with roles read, when the patch
+// names a role-written field), nil on the internal door: the kernel's own
+// writers are bound by their declarations, not by writable_by.
+func checkPatch(ty *typedef.Type, state string, tr *typedef.Transition, fields map[string]any, writer *policy.Who) error {
 	if len(fields) == 0 {
 		return nil
 	}
 	ids := slices.Sorted(maps.Keys(fields))
 	var refused []string
-	if public {
+	if writer != nil {
 		refused = ty.KernelWritten(ids)
+		for _, id := range ty.RoleWritten(ids) {
+			if f, _ := ty.Field(id); !policy.MayWriteRoleField(f, *writer) {
+				refused = append(refused, id)
+			}
+		}
 	}
 	if tr != nil {
 		refused = append(refused, tr.AllowedFields(ids)...)
@@ -50,6 +60,34 @@ func checkPatch(ty *typedef.Type, state string, tr *typedef.Transition, fields m
 		return nil
 	}
 	return fromLifecycle(lifecycle.CheckFrozen(ty, state, ids))
+}
+
+// publicWriter is the public door's writer for checkPatch: the principal,
+// with its roles (and its user's) read only when the patch names a field
+// that only roles may write. The internal door passes nil instead.
+func publicWriter(ctx context.Context, q policy.Querier, ty *typedef.Type, p item.Principal,
+	fields map[string]any) (*policy.Who, error) {
+	who := &policy.Who{Actor: p.Actor, OnBehalfOf: p.OnBehalfOf}
+	if len(ty.RoleWritten(slices.Collect(maps.Keys(fields)))) == 0 {
+		return who, nil
+	}
+	var err error
+	if who.ActorRoles, err = policy.Roles(ctx, q, nsOf(p), p.Actor); err != nil {
+		return nil, err
+	}
+	if p.OnBehalfOf != "" {
+		if who.OnBehalfOfRoles, err = policy.Roles(ctx, q, nsOf(p), p.OnBehalfOf); err != nil {
+			return nil, err
+		}
+	}
+	return who, nil
+}
+
+// checkInvariants is the last check of every write that changes fields:
+// the fields as the write leaves them keep every invariant of the Type
+// (invariant_failed, metadata invariant).
+func checkInvariants(ty *typedef.Type, merged map[string]any) error {
+	return fromLifecycle(lifecycle.CheckInvariants(ty, merged))
 }
 
 // today is the date guards read, from the service's clock.

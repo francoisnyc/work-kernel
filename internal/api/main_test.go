@@ -46,6 +46,7 @@ var tokens = []devtoken.Token{
 	{Name: "ana", Token: "tok-ana", Principal: "user:ana", Namespace: "acme"},
 	{Name: "bob", Token: "tok-bob", Principal: "user:bob", Namespace: "acme"},
 	{Name: "bea", Token: "tok-bea", Principal: "user:bea", Namespace: "globex"},
+	{Name: "hana", Token: "tok-hana", Principal: "user:hana", Namespace: "acme"}, // hr_admin (leave_test.go)
 	{Name: "sam-acme", Token: "tok-sam-acme", Principal: "user:sam", Namespace: "acme"},
 	{Name: "sam-globex", Token: "tok-sam-globex", Principal: "user:sam", Namespace: "globex"},
 }

@@ -1,0 +1,99 @@
+# The vacation request, version 2 (proof of concept, Step 2, part 2):
+# version 1 plus the leave balance. Version 1 Items keep their own
+# lifecycle beside these (a version is pinned to its Items).
+#
+# Changes from v1:
+#
+#   - The `balance` link (at most one): the request's leave balance, set by
+#     the kernel only, never by the requester (writable_by: kernel blocks
+#     LinkItems and UnlinkItems). It is set in the write that enters
+#     submitted: the unique open leave_balance whose f_owner is the person
+#     the request is for. None denies the submit no_balance, several
+#     ambiguous_balance. Recall and resubmit keep it, or replace it if the
+#     person's open balance has changed.
+#   - Approving holds: the held reaction `deduct` adds f_days to the
+#     balance's f_used, and the approval applies only if that write
+#     commits. The balance's invariant refuses an overdraft: the approval is
+#     then denied insufficient_balance.
+#   - `refund` undoes a deduction: when the approval hold closes any other
+#     way than allowed (the request withdrawn during it, the re-check of the
+#     approver failing, the reaction's budget running out), and when an
+#     approved request is withdrawn. One refund per deduction, of what was
+#     taken.
+#   - Withdrawing a submitted request is an escape: it cancels an open
+#     approval hold. Recall is not: during the approval it waits.
+#   - The requester may withdraw an approved request, while the leave has
+#     not started.
+id: vacation_request
+version: 2
+initial_state: draft
+
+fields:
+  - {id: f_start,      type: date}
+  - {id: f_end,        type: date}
+  - {id: f_days,       type: int}
+  - {id: f_leave_type, type: enum, options: [annual, unpaid, other]}
+  - {id: f_approver,   type: principal, writable_by: kernel}
+  - {id: f_comment,    type: string}
+
+states:
+  - {id: draft,     category: todo}
+  - id: submitted
+    category: waiting
+    frozen: [f_start, f_end, f_days, f_leave_type, f_approver]
+  - id: approved
+    category: done
+    frozen: [f_start, f_end, f_days, f_leave_type, f_approver]
+  - id: rejected
+    category: canceled
+    frozen: [f_start, f_end, f_days, f_leave_type, f_approver]
+  - {id: withdrawn, category: canceled}
+
+transitions:
+  - from: draft
+    to: submitted
+    allowed: [creator]
+    required: [f_start, f_end, f_days, f_leave_type]
+    guard: 'f_end >= f_start && f_start >= today && f_days > 0'
+  - {from: submitted, to: approved, allowed: ['field:f_approver'], except: [creator]}
+  - {from: submitted, to: rejected, allowed: ['field:f_approver'], except: [creator]}
+  - {from: submitted, to: draft,     allowed: [creator]}
+  - {from: submitted, to: withdrawn, allowed: [creator], escape: true}
+  - {from: draft,     to: withdrawn, allowed: [creator], escape: true}
+  - from: approved
+    to: withdrawn
+    allowed: [creator]
+    guard: 'f_start >= today'
+
+links:
+  - name: balance
+    inverse: requests
+    targets: [leave_balance]
+    max: one
+    writable_by: kernel
+    resolve: {on_enter: submitted, field: f_owner, equals: creator, state: open}
+
+hooks:
+  - id: hr_check
+    on: transition
+    from: draft
+    to: submitted
+    kind: check
+    action: hr.manager_of
+    reads: [created_on_behalf_of, created_by]
+    writes: [f_approver]
+
+reactions:
+  - id: deduct
+    kind: held
+    on: enter
+    state: approved
+    from: [submitted]
+    link: balance
+    add: {f_used: f_days}
+  - id: refund
+    kind: after
+    on: enter
+    state: withdrawn
+    from: [approved]
+    undoes: deduct

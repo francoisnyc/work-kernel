@@ -69,9 +69,31 @@ func (a *Activities) LoadItem(ctx context.Context, itemID string) (Snapshot, err
 		}
 	}
 	checks := map[string]string{}
+	var held, undos, onEntry map[string]string // nil for a Type without reactions, as before them
 	for _, tr := range ty.Transitions {
+		move := tr.From + "->" + tr.To
 		if h, ok := lifecycle.CheckFor(ty, tr.From, tr.To); ok {
-			checks[tr.From+"->"+tr.To] = h.ID
+			checks[move] = h.ID
+		}
+		if r, ok := lifecycle.HeldReaction(ty, tr.From, tr.To); ok {
+			if held == nil {
+				held = map[string]string{}
+			}
+			held[move] = r.ID
+		}
+		if r, ok := lifecycle.UndoOnEntry(ty, tr.From, tr.To); ok {
+			if onEntry == nil {
+				onEntry = map[string]string{}
+			}
+			onEntry[move] = r.ID
+		}
+	}
+	for _, r := range ty.Reactions {
+		if u, ok := lifecycle.UndoOf(ty, r.ID); ok {
+			if undos == nil {
+				undos = map[string]string{}
+			}
+			undos[r.ID] = u.ID
 		}
 	}
 	// The current entry's enrich hooks that have not written yet. A hook
@@ -90,6 +112,16 @@ func (a *Activities) LoadItem(ctx context.Context, itemID string) (Snapshot, err
 		CorrelationID: se.CorrelationID, Hop: se.Hop,
 		Enrich: enrich, Checks: checks, HookBudget: a.HookBudget, PendingEnrich: pending,
 		HookAttemptTimeout: a.HookAttemptTimeout, Actions: actions,
+		HeldReactions: held, Undos: undos, UndoOnEntry: onEntry,
+	}
+	if se.EnteredHold != uuid.Nil {
+		snap.EnteredHold = se.EnteredHold.String()
+	}
+	for _, u := range se.PendingUndos {
+		snap.PendingUndos = append(snap.PendingUndos, PendingUndo{
+			ReactionID: u.Reaction, HoldID: u.HoldID.String(), CauseSeq: u.CauseSeq,
+			CorrelationID: u.CorrelationID, Hop: u.Hop,
+		})
 	}
 	for _, pa := range se.PendingActions {
 		snap.PendingActions = append(snap.PendingActions, PendingAction{
@@ -97,8 +129,9 @@ func (a *Activities) LoadItem(ctx context.Context, itemID string) (Snapshot, err
 		})
 	}
 	if h := se.OpenHold; h != nil {
+		_, isReaction := ty.Reaction(h.Hook)
 		snap.Hold = &OpenHold{
-			ID: h.ID.String(), Hook: h.Hook, From: h.From, RequestedTo: h.To,
+			ID: h.ID.String(), Hook: h.Hook, Reaction: isReaction, From: h.From, RequestedTo: h.To,
 			RequestedSeq: h.RequestedSeq, CorrelationID: h.CorrelationID, Hop: h.Hop,
 		}
 	}
@@ -190,5 +223,9 @@ func NewWorker(c client.Client, taskQueue string, k *itemservice.Service, opts W
 	w.RegisterActivityWithOptions(a.ResolveHold, activity.RegisterOptions{Name: ActivityResolveHold})
 	w.RegisterActivityWithOptions(a.RunAction, activity.RegisterOptions{Name: ActivityRunAction})
 	w.RegisterActivityWithOptions(a.HookFailed, activity.RegisterOptions{Name: ActivityHookFailed})
+	w.RegisterActivityWithOptions(a.RunReaction, activity.RegisterOptions{Name: ActivityRunReaction})
+	w.RegisterActivityWithOptions(a.ResolveReaction, activity.RegisterOptions{Name: ActivityResolveReaction})
+	w.RegisterActivityWithOptions(a.Undo, activity.RegisterOptions{Name: ActivityUndo})
+	w.RegisterActivityWithOptions(a.ReactionFailed, activity.RegisterOptions{Name: ActivityReactionFailed})
 	return w
 }

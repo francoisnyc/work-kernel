@@ -48,6 +48,9 @@ func (in *Internal) Update(ctx context.Context, req UpdateRequest) (WriteResult,
 	if err != nil {
 		return WriteResult{}, err
 	}
+	if err := kc.notReaction("Update"); err != nil {
+		return WriteResult{}, err
+	}
 	if req.Principal, err = in.k.inItemsNamespace(ctx, req.Principal, req.ItemID); err != nil {
 		return WriteResult{}, err
 	}
@@ -58,6 +61,9 @@ func (in *Internal) Update(ctx context.Context, req UpdateRequest) (WriteResult,
 func (in *Internal) Transition(ctx context.Context, req TransitionRequest) (WriteResult, error) {
 	kc, err := checkKernel(req.Principal, req.ItemID, req.Attribution)
 	if err != nil {
+		return WriteResult{}, err
+	}
+	if err := kc.notReaction("Transition"); err != nil {
 		return WriteResult{}, err
 	}
 	if req.Principal, err = in.k.inItemsNamespace(ctx, req.Principal, req.ItemID); err != nil {
@@ -88,7 +94,26 @@ type kernelCause struct {
 	causeSeq    int64
 	typeID      string
 	typeVersion int
-	hookID      string // the hook acting; empty for the timer
+	hookID      string // the hook acting; empty for the timer and a reaction
+	reactionID  string // the reaction acting (Step 2, part 2); empty otherwise
+}
+
+// decider is the hook or reaction acting: what a hold names as deciding it.
+func (kc *kernelCause) decider() string {
+	if kc.reactionID != "" {
+		return kc.reactionID
+	}
+	return kc.hookID
+}
+
+// notReaction refuses a reaction on the internal door's operations other
+// than React, Undo, ReactionFailed and its own hold's ResolveHold.
+func (kc *kernelCause) notReaction(op string) error {
+	if kc.reactionID != "" {
+		return fmt.Errorf("%w: a reaction writes only through React, Undo and its hold's ResolveHold, not %s",
+			ErrInvalid, op)
+	}
+	return nil
 }
 
 // checkKernel checks a kernel write before any work is done. Everything here
@@ -99,8 +124,10 @@ func checkKernel(p item.Principal, itemID uuid.UUID, a item.Attribution) (*kerne
 		return nil, fmt.Errorf("%w: kernel write: "+format, append([]any{ErrInvalid}, args...)...)
 	}
 	hookType, hookID, isHook := item.HookParts(p.Actor)
-	if p.Actor != typedef.TimerPrincipal && !isHook {
-		return invalid("the internal door is for system:timer and hook:<type>:<hook-id>, not %q", p.Actor)
+	reactionType, reactionID, isReaction := item.ReactionParts(p.Actor)
+	if p.Actor != typedef.TimerPrincipal && !isHook && !isReaction {
+		return invalid("the internal door is for system:timer, hook:<type>:<hook-id> and "+
+			"reaction:<type>:<id>, not %q", p.Actor)
 	}
 	if p.OnBehalfOf != "" {
 		return invalid("on_behalf_of is filled by the kernel from the cause, not by the caller")
@@ -110,14 +137,22 @@ func checkKernel(p item.Principal, itemID uuid.UUID, a item.Attribution) (*kerne
 	}
 
 	kc := &kernelCause{}
-	if isHook {
+	switch {
+	case isReaction:
+		// reaction:<type>@v<version>:<id>, naming the reaction that is acting.
+		t, v, r, ok := parseOrigin(item.KindReaction, a.OriginatingHook)
+		if !ok || t != reactionType || r != reactionID {
+			return invalid("originating_hook %q must be reaction:%s@v<version>:%s", a.OriginatingHook, reactionType, reactionID)
+		}
+		kc.typeID, kc.typeVersion, kc.reactionID = t, v, r
+	case isHook:
 		// hook:<type>@v<version>:<hook-id>, naming the hook that is acting.
 		t, v, h, ok := parseOrigin(item.KindHook, a.OriginatingHook)
 		if !ok || t != hookType || h != hookID {
 			return invalid("originating_hook %q must be hook:%s@v<version>:%s", a.OriginatingHook, hookType, hookID)
 		}
 		kc.typeID, kc.typeVersion, kc.hookID = t, v, h
-	} else {
+	default:
 		// timer:<type>@v<version>:<state>, the state the timer was armed in.
 		t, v, _, ok := parseOrigin("timer", a.OriginatingHook)
 		if !ok {
@@ -128,7 +163,9 @@ func checkKernel(p item.Principal, itemID uuid.UUID, a item.Attribution) (*kerne
 	}
 
 	// causation_id is "<item>:<seq>", and the item is this one: a kernel
-	// actor acts only on the Item that triggered it.
+	// actor acts only on the Item that triggered it. (A reaction writes on
+	// another Item, the target, caused by an event of the source: React
+	// and Undo pass the source here and check the target themselves.)
 	idPart, seqPart, _ := strings.Cut(a.CausationID, ":")
 	causeItem, err := uuid.Parse(idPart)
 	if err != nil {

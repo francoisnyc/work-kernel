@@ -192,7 +192,11 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 		return WriteResult{}, fieldsInvalid(err)
 	}
 	// Create is the public door only: a kernel-written field is refused.
-	if err := checkPatch(ty, "", nil, req.Fields, true); err != nil {
+	writer, err := publicWriter(ctx, k.pool, ty, req.Principal, req.Fields)
+	if err != nil {
+		return WriteResult{}, err
+	}
+	if err := checkPatch(ty, "", nil, req.Fields, writer); err != nil {
 		return WriteResult{}, err
 	}
 	fields := req.Fields
@@ -231,6 +235,11 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 			return WriteResult{}, err
 		}
 		if err := checkAgentWrite(ctx, tx, req.Principal, target, req.ContainerID); err != nil {
+			return WriteResult{}, err
+		}
+
+		// Last: the new Item keeps the Type's invariants.
+		if err := checkInvariants(ty, fields); err != nil {
 			return WriteResult{}, err
 		}
 
@@ -404,6 +413,13 @@ type StateEntry struct {
 	// of their state, not just the current one: an action is never dropped
 	// because the Item moved on (or the worker died).
 	PendingActions []PendingAction
+	// PendingUndos are the undos not yet done, for any hold of the Item
+	// (Step 2, part 2): a workflow run that starts after a crash resumes them.
+	PendingUndos []PendingUndo
+	// EnteredHold is the hold whose allowed resolution entered State, if
+	// the entry was a held transition: an undo on leaving State reverses
+	// that hold's reservation, never an earlier one's.
+	EnteredHold uuid.UUID
 }
 
 // HoldEntry is an open hold, as the workflow needs it: opaque IDs, state
@@ -475,6 +491,22 @@ func (k *Service) StateEntry(ctx context.Context, id uuid.UUID) (StateEntry, err
 		return StateEntry{}, err
 	}
 	if se.PendingActions, err = k.pendingActions(ctx, id, ty); err != nil {
+		return StateEntry{}, err
+	}
+	// The hold whose allowed resolution entered the state, if any: an
+	// escape names its hold as canceled_hold_id, never hold_id.
+	var entered *string
+	if err := k.pool.QueryRow(ctx,
+		`select payload ->> 'hold_id' from item_events where item_id = $1 and item_seq = $2 and op = 'transition'`,
+		id, se.EnteredSeq).Scan(&entered); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return StateEntry{}, fmt.Errorf("read the entering hold: %w", err)
+	}
+	if entered != nil {
+		if se.EnteredHold, err = uuid.Parse(*entered); err != nil {
+			return StateEntry{}, fmt.Errorf("read the entering hold: %w", err)
+		}
+	}
+	if se.PendingUndos, err = k.pendingUndos(ctx, id, ty); err != nil {
 		return StateEntry{}, err
 	}
 	return se, nil
