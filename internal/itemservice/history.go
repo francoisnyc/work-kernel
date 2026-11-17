@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -169,6 +170,9 @@ func (k *Service) ListEvents(ctx context.Context, req ListEventsRequest) (ListEv
 	for _, r := range found {
 		e, err := r.e.withPayload(ctx, r.payload, r.values, r.deltas, &refs)
 		if err != nil {
+			return ListEventsResult{}, err
+		}
+		if e.CausationID, err = refs.causation(ctx, req.ItemID, e.CausationID); err != nil {
 			return ListEventsResult{}, err
 		}
 		res.Events = append(res.Events, e)
@@ -340,6 +344,37 @@ func (r *refResolver) ref(ctx context.Context, id uuid.UUID) (*ItemRef, error) {
 	}
 	r.seen[id] = ref
 	return ref, nil
+}
+
+// causation passes an event's causation_id (<item>:<seq>) through
+// visibility. Naming this Item, it stays. Naming another (a reaction's
+// write on its target names the source), it is shown only if the principal
+// can see that Item, and otherwise omitted, as is a value that does not
+// parse: an ID-shaped field is not marked restricted, which would hint.
+// Every path that returns events goes through ListEvents, so through this.
+func (r *refResolver) causation(ctx context.Context, self uuid.UUID, causation string) (string, error) {
+	if causation == "" {
+		return "", nil
+	}
+	idPart, seq, ok := strings.Cut(causation, ":")
+	if !ok || seq == "" {
+		return "", nil
+	}
+	id, err := uuid.Parse(idPart)
+	if err != nil {
+		return "", nil
+	}
+	if id == self {
+		return causation, nil
+	}
+	ref, err := r.ref(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if ref.Restricted {
+		return "", nil
+	}
+	return causation, nil
 }
 
 // raw resolves a container key that may be absent or null (the top level).
