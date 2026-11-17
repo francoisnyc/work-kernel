@@ -1,19 +1,27 @@
-// Command connstub runs the stub CRM, ERP and (with --hr-listen) HR
-// directory (internal/connstub) as a service, for the compose stack: the
-// worker's hooks call them as they would call real ones.
+// Command connstub runs the stub CRM, ERP, (with --hr-listen) HR
+// directory and (with --email-listen) email service (internal/connstub) as
+// a service, for the compose stack: the worker's hooks call them as they
+// would call real ones. --email-read-listen serves the sent messages
+// read-only (GET /messages?item=), for the dev compose file to publish to
+// the scenario; nothing outside the stack can send.
 //
 // --hr-directory is a JSON object mapping each employee to their manager,
 // both user principal IDs (deploy/hr-directory.json).
 //
 //	connstub [--crm-listen :8081] [--erp-listen :8082] [--erp-latency 1s] [--customers FILE]
 //	         [--hr-listen :8083 [--hr-directory FILE]]
+//	         [--email-listen :8084 [--email-read-listen :8085]]
 //	connstub --probe URL
 //
 // --customers is a JSON object of customers by ID; an unknown key is an
 // error, so a typo never passes silently:
 //
 //	{"cust-good": {"plan": "pro", "credit_limit": 1000},
-//	 "cust-hold": {"plan": "free", "on_hold": true}}
+//	 "cust-hold": {"plan": "free", "on_hold": true},
+//	 "cust-slow": {"plan": "pro", "credit_limit": 1000, "latency": "3s"}}
+//
+// latency (a Go duration) makes the ERP wait that long before answering
+// for the customer, on top of --erp-latency.
 //
 // Each server also answers GET /healthz with 200 and no body. --probe gets a
 // URL and exits 0 on 200: the image has no shell or curl.
@@ -51,6 +59,7 @@ type customer struct {
 	OnHold      bool   `json:"on_hold"`
 	CreditLimit int    `json:"credit_limit"`
 	CostCenter  string `json:"cost_center"`
+	Latency     string `json:"latency"` // a Go duration; empty is none
 }
 
 // run serves both stubs until ctx is canceled, or probes and returns.
@@ -63,12 +72,17 @@ func run(ctx context.Context, args []string, stderr io.Writer) error {
 	customersPath := fs.String("customers", "", "JSON file of customers by ID")
 	hrAddr := fs.String("hr-listen", "", "the HR directory's address (none: no HR directory)")
 	hrPath := fs.String("hr-directory", "", "JSON file mapping each employee to their manager (principal IDs)")
+	emailAddr := fs.String("email-listen", "", "the email service's address (none: no email service)")
+	emailReadAddr := fs.String("email-read-listen", "", "the read-only address serving the sent messages (dev only)")
 	probeURL := fs.String("probe", "", "check a running stub's /healthz URL and exit (for container health checks)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *probeURL != "" {
 		return probe(ctx, *probeURL)
+	}
+	if *emailReadAddr != "" && *emailAddr == "" {
+		return fmt.Errorf("--email-read-listen needs --email-listen")
 	}
 	customers := map[string]customer{}
 	if *customersPath != "" {
@@ -83,6 +97,17 @@ func run(ctx context.Context, args []string, stderr io.Writer) error {
 			return fmt.Errorf("%s: %w", *customersPath, err)
 		}
 	}
+	latencies := map[string]time.Duration{}
+	for id, c := range customers {
+		if c.Latency == "" {
+			continue
+		}
+		d, err := time.ParseDuration(c.Latency)
+		if err != nil || d < 0 {
+			return fmt.Errorf("%s: customer %s: latency %q: want a Go duration such as 3s", *customersPath, id, c.Latency)
+		}
+		latencies[id] = d
+	}
 
 	crm, err := connstub.ServeCRM(*crmAddr)
 	if err != nil {
@@ -96,7 +121,8 @@ func run(ctx context.Context, args []string, stderr io.Writer) error {
 	defer erp.Close()
 	erp.SetLatency(*erpLatency)
 	for id, c := range customers {
-		sc := connstub.Customer{Plan: c.Plan, OnHold: c.OnHold, CreditLimit: c.CreditLimit, CostCenter: c.CostCenter}
+		sc := connstub.Customer{Plan: c.Plan, OnHold: c.OnHold, CreditLimit: c.CreditLimit, CostCenter: c.CostCenter,
+			Latency: latencies[id]}
 		crm.SetCustomer(id, sc)
 		erp.SetCustomer(id, sc)
 	}
@@ -116,6 +142,19 @@ func run(ctx context.Context, args []string, stderr io.Writer) error {
 			hr.SetManager(employee, manager)
 		}
 		slog.Info("connstub serving HR", "hr", *hrAddr, "employees", len(directory))
+	}
+	if *emailAddr != "" {
+		email, err := connstub.ServeEmail(*emailAddr)
+		if err != nil {
+			return fmt.Errorf("email: %w", err)
+		}
+		defer email.Close()
+		if *emailReadAddr != "" {
+			if err := email.ServeEmailReader(*emailReadAddr); err != nil {
+				return fmt.Errorf("email reader: %w", err)
+			}
+		}
+		slog.Info("connstub serving email", "email", *emailAddr, "reader", *emailReadAddr)
 	}
 	slog.Info("connstub serving", "crm", *crmAddr, "erp", *erpAddr, "erp_latency", *erpLatency, "customers", len(customers))
 	<-ctx.Done()

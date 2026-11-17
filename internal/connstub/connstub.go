@@ -45,7 +45,7 @@ type Customer struct {
 	CreditLimit int    // ERP: the largest amount a check allows
 	CostCenter  string // ERP: if set, a check corrects the ticket's cost center to it
 	// Latency (Step 2, part 3): how long the ERP waits before answering for
-	// this customer, on top of the server's latency. Phase B: not applied yet.
+	// this customer, on top of the server's latency.
 	Latency time.Duration
 }
 
@@ -76,6 +76,12 @@ type Server struct {
 	dropped     int
 
 	arrivals map[string][]Arrival // customer -> requests, as they arrived
+
+	// Email only.
+	messages []Message          // in arrival order
+	byMsgKey map[string]Message // idempotency key -> the message it recorded
+	lastMsg  int
+	reader   *httptest.Server // the read-only listener, if serving
 }
 
 // Arrival is when one request for a customer reached the stub, before any
@@ -203,7 +209,7 @@ func newServer() *Server {
 	return &Server{
 		customers: map[string]Customer{}, managers: map[string]string{},
 		invoices: map[string][]string{}, byKey: map[string]invoiceRec{}, seen: map[string]bool{},
-		arrivals: map[string][]Arrival{},
+		arrivals: map[string][]Arrival{}, byMsgKey: map[string]Message{},
 	}
 }
 
@@ -282,8 +288,16 @@ func (s *Server) startOn(addr string, h http.Handler) error {
 	return nil
 }
 
-// Close stops the server.
-func (s *Server) Close() { s.srv.Close() }
+// Close stops the server, and its email reader if any.
+func (s *Server) Close() {
+	s.srv.Close()
+	s.mu.Lock()
+	reader := s.reader
+	s.mu.Unlock()
+	if reader != nil {
+		reader.Close()
+	}
+}
 
 // SetCustomer adds or replaces a customer.
 func (s *Server) SetCustomer(id string, c Customer) {
@@ -401,6 +415,13 @@ func (s *Server) wrap(serve func(w http.ResponseWriter, r *http.Request, id stri
 		if !ok {
 			http.Error(w, "no such customer", http.StatusNotFound)
 			return
+		}
+		if c.Latency > 0 {
+			select {
+			case <-time.After(c.Latency):
+			case <-r.Context().Done():
+				return
+			}
 		}
 		serve(w, r, id, c, amount)
 	}
