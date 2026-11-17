@@ -4,6 +4,9 @@
 //
 //   - item 5: the event names the hold (HoldID) and says it was canceled
 //     (Canceled), so the workflow never reads it as allowed.
+//   - item 7: the event starts the workflow (Update-With-Start): the run
+//     that took the request may be gone, and the undo of the committed
+//     deduction must still run. withdrawn has no behavior of its own.
 package relay_test
 
 import (
@@ -88,5 +91,14 @@ func TestRelay_EscapeCancelingAHold_IsMarkedCanceled(t *testing.T) {
 	ev, _ := deliveryOf(t, fake, id, escape)
 	if ev.HoldID != hold.String() || !ev.Canceled || ev.To != "withdrawn" {
 		t.Errorf("the escape = %+v, want hold %s, Canceled, to withdrawn", ev, hold)
+	}
+}
+
+func TestRelay_EscapeCancelingAHeldReactionsHold_StartsTheWorkflow(t *testing.T) {
+	r, fake, _ := newRelay(t)
+	id, _, escape := escapedApproval(t)
+	runOnce(t, r)
+	if _, start := deliveryOf(t, fake, id, escape); !start {
+		t.Error("the escape that canceled deduct's hold does not start the workflow: a dead run's undo would never run")
 	}
 }
