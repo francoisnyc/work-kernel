@@ -275,7 +275,9 @@ func (r *Relay) delivery(ctx context.Context, id uuid.UUID, ev pendingEvent) (De
 		},
 		// The Type decides, in one place, whether this event needs a
 		// running workflow: it enters a state with behavior, or opens a hold.
-		Start: lifecycle.StartsWorkflow(ty, lifecycle.Event{Op: ev.Op, Entered: entered, From: shape.From}),
+		Start: lifecycle.StartsWorkflow(ty, lifecycle.Event{Op: ev.Op, Entered: entered, From: shape.From,
+			ClosesHold: holdID != "" && ev.Op != lifecycle.OpTransitionRequested,
+			Allowed:    ev.Op == "transition" && holdID != "" && !canceled}),
 	}, nil
 }
 
