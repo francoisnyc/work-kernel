@@ -261,6 +261,10 @@ func (t *Type) checkKernelLinks(fail func(string, ...any) error) error {
 		if _, ok := t.State(r.OnEnter); !ok {
 			return fail("%s: resolve on_enter %q is not a declared state", where, r.OnEnter)
 		}
+		if r.OnEnter == t.InitialState {
+			return fail("%s: resolve on_enter %q is the initial state, which Create enters without resolving links",
+				where, r.OnEnter)
+		}
 		if r.Equals != ResolveEqualsCreator {
 			return fail("%s: resolve equals %q: the only value is creator", where, r.Equals)
 		}
@@ -424,6 +428,16 @@ func (t *Type) checkReactions(fail func(string, ...any) error) error {
 			}
 			if !l.SourceSingle() {
 				return fail("%s: link %s may have many targets; a reaction follows a link of max: one", where, l.Name)
+			}
+			// A link the kernel resolves is sure to be set only in the state
+			// whose entry resolves it. (A link people set is exempt.)
+			if l.Resolve != nil {
+				for _, from := range r.From {
+					if from != l.Resolve.OnEnter {
+						return fail("%s: it leaves %s, but link %s is resolved on entering %s, so it may be unset in %s",
+							where, from, l.Name, l.Resolve.OnEnter, from)
+					}
+				}
 			}
 			if len(r.Add) == 0 {
 				return fail("%s: a held reaction adds to some field (add)", where)
