@@ -55,7 +55,12 @@ A Type is versioned YAML data that **names code but never contains it**.
 - Fields: stable ID, type, options, defaults, invariants as expressions.
   Types: `string`, `int`, `bool`, `enum`, `principal`, `date` (an ISO 8601
   calendar date, `2026-12-01`). A field may be `writable_by: kernel`: only the
-  internal door (a hook) writes it (see "Approval as a business state").
+  internal door (a hook, or another Type's reaction it accepts) writes it
+  (see "Approval as a business state"), or `writable_by: [role:<name>, ...]`:
+  on the public door only holders of a role write it (see "Link reactions,
+  the leave balance and the saga"). A Type may declare `invariants`, rules
+  over its fields that every write keeps, and `reactions`, writes on the
+  Items it links to.
 - States: each has a category — `triage, backlog, todo, active, waiting, done, canceled, none`.
   `none` means "not work": work views leave it out. A Type that declares no
   states gets one implicit state, `default`, with category `none`. A state may
@@ -273,7 +278,8 @@ client → item service (Go, stateless)
 
 - **Principals are typed IDs**, given by the caller: `user:<id>`, `agent:<id>`,
   `group:<id>`, and for the kernel's own actors `system:<id>` (`system:timer`)
-  and `hook:<type>:<hook-id>` (a Type's hook).
+  and `hook:<type>:<hook-id>` (a Type's hook), and since Step 2, part 2
+  `reaction:<type>:<id>` (a Type's link reaction).
   The actor, `on_behalf_of`, every reader and every role holder is one. An
   untyped ID is `ErrInvalid`. Only users and agents are readers today; `group:`
   is reserved and refused until groups exist, so groups need no migration later.
@@ -771,6 +777,9 @@ A rule's refusal answers with its code; every kernel rejection carries one
 | `ErrRejected`, the link exists / does not exist / its target's Type is not allowed | `FAILED_PRECONDITION` | `ALREADY_LINKED` / `NOT_LINKED` / `LINK_TARGET_TYPE` |
 | `ErrForbidden`, a write names a field it may not write (kernel-written, or named by its transition's `allowed`) | `PERMISSION_DENIED` | `FIELD_NOT_WRITABLE` (+ fields) |
 | `ErrRejected`, a write names a field the Item's state freezes | `FAILED_PRECONDITION` | `FIELD_FROZEN` (+ fields, state) |
+| `ErrRejected`, a write would break one of the Type's invariants | `FAILED_PRECONDITION` | `INVARIANT_FAILED` (+ invariant) |
+| `ErrForbidden`, LinkItems / UnlinkItems on a link only the kernel sets | `PERMISSION_DENIED` | `LINK_NOT_WRITABLE` (+ link_type) |
+| `ErrRejected`, a direct transition into a state that sets a link found no single target | `FAILED_PRECONDITION` | `LINK_UNRESOLVED` (+ link_type, reason) |
 | `ErrStale` | `ABORTED` | `STALE` |
 | `ErrHeld` | `ABORTED` | `HELD` (+ hold name) |
 | `ErrIdempotencyKeyReuse` | `ALREADY_EXISTS` | `IDEMPOTENCY_KEY_REUSED` |
@@ -963,11 +972,137 @@ manager, and answers `correct` with `f_approver` (the Item enters
 `submitted` with it, in the same write) or `deny` (`unknown_employee`, or
 `no_eligible_approver` when someone manages themselves).
 
-**Constraints kept open for parts 2 and 3:** `writable_by` extends to link
+**Built in part 2** (see "Link reactions, the leave balance and the saga"):
+`writable_by` on link types, reactions and their consent, `add`, the
+refund. **Still open for part 3:** a field-less reminder event needs an
+explicit `ErrHeld` exemption, and timers refused as held will be deferred,
+not spent.
+
+**Constraints that were kept open for parts 2 and 3:** `writable_by` extends to link
 types; reactions will declare which fields they write on a target Type; an
 `add` op on ints and a compensating refund arrive in part 2; a field-less
 reminder event will need an explicit `ErrHeld` exemption, and timers refused
 as held will be deferred, not spent, in part 3.
+
+### Link reactions, the leave balance and the saga (proof of concept, Step 2, part 2)
+
+Decided 2026-11-16, built 2026-11-17. The vacation request
+(`vacation_request@2`) deducts its days from a leave balance
+(`leave_balance@1`) when approved, and gives them back when the approval
+does not stand. Nothing in the kernel is named balance or vacation: the
+kernel gained reactions, invariants, role writers and kernel-set links.
+
+**Reactions.** A Type declares writes on the Items its links point to:
+`{id, kind: held, on: enter, state, from: [...], link, add: {field: cel}}`,
+and its undo `{id, kind: after, on: enter, state, from, undoes: <held>}`.
+The principal is `reaction:<type>:<id>`, `originating_hook`
+`reaction:<type>@v<n>:<id>`; reaction and hook IDs share one space
+(`item_holds.hook` names either).
+- A held reaction holds each `from -> state` transition: asking for it
+  opens a hold the reaction decides. It writes on its link's one target;
+  the move applies if that write commits, and is denied with the target's
+  refusal (an invariant's ID) if not. One hold per transition: a check
+  hook and a held reaction on one transition are refused at load. `add`
+  expressions are CEL over the source's fields only (no `today`, no links),
+  of type int; the fields they read are frozen while its hold is open, like
+  a check's reads.
+- Every held reaction has exactly one undo (refused at load otherwise). The
+  undo reverses the write's **recorded delta**, never recomputes it: a
+  requester who edits `f_days` after withdrawing cannot get more back than
+  was taken. An `after` reaction with a patch of its own is Later.
+- **Consent.** The target declares `accepts_reactions: {<type>:<id>:
+  [fields]}` (int fields, unversioned keys), checked at load across Types
+  (`ParseDir`) and at write time against the target Item's pinned version
+  (`reaction_not_accepted`). A consent counts as the writer of a
+  `writable_by: kernel` field.
+- **`add`** is for reactions only: an unset field is 0 + n. History shows
+  both the result (`item_event_values.field_values`, as for every event)
+  and the amount (`field_deltas`, migration 00011); the payload lists
+  `field_ids` and `added_field_ids`; the API shows `fields` and `added`.
+- **Relaxed only for reactions:** a reaction's cause is an event of the
+  source while it writes the target (`React`, `Undo`), or resolves its own
+  hold on the source (allow, deny or error, never correct). `hook:` and
+  `system:` keep the same-Item, same-Type rule; a reaction is refused on
+  `Internal().Update` and `Transition`. A reaction is never the requester
+  nor took part in creating.
+
+**The saga.** `React` writes one Item, the target, under the key
+`<held>:<source>:<requested seq>:<target>`. It locks the source FOR SHARE
+and the target FOR UPDATE in UUID order and commits only while **that hold
+is open**: an escape (the source FOR UPDATE) waits for it or makes it
+refuse (`ErrStale`), so a deduction never outlives its hold. It checks the
+link at write time (`not_linked`). Deduct and resolve are two transactions
+of one Item each, so the hold can close another way in between:
+- **Undo** runs when the hold closes any other way than allowed (denied, an
+  error, the budget, the approver's re-check failing, canceled by an
+  escape), and when the state its allowed resolution entered is left by the
+  undo's trigger (`approved -> withdrawn`), for the hold that **entered**
+  it (`StateEntry.EnteredHold`), never an earlier one. Its key is
+  `<reservation key>:<undo>`, one per deduction whichever path asks. It
+  finds the reservation through the idempotency record committed with the
+  deduction, so without a committed deduction it writes nothing, and it
+  never runs twice. It does not check the link: it gives back what was
+  taken, where it was taken. An open hold, or an allowed one whose state
+  was not left, is `not_undoable`.
+- **In the workflow** an undo is never dropped: one activity try per
+  attempt, a pause doubling from 1 s to one minute, without limit. A
+  refusal ends it, recorded once on the source (`REACTION_FAILED`).
+  Attempts and the last error stay on the pending undo and show in the
+  workflow query `undos` (LoadItem reads Postgres, which never sees
+  retries); after 100 undo attempts in one run the run continues as new,
+  carrying them. LoadItem reports the undos not yet done, so a run after a
+  crash resumes them. Alerting on a stuck undo is Later.
+- **Why not one transaction** (deduct and resolve together): no
+  compensation would be needed, but it writes two Items per transaction;
+  one Item per write keeps Items independent, and is the shape a target in
+  another service will need.
+
+**Invariants.** `invariants: [{id, rule}]`, CEL over the fields only; the
+ID is the refusal code (`INVARIANT_FAILED`, metadata `invariant`) and a
+held reaction's deny reason. A rule that cannot be evaluated (a null) does
+not hold, so rules test for null themselves; there are no field defaults.
+Checked **last** on every write that changes fields, on every door: create,
+update, a transition's patch, a held request's patch, a hook's write, a
+reaction, an undo; a check's correction that breaks one denies the hold,
+naming it. **Why not a self-transition with a guard:** updates have no
+guards, so lowering `f_allowance` below `f_used` would pass; a
+self-transition is a state entry (timers restart, enter hooks rerun,
+plumbing in the lifecycle); and a Type without states would need a fake
+one. An approver may learn `insufficient_balance` about a balance they
+cannot see: accepted, for the same reason as a hidden blocker (a rule must
+hold for everyone).
+
+**Role writers.** `writable_by: [role:<name>, ...]`: on the public door the
+actor, and the user an agent acts for, must both hold one of the roles
+(`FIELD_NOT_WRITABLE`, after visibility); the kernel's own writers are not
+affected. On `leave_balance`, `f_owner` and `f_allowance` are `hr_admin`'s
+and `f_used` the kernel's; the invariant `balance_incomplete` refuses a
+balance without an owner and an allowance, so a non-admin cannot create one.
+
+**Kernel-set links.** A link type `writable_by: kernel` with `resolve:
+{on_enter, field, equals: creator, state}`: LinkItems and UnlinkItems
+refuse it to everyone (`LINK_NOT_WRITABLE`, after NOT_FOUND), and the write
+that enters `on_enter`, on any door, sets it to the unique Item of its one
+target Type in `state` whose principal `field` holds the Item's creator
+(`created_on_behalf_of`, else `created_by`), whoever can see it. None or
+several: `no_<link>` / `ambiguous_<link>`, a denied hold inside
+`ResolveHold`, `LINK_UNRESOLVED` on a direct transition. The same target
+again records nothing; another replaces it in the same write
+(`link_target`, `link_replaced` on the transition event). One per state.
+Locks: the candidates and the current target are read **before** any lock;
+then the Item (FOR UPDATE), the guard's linked Items (FOR SHARE), the
+candidates (FOR SHARE) and the current target (FOR KEY SHARE) are locked in
+one UUID-sorted pass; then everything is read again, and a change starts
+the transaction again. A balance created meanwhile is not locked (a
+phantom): two open balances for one person are refused as ambiguous, never
+prevented (uniqueness is Later). Balances stay open until HR closes them,
+so a new balance needs no delete.
+
+**Workflow changes without `GetVersion`** are proven by replay:
+`internal/workflow/testdata/histories/` holds histories recorded from main
+before the change (a ticket with a hold and a timer, a vacation request
+with the HR check, a timer that fires), and `TestReplay_HistoriesFromMain`
+replays them on today's code.
 
 ## Spike build order
 
@@ -1079,7 +1214,7 @@ in the journal.
 | 0 (**done**) | Public API v1 server (`cmd/itemservice`, connect-go) and the `pli` CLI (`cmd/pli`) over what exists: create, get, update (patch, readers, move), transition with `wait`, search with filters, list by container, item history, Types read-only, agent sessions with required scopes and powers. Dev-token auth, the error table, paging, `request_id`, `etag`, plain-JSON field values. `buf lint` and `buf breaking` in CI. `docker compose up` runs Postgres, Temporal, a one-shot `migrate`, the item service, relay, worker and `connstub` (the stub CRM and ERP) | A scripted `pli` session creates, edits, moves (including a held approve with `wait`), searches with filters, lists a container and reads history, acting as two users; every named refusal comes back with its code and reason; an agent session refused outside its scopes; a cross-namespace attempt fails on every operation; a stranger can run it from the README. **Done 2026-11-16**: [journal, Step 0, part 3](journal.md#2026-11-16--step-0-proof-of-concept-part-3-one-command-stack-scenario-readme-finished) |
 | 1 (**done**) | Link types and principal fields | Declared link types with cardinality, inverse and allowed targets, enforced; link changes are events with etags; guards and search see links; principal fields checked. **Done 2026-11-16**: [journal, Step 1](journal.md#2026-11-16--step-1-proof-of-concept-link-types-and-principal-fields-finished) |
 | 2, part 1 (**done**) | Vacation request: approval as a business state, its primitives, the HR check | Draft -> submitted -> approved/rejected through pli, the approver set by the HR check and never by the requester, the submitted dates frozen, no self-approval, agents unable to approve, every refusal named; through the API, pli and the scenario. **Done 2026-11-16**: [journal, Step 2, part 1](journal.md#2026-11-16--step-2-proof-of-concept-part-1-approval-primitives-and-the-hr-check-finished) |
-| 2, part 2 | Link reactions, the leave balance, the held deduction and its compensation | Planned |
+| 2, part 2 (**done**) | Link reactions, the leave balance, the held deduction and its compensation | Approving a vacation request deducts its days from the requester's balance exactly once, or is DENIED insufficient_balance; two approvals racing never overdraw; every non-allow end of the hold after a deduction refunds it once, never without one; withdrawing an approved request refunds it; the requester never chooses or changes the balance; through the API, pli and the scenario. **Done 2026-11-17**: [journal, Step 2, part 2](journal.md#2026-11-17--step-2-proof-of-concept-part-2-link-reactions-the-leave-balance-the-saga-finished) |
 | 2, part 3 | Acting timers, timers deferred during holds, the stub email connector, the full scenario | Planned |
 | 3+ | The Jira scenarios | Planned per step when reached |
 
