@@ -44,6 +44,9 @@ type Customer struct {
 	OnHold      bool   // ERP: credit on hold
 	CreditLimit int    // ERP: the largest amount a check allows
 	CostCenter  string // ERP: if set, a check corrects the ticket's cost center to it
+	// Latency (Step 2, part 3): how long the ERP waits before answering for
+	// this customer, on top of the server's latency. Phase B: not applied yet.
+	Latency time.Duration
 }
 
 // Server is one stub. Its settings may be changed while it serves: a test

@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/francoisnyc/work-kernel/internal/connstub"
 )
@@ -113,5 +114,30 @@ func TestEmail_ReaderIsReadOnly(t *testing.T) {
 	}
 	if n := len(s.Messages("i")); n != 1 {
 		t.Errorf("messages = %d, want 1", n)
+	}
+}
+
+// Proof of concept, Step 2, part 3: a customer may be slow. The ERP waits
+// that long before answering for it (on top of the server's latency), so
+// the scenario can hold an approval open across a timer.
+func TestERP_ASlowCustomer(t *testing.T) {
+	s := connstub.NewERP()
+	t.Cleanup(s.Close)
+	s.SetCustomer("cust-slow", connstub.Customer{CreditLimit: 10, Latency: 300 * time.Millisecond})
+	s.SetCustomer("cust-fast", connstub.Customer{CreditLimit: 10})
+	timed := func(id string) time.Duration {
+		began := time.Now()
+		res, err := http.Get(s.URL + "/customers/" + id + "/credit")
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return time.Since(began)
+	}
+	if d := timed("cust-slow"); d < 300*time.Millisecond {
+		t.Errorf("cust-slow answered in %v, want at least 300ms", d)
+	}
+	if d := timed("cust-fast"); d >= 300*time.Millisecond {
+		t.Errorf("cust-fast answered in %v, want at once", d)
 	}
 }
