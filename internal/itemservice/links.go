@@ -31,6 +31,10 @@ const (
 	CodeAlreadyLinked   = "already_linked"   // the same link exists
 	CodeNotLinked       = "not_linked"       // no such link to remove
 	CodeLinkTargetType  = "link_target_type" // the target's Type is not one the link type allows
+	// CodeLinkTargetChanged: a held reaction's resolve link no longer
+	// resolves to its target (closed, given to someone else, or another
+	// candidate appeared); the hold is denied with it.
+	CodeLinkTargetChanged = "link_target_changed"
 )
 
 // MaxLinksShown is how many links Get shows per direction (restricted ones
