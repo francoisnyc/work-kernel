@@ -21,6 +21,8 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+
+	"github.com/francoisnyc/work-kernel/internal/item"
 )
 
 // Verdict is a check's answer.
@@ -182,11 +184,27 @@ func (c *Connectors) RunCall(ctx context.Context, name, key string, args []any, 
 
 // notify sends one message: the recipient (a principal), the template (the
 // hook's ID), the Item and the key. A retry sends the same key, and the
-// service stores it once.
-//
-// Phase B stub: not implemented yet.
+// service stores it once. Only people and agents get mail: a recipient
+// that is not a user or agent principal is permanent.
 func notify(ctx context.Context, c *Connectors, key string, args []any, call Call) (Result, error) {
-	return Result{}, errors.New("email.notify is not implemented")
+	if c.email == "" {
+		return Result{}, permanent("email.notify: no email service is configured")
+	}
+	to, _ := args[0].(string)
+	if kind, ok := item.KindOf(to); !ok || (kind != item.KindUser && kind != item.KindAgent) {
+		return Result{}, permanent("email.notify: the recipient must be a user or agent principal, got %v", args[0])
+	}
+	if call.HookID == "" || call.ItemID == "" {
+		return Result{}, permanent("email.notify: no hook or Item to send for")
+	}
+	req := map[string]any{"to": to, "template": call.HookID, "item": call.ItemID, "key": key}
+	var body struct {
+		ID string `json:"id"`
+	}
+	if err := c.call(ctx, key, http.MethodPost, c.email+"/messages", req, &body); err != nil {
+		return Result{}, err
+	}
+	return Result{}, nil
 }
 
 // --- the actions ---
