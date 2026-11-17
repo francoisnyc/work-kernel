@@ -405,8 +405,13 @@ func (t *Type) checkReactions(fail func(string, ...any) error) error {
 				return fail("%s: a held reaction names the states it holds the move from (from)", where)
 			}
 			for _, from := range r.From {
-				if _, ok := t.Transition(from, r.State); !ok {
+				tr, ok := t.Transition(from, r.State)
+				if !ok {
 					return fail("%s: there is no transition %s -> %s to hold", where, from, r.State)
+				}
+				if tr.Escape {
+					return fail("%s: transition %s -> %s is an escape: it cancels a hold, so it may not open one",
+						where, from, r.State)
 				}
 				if h, ok := t.checkOn(from, r.State); ok {
 					return fail("%s: transition %s -> %s already has the check %q; one hold per transition",

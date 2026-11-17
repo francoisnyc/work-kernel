@@ -119,6 +119,9 @@ func (t *Type) checkHooks() error {
 			if h.Kind != HookCheck {
 				return fail("a hook on a transition must be kind check, not %q: enrich and action belong on entering a state", h.Kind)
 			}
+			if tr.Escape {
+				return fail("transition %s -> %s is an escape: it cancels a hold, so it may not open one", h.From, h.To)
+			}
 			name := h.From + " -> " + h.To
 			if other, dup := checked[name]; dup {
 				return fail("transition %s already has the check %q", name, other)
