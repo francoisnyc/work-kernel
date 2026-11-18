@@ -224,6 +224,11 @@ func format(v *big.Int, n int) string {
 	return strings.TrimRight(string(digits), Alphabet[:1])
 }
 
+// int64N draws the jitter: a uniform integer in [0, n). It is a variable
+// only so that the golden-vector test (vectors_test.go) can put fixed
+// draws in its place; nothing else assigns it.
+var int64N = rand.Int64N
+
 // random returns a uniform integer in [0, max], for the jitter. It is not
 // a secret: math/rand is enough.
 func random(max *big.Int) *big.Int {
@@ -231,11 +236,11 @@ func random(max *big.Int) *big.Int {
 		return new(big.Int)
 	}
 	if max.IsInt64() && max.Int64() < 1<<62 {
-		return big.NewInt(rand.Int64N(max.Int64() + 1))
+		return big.NewInt(int64N(max.Int64() + 1))
 	}
 	// A very wide gap: jitter its top 62 bits, which is plenty.
 	shift := uint(max.BitLen() - 62)
 	top := new(big.Int).Rsh(max, shift)
-	r := big.NewInt(rand.Int64N(top.Int64() + 1))
+	r := big.NewInt(int64N(top.Int64() + 1))
 	return r.Lsh(r, shift)
 }
