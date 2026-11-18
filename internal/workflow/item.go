@@ -67,6 +67,12 @@ const (
 // keep.
 const versionTimerWaitsForHold = "timer-waits-for-hold"
 
+// versionCanceledHoldNotAllowed is the GetVersion change ID of the
+// consolidation's item 5: an event that cancels a hold (Event.Canceled) is
+// never read as the hold allowed. DefaultVersion: the old reading
+// (To == RequestedTo), which no recorded event with Canceled can reach.
+const versionCanceledHoldNotAllowed = "canceled-hold-not-allowed"
+
 // MaxRetryInterval caps the pause between two attempts of an activity. A
 // hook gives up when its next attempt cannot start within its budget, so it
 // may end up to this long before the budget runs out.
@@ -321,6 +327,9 @@ type Event struct {
 	HoldID      string
 	// Reaction: a reaction_applied event's reaction (Step 2, part 3).
 	Reaction string
+	// Canceled: the event closes HoldID by canceling it (an escape,
+	// canceled_hold_id), never by allowing it (consolidation, item 5).
+	Canceled bool
 }
 
 // ApplyResult answers one delivered event.
@@ -456,6 +465,12 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 			// The hold is closed (resolved, or canceled by an escape). A
 			// check still running has nothing left to decide.
 			allowed := ev.Op == "transition" && ev.To == s.Hold.RequestedTo
+			// An escape canceled the hold: never allowed, whatever state it
+			// entered. Asked only of such an event, which no history
+			// recorded before the change carries.
+			if ev.Canceled && workflow.GetVersion(ctx, versionCanceledHoldNotAllowed, workflow.DefaultVersion, 1) >= 1 {
+				allowed = false
+			}
 			if allowed {
 				enteredBy = s.Hold.ID
 			} else if undo := s.Undos[s.Hold.Hook]; s.Hold.Reaction && undo != "" {

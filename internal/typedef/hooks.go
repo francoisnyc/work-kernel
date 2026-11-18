@@ -119,11 +119,25 @@ func (t *Type) checkHooks() error {
 			if h.Kind != HookCheck {
 				return fail("a hook on a transition must be kind check, not %q: enrich and action belong on entering a state", h.Kind)
 			}
+			if tr.Escape {
+				return fail("transition %s -> %s is an escape: it cancels a hold, so it may not open one", h.From, h.To)
+			}
 			name := h.From + " -> " + h.To
 			if other, dup := checked[name]; dup {
 				return fail("transition %s already has the check %q", name, other)
 			}
 			checked[name] = h.ID
+			// The correction travels with the move out of the from-state:
+			// it may not write what that state freezes (else every
+			// resolution would be refused FIELD_FROZEN).
+			if from, ok := t.State(h.From); ok {
+				for _, id := range h.Writes {
+					if slices.Contains(from.Frozen, id) {
+						return fail("it writes %s, which state %s freezes: its correction leaves %s with the move",
+							id, h.From, h.From)
+					}
+				}
+			}
 			// A check's correction is the transition's patch, applied by
 			// ResolveHold: like any patch of the transition, it may not
 			// write a field the transition's `allowed` names.

@@ -196,6 +196,16 @@ client → item service (Go, stateless)
 - To erase personal data, delete or redact rows in `item_event_values`; the event
   log itself stays append-only and intact. Per-subject encryption
   (crypto-shredding) can replace this later without changing the event shape.
+- **Events naming other Items.** An event's `causation_id` (`<item>:<seq>`)
+  names another Item when a reaction writes on its target. On the way out
+  it is shown only to a reader who can see that Item; to anyone else it is
+  omitted (not "restricted": an ID-shaped field should not hint), as is a
+  value that does not parse. Link targets and containers are shown or
+  restricted the same way. `ListEvents` (behind the API's `ListItemEvents`
+  and `pli item history`) is today the only path that returns events, and
+  applies this. **Any future event path (a watch, a stream, a webhook)
+  must go through `ListEvents`' projection**, never read `item_events`
+  raw. (Consolidation after Step 2.)
 
 ## Durable behavior (Temporal)
 
@@ -1191,6 +1201,49 @@ allowed to `principal:system:timer` only; `expired` is canceled). Emails
 (`email.notify`, reading `f_approver` or `creator`): `remind_approver`,
 `notify_approved`, `notify_rejected`, `notify_expired`, and `refund_email`
 on `refund`.
+
+### Consolidation after Step 2 (decided and built 2026-11-18)
+
+An adversarial review of how Step 2's primitives meet found seven bugs;
+each was reproduced by a failing test, then fixed. The rules they settle:
+
+- **A held target is not a refusal.** A held reaction whose target is held
+  by its own open hold (the reaction writes a field the target's check
+  freezes) retries within its budget; when the budget runs out, the
+  source's hold resolves as error, `budget_exhausted`. Never left open.
+- **A refused correction closes the hold.** When the kernel refuses a
+  check's correction (Invalid, Rejected or Forbidden: a value of the wrong
+  shape, a frozen field), the check activity closes the hold as error,
+  `correction_refused`, under its own key `hold:<id>:refused` (a retry
+  sending the correction again under `hold:<id>` never collides with it).
+  Only on the correction path: any other refusal is not giving up. A check
+  writing a field frozen in its transition's from-state is refused at
+  load.
+- **React writes where resolution would.** For a resolve link, React runs
+  the link's lookup again under the target lock; none, several or another
+  Item than the link's target deny the hold with `link_target_changed`,
+  and nothing is written. No silent re-resolution: the requester
+  resubmits, which resolves again. **A candidate created concurrently is
+  not locked (a phantom), at resolution and at React alike:** it can slip
+  past both, and the next resolution refuses the two as ambiguous.
+  Accepted for the proof of concept; uniqueness is Later.
+- **`causation_id` across Items** passes through visibility (see "Events
+  and personal data").
+- **Escapes and holds.** A check or a held reaction on an `escape: true`
+  transition is refused at load (an escape cancels a hold; it may not open
+  one). The relay marks an escape's event `Canceled` beside the hold it
+  names, and the workflow never reads it as the hold allowed, behind
+  `GetVersion("canceled-hold-not-allowed")`, asked only of a `Canceled`
+  event, so recorded histories replay unchanged (a fourth, with a canceled
+  hold, proves it).
+- **Resolve links at load.** `resolve.on_enter` may not be the initial
+  state (Create resolves nothing), and a held reaction on a resolve link
+  may leave only from that link's `on_enter` state. Links people set are
+  exempt.
+- **No undo without a run.** An event that closes a hold any other way
+  than allowed (denied, failed, canceled), on a Type with a held reaction
+  leaving that state, starts the workflow (`lifecycle.StartsWorkflow`), so
+  a pending undo runs even if the run that took the request is gone.
 
 ## Spike build order
 

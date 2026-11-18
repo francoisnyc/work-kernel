@@ -246,9 +246,11 @@ func (r *Relay) delivery(ctx context.Context, id uuid.UUID, ev pendingEvent) (De
 	case "transition":
 		entered = shape.To
 	}
-	holdID := shape.HoldID
-	if holdID == "" {
-		holdID = shape.CanceledHoldID
+	// An escape names the hold it canceled; it is passed as the hold the
+	// event closes, marked Canceled so it is never read as allowed.
+	holdID, canceled := shape.HoldID, false
+	if holdID == "" && shape.CanceledHoldID != "" {
+		holdID, canceled = shape.CanceledHoldID, true
 	}
 	// An applied undo names its reaction, for the hooks that run on it
 	// (the refund email); the workflow knows reactions by their own ID.
@@ -268,12 +270,14 @@ func (r *Relay) delivery(ctx context.Context, id uuid.UUID, ev pendingEvent) (De
 		UpdateID: fmt.Sprintf("%s:%d", id, ev.Seq),
 		Event: workflow.Event{
 			Seq: ev.Seq, Op: ev.Op, From: shape.From, To: entered, At: ev.At,
-			RequestedTo: shape.RequestedTo, HoldID: holdID, Reaction: reaction,
+			RequestedTo: shape.RequestedTo, HoldID: holdID, Canceled: canceled, Reaction: reaction,
 			CorrelationID: ev.CorrelationID, Hop: ev.Hop,
 		},
 		// The Type decides, in one place, whether this event needs a
 		// running workflow: it enters a state with behavior, or opens a hold.
-		Start: lifecycle.StartsWorkflow(ty, lifecycle.Event{Op: ev.Op, Entered: entered, From: shape.From}),
+		Start: lifecycle.StartsWorkflow(ty, lifecycle.Event{Op: ev.Op, Entered: entered, From: shape.From,
+			ClosesHold: holdID != "" && ev.Op != lifecycle.OpTransitionRequested,
+			Allowed:    ev.Op == "transition" && holdID != "" && !canceled}),
 	}, nil
 }
 

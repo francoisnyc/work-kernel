@@ -79,18 +79,11 @@ func readResolutions(ctx context.Context, tx pgx.Tx, ns string, ty *typedef.Type
 	out := make([]linkResolution, 0, len(links))
 	for _, l := range links {
 		r := linkResolution{link: l}
+		var err error
+		if r.candidates, err = resolveCandidates(ctx, tx, ns, l, creator); err != nil {
+			return nil, err
+		}
 		rows, err := tx.Query(ctx,
-			`select id from items
-			 where namespace_id = $1 and type_id = $2 and state = $3 and fields ->> $4 = $5
-			 order by id`,
-			ns, l.Targets[0], l.Resolve.State, l.Resolve.Field, creator)
-		if err != nil {
-			return nil, fmt.Errorf("read link candidates: %w", err)
-		}
-		if r.candidates, err = pgx.CollectRows(rows, pgx.RowTo[uuid.UUID]); err != nil {
-			return nil, fmt.Errorf("read link candidates: %w", err)
-		}
-		rows, err = tx.Query(ctx,
 			`select target_id from links where source_id = $1 and link_type = $2 order by target_id`, id, l.Name)
 		if err != nil {
 			return nil, fmt.Errorf("read the current link: %w", err)
@@ -101,6 +94,25 @@ func readResolutions(ctx context.Context, tx pgx.Tx, ns string, ty *typedef.Type
 		out = append(out, r)
 	}
 	return out, nil
+}
+
+// resolveCandidates is a resolve link's lookup: the Items of its target
+// Type, in the resolve's state, whose principal field holds creator, in ID
+// order, whoever can see them. Resolution and React both ask it.
+func resolveCandidates(ctx context.Context, tx pgx.Tx, ns string, l typedef.LinkType, creator string) ([]uuid.UUID, error) {
+	rows, err := tx.Query(ctx,
+		`select id from items
+		 where namespace_id = $1 and type_id = $2 and state = $3 and fields ->> $4 = $5
+		 order by id`,
+		ns, l.Targets[0], l.Resolve.State, l.Resolve.Field, creator)
+	if err != nil {
+		return nil, fmt.Errorf("read link candidates: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+	if err != nil {
+		return nil, fmt.Errorf("read link candidates: %w", err)
+	}
+	return ids, nil
 }
 
 func sameResolutions(a, b []linkResolution) bool {

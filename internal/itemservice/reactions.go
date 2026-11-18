@@ -145,6 +145,26 @@ func (in *Internal) React(ctx context.Context, req ReactRequest) (ReactResult, e
 		if !linked {
 			return WriteResult{}, rejected(CodeNotLinked, "the source no longer links to a target by %s", r.Link)
 		}
+		// A link the kernel resolved must still be the one resolution would
+		// pick: the target is locked, so its state and owner hold until the
+		// commit. Anything else (none, several, another Item) denies; the
+		// requester resubmits, which resolves again. A candidate created
+		// meanwhile is not locked (a phantom), as at resolution.
+		if l, ok := srcTy.Link(r.Link); ok && l.Resolve != nil {
+			var creator string
+			if err := tx.QueryRow(ctx, `select coalesce(created_on_behalf_of, created_by) from items where id = $1`,
+				req.SourceID).Scan(&creator); err != nil {
+				return WriteResult{}, fmt.Errorf("read creator: %w", err)
+			}
+			now, err := resolveCandidates(ctx, tx, ns, l, creator)
+			if err != nil {
+				return WriteResult{}, err
+			}
+			if len(now) != 1 || now[0] != target {
+				return WriteResult{}, rejected(CodeLinkTargetChanged,
+					"link %s no longer resolves to its target (%d candidates now): resubmit to resolve it again", r.Link, len(now))
+			}
+		}
 		adds, err := lifecycle.ReactionAdds(r, srcFields)
 		if err != nil {
 			return WriteResult{}, rejected(CodeReactionAmountInvalid, "%v", err)

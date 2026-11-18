@@ -30,6 +30,9 @@ type Event struct {
 	Op      string
 	Entered string
 	From    string // the state left, for a transition; an after reaction depends on it
+	// ClosesHold: the event closes a hold (resolves it, or an escape
+	// cancels it); Allowed: by applying the requested move.
+	ClosesHold, Allowed bool
 }
 
 // StartsWorkflow reports whether an event needs the Item's workflow to be
@@ -38,10 +41,22 @@ type Event struct {
 // notifies a running one for any other.
 //
 // Entering a state by an after reaction's trigger (approved -> withdrawn)
-// starts it too: the run that saw the approval may have completed.
+// starts it too: the run that saw the approval may have completed. So does
+// closing a held reaction's hold non-allow: the run may be gone.
 func StartsWorkflow(t *typedef.Type, ev Event) bool {
 	if ev.Op == OpTransitionRequested {
 		return true
+	}
+	// A hold closed any other way than allowed (denied, failed, canceled
+	// by an escape) on a Type whose held reaction holds a move from this
+	// state: the reaction may have committed, and its undo must run even
+	// if the run that took the request is gone.
+	if ev.ClosesHold && !ev.Allowed {
+		for _, r := range t.Reactions {
+			if r.Kind == typedef.ReactionHeld && slices.Contains(r.From, ev.From) {
+				return true
+			}
+		}
 	}
 	// An undo applied runs its reaction hooks (the refund email), even in a
 	// final state with no other behavior.
