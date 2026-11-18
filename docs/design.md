@@ -623,7 +623,7 @@ Follow the published conventions: Google's API design guides (AIPs) for
 resources, paging, errors; Stripe's model for idempotency keys.
 
 **No generic action call.** Every operation that isn't "change fields" or
-"move state" gets its own named, typed call (`ApproveWiden`, `RankItem`), never
+"move state" gets its own named, typed call (`ApproveWiden`, `LinkItems`), never
 a catch-all `Action(item, name, json)` (Unix's `ioctl` is the warning). Each
 new call passes the kernel membership test.
 
@@ -1357,7 +1357,102 @@ in the journal.
 | 2, part 1 (**done**) | Vacation request: approval as a business state, its primitives, the HR check | Draft -> submitted -> approved/rejected through pli, the approver set by the HR check and never by the requester, the submitted dates frozen, no self-approval, agents unable to approve, every refusal named; through the API, pli and the scenario. **Done 2026-11-16**: [journal, Step 2, part 1](journal.md#2026-11-16--step-2-proof-of-concept-part-1-approval-primitives-and-the-hr-check-finished) |
 | 2, part 2 (**done**) | Link reactions, the leave balance, the held deduction and its compensation | Approving a vacation request deducts its days from the requester's balance exactly once, or is DENIED insufficient_balance; two approvals racing never overdraw; every non-allow end of the hold after a deduction refunds it once, never without one; withdrawing an approved request refunds it; the requester never chooses or changes the balance; through the API, pli and the scenario. **Done 2026-11-17**: [journal, Step 2, part 2](journal.md#2026-11-17--step-2-proof-of-concept-part-2-link-reactions-the-leave-balance-the-saga-finished) |
 | 2, part 3 (**done**) | Acting timers, timers deferred during holds, the stub email connector, the full scenario | A submitted request reminds its approver on schedule and expires when nobody decides, emailing the requester; approval and refund emails go out exactly once, none after a denial; a timer due during a hold waits for it; through the API, pli and the scenario on a dev clock. **Done 2026-11-17**: [journal, Step 2, part 3](journal.md#2026-11-17--step-2-proof-of-concept-part-3-acting-timers-deferred-timers-and-the-email-stub-finished) |
-| 3+ | The Jira scenarios | Planned per step when reached |
+| Consolidation (**done**) | An independent adversarial review of how Step 2's primitives combine; seven interaction bugs fixed, each reproduced by a failing test first; the flaky hooks test fixed | Every finding reproduced then fixed in its own commit; all recorded histories replay. **Done 2026-11-18** (PR #25) |
+| Jira 1 | The PLAT software project: ordering by a field, rank as an app field, incoming links from other Types, rollups, field effects on transitions, watching (see "Jira proof of concept" below) | Scenarios A and D below run through pli; ordering pages correctly; ranking costs measured |
+| SLA design | A design pass on paper (questions and decisions, no code) for SLA objects and business calendars | SLA shape decided and recorded |
+| Jira 2 | The IT service desk: SLAs, business calendars, customers as principals, reactions that move a parent, several approvers (N of M) | Scenarios B and C run through pli |
+| Bonita | The company's real Bonita processes, mapped against the BPMN pattern table, then rebuilt | Planned after Jira 2 |
+
+## Jira proof of concept
+
+Two projects test the kernel against Jira: PLAT, a software project (Jira
+part 1), and IT, a service desk (Jira part 2, after an SLA design pass). The
+real Bonita processes come after both.
+
+### Decisions for Jira part 1
+
+**Ordering is a kernel feature; manual rank is not** (decision log
+2026-11-17). Manual ranking fails the kernel membership test: the Jira clone
+ranks by hand, Slack orders by time (its sidebar order is per user), the
+helpdesk sorts by priority and SLA. Sorting by a field passes it, and only the
+kernel can sort correctly with visibility and paging. So:
+- the kernel adds `order_by` on a declared field to `ListItems` and
+  `SearchItems` (nulls last, ties by Item ID, keyset page tokens that carry the
+  sort value), across every Type that declares the field;
+- rank is an app field, scoped per container (a backlog or sprint orders its
+  own Items). Jira's trouble came from one global rank whose rebalance touched
+  and reindexed every issue. Fractional keys (midpoint with jitter, ties by Item
+  ID) come from one shared client package that `pli` uses; the app rebalances
+  one container at a time;
+- accepted risk, to be measured: every drag is an ordinary write (an event,
+  and on Types with hooks an outbox row and a workflow wake-up). If it hurts,
+  the generic fix is a field attribute meaning "no rule reads this" that skips
+  the outbox, never a rank feature.
+
+**Watching is user space** (decision log 2026-11-13). Lasting interest is a
+Subscription Item with a `watches` link to the watched Item: visible,
+permissioned, audited, removable like any Item. No `Watch` call. Notifications
+come later and read these links. The only kernel need is a link type that may
+target any Type. Watching an Item you can't see is `NOT_FOUND`, as for any
+link.
+
+**Rollups are computed when read, over what the reader can see** (decision
+log 2026-11-13 for read time; 2026-11-17 for visibility). An epic's progress
+("3 of 5 done") is counted at read time, never pushed or stored. Unlike guards,
+which see every linked Item so a rule holds for everyone, a rollup is a read:
+it counts only Items the reader can see, because counting hidden ones would
+reveal they exist.
+
+**Incoming links from other Types.** A Type can name only its own links and
+their inverses today, so an epic cannot name the stories that point to it
+through the story Type's `epic` link. One primitive fixes both guards and
+rollups: a Type names incoming links declared by other Types, checked across
+Types at load. Guards see them as Step 1's links (state and category only).
+
+**Field effects on transitions.** A transition may require fields from its
+patch (as today) and clear fields in the same write, e.g. done requires
+`resolution`; reopening clears it.
+
+Deferred: a timer at a date rather than after a duration (a sprint closing on
+its end date); in Jira part 1 the sprint is closed by hand.
+
+### The PLAT Types
+
+| Type | States (category) | Fields | Links |
+| --- | --- | --- | --- |
+| story, bug, task | todo (todo) -> in_progress (active) -> in_review (active) -> done (done); canceled (canceled) | summary, description, assignee (principal), priority, points, resolution, rank | epic (at most one), sprint (at most one), blocks / is blocked by, relates, duplicates |
+| epic | todo -> in_progress -> done | summary, owner (principal) | progress: a rollup of the stories, bugs and tasks linking to it by `epic` |
+| sprint | planned (backlog) -> active (active) -> closed (done) | name, start, end, goal | Items link to it by `sprint` |
+
+Stories, bugs and tasks are contained in the PLAT container; they belong to a
+sprint and an epic by links, not by containment. Comments are contained Items.
+
+### Scenario A: a sprint in PLAT
+
+1. lea creates an epic in PLAT, "Single sign-on" (PLAT-1).
+2. lea creates stories and a bug in PLAT, each linked to PLAT-1 by `epic`.
+3. lea creates sprint "Sprint 12" (end 2026-12-04) and links PLAT-2 to it by
+   `sprint`; she assigns PLAT-2 to sam.
+4. sam links PLAT-2 `blocks` PLAT-3, moves PLAT-2 to in_progress, and comments
+   on it (a comment Item contained in PLAT-2).
+5. lea opens the board: a search for the Items linked to Sprint 12 by
+   `sprint` (a link filter, not a container listing), ordered by rank.
+6. lea ranks PLAT-4 before PLAT-2; the board order changes.
+7. sam lists his open work: a search with `assignee = me` and the todo and
+   active categories, ordered by priority.
+8. lea reads PLAT-2's history.
+9. lea shows PLAT-1: its progress counts only what she can see.
+10. sam moves PLAT-2 to done with resolution `fixed`; done without a
+    resolution is refused; reopening clears it.
+11. lea closes the sprint by hand.
+
+### Scenario D: across the project
+
+1. lea searches "VPN" in the active category.
+2. lea searches stories, bugs and tasks with priority P1 that are open,
+   ordered by a field, 20 per page, and pages through all of them.
+3. ana watches PLAT-9: a Subscription Item linked to it by `watches`. Watching
+   an Item she can't see is `NOT_FOUND`. Removing the subscription unwatches.
 
 ## Out of scope for the spike
 
