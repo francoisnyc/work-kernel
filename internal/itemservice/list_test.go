@@ -594,19 +594,34 @@ func TestFilters_Fields(t *testing.T) {
 func TestFilters_Refusals(t *testing.T) {
 	w := newFilterWorld(t)
 	typ := []string{w.typ}
+	// A second Type that declares f_n as a string (the filter Type's is an
+	// int) and has a principal field.
+	clash := "flc-" + uuid.NewString()[:8]
+	ty, err := typedef.Parse(fmt.Appendf(nil,
+		"id: %s\nversion: 1\nfields:\n  - {id: f_n, type: string}\n  - {id: f_p, type: principal}\n", clash))
+	if err != nil {
+		t.Fatalf("parse the clashing Type: %v", err)
+	}
+	if err := w.k.RegisterType(testCtx(t), ty); err != nil {
+		t.Fatalf("register the clashing Type: %v", err)
+	}
 	cases := []struct {
 		name string
 		f    itemservice.Filter
 		path string
 	}{
-		{"field filter without a Type", itemservice.Filter{Fields: []itemservice.FieldFilter{{Field: "f_n", Eq: 1}}}, "filter.types"},
-		{"field filter with two Types", itemservice.Filter{TypeIDs: []string{w.typ, "ticket"},
-			Fields: []itemservice.FieldFilter{{Field: "f_n", Eq: 1}}}, "filter.types"},
+		// Jira part 1: a field filter works across Types; these are the
+		// nearest refusals that still hold.
+		{"a field no registered Type declares", itemservice.Filter{
+			Fields: []itemservice.FieldFilter{{Field: "f_declared_by_no_type", Eq: 1}}}, "filter.fields"},
+		{"two Types that declare the field with different types", itemservice.Filter{TypeIDs: []string{w.typ, clash},
+			Fields: []itemservice.FieldFilter{{Field: "f_n", Eq: 1}}}, "filter.fields"},
 		{"unknown Type", itemservice.Filter{TypeIDs: []string{"no-such-type"}}, "filter.types"},
 		{"unknown field", itemservice.Filter{TypeIDs: typ, Fields: []itemservice.FieldFilter{{Field: "f_nope", Eq: 1}}}, "filter.fields"},
 		{"field type differs across versions", itemservice.Filter{TypeIDs: typ,
 			Fields: []itemservice.FieldFilter{{Field: "f_mixed", Eq: "1"}}}, "filter.fields"},
-		{"range on a string", itemservice.Filter{TypeIDs: typ, Fields: []itemservice.FieldFilter{{Field: "f_s", Gt: "a"}}}, "filter.fields"},
+		{"range on a principal", itemservice.Filter{TypeIDs: []string{clash},
+			Fields: []itemservice.FieldFilter{{Field: "f_p", Gt: "user:a"}}}, "filter.fields"},
 		{"range on an enum", itemservice.Filter{TypeIDs: typ, Fields: []itemservice.FieldFilter{{Field: "f_e", Lt: "red"}}}, "filter.fields"},
 		{"range on a bool", itemservice.Filter{TypeIDs: typ, Fields: []itemservice.FieldFilter{{Field: "f_b", Gte: true}}}, "filter.fields"},
 		{"eq and a bound", itemservice.Filter{TypeIDs: typ, Fields: []itemservice.FieldFilter{{Field: "f_n", Eq: 1, Gt: 0}}}, "filter.fields"},
@@ -625,7 +640,7 @@ func TestFilters_Refusals(t *testing.T) {
 		})
 	}
 	// The second field filter is the one named.
-	_, err := w.k.Search(testCtx(t), itemservice.SearchRequest{Principal: w.user, Filter: itemservice.Filter{
+	_, err = w.k.Search(testCtx(t), itemservice.SearchRequest{Principal: w.user, Filter: itemservice.Filter{
 		TypeIDs: typ, Fields: []itemservice.FieldFilter{{Field: "f_n", Eq: 1}, {Field: "f_nope", Eq: 1}},
 	}})
 	assertInvalidAt(t, "second filter", err, "filter.fields[1]")

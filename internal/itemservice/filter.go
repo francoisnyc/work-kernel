@@ -21,8 +21,10 @@ type Filter struct {
 	// Categories are read in each Item's own Type version, so a category
 	// becomes a set of (type, version, state).
 	Categories []string
-	// Fields needs exactly one Type in TypeIDs, and the field must have one
-	// type in every version of it; else ErrInvalid.
+	// Fields are conditions on field values. A field must have one type
+	// across the Types in TypeIDs, or across every registered Type that
+	// declares it when TypeIDs is empty (a string and a principal count as
+	// one for Eq); else ErrInvalid.
 	Fields []FieldFilter
 	// Links keeps Items linked to or from given Items (see LinkFilter).
 	Links []LinkFilter
@@ -30,7 +32,9 @@ type Filter struct {
 
 // FieldFilter is a condition on one field: Eq, or a range of one or two
 // bounds. nil means "no such bound". Values are as Item.Fields holds them
-// (an int field takes any whole number). Ranges are for int fields only.
+// (an int field takes any whole number, a date field an ISO 8601 date).
+// Ranges are for int, date and string fields; strings compare byte by
+// byte, never by the database's locale.
 type FieldFilter struct {
 	Field                string
 	Eq, Gt, Gte, Lt, Lte any
@@ -103,12 +107,9 @@ func (k *Service) resolveFilter(ctx context.Context, p item.Principal, f Filter)
 		out.args["f_cat_types"], out.args["f_cat_versions"], out.args["f_cat_states"] = ids, vs, states
 	}
 
-	if len(f.Fields) > 0 && len(f.TypeIDs) != 1 {
-		return out, &InvalidError{Path: "filter.types", Reason: "a field filter needs exactly one Type"}
-	}
 	for i, ff := range f.Fields {
 		path := fmt.Sprintf("filter.fields[%d]", i)
-		ft, err := fieldTypeAcross(versions(f.TypeIDs[0]), ff.Field)
+		ft, err := fieldTypeAcross(inPlay(all, f.TypeIDs), ff.Field)
 		if err != nil {
 			return out, &InvalidError{Path: path, Reason: err.Error()}
 		}
@@ -128,31 +129,65 @@ func (k *Service) resolveFilter(ctx context.Context, p item.Principal, f Filter)
 	return out, nil
 }
 
-// fieldTypeAcross returns the field's definition, which must be the same
-// type in every version that declares it, and declared in at least one.
-func fieldTypeAcross(versions []*typedef.Type, id string) (typedef.Field, error) {
-	var found *typedef.Field
+// inPlay returns the Type versions a field name is looked up in: every
+// version of the selected Types, or every registered version when no Type
+// is selected.
+func inPlay(all []*typedef.Type, typeIDs []string) []*typedef.Type {
+	if len(typeIDs) == 0 {
+		return all
+	}
+	var vs []*typedef.Type
+	for _, t := range all {
+		if slices.Contains(typeIDs, t.ID) {
+			vs = append(vs, t)
+		}
+	}
+	return vs
+}
+
+// declarations returns how the Type versions in play declare a field: the
+// distinct types, and for an enum every option any of them has (each
+// version's own options are valid values). No declaration at all is an
+// error: a filter or an order on a field nobody declares is a mistake.
+func declarations(versions []*typedef.Type, id string) (types []typedef.FieldType, options []string, err error) {
 	for _, t := range versions {
 		f, ok := t.Field(id)
 		if !ok {
 			continue
 		}
-		if found != nil && found.Type != f.Type {
-			// A string in one version and a principal in another is one
-			// stored type: it filters as a principal (eq only).
-			if !stringOrPrincipal(found.Type) || !stringOrPrincipal(f.Type) {
-				return typedef.Field{}, fmt.Errorf("the field has different types across the Type's versions")
+		if !slices.Contains(types, f.Type) {
+			types = append(types, f.Type)
+		}
+		for _, o := range f.Options {
+			if !slices.Contains(options, o) {
+				options = append(options, o)
 			}
+		}
+	}
+	if len(types) == 0 {
+		return nil, nil, fmt.Errorf("no Type in play declares the field")
+	}
+	return types, options, nil
+}
+
+// fieldTypeAcross returns the field's definition for a filter: it must
+// have one type in every Type version in play that declares it, and be
+// declared by at least one. A string in one and a principal in another is
+// one stored type: it filters as a principal (eq only).
+func fieldTypeAcross(versions []*typedef.Type, id string) (typedef.Field, error) {
+	types, options, err := declarations(versions, id)
+	if err != nil {
+		return typedef.Field{}, err
+	}
+	f := typedef.Field{ID: id, Type: types[0], Options: options}
+	if len(types) > 1 {
+		if !slices.ContainsFunc(types, func(t typedef.FieldType) bool { return !stringOrPrincipal(t) }) {
 			f.Type = typedef.Principal
+			return f, nil
 		}
-		if found == nil || len(f.Options) > len(found.Options) || f.Type == typedef.Principal {
-			found = &f // for an enum, the widest set of options; a principal wins over a string
-		}
+		return typedef.Field{}, fmt.Errorf("the field has different types across the Types that declare it")
 	}
-	if found == nil {
-		return typedef.Field{}, fmt.Errorf("the Type has no such field")
-	}
-	return *found, nil
+	return f, nil
 }
 
 // fieldConds checks one field filter and returns its SQL conditions, adding
@@ -175,8 +210,8 @@ func fieldConds(f typedef.Field, ff FieldFilter, i int, args pgx.NamedArgs, p it
 		return nil, fmt.Errorf("eq and a bound do not go together")
 	case ff.Gt != nil && ff.Gte != nil, ff.Lt != nil && ff.Lte != nil:
 		return nil, fmt.Errorf("one lower bound and one upper bound at most")
-	case len(bounds) > 0 && f.Type != typedef.Int:
-		return nil, fmt.Errorf("ranges are for int fields only")
+	case len(bounds) > 0 && f.Type != typedef.Int && f.Type != typedef.Date && f.Type != typedef.String:
+		return nil, fmt.Errorf("ranges are for int, date and string fields")
 	}
 	// On a principal field "me" is the caller: the user an agent acts for,
 	// else the actor itself.
@@ -217,6 +252,11 @@ func fieldConds(f typedef.Field, ff FieldFilter, i int, args pgx.NamedArgs, p it
 				return nil, fmt.Errorf("want user:<id>, agent:<id> or me")
 			}
 			return s, nil
+		case typedef.Date:
+			if _, ok := typedef.ParseDate(v); !ok {
+				return nil, fmt.Errorf("want a date, YYYY-MM-DD")
+			}
+			return v, nil
 		default:
 			s, ok := v.(string)
 			if !ok {
@@ -225,20 +265,17 @@ func fieldConds(f typedef.Field, ff FieldFilter, i int, args pgx.NamedArgs, p it
 			return s, nil
 		}
 	}
-	// How the stored JSON value is read for comparison, by field type.
-	read := map[typedef.FieldType]string{
-		// CASE, because SQL does not promise to test a guard before a cast.
-		typedef.Int: "(case when jsonb_typeof(m.fields -> @" + fieldArg + ") = 'number' " +
-			"then (m.fields ->> @" + fieldArg + ")::numeric end)",
-		typedef.Bool:      "(m.fields ->> @" + fieldArg + ")::boolean",
-		typedef.Enum:      "(m.fields ->> @" + fieldArg + ")",
-		typedef.String:    "(m.fields ->> @" + fieldArg + ")",
-		typedef.Principal: "(m.fields ->> @" + fieldArg + ")",
-	}[f.Type]
-	cast := map[typedef.FieldType]string{
-		typedef.Int: "::numeric", typedef.Bool: "::boolean", typedef.Enum: "::text", typedef.String: "::text",
-		typedef.Principal: "::text",
-	}[f.Type]
+	// How the stored JSON value is read for comparison, and what the
+	// argument is cast to. Text compares byte by byte (COLLATE "C"), never
+	// by the database's locale: rank keys depend on it, and an ISO 8601
+	// date then compares as a date.
+	read, cast := fieldRead(f.Type, fieldArg), "::text"
+	switch f.Type {
+	case typedef.Int:
+		cast = "::numeric"
+	case typedef.Bool:
+		cast = "::boolean"
+	}
 
 	if ff.Eq != nil {
 		bounds = []bound{{"=", ff.Eq}}
@@ -254,6 +291,22 @@ func fieldConds(f typedef.Field, ff FieldFilter, i int, args pgx.NamedArgs, p it
 		conds = append(conds, fmt.Sprintf("%s %s @%s%s", read, b.op, arg, cast))
 	}
 	return []string{"(" + strings.Join(conds, " and ") + ")"}, nil
+}
+
+// fieldRead is the SQL that reads the field named by the argument arg from
+// the Items alias m, as the value its type compares by: a number for an
+// int, a boolean for a bool, else text under COLLATE "C" (byte order).
+func fieldRead(t typedef.FieldType, arg string) string {
+	switch t {
+	case typedef.Int:
+		// CASE, because SQL does not promise to test a guard before a cast.
+		return "(case when jsonb_typeof(m.fields -> @" + arg + ") = 'number' " +
+			"then (m.fields ->> @" + arg + ")::numeric end)"
+	case typedef.Bool:
+		return "(case when jsonb_typeof(m.fields -> @" + arg + ") = 'boolean' " +
+			"then (m.fields ->> @" + arg + ")::boolean end)"
+	}
+	return `((m.fields ->> @` + arg + `) collate "C")`
 }
 
 // oneOrAny is the condition that column is one of values: "=" for one

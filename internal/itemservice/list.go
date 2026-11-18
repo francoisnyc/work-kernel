@@ -16,11 +16,13 @@ type ListRequest struct {
 	Principal   item.Principal
 	ContainerID *uuid.UUID // nil: the Items at the top level
 	Filter      Filter
-	Limit       int    // as SearchRequest.Limit
-	PageToken   string // as SearchRequest.PageToken
+	Limit       int      // as SearchRequest.Limit
+	PageToken   string   // as SearchRequest.PageToken
+	OrderBy     *OrderBy // as SearchRequest.OrderBy
 }
 
-// ListResult is one page, newest first (created_at, then id).
+// ListResult is one page, newest first (created_at, then id) or in the
+// request's order.
 type ListResult struct {
 	Items         []item.Item
 	NextPageToken string
@@ -46,6 +48,10 @@ func (k *Service) List(ctx context.Context, req ListRequest) (ListResult, error)
 	if err != nil {
 		return ListResult{}, err
 	}
+	order, err := k.resolveOrder(ctx, req.Filter.TypeIDs, req.OrderBy)
+	if err != nil {
+		return ListResult{}, err
+	}
 	// The container is read like Get reads an Item: visible to the
 	// principal, in the session's scopes, in the namespace. Its own read is
 	// recorded for an agent, and it is not returned.
@@ -59,13 +65,15 @@ func (k *Service) List(ctx context.Context, req ListRequest) (ListResult, error)
 	key := requestKey("list", req.Principal, struct {
 		Container *uuid.UUID
 		Filter    Filter
-	}{req.ContainerID, req.Filter})
+		OrderBy   *OrderBy
+	}{req.ContainerID, req.Filter, req.OrderBy})
 	after, err := decodeToken(req.PageToken, key)
 	if err != nil {
 		return ListResult{}, err
 	}
 	found, next, err := k.page(ctx, itemQuery{
-		p: req.Principal, parent: req.ContainerID, list: true, filter: filter, limit: limit, after: after, key: key,
+		p: req.Principal, parent: req.ContainerID, list: true, filter: filter, order: order,
+		limit: limit, after: after, key: key,
 	})
 	if err != nil {
 		return ListResult{}, fmt.Errorf("list: %w", err)

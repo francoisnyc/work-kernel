@@ -183,12 +183,14 @@ func TestSearchItems_FilterRefusals(t *testing.T) {
 		f     *kernelv1.ItemFilter
 		field string
 	}{
-		{"field filter without a Type", &kernelv1.ItemFilter{Fields: []*kernelv1.FieldFilter{{Field: "f_priority", Eq: str("1")}}}, "filter.types"},
+		// Jira part 1: a field filter works across Types; a field nobody
+		// declares is the nearest refusal that still holds.
+		{"a field no Type declares", &kernelv1.ItemFilter{Fields: []*kernelv1.FieldFilter{{Field: "f_declared_by_no_type", Eq: str("1")}}}, "filter.fields[0]"},
 		{"a Type with a version", &kernelv1.ItemFilter{Types: []string{ticketV1}}, "filter.types"},
 		{"a malformed Type", &kernelv1.ItemFilter{Types: []string{"ticket"}}, "filter.types"},
 		{"an unknown Type", &kernelv1.ItemFilter{Types: []string{"namespaces/acme/types/nope"}}, "filter.types"},
 		{"unknown field", &kernelv1.ItemFilter{Types: []string{ticket}, Fields: []*kernelv1.FieldFilter{{Field: "f_nope", Eq: str("1")}}}, "filter.fields[0]"},
-		{"range on a string", &kernelv1.ItemFilter{Types: []string{ticket}, Fields: []*kernelv1.FieldFilter{{Field: "f_title", Gt: str("a")}}}, "filter.fields[0]"},
+		{"range on a bool", &kernelv1.ItemFilter{Types: []string{ticket}, Fields: []*kernelv1.FieldFilter{{Field: "f_urgent", Gte: structpb.NewBoolValue(true)}}}, "filter.fields[0]"},
 		{"an int that is not one", &kernelv1.ItemFilter{Types: []string{ticket}, Fields: []*kernelv1.FieldFilter{{Field: "f_priority", Eq: str("seven")}}}, "filter.fields[0]"},
 		{"eq and a bound", &kernelv1.ItemFilter{Types: []string{ticket}, Fields: []*kernelv1.FieldFilter{{Field: "f_priority", Eq: str("1"), Lt: str("3")}}}, "filter.fields[0]"},
 		{"no condition", &kernelv1.ItemFilter{Types: []string{ticket}, Fields: []*kernelv1.FieldFilter{{Field: "f_priority"}}}, "filter.fields[0]"},

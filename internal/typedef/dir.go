@@ -48,6 +48,10 @@ func ParseDir(dir string) ([]*Type, error) {
 	if err := CheckLinkInverses(types); err != nil {
 		return nil, err
 	}
+	// So do incoming declarations: the links other Types declare.
+	if err := CheckIncoming(types); err != nil {
+		return nil, err
+	}
 	// Reactions and link resolution name other Types too.
 	if err := CheckReactions(types); err != nil {
 		return nil, err

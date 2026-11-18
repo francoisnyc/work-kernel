@@ -522,8 +522,12 @@ type Item struct {
 	// More links exist in some direction than are shown: page through them
 	// with an ItemFilter link condition.
 	LinksTruncated bool `protobuf:"varint,13,opt,name=links_truncated,json=linksTruncated,proto3" json:"links_truncated,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// The values the Item's Type version computes when the Item is read,
+	// keyed by rollup ID (Type.rollups). Filled by GetItem only. A rollup
+	// counts only the linked Items the caller can see.
+	Rollups       map[string]*RollupValue `protobuf:"bytes,14,rep,name=rollups,proto3" json:"rollups,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Item) Reset() {
@@ -647,6 +651,60 @@ func (x *Item) GetLinksTruncated() bool {
 	return false
 }
 
+func (x *Item) GetRollups() map[string]*RollupValue {
+	if x != nil {
+		return x.Rollups
+	}
+	return nil
+}
+
+// One rollup of an Item: how many linked Items the caller can see, by state
+// category (todo, active, done...) or by state ID. A key with no Item is
+// absent.
+type RollupValue struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Counts        map[string]int64       `protobuf:"bytes,1,rep,name=counts,proto3" json:"counts,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RollupValue) Reset() {
+	*x = RollupValue{}
+	mi := &file_kernel_v1_kernel_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RollupValue) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RollupValue) ProtoMessage() {}
+
+func (x *RollupValue) ProtoReflect() protoreflect.Message {
+	mi := &file_kernel_v1_kernel_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RollupValue.ProtoReflect.Descriptor instead.
+func (*RollupValue) Descriptor() ([]byte, []int) {
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *RollupValue) GetCounts() map[string]int64 {
+	if x != nil {
+		return x.Counts
+	}
+	return nil
+}
+
 // One link of an Item, as seen from that Item.
 type Link struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -662,7 +720,7 @@ type Link struct {
 
 func (x *Link) Reset() {
 	*x = Link{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[1]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -674,7 +732,7 @@ func (x *Link) String() string {
 func (*Link) ProtoMessage() {}
 
 func (x *Link) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[1]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -687,7 +745,7 @@ func (x *Link) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Link.ProtoReflect.Descriptor instead.
 func (*Link) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{1}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Link) GetLinkType() string {
@@ -724,7 +782,7 @@ type ItemRef struct {
 
 func (x *ItemRef) Reset() {
 	*x = ItemRef{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[2]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -736,7 +794,7 @@ func (x *ItemRef) String() string {
 func (*ItemRef) ProtoMessage() {}
 
 func (x *ItemRef) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[2]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -749,7 +807,7 @@ func (x *ItemRef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ItemRef.ProtoReflect.Descriptor instead.
 func (*ItemRef) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{2}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ItemRef) GetName() string {
@@ -783,7 +841,7 @@ type Hold struct {
 
 func (x *Hold) Reset() {
 	*x = Hold{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[3]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -795,7 +853,7 @@ func (x *Hold) String() string {
 func (*Hold) ProtoMessage() {}
 
 func (x *Hold) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[3]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -808,7 +866,7 @@ func (x *Hold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Hold.ProtoReflect.Descriptor instead.
 func (*Hold) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{3}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Hold) GetName() string {
@@ -849,7 +907,7 @@ type Readers struct {
 
 func (x *Readers) Reset() {
 	*x = Readers{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[4]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -861,7 +919,7 @@ func (x *Readers) String() string {
 func (*Readers) ProtoMessage() {}
 
 func (x *Readers) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[4]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -874,7 +932,7 @@ func (x *Readers) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Readers.ProtoReflect.Descriptor instead.
 func (*Readers) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{4}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Readers) GetPrincipals() []string {
@@ -906,7 +964,7 @@ type CreateItemRequest struct {
 
 func (x *CreateItemRequest) Reset() {
 	*x = CreateItemRequest{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[5]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -918,7 +976,7 @@ func (x *CreateItemRequest) String() string {
 func (*CreateItemRequest) ProtoMessage() {}
 
 func (x *CreateItemRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[5]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -931,7 +989,7 @@ func (x *CreateItemRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateItemRequest.ProtoReflect.Descriptor instead.
 func (*CreateItemRequest) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{5}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *CreateItemRequest) GetParent() string {
@@ -987,7 +1045,7 @@ type CreateItemResponse struct {
 
 func (x *CreateItemResponse) Reset() {
 	*x = CreateItemResponse{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[6]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -999,7 +1057,7 @@ func (x *CreateItemResponse) String() string {
 func (*CreateItemResponse) ProtoMessage() {}
 
 func (x *CreateItemResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[6]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1012,7 +1070,7 @@ func (x *CreateItemResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateItemResponse.ProtoReflect.Descriptor instead.
 func (*CreateItemResponse) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{6}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *CreateItemResponse) GetItem() *Item {
@@ -1046,7 +1104,7 @@ type GetItemRequest struct {
 
 func (x *GetItemRequest) Reset() {
 	*x = GetItemRequest{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[7]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1058,7 +1116,7 @@ func (x *GetItemRequest) String() string {
 func (*GetItemRequest) ProtoMessage() {}
 
 func (x *GetItemRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[7]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1071,7 +1129,7 @@ func (x *GetItemRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetItemRequest.ProtoReflect.Descriptor instead.
 func (*GetItemRequest) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{7}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *GetItemRequest) GetName() string {
@@ -1090,7 +1148,7 @@ type GetItemResponse struct {
 
 func (x *GetItemResponse) Reset() {
 	*x = GetItemResponse{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[8]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1102,7 +1160,7 @@ func (x *GetItemResponse) String() string {
 func (*GetItemResponse) ProtoMessage() {}
 
 func (x *GetItemResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[8]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1115,7 +1173,7 @@ func (x *GetItemResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetItemResponse.ProtoReflect.Descriptor instead.
 func (*GetItemResponse) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{8}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *GetItemResponse) GetItem() *Item {
@@ -1146,7 +1204,7 @@ type UpdateItemRequest struct {
 
 func (x *UpdateItemRequest) Reset() {
 	*x = UpdateItemRequest{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[9]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1158,7 +1216,7 @@ func (x *UpdateItemRequest) String() string {
 func (*UpdateItemRequest) ProtoMessage() {}
 
 func (x *UpdateItemRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[9]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1171,7 +1229,7 @@ func (x *UpdateItemRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateItemRequest.ProtoReflect.Descriptor instead.
 func (*UpdateItemRequest) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{9}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *UpdateItemRequest) GetName() string {
@@ -1231,7 +1289,7 @@ type PolicyChange struct {
 
 func (x *PolicyChange) Reset() {
 	*x = PolicyChange{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[10]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1243,7 +1301,7 @@ func (x *PolicyChange) String() string {
 func (*PolicyChange) ProtoMessage() {}
 
 func (x *PolicyChange) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[10]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1256,7 +1314,7 @@ func (x *PolicyChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PolicyChange.ProtoReflect.Descriptor instead.
 func (*PolicyChange) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{10}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *PolicyChange) GetChange() isPolicyChange_Change {
@@ -1313,7 +1371,7 @@ type Move struct {
 
 func (x *Move) Reset() {
 	*x = Move{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[11]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1325,7 +1383,7 @@ func (x *Move) String() string {
 func (*Move) ProtoMessage() {}
 
 func (x *Move) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[11]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1338,7 +1396,7 @@ func (x *Move) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Move.ProtoReflect.Descriptor instead.
 func (*Move) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{11}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *Move) GetContainer() string {
@@ -1366,7 +1424,7 @@ type UpdateItemResponse struct {
 
 func (x *UpdateItemResponse) Reset() {
 	*x = UpdateItemResponse{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[12]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1378,7 +1436,7 @@ func (x *UpdateItemResponse) String() string {
 func (*UpdateItemResponse) ProtoMessage() {}
 
 func (x *UpdateItemResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[12]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1391,7 +1449,7 @@ func (x *UpdateItemResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateItemResponse.ProtoReflect.Descriptor instead.
 func (*UpdateItemResponse) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{12}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *UpdateItemResponse) GetItem() *Item {
@@ -1437,7 +1495,7 @@ type TransitionItemRequest struct {
 
 func (x *TransitionItemRequest) Reset() {
 	*x = TransitionItemRequest{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[13]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1449,7 +1507,7 @@ func (x *TransitionItemRequest) String() string {
 func (*TransitionItemRequest) ProtoMessage() {}
 
 func (x *TransitionItemRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[13]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1462,7 +1520,7 @@ func (x *TransitionItemRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TransitionItemRequest.ProtoReflect.Descriptor instead.
 func (*TransitionItemRequest) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{13}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *TransitionItemRequest) GetName() string {
@@ -1525,7 +1583,7 @@ type TransitionItemResponse struct {
 
 func (x *TransitionItemResponse) Reset() {
 	*x = TransitionItemResponse{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[14]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1537,7 +1595,7 @@ func (x *TransitionItemResponse) String() string {
 func (*TransitionItemResponse) ProtoMessage() {}
 
 func (x *TransitionItemResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[14]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1550,7 +1608,7 @@ func (x *TransitionItemResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TransitionItemResponse.ProtoReflect.Descriptor instead.
 func (*TransitionItemResponse) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{14}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *TransitionItemResponse) GetItem() *Item {
@@ -1609,14 +1667,23 @@ type SearchItemsRequest struct {
 	// Default 50, at most 500 (more is read as 500).
 	PageSize int32 `protobuf:"varint,5,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// The previous page's next_page_token, with the same request otherwise.
-	PageToken     string `protobuf:"bytes,6,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	PageToken string `protobuf:"bytes,6,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	// Sort by one declared field instead of newest first: a field ID, then
+	// optionally " asc" (the default) or " desc" (f_rank, f_priority desc),
+	// AIP-132 style, one field only. Items without a value
+	// come last in both directions; ties are broken by Item ID, ascending.
+	// The field must be a string, int, date or enum, with one type across the
+	// filter's Types (across every Type that declares it when the filter
+	// names none), else INVALID_ARGUMENT. Strings and enum names compare byte
+	// by byte, not by locale. Part of what a page token is bound to.
+	OrderBy       string `protobuf:"bytes,7,opt,name=order_by,json=orderBy,proto3" json:"order_by,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SearchItemsRequest) Reset() {
 	*x = SearchItemsRequest{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[15]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1628,7 +1695,7 @@ func (x *SearchItemsRequest) String() string {
 func (*SearchItemsRequest) ProtoMessage() {}
 
 func (x *SearchItemsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[15]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1641,7 +1708,7 @@ func (x *SearchItemsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchItemsRequest.ProtoReflect.Descriptor instead.
 func (*SearchItemsRequest) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{15}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *SearchItemsRequest) GetParent() string {
@@ -1686,9 +1753,16 @@ func (x *SearchItemsRequest) GetPageToken() string {
 	return ""
 }
 
+func (x *SearchItemsRequest) GetOrderBy() string {
+	if x != nil {
+		return x.OrderBy
+	}
+	return ""
+}
+
 type SearchItemsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Newest first (create time, then name).
+	// Newest first (create time, then name), unless the request has order_by.
 	Items []*Item `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
 	// Empty on the last page.
 	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
@@ -1698,7 +1772,7 @@ type SearchItemsResponse struct {
 
 func (x *SearchItemsResponse) Reset() {
 	*x = SearchItemsResponse{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[16]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1710,7 +1784,7 @@ func (x *SearchItemsResponse) String() string {
 func (*SearchItemsResponse) ProtoMessage() {}
 
 func (x *SearchItemsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[16]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1723,7 +1797,7 @@ func (x *SearchItemsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchItemsResponse.ProtoReflect.Descriptor instead.
 func (*SearchItemsResponse) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{16}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *SearchItemsResponse) GetItems() []*Item {
@@ -1751,8 +1825,9 @@ type ItemFilter struct {
 	States []string `protobuf:"bytes,2,rep,name=states,proto3" json:"states,omitempty"`
 	// State categories, read in each Item's own Type version.
 	Categories []StateCategory `protobuf:"varint,3,rep,packed,name=categories,proto3,enum=kernel.v1.StateCategory" json:"categories,omitempty"`
-	// Conditions on field values. A field filter needs exactly one Type in
-	// types, and the field must have one type in every version of it.
+	// Conditions on field values. The field must have one type across the
+	// Types in types, or across every Type that declares it when types is
+	// empty (a string and a principal count as one for eq).
 	Fields []*FieldFilter `protobuf:"bytes,4,rep,name=fields,proto3" json:"fields,omitempty"`
 	// Conditions on links: Items linked to (or from) an Item.
 	Links         []*LinkFilter `protobuf:"bytes,5,rep,name=links,proto3" json:"links,omitempty"`
@@ -1762,7 +1837,7 @@ type ItemFilter struct {
 
 func (x *ItemFilter) Reset() {
 	*x = ItemFilter{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[17]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1774,7 +1849,7 @@ func (x *ItemFilter) String() string {
 func (*ItemFilter) ProtoMessage() {}
 
 func (x *ItemFilter) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[17]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1787,7 +1862,7 @@ func (x *ItemFilter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ItemFilter.ProtoReflect.Descriptor instead.
 func (*ItemFilter) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{17}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ItemFilter) GetTypes() []string {
@@ -1842,7 +1917,7 @@ type LinkFilter struct {
 
 func (x *LinkFilter) Reset() {
 	*x = LinkFilter{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[18]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1854,7 +1929,7 @@ func (x *LinkFilter) String() string {
 func (*LinkFilter) ProtoMessage() {}
 
 func (x *LinkFilter) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[18]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1867,7 +1942,7 @@ func (x *LinkFilter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LinkFilter.ProtoReflect.Descriptor instead.
 func (*LinkFilter) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{18}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *LinkFilter) GetLinkType() string {
@@ -1892,8 +1967,10 @@ func (x *LinkFilter) GetItem() string {
 }
 
 // A condition on one field's value: eq, or a range of one or two bounds.
-// Values are plain JSON as in Item.fields (an int is a string). Ranges are
-// for ordered types only (int); strings, enums and booleans take eq.
+// Values are plain JSON as in Item.fields (an int is a string, a date an
+// ISO 8601 string). Ranges are for ordered types only: int, date and string
+// (strings compare byte by byte, not by locale); enums, booleans and
+// principals take eq.
 //
 // On a principal field, eq takes user:<id> or agent:<id>, or "me": the
 // caller (for an agent, the user it acts for, else the agent).
@@ -1912,7 +1989,7 @@ type FieldFilter struct {
 
 func (x *FieldFilter) Reset() {
 	*x = FieldFilter{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[19]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1924,7 +2001,7 @@ func (x *FieldFilter) String() string {
 func (*FieldFilter) ProtoMessage() {}
 
 func (x *FieldFilter) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[19]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1937,7 +2014,7 @@ func (x *FieldFilter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FieldFilter.ProtoReflect.Descriptor instead.
 func (*FieldFilter) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{19}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *FieldFilter) GetField() string {
@@ -1989,15 +2066,17 @@ type ListItemsRequest struct {
 	Parent string      `protobuf:"bytes,1,opt,name=parent,proto3" json:"parent,omitempty"`
 	Filter *ItemFilter `protobuf:"bytes,2,opt,name=filter,proto3" json:"filter,omitempty"`
 	// As on SearchItemsRequest.
-	PageSize      int32  `protobuf:"varint,3,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
-	PageToken     string `protobuf:"bytes,4,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	PageSize  int32  `protobuf:"varint,3,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	PageToken string `protobuf:"bytes,4,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	// As on SearchItemsRequest.
+	OrderBy       string `protobuf:"bytes,5,opt,name=order_by,json=orderBy,proto3" json:"order_by,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ListItemsRequest) Reset() {
 	*x = ListItemsRequest{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[20]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2009,7 +2088,7 @@ func (x *ListItemsRequest) String() string {
 func (*ListItemsRequest) ProtoMessage() {}
 
 func (x *ListItemsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[20]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2022,7 +2101,7 @@ func (x *ListItemsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListItemsRequest.ProtoReflect.Descriptor instead.
 func (*ListItemsRequest) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{20}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ListItemsRequest) GetParent() string {
@@ -2053,9 +2132,16 @@ func (x *ListItemsRequest) GetPageToken() string {
 	return ""
 }
 
+func (x *ListItemsRequest) GetOrderBy() string {
+	if x != nil {
+		return x.OrderBy
+	}
+	return ""
+}
+
 type ListItemsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Newest first (create time, then name).
+	// Newest first (create time, then name), unless the request has order_by.
 	Items         []*Item `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
 	NextPageToken string  `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -2064,7 +2150,7 @@ type ListItemsResponse struct {
 
 func (x *ListItemsResponse) Reset() {
 	*x = ListItemsResponse{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[21]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2076,7 +2162,7 @@ func (x *ListItemsResponse) String() string {
 func (*ListItemsResponse) ProtoMessage() {}
 
 func (x *ListItemsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[21]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2089,7 +2175,7 @@ func (x *ListItemsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListItemsResponse.ProtoReflect.Descriptor instead.
 func (*ListItemsResponse) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{21}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ListItemsResponse) GetItems() []*Item {
@@ -2119,7 +2205,7 @@ type ListItemEventsRequest struct {
 
 func (x *ListItemEventsRequest) Reset() {
 	*x = ListItemEventsRequest{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[22]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2131,7 +2217,7 @@ func (x *ListItemEventsRequest) String() string {
 func (*ListItemEventsRequest) ProtoMessage() {}
 
 func (x *ListItemEventsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[22]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2144,7 +2230,7 @@ func (x *ListItemEventsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListItemEventsRequest.ProtoReflect.Descriptor instead.
 func (*ListItemEventsRequest) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{22}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ListItemEventsRequest) GetParent() string {
@@ -2179,7 +2265,7 @@ type ListItemEventsResponse struct {
 
 func (x *ListItemEventsResponse) Reset() {
 	*x = ListItemEventsResponse{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[23]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2191,7 +2277,7 @@ func (x *ListItemEventsResponse) String() string {
 func (*ListItemEventsResponse) ProtoMessage() {}
 
 func (x *ListItemEventsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[23]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2204,7 +2290,7 @@ func (x *ListItemEventsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListItemEventsResponse.ProtoReflect.Descriptor instead.
 func (*ListItemEventsResponse) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{23}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ListItemEventsResponse) GetEvents() []*ItemEvent {
@@ -2293,7 +2379,7 @@ type ItemEvent struct {
 
 func (x *ItemEvent) Reset() {
 	*x = ItemEvent{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[24]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2305,7 +2391,7 @@ func (x *ItemEvent) String() string {
 func (*ItemEvent) ProtoMessage() {}
 
 func (x *ItemEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[24]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2318,7 +2404,7 @@ func (x *ItemEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ItemEvent.ProtoReflect.Descriptor instead.
 func (*ItemEvent) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{24}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ItemEvent) GetName() string {
@@ -2574,7 +2660,7 @@ type StartAgentSessionRequest struct {
 
 func (x *StartAgentSessionRequest) Reset() {
 	*x = StartAgentSessionRequest{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[25]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2586,7 +2672,7 @@ func (x *StartAgentSessionRequest) String() string {
 func (*StartAgentSessionRequest) ProtoMessage() {}
 
 func (x *StartAgentSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[25]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2599,7 +2685,7 @@ func (x *StartAgentSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartAgentSessionRequest.ProtoReflect.Descriptor instead.
 func (*StartAgentSessionRequest) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{25}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *StartAgentSessionRequest) GetParent() string {
@@ -2639,7 +2725,7 @@ type StartAgentSessionResponse struct {
 
 func (x *StartAgentSessionResponse) Reset() {
 	*x = StartAgentSessionResponse{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[26]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2651,7 +2737,7 @@ func (x *StartAgentSessionResponse) String() string {
 func (*StartAgentSessionResponse) ProtoMessage() {}
 
 func (x *StartAgentSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[26]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2664,7 +2750,7 @@ func (x *StartAgentSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartAgentSessionResponse.ProtoReflect.Descriptor instead.
 func (*StartAgentSessionResponse) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{26}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *StartAgentSessionResponse) GetSession() *AgentSession {
@@ -2690,7 +2776,7 @@ type AgentSession struct {
 
 func (x *AgentSession) Reset() {
 	*x = AgentSession{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[27]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2702,7 +2788,7 @@ func (x *AgentSession) String() string {
 func (*AgentSession) ProtoMessage() {}
 
 func (x *AgentSession) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[27]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2715,7 +2801,7 @@ func (x *AgentSession) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentSession.ProtoReflect.Descriptor instead.
 func (*AgentSession) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{27}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *AgentSession) GetName() string {
@@ -2788,7 +2874,7 @@ type ApproveWidenRequest struct {
 
 func (x *ApproveWidenRequest) Reset() {
 	*x = ApproveWidenRequest{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[28]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2800,7 +2886,7 @@ func (x *ApproveWidenRequest) String() string {
 func (*ApproveWidenRequest) ProtoMessage() {}
 
 func (x *ApproveWidenRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[28]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2813,7 +2899,7 @@ func (x *ApproveWidenRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApproveWidenRequest.ProtoReflect.Descriptor instead.
 func (*ApproveWidenRequest) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{28}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *ApproveWidenRequest) GetParent() string {
@@ -2870,7 +2956,7 @@ type ApproveWidenResponse struct {
 
 func (x *ApproveWidenResponse) Reset() {
 	*x = ApproveWidenResponse{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[29]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2882,7 +2968,7 @@ func (x *ApproveWidenResponse) String() string {
 func (*ApproveWidenResponse) ProtoMessage() {}
 
 func (x *ApproveWidenResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[29]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2895,7 +2981,7 @@ func (x *ApproveWidenResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApproveWidenResponse.ProtoReflect.Descriptor instead.
 func (*ApproveWidenResponse) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{29}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *ApproveWidenResponse) GetAudience() string {
@@ -2926,13 +3012,18 @@ type Type struct {
 	// Reactions of other Types that may write Items of this version, and the
 	// fields each may write. Any other reaction is refused.
 	AcceptsReactions []*AcceptedReaction `protobuf:"bytes,11,rep,name=accepts_reactions,json=acceptsReactions,proto3" json:"accepts_reactions,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Links other Types declare towards this Type, named so its guards and
+	// rollups can read them.
+	Incoming []*IncomingLink `protobuf:"bytes,12,rep,name=incoming,proto3" json:"incoming,omitempty"`
+	// Values computed when an Item of this version is read (Item.rollups).
+	Rollups       []*Rollup `protobuf:"bytes,13,rep,name=rollups,proto3" json:"rollups,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Type) Reset() {
 	*x = Type{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[30]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2944,7 +3035,7 @@ func (x *Type) String() string {
 func (*Type) ProtoMessage() {}
 
 func (x *Type) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[30]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2957,7 +3048,7 @@ func (x *Type) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Type.ProtoReflect.Descriptor instead.
 func (*Type) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{30}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *Type) GetName() string {
@@ -3037,6 +3128,147 @@ func (x *Type) GetAcceptsReactions() []*AcceptedReaction {
 	return nil
 }
 
+func (x *Type) GetIncoming() []*IncomingLink {
+	if x != nil {
+		return x.Incoming
+	}
+	return nil
+}
+
+func (x *Type) GetRollups() []*Rollup {
+	if x != nil {
+		return x.Rollups
+	}
+	return nil
+}
+
+// Links declared by other Types that point to Items of this Type: the
+// Items of the `from` Types linked by their link type `link`. `name` is the
+// inverse those Types declare for it.
+type IncomingLink struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Link  string                 `protobuf:"bytes,2,opt,name=link,proto3" json:"link,omitempty"`
+	// Type names without a version, namespaces/{ns}/types/{type}.
+	From          []string `protobuf:"bytes,3,rep,name=from,proto3" json:"from,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *IncomingLink) Reset() {
+	*x = IncomingLink{}
+	mi := &file_kernel_v1_kernel_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *IncomingLink) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*IncomingLink) ProtoMessage() {}
+
+func (x *IncomingLink) ProtoReflect() protoreflect.Message {
+	mi := &file_kernel_v1_kernel_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use IncomingLink.ProtoReflect.Descriptor instead.
+func (*IncomingLink) Descriptor() ([]byte, []int) {
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *IncomingLink) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *IncomingLink) GetLink() string {
+	if x != nil {
+		return x.Link
+	}
+	return ""
+}
+
+func (x *IncomingLink) GetFrom() []string {
+	if x != nil {
+		return x.From
+	}
+	return nil
+}
+
+// A value computed at read time: a count of the Items linked under `over`
+// (a link name the Type can read), grouped by `count_by`.
+type Rollup struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Over  string                 `protobuf:"bytes,2,opt,name=over,proto3" json:"over,omitempty"`
+	// "category" or "state".
+	CountBy       string `protobuf:"bytes,3,opt,name=count_by,json=countBy,proto3" json:"count_by,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Rollup) Reset() {
+	*x = Rollup{}
+	mi := &file_kernel_v1_kernel_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Rollup) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Rollup) ProtoMessage() {}
+
+func (x *Rollup) ProtoReflect() protoreflect.Message {
+	mi := &file_kernel_v1_kernel_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Rollup.ProtoReflect.Descriptor instead.
+func (*Rollup) Descriptor() ([]byte, []int) {
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *Rollup) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *Rollup) GetOver() string {
+	if x != nil {
+		return x.Over
+	}
+	return ""
+}
+
+func (x *Rollup) GetCountBy() string {
+	if x != nil {
+		return x.CountBy
+	}
+	return ""
+}
+
 // A rule over an Item's fields. Its id is the refusal code: a write that
 // would break it is refused naming it, and a held reaction refused by it is
 // denied with it as the reason.
@@ -3052,7 +3284,7 @@ type Invariant struct {
 
 func (x *Invariant) Reset() {
 	*x = Invariant{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[31]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3064,7 +3296,7 @@ func (x *Invariant) String() string {
 func (*Invariant) ProtoMessage() {}
 
 func (x *Invariant) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[31]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3077,7 +3309,7 @@ func (x *Invariant) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Invariant.ProtoReflect.Descriptor instead.
 func (*Invariant) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{31}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *Invariant) GetId() string {
@@ -3116,7 +3348,7 @@ type Reaction struct {
 
 func (x *Reaction) Reset() {
 	*x = Reaction{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[32]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3128,7 +3360,7 @@ func (x *Reaction) String() string {
 func (*Reaction) ProtoMessage() {}
 
 func (x *Reaction) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[32]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3141,7 +3373,7 @@ func (x *Reaction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Reaction.ProtoReflect.Descriptor instead.
 func (*Reaction) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{32}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *Reaction) GetId() string {
@@ -3206,7 +3438,7 @@ type AcceptedReaction struct {
 
 func (x *AcceptedReaction) Reset() {
 	*x = AcceptedReaction{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[33]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3218,7 +3450,7 @@ func (x *AcceptedReaction) String() string {
 func (*AcceptedReaction) ProtoMessage() {}
 
 func (x *AcceptedReaction) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[33]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3231,7 +3463,7 @@ func (x *AcceptedReaction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcceptedReaction.ProtoReflect.Descriptor instead.
 func (*AcceptedReaction) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{33}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *AcceptedReaction) GetReaction() string {
@@ -3256,7 +3488,8 @@ type LinkType struct {
 	Name    string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Inverse string `protobuf:"bytes,2,opt,name=inverse,proto3" json:"inverse,omitempty"`
 	// Type names without a version, namespaces/{ns}/types/{type}: a target
-	// may be of any version of these Types.
+	// may be of any version of these Types. A single "*" means a target may
+	// be of any Type.
 	Targets []string `protobuf:"bytes,3,rep,name=targets,proto3" json:"targets,omitempty"`
 	// At most one link of this type from a source; else many.
 	MaxOne bool `protobuf:"varint,4,opt,name=max_one,json=maxOne,proto3" json:"max_one,omitempty"`
@@ -3273,7 +3506,7 @@ type LinkType struct {
 
 func (x *LinkType) Reset() {
 	*x = LinkType{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[34]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3285,7 +3518,7 @@ func (x *LinkType) String() string {
 func (*LinkType) ProtoMessage() {}
 
 func (x *LinkType) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[34]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3298,7 +3531,7 @@ func (x *LinkType) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LinkType.ProtoReflect.Descriptor instead.
 func (*LinkType) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{34}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *LinkType) GetName() string {
@@ -3368,7 +3601,7 @@ type LinkResolve struct {
 
 func (x *LinkResolve) Reset() {
 	*x = LinkResolve{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[35]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3380,7 +3613,7 @@ func (x *LinkResolve) String() string {
 func (*LinkResolve) ProtoMessage() {}
 
 func (x *LinkResolve) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[35]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3393,7 +3626,7 @@ func (x *LinkResolve) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LinkResolve.ProtoReflect.Descriptor instead.
 func (*LinkResolve) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{35}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *LinkResolve) GetOnEnter() string {
@@ -3442,7 +3675,7 @@ type Field struct {
 
 func (x *Field) Reset() {
 	*x = Field{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[36]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3454,7 +3687,7 @@ func (x *Field) String() string {
 func (*Field) ProtoMessage() {}
 
 func (x *Field) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[36]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3467,7 +3700,7 @@ func (x *Field) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Field.ProtoReflect.Descriptor instead.
 func (*Field) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{36}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *Field) GetId() string {
@@ -3522,7 +3755,7 @@ type State struct {
 
 func (x *State) Reset() {
 	*x = State{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[37]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3534,7 +3767,7 @@ func (x *State) String() string {
 func (*State) ProtoMessage() {}
 
 func (x *State) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[37]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3547,7 +3780,7 @@ func (x *State) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use State.ProtoReflect.Descriptor instead.
 func (*State) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{37}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *State) GetId() string {
@@ -3593,7 +3826,7 @@ type ActingTimer struct {
 
 func (x *ActingTimer) Reset() {
 	*x = ActingTimer{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[38]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3605,7 +3838,7 @@ func (x *ActingTimer) String() string {
 func (*ActingTimer) ProtoMessage() {}
 
 func (x *ActingTimer) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[38]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3618,7 +3851,7 @@ func (x *ActingTimer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActingTimer.ProtoReflect.Descriptor instead.
 func (*ActingTimer) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{38}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *ActingTimer) GetId() string {
@@ -3669,14 +3902,17 @@ type Transition struct {
 	Checked bool `protobuf:"varint,7,opt,name=checked,proto3" json:"checked,omitempty"`
 	// Who may not make the move, even if `allowed` names them: for now only
 	// creator.
-	Except        []string `protobuf:"bytes,8,rep,name=except,proto3" json:"except,omitempty"`
+	Except []string `protobuf:"bytes,8,rep,name=except,proto3" json:"except,omitempty"`
+	// Field IDs the move unsets in the same write. Required fields and the
+	// guard are judged before the clear.
+	Clears        []string `protobuf:"bytes,9,rep,name=clears,proto3" json:"clears,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Transition) Reset() {
 	*x = Transition{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[39]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3688,7 +3924,7 @@ func (x *Transition) String() string {
 func (*Transition) ProtoMessage() {}
 
 func (x *Transition) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[39]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3701,7 +3937,7 @@ func (x *Transition) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Transition.ProtoReflect.Descriptor instead.
 func (*Transition) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{39}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *Transition) GetFromState() string {
@@ -3760,6 +3996,13 @@ func (x *Transition) GetExcept() []string {
 	return nil
 }
 
+func (x *Transition) GetClears() []string {
+	if x != nil {
+		return x.Clears
+	}
+	return nil
+}
+
 type GetTypeRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// namespaces/{ns}/types/{type}/versions/{n}
@@ -3770,7 +4013,7 @@ type GetTypeRequest struct {
 
 func (x *GetTypeRequest) Reset() {
 	*x = GetTypeRequest{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[40]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3782,7 +4025,7 @@ func (x *GetTypeRequest) String() string {
 func (*GetTypeRequest) ProtoMessage() {}
 
 func (x *GetTypeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[40]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3795,7 +4038,7 @@ func (x *GetTypeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTypeRequest.ProtoReflect.Descriptor instead.
 func (*GetTypeRequest) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{40}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *GetTypeRequest) GetName() string {
@@ -3814,7 +4057,7 @@ type GetTypeResponse struct {
 
 func (x *GetTypeResponse) Reset() {
 	*x = GetTypeResponse{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[41]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3826,7 +4069,7 @@ func (x *GetTypeResponse) String() string {
 func (*GetTypeResponse) ProtoMessage() {}
 
 func (x *GetTypeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[41]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3839,7 +4082,7 @@ func (x *GetTypeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTypeResponse.ProtoReflect.Descriptor instead.
 func (*GetTypeResponse) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{41}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *GetTypeResponse) GetType() *Type {
@@ -3859,7 +4102,7 @@ type ListTypesRequest struct {
 
 func (x *ListTypesRequest) Reset() {
 	*x = ListTypesRequest{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[42]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3871,7 +4114,7 @@ func (x *ListTypesRequest) String() string {
 func (*ListTypesRequest) ProtoMessage() {}
 
 func (x *ListTypesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[42]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3884,7 +4127,7 @@ func (x *ListTypesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTypesRequest.ProtoReflect.Descriptor instead.
 func (*ListTypesRequest) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{42}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *ListTypesRequest) GetParent() string {
@@ -3904,7 +4147,7 @@ type ListTypesResponse struct {
 
 func (x *ListTypesResponse) Reset() {
 	*x = ListTypesResponse{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[43]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3916,7 +4159,7 @@ func (x *ListTypesResponse) String() string {
 func (*ListTypesResponse) ProtoMessage() {}
 
 func (x *ListTypesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[43]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3929,7 +4172,7 @@ func (x *ListTypesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTypesResponse.ProtoReflect.Descriptor instead.
 func (*ListTypesResponse) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{43}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *ListTypesResponse) GetTypes() []*Type {
@@ -3958,7 +4201,7 @@ type LinkItemsRequest struct {
 
 func (x *LinkItemsRequest) Reset() {
 	*x = LinkItemsRequest{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[44]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3970,7 +4213,7 @@ func (x *LinkItemsRequest) String() string {
 func (*LinkItemsRequest) ProtoMessage() {}
 
 func (x *LinkItemsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[44]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3983,7 +4226,7 @@ func (x *LinkItemsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LinkItemsRequest.ProtoReflect.Descriptor instead.
 func (*LinkItemsRequest) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{44}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *LinkItemsRequest) GetName() string {
@@ -4033,7 +4276,7 @@ type LinkItemsResponse struct {
 
 func (x *LinkItemsResponse) Reset() {
 	*x = LinkItemsResponse{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[45]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4045,7 +4288,7 @@ func (x *LinkItemsResponse) String() string {
 func (*LinkItemsResponse) ProtoMessage() {}
 
 func (x *LinkItemsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[45]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4058,7 +4301,7 @@ func (x *LinkItemsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LinkItemsResponse.ProtoReflect.Descriptor instead.
 func (*LinkItemsResponse) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{45}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *LinkItemsResponse) GetItem() *Item {
@@ -4096,7 +4339,7 @@ type UnlinkItemsRequest struct {
 
 func (x *UnlinkItemsRequest) Reset() {
 	*x = UnlinkItemsRequest{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[46]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4108,7 +4351,7 @@ func (x *UnlinkItemsRequest) String() string {
 func (*UnlinkItemsRequest) ProtoMessage() {}
 
 func (x *UnlinkItemsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[46]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4121,7 +4364,7 @@ func (x *UnlinkItemsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnlinkItemsRequest.ProtoReflect.Descriptor instead.
 func (*UnlinkItemsRequest) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{46}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *UnlinkItemsRequest) GetName() string {
@@ -4170,7 +4413,7 @@ type UnlinkItemsResponse struct {
 
 func (x *UnlinkItemsResponse) Reset() {
 	*x = UnlinkItemsResponse{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[47]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4182,7 +4425,7 @@ func (x *UnlinkItemsResponse) String() string {
 func (*UnlinkItemsResponse) ProtoMessage() {}
 
 func (x *UnlinkItemsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[47]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4195,7 +4438,7 @@ func (x *UnlinkItemsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnlinkItemsResponse.ProtoReflect.Descriptor instead.
 func (*UnlinkItemsResponse) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{47}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *UnlinkItemsResponse) GetItem() *Item {
@@ -4223,7 +4466,7 @@ var File_kernel_v1_kernel_proto protoreflect.FileDescriptor
 
 const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\n" +
-	"\x16kernel/v1/kernel.proto\x12\tkernel.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xda\x03\n" +
+	"\x16kernel/v1/kernel.proto\x12\tkernel.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe6\x04\n" +
 	"\x04Item\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x1c\n" +
@@ -4239,7 +4482,16 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	" \x01(\tR\x11creatorOnBehalfOf\x124\n" +
 	"\bcategory\x18\v \x01(\x0e2\x18.kernel.v1.StateCategoryR\bcategory\x12%\n" +
 	"\x05links\x18\f \x03(\v2\x0f.kernel.v1.LinkR\x05links\x12'\n" +
-	"\x0flinks_truncated\x18\r \x01(\bR\x0elinksTruncated\"\x83\x01\n" +
+	"\x0flinks_truncated\x18\r \x01(\bR\x0elinksTruncated\x126\n" +
+	"\arollups\x18\x0e \x03(\v2\x1c.kernel.v1.Item.RollupsEntryR\arollups\x1aR\n" +
+	"\fRollupsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
+	"\x05value\x18\x02 \x01(\v2\x16.kernel.v1.RollupValueR\x05value:\x028\x01\"\x84\x01\n" +
+	"\vRollupValue\x12:\n" +
+	"\x06counts\x18\x01 \x03(\v2\".kernel.v1.RollupValue.CountsEntryR\x06counts\x1a9\n" +
+	"\vCountsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\x03R\x05value:\x028\x01\"\x83\x01\n" +
 	"\x04Link\x12\x1b\n" +
 	"\tlink_type\x18\x01 \x01(\tR\blinkType\x126\n" +
 	"\tdirection\x18\x02 \x01(\x0e2\x18.kernel.v1.LinkDirectionR\tdirection\x12&\n" +
@@ -4311,7 +4563,7 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"commit_seq\x18\x03 \x01(\x03R\tcommitSeq\x126\n" +
 	"\aoutcome\x18\x04 \x01(\x0e2\x1c.kernel.v1.TransitionOutcomeR\aoutcome\x12\x16\n" +
 	"\x06reason\x18\x05 \x01(\tR\x06reason\x12\x12\n" +
-	"\x04hold\x18\x06 \x01(\tR\x04hold\"\xc6\x01\n" +
+	"\x04hold\x18\x06 \x01(\tR\x04hold\"\xe1\x01\n" +
 	"\x12SearchItemsRequest\x12\x16\n" +
 	"\x06parent\x18\x01 \x01(\tR\x06parent\x12\x14\n" +
 	"\x05query\x18\x02 \x01(\tR\x05query\x12\x17\n" +
@@ -4319,7 +4571,8 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\x06filter\x18\x04 \x01(\v2\x15.kernel.v1.ItemFilterR\x06filter\x12\x1b\n" +
 	"\tpage_size\x18\x05 \x01(\x05R\bpageSize\x12\x1d\n" +
 	"\n" +
-	"page_token\x18\x06 \x01(\tR\tpageToken\"d\n" +
+	"page_token\x18\x06 \x01(\tR\tpageToken\x12\x19\n" +
+	"\border_by\x18\a \x01(\tR\aorderBy\"d\n" +
 	"\x13SearchItemsResponse\x12%\n" +
 	"\x05items\x18\x01 \x03(\v2\x0f.kernel.v1.ItemR\x05items\x12&\n" +
 	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\xd1\x01\n" +
@@ -4343,13 +4596,14 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\x02gt\x18\x03 \x01(\v2\x16.google.protobuf.ValueR\x02gt\x12(\n" +
 	"\x03gte\x18\x04 \x01(\v2\x16.google.protobuf.ValueR\x03gte\x12&\n" +
 	"\x02lt\x18\x05 \x01(\v2\x16.google.protobuf.ValueR\x02lt\x12(\n" +
-	"\x03lte\x18\x06 \x01(\v2\x16.google.protobuf.ValueR\x03lte\"\x95\x01\n" +
+	"\x03lte\x18\x06 \x01(\v2\x16.google.protobuf.ValueR\x03lte\"\xb0\x01\n" +
 	"\x10ListItemsRequest\x12\x16\n" +
 	"\x06parent\x18\x01 \x01(\tR\x06parent\x12-\n" +
 	"\x06filter\x18\x02 \x01(\v2\x15.kernel.v1.ItemFilterR\x06filter\x12\x1b\n" +
 	"\tpage_size\x18\x03 \x01(\x05R\bpageSize\x12\x1d\n" +
 	"\n" +
-	"page_token\x18\x04 \x01(\tR\tpageToken\"b\n" +
+	"page_token\x18\x04 \x01(\tR\tpageToken\x12\x19\n" +
+	"\border_by\x18\x05 \x01(\tR\aorderBy\"b\n" +
 	"\x11ListItemsResponse\x12%\n" +
 	"\x05items\x18\x01 \x03(\v2\x0f.kernel.v1.ItemR\x05items\x12&\n" +
 	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"k\n" +
@@ -4426,7 +4680,7 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\rvalidate_only\x18\x05 \x01(\bR\fvalidateOnly\x12+\n" +
 	"\x11expected_audience\x18\x06 \x01(\tR\x10expectedAudience\"2\n" +
 	"\x14ApproveWidenResponse\x12\x1a\n" +
-	"\baudience\x18\x01 \x01(\tR\baudience\"\xe6\x03\n" +
+	"\baudience\x18\x01 \x01(\tR\baudience\"\xc8\x04\n" +
 	"\x04Type\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x17\n" +
 	"\atype_id\x18\x02 \x01(\tR\x06typeId\x12\x18\n" +
@@ -4442,7 +4696,17 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"invariants\x121\n" +
 	"\treactions\x18\n" +
 	" \x03(\v2\x13.kernel.v1.ReactionR\treactions\x12H\n" +
-	"\x11accepts_reactions\x18\v \x03(\v2\x1b.kernel.v1.AcceptedReactionR\x10acceptsReactions\"/\n" +
+	"\x11accepts_reactions\x18\v \x03(\v2\x1b.kernel.v1.AcceptedReactionR\x10acceptsReactions\x123\n" +
+	"\bincoming\x18\f \x03(\v2\x17.kernel.v1.IncomingLinkR\bincoming\x12+\n" +
+	"\arollups\x18\r \x03(\v2\x11.kernel.v1.RollupR\arollups\"J\n" +
+	"\fIncomingLink\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
+	"\x04link\x18\x02 \x01(\tR\x04link\x12\x12\n" +
+	"\x04from\x18\x03 \x03(\tR\x04from\"G\n" +
+	"\x06Rollup\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04over\x18\x02 \x01(\tR\x04over\x12\x19\n" +
+	"\bcount_by\x18\x03 \x01(\tR\acountBy\"/\n" +
 	"\tInvariant\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04rule\x18\x02 \x01(\tR\x04rule\"\x9b\x02\n" +
@@ -4491,7 +4755,7 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05after\x18\x02 \x01(\tR\x05after\x12\x14\n" +
 	"\x05every\x18\x03 \x01(\tR\x05every\x12\x10\n" +
-	"\x03max\x18\x04 \x01(\x05R\x03max\"\xdc\x01\n" +
+	"\x03max\x18\x04 \x01(\x05R\x03max\"\xf4\x01\n" +
 	"\n" +
 	"Transition\x12\x1d\n" +
 	"\n" +
@@ -4502,7 +4766,8 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\aallowed\x18\x05 \x03(\tR\aallowed\x12\x16\n" +
 	"\x06escape\x18\x06 \x01(\bR\x06escape\x12\x18\n" +
 	"\achecked\x18\a \x01(\bR\achecked\x12\x16\n" +
-	"\x06except\x18\b \x03(\tR\x06except\"$\n" +
+	"\x06except\x18\b \x03(\tR\x06except\x12\x16\n" +
+	"\x06clears\x18\t \x03(\tR\x06clears\"$\n" +
 	"\x0eGetTypeRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\"6\n" +
 	"\x0fGetTypeResponse\x12#\n" +
@@ -4615,7 +4880,7 @@ func file_kernel_v1_kernel_proto_rawDescGZIP() []byte {
 }
 
 var file_kernel_v1_kernel_proto_enumTypes = make([]protoimpl.EnumInfo, 7)
-var file_kernel_v1_kernel_proto_msgTypes = make([]protoimpl.MessageInfo, 49)
+var file_kernel_v1_kernel_proto_msgTypes = make([]protoimpl.MessageInfo, 54)
 var file_kernel_v1_kernel_proto_goTypes = []any{
 	(LinkDirection)(0),                // 0: kernel.v1.LinkDirection
 	(TransitionOutcome)(0),            // 1: kernel.v1.TransitionOutcome
@@ -4625,155 +4890,165 @@ var file_kernel_v1_kernel_proto_goTypes = []any{
 	(FieldType)(0),                    // 5: kernel.v1.FieldType
 	(StateCategory)(0),                // 6: kernel.v1.StateCategory
 	(*Item)(nil),                      // 7: kernel.v1.Item
-	(*Link)(nil),                      // 8: kernel.v1.Link
-	(*ItemRef)(nil),                   // 9: kernel.v1.ItemRef
-	(*Hold)(nil),                      // 10: kernel.v1.Hold
-	(*Readers)(nil),                   // 11: kernel.v1.Readers
-	(*CreateItemRequest)(nil),         // 12: kernel.v1.CreateItemRequest
-	(*CreateItemResponse)(nil),        // 13: kernel.v1.CreateItemResponse
-	(*GetItemRequest)(nil),            // 14: kernel.v1.GetItemRequest
-	(*GetItemResponse)(nil),           // 15: kernel.v1.GetItemResponse
-	(*UpdateItemRequest)(nil),         // 16: kernel.v1.UpdateItemRequest
-	(*PolicyChange)(nil),              // 17: kernel.v1.PolicyChange
-	(*Move)(nil),                      // 18: kernel.v1.Move
-	(*UpdateItemResponse)(nil),        // 19: kernel.v1.UpdateItemResponse
-	(*TransitionItemRequest)(nil),     // 20: kernel.v1.TransitionItemRequest
-	(*TransitionItemResponse)(nil),    // 21: kernel.v1.TransitionItemResponse
-	(*SearchItemsRequest)(nil),        // 22: kernel.v1.SearchItemsRequest
-	(*SearchItemsResponse)(nil),       // 23: kernel.v1.SearchItemsResponse
-	(*ItemFilter)(nil),                // 24: kernel.v1.ItemFilter
-	(*LinkFilter)(nil),                // 25: kernel.v1.LinkFilter
-	(*FieldFilter)(nil),               // 26: kernel.v1.FieldFilter
-	(*ListItemsRequest)(nil),          // 27: kernel.v1.ListItemsRequest
-	(*ListItemsResponse)(nil),         // 28: kernel.v1.ListItemsResponse
-	(*ListItemEventsRequest)(nil),     // 29: kernel.v1.ListItemEventsRequest
-	(*ListItemEventsResponse)(nil),    // 30: kernel.v1.ListItemEventsResponse
-	(*ItemEvent)(nil),                 // 31: kernel.v1.ItemEvent
-	(*StartAgentSessionRequest)(nil),  // 32: kernel.v1.StartAgentSessionRequest
-	(*StartAgentSessionResponse)(nil), // 33: kernel.v1.StartAgentSessionResponse
-	(*AgentSession)(nil),              // 34: kernel.v1.AgentSession
-	(*ApproveWidenRequest)(nil),       // 35: kernel.v1.ApproveWidenRequest
-	(*ApproveWidenResponse)(nil),      // 36: kernel.v1.ApproveWidenResponse
-	(*Type)(nil),                      // 37: kernel.v1.Type
-	(*Invariant)(nil),                 // 38: kernel.v1.Invariant
-	(*Reaction)(nil),                  // 39: kernel.v1.Reaction
-	(*AcceptedReaction)(nil),          // 40: kernel.v1.AcceptedReaction
-	(*LinkType)(nil),                  // 41: kernel.v1.LinkType
-	(*LinkResolve)(nil),               // 42: kernel.v1.LinkResolve
-	(*Field)(nil),                     // 43: kernel.v1.Field
-	(*State)(nil),                     // 44: kernel.v1.State
-	(*ActingTimer)(nil),               // 45: kernel.v1.ActingTimer
-	(*Transition)(nil),                // 46: kernel.v1.Transition
-	(*GetTypeRequest)(nil),            // 47: kernel.v1.GetTypeRequest
-	(*GetTypeResponse)(nil),           // 48: kernel.v1.GetTypeResponse
-	(*ListTypesRequest)(nil),          // 49: kernel.v1.ListTypesRequest
-	(*ListTypesResponse)(nil),         // 50: kernel.v1.ListTypesResponse
-	(*LinkItemsRequest)(nil),          // 51: kernel.v1.LinkItemsRequest
-	(*LinkItemsResponse)(nil),         // 52: kernel.v1.LinkItemsResponse
-	(*UnlinkItemsRequest)(nil),        // 53: kernel.v1.UnlinkItemsRequest
-	(*UnlinkItemsResponse)(nil),       // 54: kernel.v1.UnlinkItemsResponse
-	nil,                               // 55: kernel.v1.Reaction.AddEntry
-	(*structpb.Struct)(nil),           // 56: google.protobuf.Struct
-	(*timestamppb.Timestamp)(nil),     // 57: google.protobuf.Timestamp
-	(*durationpb.Duration)(nil),       // 58: google.protobuf.Duration
-	(*structpb.Value)(nil),            // 59: google.protobuf.Value
+	(*RollupValue)(nil),               // 8: kernel.v1.RollupValue
+	(*Link)(nil),                      // 9: kernel.v1.Link
+	(*ItemRef)(nil),                   // 10: kernel.v1.ItemRef
+	(*Hold)(nil),                      // 11: kernel.v1.Hold
+	(*Readers)(nil),                   // 12: kernel.v1.Readers
+	(*CreateItemRequest)(nil),         // 13: kernel.v1.CreateItemRequest
+	(*CreateItemResponse)(nil),        // 14: kernel.v1.CreateItemResponse
+	(*GetItemRequest)(nil),            // 15: kernel.v1.GetItemRequest
+	(*GetItemResponse)(nil),           // 16: kernel.v1.GetItemResponse
+	(*UpdateItemRequest)(nil),         // 17: kernel.v1.UpdateItemRequest
+	(*PolicyChange)(nil),              // 18: kernel.v1.PolicyChange
+	(*Move)(nil),                      // 19: kernel.v1.Move
+	(*UpdateItemResponse)(nil),        // 20: kernel.v1.UpdateItemResponse
+	(*TransitionItemRequest)(nil),     // 21: kernel.v1.TransitionItemRequest
+	(*TransitionItemResponse)(nil),    // 22: kernel.v1.TransitionItemResponse
+	(*SearchItemsRequest)(nil),        // 23: kernel.v1.SearchItemsRequest
+	(*SearchItemsResponse)(nil),       // 24: kernel.v1.SearchItemsResponse
+	(*ItemFilter)(nil),                // 25: kernel.v1.ItemFilter
+	(*LinkFilter)(nil),                // 26: kernel.v1.LinkFilter
+	(*FieldFilter)(nil),               // 27: kernel.v1.FieldFilter
+	(*ListItemsRequest)(nil),          // 28: kernel.v1.ListItemsRequest
+	(*ListItemsResponse)(nil),         // 29: kernel.v1.ListItemsResponse
+	(*ListItemEventsRequest)(nil),     // 30: kernel.v1.ListItemEventsRequest
+	(*ListItemEventsResponse)(nil),    // 31: kernel.v1.ListItemEventsResponse
+	(*ItemEvent)(nil),                 // 32: kernel.v1.ItemEvent
+	(*StartAgentSessionRequest)(nil),  // 33: kernel.v1.StartAgentSessionRequest
+	(*StartAgentSessionResponse)(nil), // 34: kernel.v1.StartAgentSessionResponse
+	(*AgentSession)(nil),              // 35: kernel.v1.AgentSession
+	(*ApproveWidenRequest)(nil),       // 36: kernel.v1.ApproveWidenRequest
+	(*ApproveWidenResponse)(nil),      // 37: kernel.v1.ApproveWidenResponse
+	(*Type)(nil),                      // 38: kernel.v1.Type
+	(*IncomingLink)(nil),              // 39: kernel.v1.IncomingLink
+	(*Rollup)(nil),                    // 40: kernel.v1.Rollup
+	(*Invariant)(nil),                 // 41: kernel.v1.Invariant
+	(*Reaction)(nil),                  // 42: kernel.v1.Reaction
+	(*AcceptedReaction)(nil),          // 43: kernel.v1.AcceptedReaction
+	(*LinkType)(nil),                  // 44: kernel.v1.LinkType
+	(*LinkResolve)(nil),               // 45: kernel.v1.LinkResolve
+	(*Field)(nil),                     // 46: kernel.v1.Field
+	(*State)(nil),                     // 47: kernel.v1.State
+	(*ActingTimer)(nil),               // 48: kernel.v1.ActingTimer
+	(*Transition)(nil),                // 49: kernel.v1.Transition
+	(*GetTypeRequest)(nil),            // 50: kernel.v1.GetTypeRequest
+	(*GetTypeResponse)(nil),           // 51: kernel.v1.GetTypeResponse
+	(*ListTypesRequest)(nil),          // 52: kernel.v1.ListTypesRequest
+	(*ListTypesResponse)(nil),         // 53: kernel.v1.ListTypesResponse
+	(*LinkItemsRequest)(nil),          // 54: kernel.v1.LinkItemsRequest
+	(*LinkItemsResponse)(nil),         // 55: kernel.v1.LinkItemsResponse
+	(*UnlinkItemsRequest)(nil),        // 56: kernel.v1.UnlinkItemsRequest
+	(*UnlinkItemsResponse)(nil),       // 57: kernel.v1.UnlinkItemsResponse
+	nil,                               // 58: kernel.v1.Item.RollupsEntry
+	nil,                               // 59: kernel.v1.RollupValue.CountsEntry
+	nil,                               // 60: kernel.v1.Reaction.AddEntry
+	(*structpb.Struct)(nil),           // 61: google.protobuf.Struct
+	(*timestamppb.Timestamp)(nil),     // 62: google.protobuf.Timestamp
+	(*durationpb.Duration)(nil),       // 63: google.protobuf.Duration
+	(*structpb.Value)(nil),            // 64: google.protobuf.Value
 }
 var file_kernel_v1_kernel_proto_depIdxs = []int32{
-	56, // 0: kernel.v1.Item.fields:type_name -> google.protobuf.Struct
-	10, // 1: kernel.v1.Item.hold:type_name -> kernel.v1.Hold
-	57, // 2: kernel.v1.Item.create_time:type_name -> google.protobuf.Timestamp
+	61, // 0: kernel.v1.Item.fields:type_name -> google.protobuf.Struct
+	11, // 1: kernel.v1.Item.hold:type_name -> kernel.v1.Hold
+	62, // 2: kernel.v1.Item.create_time:type_name -> google.protobuf.Timestamp
 	6,  // 3: kernel.v1.Item.category:type_name -> kernel.v1.StateCategory
-	8,  // 4: kernel.v1.Item.links:type_name -> kernel.v1.Link
-	0,  // 5: kernel.v1.Link.direction:type_name -> kernel.v1.LinkDirection
-	9,  // 6: kernel.v1.Link.item:type_name -> kernel.v1.ItemRef
-	56, // 7: kernel.v1.CreateItemRequest.fields:type_name -> google.protobuf.Struct
-	11, // 8: kernel.v1.CreateItemRequest.narrow:type_name -> kernel.v1.Readers
-	7,  // 9: kernel.v1.CreateItemResponse.item:type_name -> kernel.v1.Item
-	7,  // 10: kernel.v1.GetItemResponse.item:type_name -> kernel.v1.Item
-	56, // 11: kernel.v1.UpdateItemRequest.fields:type_name -> google.protobuf.Struct
-	17, // 12: kernel.v1.UpdateItemRequest.policy:type_name -> kernel.v1.PolicyChange
-	18, // 13: kernel.v1.UpdateItemRequest.move:type_name -> kernel.v1.Move
-	11, // 14: kernel.v1.PolicyChange.narrow:type_name -> kernel.v1.Readers
-	7,  // 15: kernel.v1.UpdateItemResponse.item:type_name -> kernel.v1.Item
-	56, // 16: kernel.v1.TransitionItemRequest.fields:type_name -> google.protobuf.Struct
-	58, // 17: kernel.v1.TransitionItemRequest.wait:type_name -> google.protobuf.Duration
-	7,  // 18: kernel.v1.TransitionItemResponse.item:type_name -> kernel.v1.Item
-	1,  // 19: kernel.v1.TransitionItemResponse.outcome:type_name -> kernel.v1.TransitionOutcome
-	24, // 20: kernel.v1.SearchItemsRequest.filter:type_name -> kernel.v1.ItemFilter
-	7,  // 21: kernel.v1.SearchItemsResponse.items:type_name -> kernel.v1.Item
-	6,  // 22: kernel.v1.ItemFilter.categories:type_name -> kernel.v1.StateCategory
-	26, // 23: kernel.v1.ItemFilter.fields:type_name -> kernel.v1.FieldFilter
-	25, // 24: kernel.v1.ItemFilter.links:type_name -> kernel.v1.LinkFilter
-	0,  // 25: kernel.v1.LinkFilter.direction:type_name -> kernel.v1.LinkDirection
-	59, // 26: kernel.v1.FieldFilter.eq:type_name -> google.protobuf.Value
-	59, // 27: kernel.v1.FieldFilter.gt:type_name -> google.protobuf.Value
-	59, // 28: kernel.v1.FieldFilter.gte:type_name -> google.protobuf.Value
-	59, // 29: kernel.v1.FieldFilter.lt:type_name -> google.protobuf.Value
-	59, // 30: kernel.v1.FieldFilter.lte:type_name -> google.protobuf.Value
-	24, // 31: kernel.v1.ListItemsRequest.filter:type_name -> kernel.v1.ItemFilter
-	7,  // 32: kernel.v1.ListItemsResponse.items:type_name -> kernel.v1.Item
-	31, // 33: kernel.v1.ListItemEventsResponse.events:type_name -> kernel.v1.ItemEvent
-	2,  // 34: kernel.v1.ItemEvent.kind:type_name -> kernel.v1.ItemEventKind
-	57, // 35: kernel.v1.ItemEvent.create_time:type_name -> google.protobuf.Timestamp
-	56, // 36: kernel.v1.ItemEvent.fields:type_name -> google.protobuf.Struct
-	11, // 37: kernel.v1.ItemEvent.readers:type_name -> kernel.v1.Readers
-	9,  // 38: kernel.v1.ItemEvent.container:type_name -> kernel.v1.ItemRef
-	9,  // 39: kernel.v1.ItemEvent.container_from:type_name -> kernel.v1.ItemRef
-	9,  // 40: kernel.v1.ItemEvent.container_to:type_name -> kernel.v1.ItemRef
-	9,  // 41: kernel.v1.ItemEvent.link_target:type_name -> kernel.v1.ItemRef
-	56, // 42: kernel.v1.ItemEvent.added:type_name -> google.protobuf.Struct
-	9,  // 43: kernel.v1.ItemEvent.link_replaced:type_name -> kernel.v1.ItemRef
-	34, // 44: kernel.v1.StartAgentSessionResponse.session:type_name -> kernel.v1.AgentSession
-	43, // 45: kernel.v1.Type.fields:type_name -> kernel.v1.Field
-	44, // 46: kernel.v1.Type.states:type_name -> kernel.v1.State
-	46, // 47: kernel.v1.Type.transitions:type_name -> kernel.v1.Transition
-	41, // 48: kernel.v1.Type.link_types:type_name -> kernel.v1.LinkType
-	38, // 49: kernel.v1.Type.invariants:type_name -> kernel.v1.Invariant
-	39, // 50: kernel.v1.Type.reactions:type_name -> kernel.v1.Reaction
-	40, // 51: kernel.v1.Type.accepts_reactions:type_name -> kernel.v1.AcceptedReaction
-	3,  // 52: kernel.v1.Reaction.kind:type_name -> kernel.v1.ReactionKind
-	55, // 53: kernel.v1.Reaction.add:type_name -> kernel.v1.Reaction.AddEntry
-	4,  // 54: kernel.v1.LinkType.writable_by:type_name -> kernel.v1.FieldWriter
-	42, // 55: kernel.v1.LinkType.resolve:type_name -> kernel.v1.LinkResolve
-	5,  // 56: kernel.v1.Field.type:type_name -> kernel.v1.FieldType
-	4,  // 57: kernel.v1.Field.writable_by:type_name -> kernel.v1.FieldWriter
-	6,  // 58: kernel.v1.State.category:type_name -> kernel.v1.StateCategory
-	45, // 59: kernel.v1.State.acting:type_name -> kernel.v1.ActingTimer
-	37, // 60: kernel.v1.GetTypeResponse.type:type_name -> kernel.v1.Type
-	37, // 61: kernel.v1.ListTypesResponse.types:type_name -> kernel.v1.Type
-	7,  // 62: kernel.v1.LinkItemsResponse.item:type_name -> kernel.v1.Item
-	7,  // 63: kernel.v1.UnlinkItemsResponse.item:type_name -> kernel.v1.Item
-	12, // 64: kernel.v1.ItemService.CreateItem:input_type -> kernel.v1.CreateItemRequest
-	14, // 65: kernel.v1.ItemService.GetItem:input_type -> kernel.v1.GetItemRequest
-	16, // 66: kernel.v1.ItemService.UpdateItem:input_type -> kernel.v1.UpdateItemRequest
-	20, // 67: kernel.v1.ItemService.TransitionItem:input_type -> kernel.v1.TransitionItemRequest
-	22, // 68: kernel.v1.ItemService.SearchItems:input_type -> kernel.v1.SearchItemsRequest
-	27, // 69: kernel.v1.ItemService.ListItems:input_type -> kernel.v1.ListItemsRequest
-	29, // 70: kernel.v1.ItemService.ListItemEvents:input_type -> kernel.v1.ListItemEventsRequest
-	47, // 71: kernel.v1.ItemService.GetType:input_type -> kernel.v1.GetTypeRequest
-	49, // 72: kernel.v1.ItemService.ListTypes:input_type -> kernel.v1.ListTypesRequest
-	32, // 73: kernel.v1.ItemService.StartAgentSession:input_type -> kernel.v1.StartAgentSessionRequest
-	35, // 74: kernel.v1.ItemService.ApproveWiden:input_type -> kernel.v1.ApproveWidenRequest
-	51, // 75: kernel.v1.ItemService.LinkItems:input_type -> kernel.v1.LinkItemsRequest
-	53, // 76: kernel.v1.ItemService.UnlinkItems:input_type -> kernel.v1.UnlinkItemsRequest
-	13, // 77: kernel.v1.ItemService.CreateItem:output_type -> kernel.v1.CreateItemResponse
-	15, // 78: kernel.v1.ItemService.GetItem:output_type -> kernel.v1.GetItemResponse
-	19, // 79: kernel.v1.ItemService.UpdateItem:output_type -> kernel.v1.UpdateItemResponse
-	21, // 80: kernel.v1.ItemService.TransitionItem:output_type -> kernel.v1.TransitionItemResponse
-	23, // 81: kernel.v1.ItemService.SearchItems:output_type -> kernel.v1.SearchItemsResponse
-	28, // 82: kernel.v1.ItemService.ListItems:output_type -> kernel.v1.ListItemsResponse
-	30, // 83: kernel.v1.ItemService.ListItemEvents:output_type -> kernel.v1.ListItemEventsResponse
-	48, // 84: kernel.v1.ItemService.GetType:output_type -> kernel.v1.GetTypeResponse
-	50, // 85: kernel.v1.ItemService.ListTypes:output_type -> kernel.v1.ListTypesResponse
-	33, // 86: kernel.v1.ItemService.StartAgentSession:output_type -> kernel.v1.StartAgentSessionResponse
-	36, // 87: kernel.v1.ItemService.ApproveWiden:output_type -> kernel.v1.ApproveWidenResponse
-	52, // 88: kernel.v1.ItemService.LinkItems:output_type -> kernel.v1.LinkItemsResponse
-	54, // 89: kernel.v1.ItemService.UnlinkItems:output_type -> kernel.v1.UnlinkItemsResponse
-	77, // [77:90] is the sub-list for method output_type
-	64, // [64:77] is the sub-list for method input_type
-	64, // [64:64] is the sub-list for extension type_name
-	64, // [64:64] is the sub-list for extension extendee
-	0,  // [0:64] is the sub-list for field type_name
+	9,  // 4: kernel.v1.Item.links:type_name -> kernel.v1.Link
+	58, // 5: kernel.v1.Item.rollups:type_name -> kernel.v1.Item.RollupsEntry
+	59, // 6: kernel.v1.RollupValue.counts:type_name -> kernel.v1.RollupValue.CountsEntry
+	0,  // 7: kernel.v1.Link.direction:type_name -> kernel.v1.LinkDirection
+	10, // 8: kernel.v1.Link.item:type_name -> kernel.v1.ItemRef
+	61, // 9: kernel.v1.CreateItemRequest.fields:type_name -> google.protobuf.Struct
+	12, // 10: kernel.v1.CreateItemRequest.narrow:type_name -> kernel.v1.Readers
+	7,  // 11: kernel.v1.CreateItemResponse.item:type_name -> kernel.v1.Item
+	7,  // 12: kernel.v1.GetItemResponse.item:type_name -> kernel.v1.Item
+	61, // 13: kernel.v1.UpdateItemRequest.fields:type_name -> google.protobuf.Struct
+	18, // 14: kernel.v1.UpdateItemRequest.policy:type_name -> kernel.v1.PolicyChange
+	19, // 15: kernel.v1.UpdateItemRequest.move:type_name -> kernel.v1.Move
+	12, // 16: kernel.v1.PolicyChange.narrow:type_name -> kernel.v1.Readers
+	7,  // 17: kernel.v1.UpdateItemResponse.item:type_name -> kernel.v1.Item
+	61, // 18: kernel.v1.TransitionItemRequest.fields:type_name -> google.protobuf.Struct
+	63, // 19: kernel.v1.TransitionItemRequest.wait:type_name -> google.protobuf.Duration
+	7,  // 20: kernel.v1.TransitionItemResponse.item:type_name -> kernel.v1.Item
+	1,  // 21: kernel.v1.TransitionItemResponse.outcome:type_name -> kernel.v1.TransitionOutcome
+	25, // 22: kernel.v1.SearchItemsRequest.filter:type_name -> kernel.v1.ItemFilter
+	7,  // 23: kernel.v1.SearchItemsResponse.items:type_name -> kernel.v1.Item
+	6,  // 24: kernel.v1.ItemFilter.categories:type_name -> kernel.v1.StateCategory
+	27, // 25: kernel.v1.ItemFilter.fields:type_name -> kernel.v1.FieldFilter
+	26, // 26: kernel.v1.ItemFilter.links:type_name -> kernel.v1.LinkFilter
+	0,  // 27: kernel.v1.LinkFilter.direction:type_name -> kernel.v1.LinkDirection
+	64, // 28: kernel.v1.FieldFilter.eq:type_name -> google.protobuf.Value
+	64, // 29: kernel.v1.FieldFilter.gt:type_name -> google.protobuf.Value
+	64, // 30: kernel.v1.FieldFilter.gte:type_name -> google.protobuf.Value
+	64, // 31: kernel.v1.FieldFilter.lt:type_name -> google.protobuf.Value
+	64, // 32: kernel.v1.FieldFilter.lte:type_name -> google.protobuf.Value
+	25, // 33: kernel.v1.ListItemsRequest.filter:type_name -> kernel.v1.ItemFilter
+	7,  // 34: kernel.v1.ListItemsResponse.items:type_name -> kernel.v1.Item
+	32, // 35: kernel.v1.ListItemEventsResponse.events:type_name -> kernel.v1.ItemEvent
+	2,  // 36: kernel.v1.ItemEvent.kind:type_name -> kernel.v1.ItemEventKind
+	62, // 37: kernel.v1.ItemEvent.create_time:type_name -> google.protobuf.Timestamp
+	61, // 38: kernel.v1.ItemEvent.fields:type_name -> google.protobuf.Struct
+	12, // 39: kernel.v1.ItemEvent.readers:type_name -> kernel.v1.Readers
+	10, // 40: kernel.v1.ItemEvent.container:type_name -> kernel.v1.ItemRef
+	10, // 41: kernel.v1.ItemEvent.container_from:type_name -> kernel.v1.ItemRef
+	10, // 42: kernel.v1.ItemEvent.container_to:type_name -> kernel.v1.ItemRef
+	10, // 43: kernel.v1.ItemEvent.link_target:type_name -> kernel.v1.ItemRef
+	61, // 44: kernel.v1.ItemEvent.added:type_name -> google.protobuf.Struct
+	10, // 45: kernel.v1.ItemEvent.link_replaced:type_name -> kernel.v1.ItemRef
+	35, // 46: kernel.v1.StartAgentSessionResponse.session:type_name -> kernel.v1.AgentSession
+	46, // 47: kernel.v1.Type.fields:type_name -> kernel.v1.Field
+	47, // 48: kernel.v1.Type.states:type_name -> kernel.v1.State
+	49, // 49: kernel.v1.Type.transitions:type_name -> kernel.v1.Transition
+	44, // 50: kernel.v1.Type.link_types:type_name -> kernel.v1.LinkType
+	41, // 51: kernel.v1.Type.invariants:type_name -> kernel.v1.Invariant
+	42, // 52: kernel.v1.Type.reactions:type_name -> kernel.v1.Reaction
+	43, // 53: kernel.v1.Type.accepts_reactions:type_name -> kernel.v1.AcceptedReaction
+	39, // 54: kernel.v1.Type.incoming:type_name -> kernel.v1.IncomingLink
+	40, // 55: kernel.v1.Type.rollups:type_name -> kernel.v1.Rollup
+	3,  // 56: kernel.v1.Reaction.kind:type_name -> kernel.v1.ReactionKind
+	60, // 57: kernel.v1.Reaction.add:type_name -> kernel.v1.Reaction.AddEntry
+	4,  // 58: kernel.v1.LinkType.writable_by:type_name -> kernel.v1.FieldWriter
+	45, // 59: kernel.v1.LinkType.resolve:type_name -> kernel.v1.LinkResolve
+	5,  // 60: kernel.v1.Field.type:type_name -> kernel.v1.FieldType
+	4,  // 61: kernel.v1.Field.writable_by:type_name -> kernel.v1.FieldWriter
+	6,  // 62: kernel.v1.State.category:type_name -> kernel.v1.StateCategory
+	48, // 63: kernel.v1.State.acting:type_name -> kernel.v1.ActingTimer
+	38, // 64: kernel.v1.GetTypeResponse.type:type_name -> kernel.v1.Type
+	38, // 65: kernel.v1.ListTypesResponse.types:type_name -> kernel.v1.Type
+	7,  // 66: kernel.v1.LinkItemsResponse.item:type_name -> kernel.v1.Item
+	7,  // 67: kernel.v1.UnlinkItemsResponse.item:type_name -> kernel.v1.Item
+	8,  // 68: kernel.v1.Item.RollupsEntry.value:type_name -> kernel.v1.RollupValue
+	13, // 69: kernel.v1.ItemService.CreateItem:input_type -> kernel.v1.CreateItemRequest
+	15, // 70: kernel.v1.ItemService.GetItem:input_type -> kernel.v1.GetItemRequest
+	17, // 71: kernel.v1.ItemService.UpdateItem:input_type -> kernel.v1.UpdateItemRequest
+	21, // 72: kernel.v1.ItemService.TransitionItem:input_type -> kernel.v1.TransitionItemRequest
+	23, // 73: kernel.v1.ItemService.SearchItems:input_type -> kernel.v1.SearchItemsRequest
+	28, // 74: kernel.v1.ItemService.ListItems:input_type -> kernel.v1.ListItemsRequest
+	30, // 75: kernel.v1.ItemService.ListItemEvents:input_type -> kernel.v1.ListItemEventsRequest
+	50, // 76: kernel.v1.ItemService.GetType:input_type -> kernel.v1.GetTypeRequest
+	52, // 77: kernel.v1.ItemService.ListTypes:input_type -> kernel.v1.ListTypesRequest
+	33, // 78: kernel.v1.ItemService.StartAgentSession:input_type -> kernel.v1.StartAgentSessionRequest
+	36, // 79: kernel.v1.ItemService.ApproveWiden:input_type -> kernel.v1.ApproveWidenRequest
+	54, // 80: kernel.v1.ItemService.LinkItems:input_type -> kernel.v1.LinkItemsRequest
+	56, // 81: kernel.v1.ItemService.UnlinkItems:input_type -> kernel.v1.UnlinkItemsRequest
+	14, // 82: kernel.v1.ItemService.CreateItem:output_type -> kernel.v1.CreateItemResponse
+	16, // 83: kernel.v1.ItemService.GetItem:output_type -> kernel.v1.GetItemResponse
+	20, // 84: kernel.v1.ItemService.UpdateItem:output_type -> kernel.v1.UpdateItemResponse
+	22, // 85: kernel.v1.ItemService.TransitionItem:output_type -> kernel.v1.TransitionItemResponse
+	24, // 86: kernel.v1.ItemService.SearchItems:output_type -> kernel.v1.SearchItemsResponse
+	29, // 87: kernel.v1.ItemService.ListItems:output_type -> kernel.v1.ListItemsResponse
+	31, // 88: kernel.v1.ItemService.ListItemEvents:output_type -> kernel.v1.ListItemEventsResponse
+	51, // 89: kernel.v1.ItemService.GetType:output_type -> kernel.v1.GetTypeResponse
+	53, // 90: kernel.v1.ItemService.ListTypes:output_type -> kernel.v1.ListTypesResponse
+	34, // 91: kernel.v1.ItemService.StartAgentSession:output_type -> kernel.v1.StartAgentSessionResponse
+	37, // 92: kernel.v1.ItemService.ApproveWiden:output_type -> kernel.v1.ApproveWidenResponse
+	55, // 93: kernel.v1.ItemService.LinkItems:output_type -> kernel.v1.LinkItemsResponse
+	57, // 94: kernel.v1.ItemService.UnlinkItems:output_type -> kernel.v1.UnlinkItemsResponse
+	82, // [82:95] is the sub-list for method output_type
+	69, // [69:82] is the sub-list for method input_type
+	69, // [69:69] is the sub-list for extension type_name
+	69, // [69:69] is the sub-list for extension extendee
+	0,  // [0:69] is the sub-list for field type_name
 }
 
 func init() { file_kernel_v1_kernel_proto_init() }
@@ -4781,7 +5056,7 @@ func file_kernel_v1_kernel_proto_init() {
 	if File_kernel_v1_kernel_proto != nil {
 		return
 	}
-	file_kernel_v1_kernel_proto_msgTypes[10].OneofWrappers = []any{
+	file_kernel_v1_kernel_proto_msgTypes[11].OneofWrappers = []any{
 		(*PolicyChange_Narrow)(nil),
 		(*PolicyChange_Inherit)(nil),
 	}
@@ -4791,7 +5066,7 @@ func file_kernel_v1_kernel_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kernel_v1_kernel_proto_rawDesc), len(file_kernel_v1_kernel_proto_rawDesc)),
 			NumEnums:      7,
-			NumMessages:   49,
+			NumMessages:   54,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -8,7 +8,10 @@
 # request: an approval as a business state, with the HR check. Step 2, part
 # 2 added the leave balance: the held deduction, its refund, the race. Part 3
 # added time and mail (reminders, expiry, the emails), on the stack's dev
-# clock (vacation_request only); it needs curl.
+# clock (vacation_request only); it needs curl. Jira part 1 added the PLAT
+# software project (scenarios A and D of docs/design.md): lea leads, sam
+# works, ana watches; order_by, rank through pli, the epic's progress,
+# resolution on done, watching as a Subscription.
 #
 #   scripts/scenario.sh          (or: make scenario, which starts the stack first)
 #
@@ -825,6 +828,221 @@ expect "v22 approval email (denied: none)" "$(sent "$v22" notify_approved)" ""
 for kind in ITEM_EVENT_KIND_HOOK_RAN ITEM_EVENT_KIND_REACTION_APPLIED; do
 	case $kinds_seen in *" $kind "* | *" $kind"*) ;; *) fail "no history showed $kind" ;; esac
 done
+
+# ---------------------------------------------------------------------------
+# Jira proof of concept, part 1: the PLAT software project (docs/design.md,
+# "Jira proof of concept", scenarios A and D). lea leads, sam works, ana
+# watches. Stories, bugs and tasks are contained in PLAT; they belong to an
+# epic and a sprint by links. Rank is an app field (f_rank) that pli writes
+# with ordinary updates; the kernel only sorts by it. There are no issue
+# keys yet: "PLAT-2" below is the variable $plat2.
+# ---------------------------------------------------------------------------
+
+issue() { # WHO TYPE SUMMARY [--set ...]...: an issue in PLAT, tagged with this run's word; prints its name
+	local who=$1 typ=$2 summary=$3
+	shift 3
+	ok "$who" item create --type "$typ@1" --in "$plat" --set "f_summary=$summary $w" "$@" | j .item.name
+}
+etag_of() { ok lea item get "$1" | j .item.etag; }
+# in_order: the Item names of a search or list answer, in the order given.
+in_order() { jqx -r '[.items[]?.name] | join(" ")'; }
+# progress WHO: the epic's progress as WHO sees it, as "active=1 todo=2".
+progress() {
+	ok "$1" item get "$plat1" |
+		j '.item.rollups.progress.counts // {} | to_entries | map("\(.key)=\(.value)") | sort | join(" ")'
+}
+board() { ok lea item search --linked "out:sprint=$sprint" --order-by f_rank | in_order; }
+
+step "A1: lea creates the PLAT space and the epic Single sign-on (PLAT-1)"
+plat=$(ok lea item create --type space@1 --set f_key=PLAT --set "f_name=Platform $w" | j .item.name)
+plat1=$(ok lea item create --type epic@1 --in "$plat" --set "f_summary=Single sign-on $w" --set f_owner=user:lea | j .item.name)
+expect "the epic's progress, nothing linked yet" "$(progress lea)" ""
+
+step "A2: lea creates two stories and a bug in PLAT, each linked to PLAT-1 by epic, ranked in turn"
+plat2=$(issue lea story "Log in with SSO" --set f_priority=P2 --set f_points=5)
+plat3=$(issue lea story "Log out everywhere" --set f_priority=P1 --set f_points=3)
+plat4=$(issue lea bug "SSO button is misaligned" --set f_priority=P3)
+for i in "$plat2" "$plat3" "$plat4"; do
+	ok lea item link "$i" epic "$plat1" >/dev/null
+	ok lea rank "$i" bottom >/dev/null
+done
+expect "PLAT-2's container" "$(ok lea item get "$plat2" | j .item.container)" "$plat"
+expect "the backlog by rank" \
+	"$(ok lea item list "$plat" --type story --type bug --type task --order-by f_rank | in_order)" "$plat2 $plat3 $plat4"
+expect "the epic's progress" "$(progress lea)" "todo=3"
+
+step "A3: lea creates Sprint 12 (ends 2026-12-04), puts the three in it, and assigns PLAT-2 to sam"
+sprint=$(ok lea item create --type sprint@1 --in "$plat" --set "f_name=Sprint 12 $w" \
+	--set f_start=2026-11-23 --set f_end=2026-12-04 --set "f_goal=Ship SSO" | j .item.name)
+expect "a new sprint's state" "$(ok lea item get "$sprint" | j .item.state)" "planned"
+for i in "$plat2" "$plat3" "$plat4"; do ok lea item link "$i" sprint "$sprint" >/dev/null; done
+ok lea item update "$plat2" --set f_assignee=user:sam >/dev/null
+ok lea item update "$plat3" --set f_assignee=user:sam >/dev/null
+ok lea item update "$plat4" --set f_assignee=user:lea >/dev/null
+# A story is in at most one sprint.
+other_sprint=$(ok lea item create --type sprint@1 --in "$plat" --set "f_name=Sprint 13 $w" --set f_end=2026-12-18 | j .item.name)
+refuse lea "FAILED_PRECONDITION LINK_CARDINALITY" item link "$plat2" sprint "$other_sprint"
+expect "sprints of this run ending in early December" \
+	"$(ok lea item search "$w" --type sprint --where 'f_end>=2026-12-01' --where 'f_end<2026-12-10' | names)" "$sprint"
+expect "sprints of this run, latest end first" \
+	"$(ok lea item search "$w" --type sprint --order-by 'f_end desc' | in_order)" "$other_sprint $sprint"
+
+step "A4: sam links PLAT-2 blocks PLAT-3, starts PLAT-2, and comments on it"
+ok sam item link "$plat2" blocks "$plat3" >/dev/null
+expect "PLAT-2's state" "$(ok sam item transition "$plat2" --to in_progress | j .item.state)" "in_progress"
+comment=$(ok sam item create --type comment@1 --in "$plat2" --set "f_body=Waiting for the IdP metadata $w" | j .item.name)
+expect "PLAT-2's comments" "$(ok lea item list "$plat2" | names)" "$comment"
+expect "the comment's author" "$(ok lea item get "$comment" | j .item.creator)" "user:sam"
+
+step "A5: lea opens the board: the Items linked to Sprint 12, by rank (a search, not a container listing)"
+began=$(now_ms)
+expect "the board" "$(board)" "$plat2 $plat3 $plat4"
+echo "    the board answered in $(($(now_ms) - began)) ms"
+expect "the sprint as a container" "$(ok lea item list "$sprint" | names)" ""
+expect "the board, last first" \
+	"$(ok lea item search --linked "out:sprint=$sprint" --order-by 'f_rank desc' | in_order)" "$plat4 $plat3 $plat2"
+
+step "A6: lea ranks PLAT-4 before PLAT-2; the board order changes, with one write"
+e2=$(etag_of "$plat2")
+e3=$(etag_of "$plat3")
+e4=$(etag_of "$plat4")
+began=$(now_ms)
+ok lea rank "$plat4" before "$plat2" >/dev/null
+echo "    the move took $(($(now_ms) - began)) ms"
+[ ! -s "$tmp/err" ] || fail "pli rank wrote to stderr: $(cat "$tmp/err")"
+expect "the board after the move" "$(board)" "$plat4 $plat2 $plat3"
+expect "PLAT-2 untouched by the move" "$(etag_of "$plat2")" "$e2"
+expect "PLAT-3 untouched by the move" "$(etag_of "$plat3")" "$e3"
+[ "$(etag_of "$plat4")" != "$e4" ] || fail "PLAT-4's etag did not change: the move wrote nothing"
+ok lea rank "$plat3" after "$plat4" >/dev/null
+expect "the board after a second move" "$(board)" "$plat4 $plat3 $plat2"
+# The order is the backlog's own: the same in PLAT's listing.
+expect "the backlog by rank" \
+	"$(ok lea item list "$plat" --type story --type bug --type task --order-by f_rank | in_order)" "$plat4 $plat3 $plat2"
+# A rebalance is a separate, deliberate command; it keeps the order.
+# (How many cards it rewrites is not asserted: a card's random key may
+# already be the one the rebalance would give it.)
+rebalanced=$(ok lea rank rebalance --in "$plat")
+expect "cards the rebalance skipped" "$(j .skipped <<<"$rebalanced")" "0"
+expect "the board after the rebalance" "$(board)" "$plat4 $plat3 $plat2"
+expect "the backlog after the rebalance" \
+	"$(ok lea item list "$plat" --type story --type bug --type task --order-by f_rank | in_order)" "$plat4 $plat3 $plat2"
+refuse lea "INVALID_ARGUMENT INVALID_REQUEST" item search --linked "out:sprint=$sprint" --order-by 'f_rank sideways'
+
+step "A7: sam lists his open work: assignee = me, todo and active, by priority"
+mine() { ok sam item search "$w" --type story --type bug --type task --where f_assignee=me \
+	--category todo --category active --order-by f_priority | in_order; }
+expect "sam's open work (P1 then P2)" "$(mine)" "$plat3 $plat2"
+# The same field means something else on a ticket (an int): with no Type
+# named, the declarations disagree and the sort is refused.
+refuse sam "INVALID_ARGUMENT INVALID_REQUEST" item search "$w" --where f_assignee=me --order-by f_priority
+
+step "A8: lea reads PLAT-2's history"
+history=$(ok lea item history "$plat2")
+expect "PLAT-2's history" "$(j '[.events[:7][].kind | sub("ITEM_EVENT_KIND_"; "")] | join(" ")' <<<"$history")" \
+	"CREATED LINK_ADDED UPDATED LINK_ADDED UPDATED LINK_ADDED TRANSITIONED"
+expect "who started it" "$(j '.events[6].actor' <<<"$history")" "user:sam"
+# Ranking is an ordinary update: the first key (A2), and the rebalance (A6)
+# if it gave PLAT-2 another key. Nothing else has happened to it since.
+expect "what the first rank write set" "$(j '.events[2].fields | keys | join(" ")' <<<"$history")" "f_rank"
+expect "events after sam started it that are not rank writes" \
+	"$(j '[.events[7:][] | select(.kind != "ITEM_EVENT_KIND_UPDATED" or (.fields | keys) != ["f_rank"])] | length' <<<"$history")" "0"
+
+step "A9: lea shows PLAT-1: its progress counts only what she can see"
+hidden=$(ok sam item create --type task@1 --in "$plat" --narrow user:sam --set "f_summary=Rotate the signing key $w" | j .item.name)
+ok sam item link "$hidden" epic "$plat1" >/dev/null
+refuse lea "NOT_FOUND NOT_FOUND" item get "$hidden"
+expect "the epic's progress as lea" "$(progress lea)" "active=1 todo=2"
+expect "the epic's progress as sam, who sees one more" "$(progress sam)" "active=1 todo=3"
+expect "the epic's links as lea do not show it" \
+	"$(ok lea item get "$plat1" | j '[.item.links[]? | select(.link_type == "issues")] | length')" "3"
+# The guard sees every issue, whoever asks: the epic does not close.
+ok lea item transition "$plat1" --to in_progress >/dev/null
+refuse lea "FAILED_PRECONDITION GUARD_FAILED" item transition "$plat1" --to done
+expect "from_state" "$(meta from_state)" "in_progress"
+
+step "A10: sam finishes PLAT-2: done needs a resolution; reopening clears it"
+ok sam item transition "$plat2" --to in_review >/dev/null
+refuse sam "FAILED_PRECONDITION MISSING_FIELDS" item transition "$plat2" --to done
+expect "the missing field" "$(meta fields)" "f_resolution"
+done2=$(ok sam item transition "$plat2" --to done --set f_resolution=fixed)
+expect "PLAT-2's resolution" "$(j .item.fields.f_resolution <<<"$done2")" "fixed"
+expect "the epic's progress" "$(progress lea)" "done=1 todo=2"
+reopened=$(ok sam item transition "$plat2" --to todo)
+expect "PLAT-2's resolution after reopening" "$(j '.item.fields.f_resolution // "cleared"' <<<"$reopened")" "cleared"
+expect "history shows the clear on the reopening event" \
+	"$(ok lea item history "$plat2" | j '.events[-1] | "\(.from_state)>\(.to_state) \(.fields | has("f_resolution")) \(.fields.f_resolution)"')" \
+	"done>todo true null"
+ok sam item transition "$plat2" --to in_progress >/dev/null
+refuse sam "FAILED_PRECONDITION MISSING_FIELDS" item transition "$plat2" --to done
+
+step "A11: lea closes the sprint by hand"
+ok lea item transition "$sprint" --to active >/dev/null
+closed=$(ok lea item transition "$sprint" --to closed)
+expect "the sprint's state" "$(j .item.state <<<"$closed")" "closed"
+expect "the sprint's category" "$(j .item.category <<<"$closed")" "STATE_CATEGORY_DONE"
+
+step "D1: lea searches VPN in the active category"
+vpn=$(issue lea story "VPN drops on wifi")
+issue lea task "VPN setup guide" >/dev/null
+ok lea item transition "$vpn" --to in_progress >/dev/null
+expect "active VPN work" "$(ok lea item search VPN "$w" --category active | names)" "$vpn"
+
+step "D2: lea pages through the open P1 stories, bugs and tasks, 20 per page, ordered by points"
+want=""
+n=45
+i=1
+while [ "$i" -le "$n" ]; do
+	case $((i % 3)) in 0) typ=story ;; 1) typ=bug ;; *) typ=task ;; esac
+	seeded=$(issue lea "$typ" "P1 seed $i" --set f_priority=P1 --set "f_points=$((i + 10))")
+	want="$seeded${want:+ $want}" # most points first
+	[ "$i" -ne 9 ] || plat9=$seeded
+	i=$((i + 1))
+done
+unpointed=$(issue lea bug "P1 without points" --set f_priority=P1)
+# PLAT-3 is P1 and open too, with 3 points: after every seed. The bug
+# without points comes last, even though the order is descending.
+want="$want $plat3 $unpointed"
+got=""
+token=""
+pages=0
+began=$(now_ms)
+while :; do
+	page=$(ok lea item search "$w" --type story --type bug --type task --where f_priority=P1 \
+		--category todo --category active --order-by 'f_points desc' --page-size 20 ${token:+--page-token "$token"})
+	pages=$((pages + 1))
+	size=$(j '.items | length' <<<"$page")
+	token=$(j '.next_page_token // ""' <<<"$page")
+	got="$got${got:+ }$(in_order <<<"$page")"
+	if [ -n "$token" ]; then expect "page $pages is full" "$size" "20"; else break; fi
+	[ "$pages" -lt 10 ] || fail "more than 10 pages: the token does not advance"
+done
+echo "    $((n + 2)) Items in $pages pages took $(($(now_ms) - began)) ms"
+expect "pages" "$pages" "3"
+expect "every open P1 once, most points first, the one without points last" "$got" "$want"
+# A token belongs to its order.
+first=$(ok lea item search "$w" --type story --where f_priority=P1 --order-by f_points --page-size 2 | j .next_page_token)
+refuse lea "INVALID_ARGUMENT INVALID_REQUEST" item search "$w" --type story --where f_priority=P1 \
+	--order-by 'f_points desc' --page-size 2 --page-token "$first"
+
+step "D3: ana watches PLAT-9: a Subscription linked to it by watches; removing the link unwatches"
+sub=$(ok ana item create --type subscription@1 --narrow user:ana | j .item.name)
+refuse ana "NOT_FOUND NOT_FOUND" item link "$sub" watches "$hidden"
+refuse ana "NOT_FOUND NOT_FOUND" item link "$sub" watches "namespaces/acme/items/$(random_uuid)"
+ok ana item link "$sub" watches "$plat9" >/dev/null
+expect "what ana watches" "$(ok ana item search --linked "out:watches=$plat9" | names)" "$sub"
+expect "PLAT-9's watchers as ana" \
+	"$(ok ana item get "$plat9" | j '[.item.links[]? | select(.link_type == "watched_by") | .item.name] | join(" ")')" "$sub"
+expect "PLAT-9's watchers as lea, who cannot see ana's subscription" \
+	"$(ok lea item get "$plat9" | j '[.item.links[]? | select(.link_type == "watched_by")] | length')" "0"
+refuse lea "NOT_FOUND NOT_FOUND" item get "$sub"
+# A ticket can be watched too: the link targets any Type.
+sub2=$(ok ana item create --type subscription@1 --narrow user:ana | j .item.name)
+ok ana item link "$sub2" watches "$t1" >/dev/null
+ok ana item unlink "$sub" watches "$plat9" >/dev/null
+expect "PLAT-9's watchers after ana unwatches" \
+	"$(ok ana item get "$plat9" | j '[.item.links[]? | select(.link_type == "watched_by")] | length')" "0"
+expect "the subscription is kept, watching nothing" "$(ok ana item get "$sub" | j '.item.links // [] | length')" "0"
 
 # ---------------------------------------------------------------------------
 # Another namespace: carol, in globex, reaches nothing of acme, on every

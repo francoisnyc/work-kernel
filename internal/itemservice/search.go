@@ -38,10 +38,25 @@ type SearchRequest struct {
 	// PageToken is the previous page's NextPageToken, sent with the same
 	// request; with any other request, caller or namespace it is ErrInvalid.
 	PageToken string
+	// OrderBy sorts by a declared field instead of newest first; nil keeps
+	// newest first.
+	OrderBy *OrderBy
 }
 
-// SearchResult holds the matching Items, newest first, as the principal may
-// see them.
+// OrderBy sorts Search and List by one declared field: ascending unless
+// Desc, Items without a value last in both directions, ties by Item ID
+// ascending. The field must be a string, int, date or enum, with one type
+// across the selected Types (or across every registered Type that declares
+// it when none is selected); else an InvalidError on order_by. Strings and
+// enum names compare byte by byte, never by locale. Items whose Type does
+// not declare the field sort as unset.
+type OrderBy struct {
+	Field string
+	Desc  bool
+}
+
+// SearchResult holds the matching Items, newest first or in the request's
+// order, as the principal may see them.
 type SearchResult struct {
 	Items         []item.Item
 	NextPageToken string // empty on the last page
@@ -75,10 +90,17 @@ func (k *Service) Search(ctx context.Context, req SearchRequest) (SearchResult, 
 	if err != nil {
 		return SearchResult{}, err
 	}
+	order, err := k.resolveOrder(ctx, req.Filter.TypeIDs, req.OrderBy)
+	if err != nil {
+		return SearchResult{}, err
+	}
+	// The order is part of what a token is bound to: a token of one order
+	// names a place that means nothing in another.
 	key := requestKey("search", req.Principal, struct {
-		Query  string
-		Filter Filter
-	}{strings.TrimSpace(req.Query), req.Filter})
+		Query   string
+		Filter  Filter
+		OrderBy *OrderBy
+	}{strings.TrimSpace(req.Query), req.Filter, req.OrderBy})
 	after, err := decodeToken(req.PageToken, key)
 	if err != nil {
 		return SearchResult{}, err
@@ -87,7 +109,8 @@ func (k *Service) Search(ctx context.Context, req SearchRequest) (SearchResult, 
 		return SearchResult{}, err
 	}
 	found, next, err := k.page(ctx, itemQuery{
-		p: req.Principal, words: strings.TrimSpace(req.Query), filter: filter, limit: limit, after: after, key: key,
+		p: req.Principal, words: strings.TrimSpace(req.Query), filter: filter, order: order,
+		limit: limit, after: after, key: key,
 	})
 	if err != nil {
 		return SearchResult{}, err

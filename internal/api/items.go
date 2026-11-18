@@ -103,17 +103,37 @@ func (s *server) view(ctx context.Context, p item.Principal, it item.Item) (*ker
 	return out, nil
 }
 
-// current reads the Item as the caller sees it now, for the wire.
+// current reads the Item as the caller sees it now, for the wire: a write's
+// answer. It carries no rollups; only GetItem does.
 func (s *server) current(ctx context.Context, p item.Principal, id uuid.UUID) (*kernelv1.Item, error) {
+	v, _, err := s.read(ctx, p, id)
+	return v, err
+}
+
+// read is current, with the Item as the kernel returned it.
+func (s *server) read(ctx context.Context, p item.Principal, id uuid.UUID) (*kernelv1.Item, item.Item, error) {
 	it, err := s.k.Get(ctx, p, id)
 	if err != nil {
-		return nil, errorFor(err, itemName(p.Namespace, id))
+		return nil, item.Item{}, errorFor(err, itemName(p.Namespace, id))
 	}
 	v, err := s.view(ctx, p, it)
 	if err != nil {
-		return nil, errorFor(err, "")
+		return nil, item.Item{}, errorFor(err, "")
 	}
-	return v, nil
+	return v, it, nil
+}
+
+// rollupsOut is an Item's rollups for the wire, as the kernel counted them
+// for the caller.
+func rollupsOut(rollups map[string]item.Rollup) map[string]*kernelv1.RollupValue {
+	if len(rollups) == 0 {
+		return nil
+	}
+	out := make(map[string]*kernelv1.RollupValue, len(rollups))
+	for id, r := range rollups {
+		out[id] = &kernelv1.RollupValue{Counts: r.Counts}
+	}
+	return out
 }
 
 // itemType reads the Item the caller names and its Type: an update needs the
@@ -200,10 +220,12 @@ func (s *server) GetItem(ctx context.Context, req *connect.Request[kernelv1.GetI
 	if cerr != nil {
 		return nil, cerr
 	}
-	it, err := s.current(ctx, p, id)
+	it, read, err := s.read(ctx, p, id)
 	if err != nil {
 		return nil, err
 	}
+	// The values the Type computes on read: on GetItem only.
+	it.Rollups = rollupsOut(read.Rollups)
 	return connect.NewResponse(&kernelv1.GetItemResponse{Item: it}), nil
 }
 
@@ -341,9 +363,13 @@ func (s *server) SearchItems(ctx context.Context, req *connect.Request[kernelv1.
 	if m.PageSize < 0 {
 		return nil, badField("page_size", "cannot be negative")
 	}
+	order, cerr := orderByIn(m.OrderBy)
+	if cerr != nil {
+		return nil, cerr
+	}
 	res, err := s.k.Search(ctx, itemservice.SearchRequest{
 		Principal: p, Query: m.Query, MinSeq: m.MinSeq, Wait: s.searchWait,
-		Filter: filter.Filter, Limit: int(m.PageSize), PageToken: m.PageToken,
+		Filter: filter.Filter, Limit: int(m.PageSize), PageToken: m.PageToken, OrderBy: order,
 	})
 	if err != nil {
 		return nil, errorIn(err, p.Namespace, "")

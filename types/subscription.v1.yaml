@@ -1,0 +1,9 @@
+# A subscription: someone's lasting interest in an Item. Watching is user
+# space: there is no Watch call. The subscription links to what it watches
+# (`watches`, which may target an Item of any Type), is created readable by
+# its owner alone, and is unlinked to unwatch. Notifications, when they
+# come, read these links.
+id: subscription
+version: 1
+links:
+  - {name: watches, inverse: watched_by, targets: ['*'], max: one}

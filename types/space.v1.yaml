@@ -1,0 +1,10 @@
+# A space: the container of a project's work (PLAT, the software project of
+# the Jira proof of concept). No lifecycle, so no listeners. Its issues,
+# epics and sprints are its children; who can see the space can see them.
+# f_key is the project's short name (PLAT); issue keys such as PLAT-12 are
+# Later: the kernel has no counter per container.
+id: space
+version: 1
+fields:
+  - {id: f_key,  type: string}
+  - {id: f_name, type: string}

@@ -307,13 +307,26 @@ func (k *Service) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item
 	if err != nil {
 		return item.Item{}, err
 	}
+	// The values the Type computes on read (rollups) are part of the Item
+	// that goes through Project. They count only what the principal sees.
+	ty, err := k.loadType(ctx, k.pool, it.TypeID, it.TypeVersion)
+	if err != nil {
+		return item.Item{}, err
+	}
+	rollups, counted, err := k.rollups(ctx, p, ty, id)
+	if err != nil {
+		return item.Item{}, err
+	}
+	it.Rollups = rollups
 	// The scope was found readable; Project is still the one door out.
 	it, ok := policy.Project(p, []uuid.UUID{*it.ScopeID}, it)
 	if !ok {
 		return item.Item{}, ErrNotFound
 	}
-	// An agent's read is recorded for the write rule (narrowing scopes only).
-	if err := recordReads(ctx, k.pool, p, []*uuid.UUID{policyScope}); err != nil {
+	// An agent's read is recorded for the write rule (narrowing scopes
+	// only): the Item's own scope, and the scopes of the Items a rollup
+	// counted.
+	if err := recordReads(ctx, k.pool, p, append([]*uuid.UUID{policyScope}, counted...)); err != nil {
 		return item.Item{}, err
 	}
 	// Links both ways, each end passed through visibility. They name other

@@ -107,6 +107,17 @@ message Item {
   // More links exist in some direction than are shown: page through them
   // with an ItemFilter link condition.
   bool links_truncated = 13;
+  // The values the Item's Type version computes when the Item is read,
+  // keyed by rollup ID (Type.rollups). Filled by GetItem only. A rollup
+  // counts only the linked Items the caller can see.
+  map<string, RollupValue> rollups = 14;
+}
+
+// One rollup of an Item: how many linked Items the caller can see, by state
+// category (todo, active, done...) or by state ID. A key with no Item is
+// absent.
+message RollupValue {
+  map<string, int64> counts = 1;
 }
 
 // One link of an Item, as seen from that Item.
@@ -280,10 +291,19 @@ message SearchItemsRequest {
   int32 page_size = 5;
   // The previous page's next_page_token, with the same request otherwise.
   string page_token = 6;
+  // Sort by one declared field instead of newest first: a field ID, then
+  // optionally " asc" (the default) or " desc" (f_rank, f_priority desc),
+  // AIP-132 style, one field only. Items without a value
+  // come last in both directions; ties are broken by Item ID, ascending.
+  // The field must be a string, int, date or enum, with one type across the
+  // filter's Types (across every Type that declares it when the filter
+  // names none), else INVALID_ARGUMENT. Strings and enum names compare byte
+  // by byte, not by locale. Part of what a page token is bound to.
+  string order_by = 7;
 }
 
 message SearchItemsResponse {
-  // Newest first (create time, then name).
+  // Newest first (create time, then name), unless the request has order_by.
   repeated Item items = 1;
   // Empty on the last page.
   string next_page_token = 2;
@@ -299,8 +319,9 @@ message ItemFilter {
   repeated string states = 2;
   // State categories, read in each Item's own Type version.
   repeated StateCategory categories = 3;
-  // Conditions on field values. A field filter needs exactly one Type in
-  // types, and the field must have one type in every version of it.
+  // Conditions on field values. The field must have one type across the
+  // Types in types, or across every Type that declares it when types is
+  // empty (a string and a principal count as one for eq).
   repeated FieldFilter fields = 4;
   // Conditions on links: Items linked to (or from) an Item.
   repeated LinkFilter links = 5;
@@ -319,8 +340,10 @@ message LinkFilter {
 }
 
 // A condition on one field's value: eq, or a range of one or two bounds.
-// Values are plain JSON as in Item.fields (an int is a string). Ranges are
-// for ordered types only (int); strings, enums and booleans take eq.
+// Values are plain JSON as in Item.fields (an int is a string, a date an
+// ISO 8601 string). Ranges are for ordered types only: int, date and string
+// (strings compare byte by byte, not by locale); enums, booleans and
+// principals take eq.
 //
 // On a principal field, eq takes user:<id> or agent:<id>, or "me": the
 // caller (for an agent, the user it acts for, else the agent).
@@ -342,10 +365,12 @@ message ListItemsRequest {
   // As on SearchItemsRequest.
   int32 page_size = 3;
   string page_token = 4;
+  // As on SearchItemsRequest.
+  string order_by = 5;
 }
 
 message ListItemsResponse {
-  // Newest first (create time, then name).
+  // Newest first (create time, then name), unless the request has order_by.
   repeated Item items = 1;
   string next_page_token = 2;
 }
@@ -540,6 +565,30 @@ message Type {
   // Reactions of other Types that may write Items of this version, and the
   // fields each may write. Any other reaction is refused.
   repeated AcceptedReaction accepts_reactions = 11;
+  // Links other Types declare towards this Type, named so its guards and
+  // rollups can read them.
+  repeated IncomingLink incoming = 12;
+  // Values computed when an Item of this version is read (Item.rollups).
+  repeated Rollup rollups = 13;
+}
+
+// Links declared by other Types that point to Items of this Type: the
+// Items of the `from` Types linked by their link type `link`. `name` is the
+// inverse those Types declare for it.
+message IncomingLink {
+  string name = 1;
+  string link = 2;
+  // Type names without a version, namespaces/{ns}/types/{type}.
+  repeated string from = 3;
+}
+
+// A value computed at read time: a count of the Items linked under `over`
+// (a link name the Type can read), grouped by `count_by`.
+message Rollup {
+  string id = 1;
+  string over = 2;
+  // "category" or "state".
+  string count_by = 3;
 }
 
 // A rule over an Item's fields. Its id is the refusal code: a write that
@@ -595,7 +644,8 @@ message LinkType {
   string name = 1;
   string inverse = 2;
   // Type names without a version, namespaces/{ns}/types/{type}: a target
-  // may be of any version of these Types.
+  // may be of any version of these Types. A single "*" means a target may
+  // be of any Type.
   repeated string targets = 3;
   // At most one link of this type from a source; else many.
   bool max_one = 4;
@@ -711,6 +761,9 @@ message Transition {
   // Who may not make the move, even if `allowed` names them: for now only
   // creator.
   repeated string except = 8;
+  // Field IDs the move unsets in the same write. Required fields and the
+  // guard are judged before the clear.
+  repeated string clears = 9;
 }
 
 message GetTypeRequest {

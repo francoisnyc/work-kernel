@@ -71,7 +71,7 @@ func typeOut(ns string, t *typedef.Type) *kernelv1.Type {
 		}
 		out.Transitions = append(out.Transitions, &kernelv1.Transition{
 			FromState: tr.From, ToState: tr.To, Guard: tr.Guard, Required: tr.Required,
-			Allowed: tr.Allowed, Except: tr.Except, Escape: tr.Escape, Checked: checked,
+			Allowed: tr.Allowed, Except: tr.Except, Escape: tr.Escape, Checked: checked, Clears: tr.Clears,
 		})
 	}
 	for _, l := range t.Links {
@@ -81,9 +81,23 @@ func typeOut(ns string, t *typedef.Type) *kernelv1.Type {
 			lt.Resolve = &kernelv1.LinkResolve{OnEnter: r.OnEnter, Field: r.Field, Equals: r.Equals, State: r.State}
 		}
 		for _, target := range l.Targets {
+			if target == typedef.AnyType { // "*": any Type, not a Type's name
+				lt.Targets = append(lt.Targets, target)
+				continue
+			}
 			lt.Targets = append(lt.Targets, namespaceName(ns)+"/types/"+target)
 		}
 		out.LinkTypes = append(out.LinkTypes, lt)
+	}
+	for _, in := range t.Incoming {
+		link := &kernelv1.IncomingLink{Name: in.Name, Link: in.Link}
+		for _, from := range in.From {
+			link.From = append(link.From, namespaceName(ns)+"/types/"+from)
+		}
+		out.Incoming = append(out.Incoming, link)
+	}
+	for _, r := range t.Rollups {
+		out.Rollups = append(out.Rollups, &kernelv1.Rollup{Id: r.ID, Over: r.Over, CountBy: r.CountBy})
 	}
 	for _, inv := range t.Invariants {
 		out.Invariants = append(out.Invariants, &kernelv1.Invariant{Id: inv.ID, Rule: inv.Rule})

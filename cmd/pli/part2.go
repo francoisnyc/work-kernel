@@ -23,6 +23,7 @@ import (
 // filterOpts are the FILTERS flags, shared by item search and item list.
 type filterOpts struct {
 	types, states, categories, wheres, links listFlag
+	orderBy                                  string
 }
 
 func filterFlags(fs *flag.FlagSet) *filterOpts {
@@ -32,6 +33,7 @@ func filterFlags(fs *flag.FlagSet) *filterOpts {
 	fs.Var(&f.categories, "category", "a state category (active, done); repeatable")
 	fs.Var(&f.wheres, "where", "F=V, F>V, F>=V, F<V or F<=V on a field (on a principal field, V may be me); repeatable")
 	fs.Var(&f.links, "linked", "out:NAME=ITEM (Items that link to ITEM) or in:NAME=ITEM (Items ITEM links to, by the inverse name); repeatable")
+	fs.StringVar(&f.orderBy, "order-by", "", "sort by a field: 'FIELD', 'FIELD asc' or 'FIELD desc' (default: newest first)")
 	return f
 }
 
@@ -145,7 +147,7 @@ func (c *cli) itemList(ctx context.Context, args []string) error {
 		return err
 	}
 	res, err := c.c.ListItems(ctx, connect.NewRequest(&kernelv1.ListItemsRequest{
-		Parent: parent, Filter: filter, PageSize: size, PageToken: *pg.token,
+		Parent: parent, Filter: filter, PageSize: size, PageToken: *pg.token, OrderBy: fl.orderBy,
 	}))
 	if err != nil {
 		return err

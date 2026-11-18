@@ -67,7 +67,8 @@ export PATH="$PWD/bin:$PATH"
 
 There is no real sign-on yet. [`dev-tokens.example.yaml`](dev-tokens.example.yaml)
 maps fake bearer tokens to principals: `ana` and `bob` (who holds the
-`approver` role) and the agent `triage-bot` in namespace `acme`, and `carol` in
+`approver` role), `lea` and `sam` (who work in the PLAT project below) and the
+agent `triage-bot` in namespace `acme`, among others, and `carol` in
 namespace `globex`. It also says what ana lets `triage-bot` do. The stack
 mounts the file read-only into the item service, which refuses to start
 without it and prints a **WARNING on every start**: anyone holding the file
@@ -130,6 +131,52 @@ pli --as ana agent approve "$S" "$TASK"                     # says who will see 
 pli --as triage-bot item update "$TASK" --set f_priority=1  # now it works
 ```
 
+### A project: order, rank, progress
+
+The PLAT Types (`space`, `story`, `bug`, `task`, `epic`, `sprint`, `comment`,
+`subscription`) make a small Jira-like project. The kernel sorts by any
+declared field; ranking by hand is the app's business: `pli rank` writes an
+ordinary string field, `f_rank`.
+
+```sh
+PLAT=$(pli --as lea item create --type space@1 --set f_key=PLAT --set f_name=Platform | jq -r .item.name)
+EPIC=$(pli --as lea item create --type epic@1 --in "$PLAT" --set f_summary="Single sign-on" | jq -r .item.name)
+SPRINT=$(pli --as lea item create --type sprint@1 --in "$PLAT" --set f_name="Sprint 12" \
+           --set f_end=2026-12-04 | jq -r .item.name)
+A=$(pli --as lea item create --type story@1 --in "$PLAT" --set f_summary="Log in with SSO" \
+      --set f_priority=P2 --set f_assignee=user:sam | jq -r .item.name)
+B=$(pli --as lea item create --type bug@1 --in "$PLAT" --set f_summary="Button misaligned" \
+      --set f_priority=P1 --set f_assignee=user:sam | jq -r .item.name)
+for I in "$A" "$B"; do
+  pli --as lea item link "$I" epic "$EPIC"; pli --as lea item link "$I" sprint "$SPRINT"
+  pli --as lea rank "$I" bottom            # one write: an update of f_rank
+done
+
+# The board: what is linked to the sprint, in rank order. Then move a card.
+pli --as lea item search --linked "out:sprint=$SPRINT" --order-by f_rank
+pli --as lea rank "$B" before "$A"
+
+# sam's open work across the three Types, most urgent first.
+pli --as sam item search --type story --type bug --type task --where f_assignee=me \
+    --category todo --category active --order-by f_priority
+
+pli --as lea item get "$EPIC"                             # rollups.progress: what lea can see
+pli --as sam item transition "$A" --to in_progress
+pli --as sam item transition "$A" --to done               # FAILED_PRECONDITION MISSING_FIELDS (f_resolution)
+pli --as sam item transition "$A" --to done --set f_resolution=fixed
+pli --as sam item transition "$A" --to todo               # reopening clears the resolution
+```
+
+`--order-by 'FIELD [asc|desc]'` works on `item search` and `item list`, on
+string, int, date and enum fields; Items without a value come last. Strings
+sort byte by byte.
+
+A move is always one write. Rank keys grow as cards are squeezed into the
+same gap; past 32 bytes `pli rank` says the container needs a rebalance and
+still succeeds. `pli rank rebalance --in "$PLAT"` rewrites the container's
+keys, short and even. **Run it when nobody is dragging cards there:** a card
+moved while it runs can land out of place (measured: two in three).
+
 `pli` keeps agent sessions under `$XDG_CONFIG_HOME/pli/sessions` when
 `XDG_CONFIG_HOME` is set (on every OS), else in the OS's config directory.
 `pli` with no arguments prints its usage.
@@ -147,7 +194,9 @@ reason checked), an agent in capability mode, every operation across
 namespaces, and a vacation request from draft to approved or rejected (the
 approver set by the HR check, the terms frozen, no self-approval, agents
 unable to approve) that deducts from a leave balance HR owns (refunded on
-withdrawal, never overdrawn, even by two approvals at once). It drives only `pli`, keeps its saved sessions in a temporary
+withdrawal, never overdrawn, even by two approvals at once), and the PLAT
+software project: a sprint's board ordered by rank, rank moves, an epic's
+progress, a resolution on done, 47 Items paged 20 at a time, watching. It drives only `pli`, keeps its saved sessions in a temporary
 `XDG_CONFIG_HOME`, cleans up after itself, and stops at the first wrong
 outcome, naming the step. It can run any number of times on the same stack.
 

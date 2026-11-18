@@ -312,6 +312,68 @@ Ideas noted during the spike, not built yet.
   system would start a new one (the run had finished). Two of this step's
   tests assumed a run stays alive in a state with nothing to do. A harness
   that refuses updates after completion would catch it. (Step 2, part 3)
+- String order is byte order (`COLLATE "C"`) in every sort and comparison:
+  rank keys need it. Locale-aware sorting of human text (a title column
+  sorted for a French reader) would be a per-field or per-request collation.
+  (Jira part 1)
+- `order_by` on an enum sorts by option name, so the PLAT priorities are
+  named to sort (P1..P4). Sort by declared option order instead; the options
+  of different Types must then agree on it. (Jira part 1)
+- `order_by` takes one declared field. Create and update times as sort keys,
+  and a second key, are not there. (Jira part 1)
+- One field ID should mean one thing across Types: `f_priority` is an int
+  on `ticket` and an enum on the PLAT Types, so a search by it with no Type
+  named is refused. A registry of shared field definitions would catch this
+  at load. (Jira part 1)
+- An online rebalance. `pli rank rebalance` is a quiet-time batch: two
+  drags in three made while it runs land out of place (bench, Jira part 1),
+  because a drag sits between keys the batch then moves. The fix is a
+  generation prefix on the keys: the batch migrates cards one by one into
+  the next generation, from one end, always taking the card that is at
+  that end now, so a card dragged meanwhile is migrated in its turn and the
+  order holds at every step (Jira's LexoRank buckets). (Jira part 1)
+- An expression index per ranked field, if containers of 30,000 cards
+  become a target. Sorting by a field sorts every match: at 30,000 issues
+  in one space a page of the backlog by rank is 29 to 32 ms and each of a
+  move's three reads 13 to 14 ms, against 3 ms for a 1,000-card board. A
+  generic form: a field attribute (`indexed: true`) that makes the kernel
+  keep `(container_id, value collate "C", id)` for that field. (Jira part 1)
+- A transition held by a check or a held reaction may not clear fields
+  (refused at load). A held move is written in two steps, the request with
+  its patch and the move when the hold resolves: decide which one clears,
+  and what a denied hold leaves behind. (Jira part 1)
+- Write answers compute rollups and drop them: the API builds every write's
+  answer with `Get`, which counts the linked Items, and only `GetItem`
+  shows the counts. One count per epic write for nothing; give the kernel a
+  read without rollups. Also: after ANALYZE the count of a 1,000-issue epic
+  switches to a sequential scan of `items` (10.9 ms against 3.6 ms fresh).
+  (Jira part 1)
+- "No rule reads this": a field attribute that would skip the outbox row
+  for writes that only touch such fields (a rank). Not needed yet: the PLAT
+  Types have no listeners, so a drag writes no outbox row. On a Type with
+  listeners a drag costs one outbox row, and six workflow history events
+  when the card's workflow is running. Revisit if a ranked Type gets hooks
+  or timers. (Jira part 1)
+- Issue keys (PLAT-12): the kernel has no counter per container. An app
+  can keep one on the space with an etag loop, at the price of serializing
+  creates in a project. (Jira part 1)
+- Archive (or delete) is still not built: unwatching unlinks and leaves the
+  subscription behind. (Jira part 1)
+- A timer at a date rather than after a duration: a sprint closing on its
+  end date. Closed by hand in Jira part 1.
+- Rollups count; they do not sum. "Points done of points planned" needs a
+  sum of an int field, the first rollup to read fields: it must go through
+  `Project`'s field rules when those exist. (Jira part 1)
+- Symmetric link types (`relates` has an inverse, `related_by`, because a
+  link name may not be its own inverse), and Type templates: story, bug and
+  task are three files with one lifecycle. (Jira part 1)
+- `RegisterType` does not check `incoming` against the registered Types;
+  only `ParseDir` does, at load. (Jira part 1)
+- `pli rank rebalance --in` takes an Item: the top level cannot be
+  rebalanced. And a move after the last card of a run of equal keys longer
+  than the cap is refused though one write would do (the run's last card
+  cannot be read cheaply: ties sort by ID ascending in both directions).
+  (Jira part 1)
 
 ## 2026-11-12 — Step 1 (finished)
 
@@ -1513,3 +1575,137 @@ and email 0.62 / 0.62 s, withdraw, refund and email 0.44 / 0.44 s, the final ema
 **Open:** Later has two new items (refused undos retried by every fresh run; acting runs counted
 as completed, so a given-up run is never retried) and loses one (the flaky test).
 **Next session:** proof-of-concept Step 3 (the Jira scenarios), once this PR is merged.
+
+## 2026-11-18 — Jira proof of concept, part 1: the PLAT software project (finished)
+
+**Built:** scenarios A and D of design.md run through pli, on eight new Types (`space`, `story`,
+`bug`, `task`, `epic`, `sprint`, `comment`, `subscription`). The board is a search for the Items
+linked to a sprint, ordered by rank; "my open work" is a search across three Types ordered by
+priority; an epic shows its progress as each reader sees it and does not close while an issue is
+open; done requires a resolution and reopening clears it; watching is a Subscription and a link.
+Rank is an app field: `internal/rank` (base-62 fractional keys, byte order) and `pli rank`.
+
+**Kernel changes, counted** (eight; proto v1 only grew, `buf breaking` green):
+(1) `order_by` on List and Search: one declared field (string, int, date, enum), asc or desc,
+nulls last both ways, ties by ID ascending; keyset tokens carry the sort value and are bound to
+the order. (2) Field filters and `order_by` across Types: the selected Types, or every registered
+Type that declares the field; refused when nobody declares it or the declarations disagree.
+(3) Date filters (equality, ranges). (4) String range filters; every text comparison and sort is
+`COLLATE "C"`. (5) `incoming`: a Type names links other Types declare towards it; guards read
+them (`typedef.LinkSource`, `CheckIncoming` in `ParseDir`). (6) Rollups: counts over a readable
+link name by category or state, on `GetItem`, counting what the reader sees and recording an
+agent's narrowed reads. (7) `clears` on transitions, with its order of checks and load rules.
+(8) `targets: ['*']`. Proto: `order_by` (two requests), `Item.rollups`, `Type.incoming`,
+`Type.rollups`, `Transition.clears`. No migration; no workflow change (the four recorded
+histories replay; no `GetVersion`). Not the kernel: `internal/rank`, pli's `rank` commands and
+`--order-by`, the Types, `cmd/bench --rank` and `--explain-order`.
+
+**EXPLAIN** (`go run ./cmd/bench --explain-order`; 30,000 issues in one space, 2% hidden, 1,000
+linked to one sprint and 1,000 to one epic, 5,000 tickets beside them; the item service's own SQL,
+captured with a pgx tracer; fresh = autovacuum off, no statistics):
+
+| Read | Fresh (ms) | Analyzed (ms) | Analyzed plan |
+| --- | --- | --- | --- |
+| Board: 1,000 linked to the sprint, by rank, page 1 | 5.6 | 3.4 | links -> items nested loop, top-N heapsort of 850 |
+| Board, page 2 (keyset on the rank) | 4.0 | 3.0 | same |
+| Backlog: the space's 30,000 children, three Types, by rank, page 1 | 58.1 | 32.3 | parallel seq scan, sort of every row |
+| Backlog, page 2 | 82.0 | 28.8 | same |
+| A move's neighbour read: highest rank below a key, 2 rows | 24.7 | 14.3 | parallel seq scan, sort of every match |
+| A move's tied-run read: rank = a key | 8.7 | 13.4 | scan, no sort |
+| My open work: assignee = me (1%), todo and active, by priority | 16.7 | 10.6 | top-N heapsort of 150 |
+| Open P1 (7,500), by points descending, 20 per page, page 1 | 40.0 | 24.2 | sort of every match |
+| Open P1, page 3 | 72.1 | 24.7 | same |
+| No Type named: everything in todo, by rank | 47.8 | 22.6 | sort of every match |
+| Words "alpha" (35,000 matches) among three Types, by rank | 63.7 | 47.6 | top-N heapsort over the matches |
+| Sprints ending in a date range, latest first | 0.1 | 0.3 | 27 rows |
+| The epic's rollup: 1,000 issues counted by state | 3.6 | 10.9 | seq scan on items after ANALYZE (nested loop fresh) |
+| The epic's guard: the link set of its 1,000 issues | 0.3 | 0.4 | index scan on links_target |
+
+Sorting by a field sorts every match, as expected. No plan demands an index at PLAT's size (a
+board is 3 ms). At 30,000 cards in one container a move is three reads of 13 to 14 ms: an
+expression index per ranked field is in Later, not built.
+
+**Rank bench** (`go run ./cmd/bench --rank`; 1,000 stories in one space, in process, 4 CPUs).
+
+Key length, in bytes (threshold 32):
+
+| Run | Longest | Mean |
+| --- | --- | --- |
+| Even keys (after a rebalance) | 3 | 3.0 |
+| 4,000 random moves by 8 users | 7 | 4.2 |
+| Always at the top, midpoint keys (first version): 100 / 200 / 500 / 1,000 inserts | 22 / 40 / 92 / 184 | 3.9 / 6.4 / 22.8 / 71.2 |
+| Always at the top, end-aware keys: 100 / 200 / 500 / 1,000 / 2,000 / 3,000 | 6 / 8 / 14 / 24 / 44 / 64 | 3.2 / 3.6 / 5.6 / 11.2 / 26.7 / 45.3 |
+| Always right below the same card (midpoint): 100 / 200 / 500 / 1,000 | 21 / 38 / 92 / 180 | 3.9 / 6.3 / 22.3 / 69.5 |
+
+Threshold crossings: none in 4,000 random moves. Always at the top: first at insert 160 with
+midpoint keys (841 of 1,000 past it; one rebalance every 152 to 168 inserts), at insert 1,415
+with end-aware keys (no rebalance in 1,000 inserts): 8.8 times rarer. Always into the same gap:
+first at insert 167, one rebalance every 161 to 169 inserts.
+
+| Moves | p50 (ms) | p95 | p99 | Reads | Writes |
+| --- | --- | --- | --- | --- | --- |
+| 8 users, random before/after (287 moves/s) | 27.3 | 34.2 | 37.4 | 3.00 | 1.000 |
+| 1 user, before a card | 12.9 | 16.0 | | 3.00 | 1 |
+| 1 user, right below the same card | 12.1 | 16.0 | 18.0 | 3 | 1 |
+| 1 user, always at the top | 5.2 | 7.3 | 8.4 | 1 | 1 |
+
+Re-keys: 0 in 4,000 concurrent moves, largest tied run 0, no two cards ever shared a key, none
+refused at the cap (8); 6 moves were planned again because a card moved between two reads.
+
+Rebalance of 1,000 cards, alone: 995 rewritten in 2.53 s (2.5 ms per card), 2 reads, 995 events,
+995 value rows, 0 outbox rows; longest key 180 -> 3.
+
+The write path per drag (200 drags):
+
+| Type | Events | Value rows | Outbox rows | Update p50 (ms) | p95 |
+| --- | --- | --- | --- | --- | --- |
+| story (no listeners) | 1 | 1 | 0 | 2.4 | 3.4 |
+| story with a hook and a timer | 1 | 1 | 1 | 2.3 | 3.3 |
+
+A card of the second Type dragged 20 times: no workflow history when none is running (the relay
+finds nothing listening); 6.0 history events per drag when its workflow is running on a timer.
+
+**The rebalance finding.** 400 drags by 4 users next to cards that are never dragged, while a
+rebalance of the same 1,000 cards runs:
+
+| Run | Out of place | Anchors out of order | Skipped by the rebalance | Re-keys |
+| --- | --- | --- | --- | --- |
+| Rebalance, order kept at every write (pli's) | 261 | 0 | 332 | 0 |
+| Rebalance written top to bottom | 325 | 24 | 243 | 28 |
+| No rebalance | 0 | 0 | | 0 |
+
+Written top to bottom, a rebalance mixes old and new keys: the board is out of order while it
+runs and cards meet on one key. `rank.RewriteOrder` (keys that move down first, from the top;
+then keys that move up, from the bottom) keeps the container in order after every write, a
+property test holds it, and the anchors stay in order. It does not save the drags: a drag is
+placed between its neighbours' keys of that moment, the batch then moves those neighbours, and
+two drags in three end up elsewhere. So the rebalance is a quiet-time batch (pli says so each
+time it runs, and the README), end-aware keys make it rare, and the online version is in Later.
+
+**Test changes to existing tests** (each agreed in review): five refusal cases replaced by the
+nearest refusal that still holds (a field no registered Type declares; two Types declaring a field
+with different types; a range on a principal, or on a bool in the API); the three pinned lists of
+Types gain the eight PLAT Types. Fixed in tests written in Phase B, which had failed at setup and
+never run: a link filter named by its inverse, a key expected on a card not ranked yet, summaries
+that parsed as numbers, and a flake in the scenario (the number of cards a rebalance rewrites).
+78 new test functions; `TestBetween_AlwaysAtTheTop` became `TestBetween_AlwaysAtAnEnd` and
+`TestBetween_AlwaysIntoTheSameGap` with the end-aware keys.
+
+**Surprises:** the bench found two things no test had: `rank.Plan` called a card that was moved
+between two of its reads a tied run (now `ErrChanged`, and the move is planned again), and the
+rebalance above. Postgres compares text by the database's collation, and nothing in the repo
+pinned one: without `COLLATE "C"` rank order would depend on the image. Ties sort by ID ascending
+in both directions, so the last card of a run of equal keys cannot be read with one descending
+query. After ANALYZE the rollup's count switches to a sequential scan of `items` (10.9 ms against
+3.6 ms). Phase B tests that fail at setup are not tested tests: four of them had bugs, and the
+pinned lists of Types belong in Phase B next time. Docker builds
+still need the module cache served as `GOPROXY`, and the daemon does not survive between turns.
+
+**Numbers:** `go test -race -count=1 ./...` green in 142 s, no data race. Scenario, two
+runs in a row on a fresh stack: 29.3 s and 28.9 s (stack up 7 s); the board 16 / 18 ms, a rank
+move 29 / 34 ms, 47 open P1 Items in 3 pages 82 / 82 ms.
+
+**Open:** a move's cost is its three reads (12 ms of a 13 ms move at 1,000 cards), not its write;
+`Threshold` 32 and `MaxGrowth` 4 held up (random drags reach 7 bytes); the Later list has this
+step's sixteen entries, the online rebalance first.
+**Next session:** the SLA design pass (paper only), then Jira part 2 (the IT service desk).

@@ -152,7 +152,7 @@ func (k *Service) linkWrite(ctx context.Context, req LinkRequest, add bool) (Wri
 		}
 
 		if add {
-			if !slices.Contains(lt.Targets, dst.TypeID) {
+			if !lt.AllowsTarget(dst.TypeID) {
 				return WriteResult{}, rejected(CodeLinkTargetType, "link %s does not allow a target of that Type", lt.Name)
 			}
 			_, err := tx.Exec(ctx,
@@ -273,24 +273,26 @@ func guardLinkNames(ty *typedef.Type, to string) []string {
 // linkSet is the IDs linked under each name a guard reads, sorted.
 type linkSet map[string][]uuid.UUID
 
-// readLinkSet reads, for each name, the Items linked to id under it: a
-// declared name reads the outgoing links, an inverse name the incoming ones
-// from Items of the same Type (a guard sees no incoming links declared by
-// other Types in Step 1).
+// readLinkSet reads, for each name, the Items linked to id under it
+// (typedef.LinkSource): a declared name reads the outgoing links; an
+// inverse name the incoming ones from Items of the same Type; an incoming
+// name those from the Types it lists, which declare the link.
 func readLinkSet(ctx context.Context, tx pgx.Tx, ty *typedef.Type, id uuid.UUID, names []string) (linkSet, error) {
 	set := linkSet{}
 	for _, name := range names {
 		var rows pgx.Rows
 		var err error
-		if lt, ok := ty.Link(name); ok {
-			rows, err = tx.Query(ctx,
-				`select target_id from links where source_id = $1 and link_type = $2 order by target_id`, id, lt.Name)
-		} else if lt, ok := ty.IncomingName(name); ok {
-			rows, err = tx.Query(ctx,
-				`select source_id from links where target_id = $1 and link_type = $2 and source_type_id = $3
-				 order by source_id`, id, lt.Name, ty.ID)
-		} else {
+		src, ok := ty.LinkSource(name)
+		switch {
+		case !ok:
 			return nil, fmt.Errorf("type %s v%d: a guard reads link %q, which it does not declare", ty.ID, ty.Version, name)
+		case src.Outgoing:
+			rows, err = tx.Query(ctx,
+				`select target_id from links where source_id = $1 and link_type = $2 order by target_id`, id, src.Link)
+		default:
+			rows, err = tx.Query(ctx,
+				`select source_id from links where target_id = $1 and link_type = $2 and source_type_id = any($3::text[])
+				 order by source_id`, id, src.Link, src.From)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("read links: %w", err)
