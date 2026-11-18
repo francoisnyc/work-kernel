@@ -104,6 +104,9 @@ const usage = `usage: pli [--server URL] [--tokens FILE] --as NAME [--session ID
   item history ITEM [PAGING]
   item link SRC LINK_TYPE TARGET [--etag E] [--request-id ID]     (LINK_TYPE: the declared name)
   item unlink SRC LINK_TYPE TARGET [--etag E] [--request-id ID]
+  rank ITEM before|after OTHER     (one write; ITEM and OTHER in one container; the field f_rank)
+  rank ITEM top|bottom
+  rank rebalance --in CONTAINER    (rewrite the container's rank keys, short and even)
   type get TYPE
   type list
   agent start [--for USER] --scopes S,S --powers P,P
@@ -111,6 +114,7 @@ const usage = `usage: pli [--server URL] [--tokens FILE] --as NAME [--session ID
 
 FILTERS: [--type TYPE]... [--state S]... [--category C]... [--where F=V|F>V|F>=V|F<V|F<=V]...
          [--linked out:NAME=ITEM | in:NAME=ITEM]...   (on a principal field, --where F=me is the caller)
+         [--order-by 'FIELD [asc|desc]']             (default: newest first)
 PAGING:  [--page-size N] [--page-token T]`
 
 // usageError is a wrong command line: exit 2, nothing sent.
@@ -192,12 +196,17 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	name := rest[0] + " " + rest[1]
 	cmd, ok := commands[name]
+	cmdArgs := rest[2:]
+	if rest[0] == "rank" {
+		// rank's second word is an Item (or "rebalance"), not a verb.
+		name, cmd, ok, cmdArgs = "rank", c.rank, true, rest[1:]
+	}
 	if !ok {
 		fmt.Fprintf(stderr, "pli: unknown command %q\n%s\n", name, usage)
 		return exitUsage
 	}
 
-	err = cmd(ctx, rest[2:])
+	err = cmd(ctx, cmdArgs)
 	var ue usageError
 	var ce *connect.Error
 	switch {
@@ -555,7 +564,7 @@ func (c *cli) itemSearch(ctx context.Context, args []string) error {
 	}
 	res, err := c.c.SearchItems(ctx, connect.NewRequest(&kernelv1.SearchItemsRequest{
 		Parent: "namespaces/" + c.ns, Query: strings.Join(pos, " "), MinSeq: *minSeq,
-		Filter: filter, PageSize: size, PageToken: *pg.token,
+		Filter: filter, PageSize: size, PageToken: *pg.token, OrderBy: fl.orderBy,
 	}))
 	if err != nil {
 		return err
