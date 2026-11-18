@@ -1,0 +1,5369 @@
+{
+ "comment": "Golden vectors shared by internal/rank (Go, the reference) and web/src/rank (TypeScript). Written by `go test ./internal/rank -run TestVectors -update`; never edit by hand.",
+ "alphabet": "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+ "threshold": 32,
+ "maxGrowth": 4,
+ "maxTiedRun": 8,
+ "valid": [
+  {
+   "key": "1",
+   "want": true
+  },
+  {
+   "key": "V",
+   "want": true
+  },
+  {
+   "key": "z",
+   "want": true
+  },
+  {
+   "key": "0V",
+   "want": true
+  },
+  {
+   "key": "a0b",
+   "want": true
+  },
+  {
+   "key": "Zz9",
+   "want": true
+  },
+  {
+   "key": "",
+   "want": false
+  },
+  {
+   "key": "a b",
+   "want": false
+  },
+  {
+   "key": "a-b",
+   "want": false
+  },
+  {
+   "key": "é",
+   "want": false
+  },
+  {
+   "key": "a|b",
+   "want": false
+  },
+  {
+   "key": "0",
+   "want": false
+  },
+  {
+   "key": "a0",
+   "want": false
+  },
+  {
+   "key": "V00",
+   "want": false
+  },
+  {
+   "key": "00",
+   "want": false
+  },
+  {
+   "key": "001",
+   "want": true
+  }
+ ],
+ "compare": [
+  {
+   "a": "0V",
+   "b": "0V",
+   "want": 0
+  },
+  {
+   "a": "0V",
+   "b": "1",
+   "want": -1
+  },
+  {
+   "a": "0V",
+   "b": "9z",
+   "want": -1
+  },
+  {
+   "a": "0V",
+   "b": "A",
+   "want": -1
+  },
+  {
+   "a": "0V",
+   "b": "B",
+   "want": -1
+  },
+  {
+   "a": "0V",
+   "b": "Zz",
+   "want": -1
+  },
+  {
+   "a": "0V",
+   "b": "a",
+   "want": -1
+  },
+  {
+   "a": "0V",
+   "b": "aa",
+   "want": -1
+  },
+  {
+   "a": "0V",
+   "b": "b",
+   "want": -1
+  },
+  {
+   "a": "0V",
+   "b": "z",
+   "want": -1
+  },
+  {
+   "a": "1",
+   "b": "0V",
+   "want": 1
+  },
+  {
+   "a": "1",
+   "b": "1",
+   "want": 0
+  },
+  {
+   "a": "1",
+   "b": "9z",
+   "want": -1
+  },
+  {
+   "a": "1",
+   "b": "A",
+   "want": -1
+  },
+  {
+   "a": "1",
+   "b": "B",
+   "want": -1
+  },
+  {
+   "a": "1",
+   "b": "Zz",
+   "want": -1
+  },
+  {
+   "a": "1",
+   "b": "a",
+   "want": -1
+  },
+  {
+   "a": "1",
+   "b": "aa",
+   "want": -1
+  },
+  {
+   "a": "1",
+   "b": "b",
+   "want": -1
+  },
+  {
+   "a": "1",
+   "b": "z",
+   "want": -1
+  },
+  {
+   "a": "9z",
+   "b": "0V",
+   "want": 1
+  },
+  {
+   "a": "9z",
+   "b": "1",
+   "want": 1
+  },
+  {
+   "a": "9z",
+   "b": "9z",
+   "want": 0
+  },
+  {
+   "a": "9z",
+   "b": "A",
+   "want": -1
+  },
+  {
+   "a": "9z",
+   "b": "B",
+   "want": -1
+  },
+  {
+   "a": "9z",
+   "b": "Zz",
+   "want": -1
+  },
+  {
+   "a": "9z",
+   "b": "a",
+   "want": -1
+  },
+  {
+   "a": "9z",
+   "b": "aa",
+   "want": -1
+  },
+  {
+   "a": "9z",
+   "b": "b",
+   "want": -1
+  },
+  {
+   "a": "9z",
+   "b": "z",
+   "want": -1
+  },
+  {
+   "a": "A",
+   "b": "0V",
+   "want": 1
+  },
+  {
+   "a": "A",
+   "b": "1",
+   "want": 1
+  },
+  {
+   "a": "A",
+   "b": "9z",
+   "want": 1
+  },
+  {
+   "a": "A",
+   "b": "A",
+   "want": 0
+  },
+  {
+   "a": "A",
+   "b": "B",
+   "want": -1
+  },
+  {
+   "a": "A",
+   "b": "Zz",
+   "want": -1
+  },
+  {
+   "a": "A",
+   "b": "a",
+   "want": -1
+  },
+  {
+   "a": "A",
+   "b": "aa",
+   "want": -1
+  },
+  {
+   "a": "A",
+   "b": "b",
+   "want": -1
+  },
+  {
+   "a": "A",
+   "b": "z",
+   "want": -1
+  },
+  {
+   "a": "B",
+   "b": "0V",
+   "want": 1
+  },
+  {
+   "a": "B",
+   "b": "1",
+   "want": 1
+  },
+  {
+   "a": "B",
+   "b": "9z",
+   "want": 1
+  },
+  {
+   "a": "B",
+   "b": "A",
+   "want": 1
+  },
+  {
+   "a": "B",
+   "b": "B",
+   "want": 0
+  },
+  {
+   "a": "B",
+   "b": "Zz",
+   "want": -1
+  },
+  {
+   "a": "B",
+   "b": "a",
+   "want": -1
+  },
+  {
+   "a": "B",
+   "b": "aa",
+   "want": -1
+  },
+  {
+   "a": "B",
+   "b": "b",
+   "want": -1
+  },
+  {
+   "a": "B",
+   "b": "z",
+   "want": -1
+  },
+  {
+   "a": "Zz",
+   "b": "0V",
+   "want": 1
+  },
+  {
+   "a": "Zz",
+   "b": "1",
+   "want": 1
+  },
+  {
+   "a": "Zz",
+   "b": "9z",
+   "want": 1
+  },
+  {
+   "a": "Zz",
+   "b": "A",
+   "want": 1
+  },
+  {
+   "a": "Zz",
+   "b": "B",
+   "want": 1
+  },
+  {
+   "a": "Zz",
+   "b": "Zz",
+   "want": 0
+  },
+  {
+   "a": "Zz",
+   "b": "a",
+   "want": -1
+  },
+  {
+   "a": "Zz",
+   "b": "aa",
+   "want": -1
+  },
+  {
+   "a": "Zz",
+   "b": "b",
+   "want": -1
+  },
+  {
+   "a": "Zz",
+   "b": "z",
+   "want": -1
+  },
+  {
+   "a": "a",
+   "b": "0V",
+   "want": 1
+  },
+  {
+   "a": "a",
+   "b": "1",
+   "want": 1
+  },
+  {
+   "a": "a",
+   "b": "9z",
+   "want": 1
+  },
+  {
+   "a": "a",
+   "b": "A",
+   "want": 1
+  },
+  {
+   "a": "a",
+   "b": "B",
+   "want": 1
+  },
+  {
+   "a": "a",
+   "b": "Zz",
+   "want": 1
+  },
+  {
+   "a": "a",
+   "b": "a",
+   "want": 0
+  },
+  {
+   "a": "a",
+   "b": "aa",
+   "want": -1
+  },
+  {
+   "a": "a",
+   "b": "b",
+   "want": -1
+  },
+  {
+   "a": "a",
+   "b": "z",
+   "want": -1
+  },
+  {
+   "a": "aa",
+   "b": "0V",
+   "want": 1
+  },
+  {
+   "a": "aa",
+   "b": "1",
+   "want": 1
+  },
+  {
+   "a": "aa",
+   "b": "9z",
+   "want": 1
+  },
+  {
+   "a": "aa",
+   "b": "A",
+   "want": 1
+  },
+  {
+   "a": "aa",
+   "b": "B",
+   "want": 1
+  },
+  {
+   "a": "aa",
+   "b": "Zz",
+   "want": 1
+  },
+  {
+   "a": "aa",
+   "b": "a",
+   "want": 1
+  },
+  {
+   "a": "aa",
+   "b": "aa",
+   "want": 0
+  },
+  {
+   "a": "aa",
+   "b": "b",
+   "want": -1
+  },
+  {
+   "a": "aa",
+   "b": "z",
+   "want": -1
+  },
+  {
+   "a": "b",
+   "b": "0V",
+   "want": 1
+  },
+  {
+   "a": "b",
+   "b": "1",
+   "want": 1
+  },
+  {
+   "a": "b",
+   "b": "9z",
+   "want": 1
+  },
+  {
+   "a": "b",
+   "b": "A",
+   "want": 1
+  },
+  {
+   "a": "b",
+   "b": "B",
+   "want": 1
+  },
+  {
+   "a": "b",
+   "b": "Zz",
+   "want": 1
+  },
+  {
+   "a": "b",
+   "b": "a",
+   "want": 1
+  },
+  {
+   "a": "b",
+   "b": "aa",
+   "want": 1
+  },
+  {
+   "a": "b",
+   "b": "b",
+   "want": 0
+  },
+  {
+   "a": "b",
+   "b": "z",
+   "want": -1
+  },
+  {
+   "a": "z",
+   "b": "0V",
+   "want": 1
+  },
+  {
+   "a": "z",
+   "b": "1",
+   "want": 1
+  },
+  {
+   "a": "z",
+   "b": "9z",
+   "want": 1
+  },
+  {
+   "a": "z",
+   "b": "A",
+   "want": 1
+  },
+  {
+   "a": "z",
+   "b": "B",
+   "want": 1
+  },
+  {
+   "a": "z",
+   "b": "Zz",
+   "want": 1
+  },
+  {
+   "a": "z",
+   "b": "a",
+   "want": 1
+  },
+  {
+   "a": "z",
+   "b": "aa",
+   "want": 1
+  },
+  {
+   "a": "z",
+   "b": "b",
+   "want": 1
+  },
+  {
+   "a": "z",
+   "b": "z",
+   "want": 0
+  }
+ ],
+ "needsRebalance": [
+  {
+   "key": "V",
+   "want": false
+  },
+  {
+   "key": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV",
+   "want": false
+  },
+  {
+   "key": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV",
+   "want": false
+  },
+  {
+   "key": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV",
+   "want": true
+  },
+  {
+   "key": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV",
+   "want": true
+  }
+ ],
+ "evenly": [
+  {
+   "lo": "",
+   "hi": "",
+   "n": 0,
+   "keys": [],
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "",
+   "n": 1,
+   "keys": [
+    "V"
+   ],
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "",
+   "n": 2,
+   "keys": [
+    "Kf",
+    "fK"
+   ],
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "",
+   "n": 10,
+   "keys": [
+    "5d",
+    "BG",
+    "Gt",
+    "MW",
+    "S9",
+    "Xm",
+    "dP",
+    "j2",
+    "of",
+    "uI"
+   ],
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "",
+   "n": 61,
+   "keys": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "M",
+    "N",
+    "O",
+    "P",
+    "Q",
+    "R",
+    "S",
+    "T",
+    "U",
+    "V",
+    "W",
+    "X",
+    "Y",
+    "Z",
+    "a",
+    "b",
+    "c",
+    "d",
+    "e",
+    "f",
+    "g",
+    "h",
+    "i",
+    "j",
+    "k",
+    "l",
+    "m",
+    "n",
+    "o",
+    "p",
+    "q",
+    "r",
+    "s",
+    "t",
+    "u",
+    "v",
+    "w",
+    "x",
+    "y",
+    "z"
+   ],
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "",
+   "n": 62,
+   "keys": [
+    "0z",
+    "1y",
+    "2x",
+    "3w",
+    "4v",
+    "5u",
+    "6t",
+    "7s",
+    "8r",
+    "9q",
+    "Ap",
+    "Bo",
+    "Cn",
+    "Dm",
+    "El",
+    "Fk",
+    "Gj",
+    "Hi",
+    "Ih",
+    "Jg",
+    "Kf",
+    "Le",
+    "Md",
+    "Nc",
+    "Ob",
+    "Pa",
+    "QZ",
+    "RY",
+    "SX",
+    "TW",
+    "UV",
+    "VU",
+    "WT",
+    "XS",
+    "YR",
+    "ZQ",
+    "aP",
+    "bO",
+    "cN",
+    "dM",
+    "eL",
+    "fK",
+    "gJ",
+    "hI",
+    "iH",
+    "jG",
+    "kF",
+    "lE",
+    "mD",
+    "nC",
+    "oB",
+    "pA",
+    "q9",
+    "r8",
+    "s7",
+    "t6",
+    "u5",
+    "v4",
+    "w3",
+    "x2",
+    "y1",
+    "z"
+   ],
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "",
+   "n": 300,
+   "keys": [
+    "0Cl",
+    "0PW",
+    "0cH",
+    "0p2",
+    "11n",
+    "1EY",
+    "1RJ",
+    "1e4",
+    "1qp",
+    "23a",
+    "2GL",
+    "2T6",
+    "2fr",
+    "2sc",
+    "35N",
+    "3I8",
+    "3Ut",
+    "3he",
+    "3uP",
+    "47A",
+    "4Jv",
+    "4Wg",
+    "4jR",
+    "4wC",
+    "58x",
+    "5Li",
+    "5YT",
+    "5lE",
+    "5xz",
+    "6Ak",
+    "6NV",
+    "6aG",
+    "6n1",
+    "6zm",
+    "7CX",
+    "7PI",
+    "7c3",
+    "7oo",
+    "81Z",
+    "8EK",
+    "8R5",
+    "8dq",
+    "8qb",
+    "93M",
+    "9G7",
+    "9Ss",
+    "9fd",
+    "9sO",
+    "A59",
+    "AHu",
+    "AUf",
+    "AhQ",
+    "AuB",
+    "B6w",
+    "BJh",
+    "BWS",
+    "BjD",
+    "Bvy",
+    "C8j",
+    "CLU",
+    "CYF",
+    "Cl",
+    "Cxl",
+    "DAW",
+    "DNH",
+    "Da2",
+    "Dmn",
+    "DzY",
+    "ECJ",
+    "EP4",
+    "Ebp",
+    "Eoa",
+    "F1L",
+    "FE6",
+    "FQr",
+    "Fdc",
+    "FqN",
+    "G38",
+    "GFt",
+    "GSe",
+    "GfP",
+    "GsA",
+    "H4v",
+    "HHg",
+    "HUR",
+    "HhC",
+    "Htx",
+    "I6i",
+    "IJT",
+    "IWE",
+    "Iiz",
+    "Ivk",
+    "J8V",
+    "JLG",
+    "JY1",
+    "Jkm",
+    "JxX",
+    "KAI",
+    "KN3",
+    "KZo",
+    "KmZ",
+    "KzK",
+    "LC5",
+    "LOq",
+    "Lbb",
+    "LoM",
+    "M17",
+    "MDs",
+    "MQd",
+    "MdO",
+    "Mq9",
+    "N2u",
+    "NFf",
+    "NSQ",
+    "NfB",
+    "Nrw",
+    "O4h",
+    "OHS",
+    "OUD",
+    "Ogy",
+    "Otj",
+    "P6U",
+    "PJF",
+    "PW",
+    "Pil",
+    "PvW",
+    "Q8H",
+    "QL2",
+    "QXn",
+    "QkY",
+    "QxJ",
+    "RA4",
+    "RMp",
+    "RZa",
+    "RmL",
+    "Rz6",
+    "SBr",
+    "SOc",
+    "SbN",
+    "So8",
+    "T0t",
+    "TDe",
+    "TQP",
+    "TdA",
+    "Tpv",
+    "U2g",
+    "UFR",
+    "USC",
+    "Uex",
+    "Uri",
+    "V4T",
+    "VHE",
+    "VTz",
+    "Vgk",
+    "VtV",
+    "W6G",
+    "WJ1",
+    "WVm",
+    "WiX",
+    "WvI",
+    "X83",
+    "XKo",
+    "XXZ",
+    "XkK",
+    "Xx5",
+    "Y9q",
+    "YMb",
+    "YZM",
+    "Ym7",
+    "Yys",
+    "ZBd",
+    "ZOO",
+    "Zb9",
+    "Znu",
+    "a0f",
+    "aDQ",
+    "aQB",
+    "acw",
+    "aph",
+    "b2S",
+    "bFD",
+    "bRy",
+    "bej",
+    "brU",
+    "c4F",
+    "cH",
+    "cTl",
+    "cgW",
+    "ctH",
+    "d62",
+    "dIn",
+    "dVY",
+    "diJ",
+    "dv4",
+    "e7p",
+    "eKa",
+    "eXL",
+    "ek6",
+    "ewr",
+    "f9c",
+    "fMN",
+    "fZ8",
+    "flt",
+    "fye",
+    "gBP",
+    "gOA",
+    "gav",
+    "gng",
+    "h0R",
+    "hDC",
+    "hPx",
+    "hci",
+    "hpT",
+    "i2E",
+    "iEz",
+    "iRk",
+    "ieV",
+    "irG",
+    "j41",
+    "jGm",
+    "jTX",
+    "jgI",
+    "jt3",
+    "k5o",
+    "kIZ",
+    "kVK",
+    "ki5",
+    "kuq",
+    "l7b",
+    "lKM",
+    "lX7",
+    "ljs",
+    "lwd",
+    "m9O",
+    "mM9",
+    "mYu",
+    "mlf",
+    "myQ",
+    "nBB",
+    "nNw",
+    "nah",
+    "nnS",
+    "o0D",
+    "oCy",
+    "oPj",
+    "ocU",
+    "opF",
+    "p2",
+    "pEl",
+    "pRW",
+    "peH",
+    "pr2",
+    "q3n",
+    "qGY",
+    "qTJ",
+    "qg4",
+    "qsp",
+    "r5a",
+    "rIL",
+    "rV6",
+    "rhr",
+    "ruc",
+    "s7N",
+    "sK8",
+    "sWt",
+    "sje",
+    "swP",
+    "t9A",
+    "tLv",
+    "tYg",
+    "tlR",
+    "tyC",
+    "uAx",
+    "uNi",
+    "uaT",
+    "unE",
+    "uzz",
+    "vCk",
+    "vPV",
+    "vcG",
+    "vp1",
+    "w1m",
+    "wEX",
+    "wRI",
+    "we3",
+    "wqo",
+    "x3Z",
+    "xGK",
+    "xT5",
+    "xfq",
+    "xsb",
+    "y5M",
+    "yI7",
+    "yUs",
+    "yhd",
+    "yuO",
+    "z79",
+    "zJu",
+    "zWf",
+    "zjQ"
+   ],
+   "error": ""
+  },
+  {
+   "lo": "V",
+   "hi": "",
+   "n": 3,
+   "keys": [
+    "ck",
+    "kU",
+    "sE"
+   ],
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "V",
+   "n": 3,
+   "keys": [
+    "7k",
+    "FU",
+    "NE"
+   ],
+   "error": ""
+  },
+  {
+   "lo": "V",
+   "hi": "W",
+   "n": 3,
+   "keys": [
+    "VFV",
+    "VV",
+    "VkV"
+   ],
+   "error": ""
+  },
+  {
+   "lo": "V",
+   "hi": "W",
+   "n": 100,
+   "keys": [
+    "V0c3",
+    "V1E6",
+    "V1q9",
+    "V2SC",
+    "V34F",
+    "V3gI",
+    "V4IL",
+    "V4uO",
+    "V5WR",
+    "V68U",
+    "V6kX",
+    "V7Ma",
+    "V7yd",
+    "V8ag",
+    "V9Cj",
+    "V9om",
+    "VAQp",
+    "VB2s",
+    "VBev",
+    "VCGy",
+    "VCt1",
+    "VDV4",
+    "VE77",
+    "VEjA",
+    "VFLD",
+    "VFxG",
+    "VGZJ",
+    "VHBM",
+    "VHnP",
+    "VIPS",
+    "VJ1V",
+    "VJdY",
+    "VKFb",
+    "VKre",
+    "VLTh",
+    "VM5k",
+    "VMhn",
+    "VNJq",
+    "VNvt",
+    "VOXw",
+    "VP9z",
+    "VPm2",
+    "VQO5",
+    "VR08",
+    "VRcB",
+    "VSEE",
+    "VSqH",
+    "VTSK",
+    "VU4N",
+    "VUgQ",
+    "VVIT",
+    "VVuW",
+    "VWWZ",
+    "VX8c",
+    "VXkf",
+    "VYMi",
+    "VYyl",
+    "VZao",
+    "VaCr",
+    "Vaou",
+    "VbQx",
+    "Vc3",
+    "Vcf3",
+    "VdH6",
+    "Vdt9",
+    "VeVC",
+    "Vf7F",
+    "VfjI",
+    "VgLL",
+    "VgxO",
+    "VhZR",
+    "ViBU",
+    "VinX",
+    "VjPa",
+    "Vk1d",
+    "Vkdg",
+    "VlFj",
+    "Vlrm",
+    "VmTp",
+    "Vn5s",
+    "Vnhv",
+    "VoJy",
+    "Vow1",
+    "VpY4",
+    "VqA7",
+    "VqmA",
+    "VrOD",
+    "Vs0G",
+    "VscJ",
+    "VtEM",
+    "VtqP",
+    "VuSS",
+    "Vv4V",
+    "VvgY",
+    "VwIb",
+    "Vwue",
+    "VxWh",
+    "Vy8k",
+    "Vykn",
+    "VzMq"
+   ],
+   "error": ""
+  },
+  {
+   "lo": "V",
+   "hi": "V1",
+   "n": 8,
+   "keys": [
+    "V06t",
+    "V0Dm",
+    "V0Kf",
+    "V0RY",
+    "V0YR",
+    "V0fK",
+    "V0mD",
+    "V0t6"
+   ],
+   "error": ""
+  },
+  {
+   "lo": "a",
+   "hi": "a001",
+   "n": 9,
+   "keys": [
+    "a0006C",
+    "a000CO",
+    "a000Ia",
+    "a000Om",
+    "a000Uy",
+    "a000bA",
+    "a000hM",
+    "a000nY",
+    "a000tk"
+   ],
+   "error": ""
+  },
+  {
+   "lo": "0001",
+   "hi": "0002",
+   "n": 4,
+   "keys": [
+    "0001CO",
+    "0001Om",
+    "0001bA",
+    "0001nY"
+   ],
+   "error": ""
+  },
+  {
+   "lo": "zzzz",
+   "hi": "",
+   "n": 5,
+   "keys": [
+    "zzzzAK",
+    "zzzzKe",
+    "zzzzUy",
+    "zzzzfI",
+    "zzzzpc"
+   ],
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "0001",
+   "n": 5,
+   "keys": [
+    "0000AK",
+    "0000Ke",
+    "0000Uy",
+    "0000fI",
+    "0000pc"
+   ],
+   "error": ""
+  },
+  {
+   "lo": "Vabc",
+   "hi": "Vabd",
+   "n": 9,
+   "keys": [
+    "Vabc6C",
+    "VabcCO",
+    "VabcIa",
+    "VabcOm",
+    "VabcUy",
+    "VabcbA",
+    "VabchM",
+    "VabcnY",
+    "Vabctk"
+   ],
+   "error": ""
+  },
+  {
+   "lo": "V",
+   "hi": "V",
+   "n": 2,
+   "keys": [],
+   "error": "no_room"
+  },
+  {
+   "lo": "W",
+   "hi": "V",
+   "n": 2,
+   "keys": [],
+   "error": "no_room"
+  },
+  {
+   "lo": "V",
+   "hi": "V",
+   "n": 0,
+   "keys": [],
+   "error": "no_room"
+  },
+  {
+   "lo": "a0",
+   "hi": "b",
+   "n": 1,
+   "keys": [],
+   "error": "invalid_key"
+  },
+  {
+   "lo": "a",
+   "hi": "b c",
+   "n": 1,
+   "keys": [],
+   "error": "invalid_key"
+  }
+ ],
+ "between": [
+  {
+   "lo": "",
+   "hi": "",
+   "draw": "0/1",
+   "key": "FV",
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "",
+   "draw": "1/1",
+   "key": "kU",
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "",
+   "draw": "1/2",
+   "key": "Uz",
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "",
+   "draw": "1/3",
+   "key": "Pp",
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "",
+   "draw": "617/1000",
+   "key": "Yc",
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "V",
+   "draw": "0/1",
+   "key": "U1w",
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "V",
+   "draw": "1/1",
+   "key": "R7k",
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "V",
+   "draw": "1/2",
+   "key": "SZq",
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "V",
+   "draw": "1/3",
+   "key": "T3s",
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "V",
+   "draw": "617/1000",
+   "key": "SEl",
+   "error": ""
+  },
+  {
+   "lo": "V",
+   "hi": "",
+   "draw": "0/1",
+   "key": "Vy4",
+   "error": ""
+  },
+  {
+   "lo": "V",
+   "hi": "",
+   "draw": "1/1",
+   "key": "YsG",
+   "error": ""
+  },
+  {
+   "lo": "V",
+   "hi": "",
+   "draw": "1/2",
+   "key": "XQA",
+   "error": ""
+  },
+  {
+   "lo": "V",
+   "hi": "",
+   "draw": "1/3",
+   "key": "Ww8",
+   "error": ""
+  },
+  {
+   "lo": "V",
+   "hi": "",
+   "draw": "617/1000",
+   "key": "XlF",
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "1",
+   "draw": "0/1",
+   "key": "0y3s",
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "1",
+   "draw": "1/1",
+   "key": "0sFV",
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "1",
+   "draw": "1/2",
+   "key": "0v9h",
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "1",
+   "draw": "1/3",
+   "key": "0w7l",
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "1",
+   "draw": "617/1000",
+   "key": "0uTX",
+   "error": ""
+  },
+  {
+   "lo": "z",
+   "hi": "",
+   "draw": "0/1",
+   "key": "z1w8",
+   "error": ""
+  },
+  {
+   "lo": "z",
+   "hi": "",
+   "draw": "1/1",
+   "key": "z7kV",
+   "error": ""
+  },
+  {
+   "lo": "z",
+   "hi": "",
+   "draw": "1/2",
+   "key": "z4qJ",
+   "error": ""
+  },
+  {
+   "lo": "z",
+   "hi": "",
+   "draw": "1/3",
+   "key": "z3sF",
+   "error": ""
+  },
+  {
+   "lo": "z",
+   "hi": "",
+   "draw": "617/1000",
+   "key": "z5WT",
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "0001",
+   "draw": "0/1",
+   "key": "0000y3s",
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "0001",
+   "draw": "1/1",
+   "key": "0000sFV",
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "0001",
+   "draw": "1/2",
+   "key": "0000v9h",
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "0001",
+   "draw": "1/3",
+   "key": "0000w7l",
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "0001",
+   "draw": "617/1000",
+   "key": "0000uTX",
+   "error": ""
+  },
+  {
+   "lo": "zzzz",
+   "hi": "",
+   "draw": "0/1",
+   "key": "zzzz1w8",
+   "error": ""
+  },
+  {
+   "lo": "zzzz",
+   "hi": "",
+   "draw": "1/1",
+   "key": "zzzz7kV",
+   "error": ""
+  },
+  {
+   "lo": "zzzz",
+   "hi": "",
+   "draw": "1/2",
+   "key": "zzzz4qJ",
+   "error": ""
+  },
+  {
+   "lo": "zzzz",
+   "hi": "",
+   "draw": "1/3",
+   "key": "zzzz3sF",
+   "error": ""
+  },
+  {
+   "lo": "zzzz",
+   "hi": "",
+   "draw": "617/1000",
+   "key": "zzzz5WT",
+   "error": ""
+  },
+  {
+   "lo": "zzzzzzzz",
+   "hi": "",
+   "draw": "0/1",
+   "key": "zzzzzzzz1w8",
+   "error": ""
+  },
+  {
+   "lo": "zzzzzzzz",
+   "hi": "",
+   "draw": "1/1",
+   "key": "zzzzzzzz7kV",
+   "error": ""
+  },
+  {
+   "lo": "zzzzzzzz",
+   "hi": "",
+   "draw": "1/2",
+   "key": "zzzzzzzz4qJ",
+   "error": ""
+  },
+  {
+   "lo": "zzzzzzzz",
+   "hi": "",
+   "draw": "1/3",
+   "key": "zzzzzzzz3sF",
+   "error": ""
+  },
+  {
+   "lo": "zzzzzzzz",
+   "hi": "",
+   "draw": "617/1000",
+   "key": "zzzzzzzz5WT",
+   "error": ""
+  },
+  {
+   "lo": "A",
+   "hi": "z",
+   "draw": "0/1",
+   "key": "Ml",
+   "error": ""
+  },
+  {
+   "lo": "A",
+   "hi": "z",
+   "draw": "1/1",
+   "key": "mF",
+   "error": ""
+  },
+  {
+   "lo": "A",
+   "hi": "z",
+   "draw": "1/2",
+   "key": "ZV",
+   "error": ""
+  },
+  {
+   "lo": "A",
+   "hi": "z",
+   "draw": "1/3",
+   "key": "VF",
+   "error": ""
+  },
+  {
+   "lo": "A",
+   "hi": "z",
+   "draw": "617/1000",
+   "key": "cT",
+   "error": ""
+  },
+  {
+   "lo": "V",
+   "hi": "W",
+   "draw": "0/1",
+   "key": "VFV",
+   "error": ""
+  },
+  {
+   "lo": "V",
+   "hi": "W",
+   "draw": "1/1",
+   "key": "VkU",
+   "error": ""
+  },
+  {
+   "lo": "V",
+   "hi": "W",
+   "draw": "1/2",
+   "key": "VUz",
+   "error": ""
+  },
+  {
+   "lo": "V",
+   "hi": "W",
+   "draw": "1/3",
+   "key": "VPp",
+   "error": ""
+  },
+  {
+   "lo": "V",
+   "hi": "W",
+   "draw": "617/1000",
+   "key": "VYc",
+   "error": ""
+  },
+  {
+   "lo": "a",
+   "hi": "b",
+   "draw": "0/1",
+   "key": "aFV",
+   "error": ""
+  },
+  {
+   "lo": "a",
+   "hi": "b",
+   "draw": "1/1",
+   "key": "akU",
+   "error": ""
+  },
+  {
+   "lo": "a",
+   "hi": "b",
+   "draw": "1/2",
+   "key": "aUz",
+   "error": ""
+  },
+  {
+   "lo": "a",
+   "hi": "b",
+   "draw": "1/3",
+   "key": "aPp",
+   "error": ""
+  },
+  {
+   "lo": "a",
+   "hi": "b",
+   "draw": "617/1000",
+   "key": "aYc",
+   "error": ""
+  },
+  {
+   "lo": "a",
+   "hi": "a1",
+   "draw": "0/1",
+   "key": "a0FV",
+   "error": ""
+  },
+  {
+   "lo": "a",
+   "hi": "a1",
+   "draw": "1/1",
+   "key": "a0kU",
+   "error": ""
+  },
+  {
+   "lo": "a",
+   "hi": "a1",
+   "draw": "1/2",
+   "key": "a0Uz",
+   "error": ""
+  },
+  {
+   "lo": "a",
+   "hi": "a1",
+   "draw": "1/3",
+   "key": "a0Pp",
+   "error": ""
+  },
+  {
+   "lo": "a",
+   "hi": "a1",
+   "draw": "617/1000",
+   "key": "a0Yc",
+   "error": ""
+  },
+  {
+   "lo": "a",
+   "hi": "a001",
+   "draw": "0/1",
+   "key": "a000FV",
+   "error": ""
+  },
+  {
+   "lo": "a",
+   "hi": "a001",
+   "draw": "1/1",
+   "key": "a000kU",
+   "error": ""
+  },
+  {
+   "lo": "a",
+   "hi": "a001",
+   "draw": "1/2",
+   "key": "a000Uz",
+   "error": ""
+  },
+  {
+   "lo": "a",
+   "hi": "a001",
+   "draw": "1/3",
+   "key": "a000Pp",
+   "error": ""
+  },
+  {
+   "lo": "a",
+   "hi": "a001",
+   "draw": "617/1000",
+   "key": "a000Yc",
+   "error": ""
+  },
+  {
+   "lo": "az",
+   "hi": "b",
+   "draw": "0/1",
+   "key": "azFV",
+   "error": ""
+  },
+  {
+   "lo": "az",
+   "hi": "b",
+   "draw": "1/1",
+   "key": "azkU",
+   "error": ""
+  },
+  {
+   "lo": "az",
+   "hi": "b",
+   "draw": "1/2",
+   "key": "azUz",
+   "error": ""
+  },
+  {
+   "lo": "az",
+   "hi": "b",
+   "draw": "1/3",
+   "key": "azPp",
+   "error": ""
+  },
+  {
+   "lo": "az",
+   "hi": "b",
+   "draw": "617/1000",
+   "key": "azYc",
+   "error": ""
+  },
+  {
+   "lo": "azzz",
+   "hi": "b",
+   "draw": "0/1",
+   "key": "azzzFV",
+   "error": ""
+  },
+  {
+   "lo": "azzz",
+   "hi": "b",
+   "draw": "1/1",
+   "key": "azzzkU",
+   "error": ""
+  },
+  {
+   "lo": "azzz",
+   "hi": "b",
+   "draw": "1/2",
+   "key": "azzzUz",
+   "error": ""
+  },
+  {
+   "lo": "azzz",
+   "hi": "b",
+   "draw": "1/3",
+   "key": "azzzPp",
+   "error": ""
+  },
+  {
+   "lo": "azzz",
+   "hi": "b",
+   "draw": "617/1000",
+   "key": "azzzYc",
+   "error": ""
+  },
+  {
+   "lo": "Vabc",
+   "hi": "Vabd",
+   "draw": "0/1",
+   "key": "VabcFV",
+   "error": ""
+  },
+  {
+   "lo": "Vabc",
+   "hi": "Vabd",
+   "draw": "1/1",
+   "key": "VabckU",
+   "error": ""
+  },
+  {
+   "lo": "Vabc",
+   "hi": "Vabd",
+   "draw": "1/2",
+   "key": "VabcUz",
+   "error": ""
+  },
+  {
+   "lo": "Vabc",
+   "hi": "Vabd",
+   "draw": "1/3",
+   "key": "VabcPp",
+   "error": ""
+  },
+  {
+   "lo": "Vabc",
+   "hi": "Vabd",
+   "draw": "617/1000",
+   "key": "VabcYc",
+   "error": ""
+  },
+  {
+   "lo": "0001",
+   "hi": "0002",
+   "draw": "0/1",
+   "key": "0001FV",
+   "error": ""
+  },
+  {
+   "lo": "0001",
+   "hi": "0002",
+   "draw": "1/1",
+   "key": "0001kU",
+   "error": ""
+  },
+  {
+   "lo": "0001",
+   "hi": "0002",
+   "draw": "1/2",
+   "key": "0001Uz",
+   "error": ""
+  },
+  {
+   "lo": "0001",
+   "hi": "0002",
+   "draw": "1/3",
+   "key": "0001Pp",
+   "error": ""
+  },
+  {
+   "lo": "0001",
+   "hi": "0002",
+   "draw": "617/1000",
+   "key": "0001Yc",
+   "error": ""
+  },
+  {
+   "lo": "9",
+   "hi": "A",
+   "draw": "0/1",
+   "key": "9FV",
+   "error": ""
+  },
+  {
+   "lo": "9",
+   "hi": "A",
+   "draw": "1/1",
+   "key": "9kU",
+   "error": ""
+  },
+  {
+   "lo": "9",
+   "hi": "A",
+   "draw": "1/2",
+   "key": "9Uz",
+   "error": ""
+  },
+  {
+   "lo": "9",
+   "hi": "A",
+   "draw": "1/3",
+   "key": "9Pp",
+   "error": ""
+  },
+  {
+   "lo": "9",
+   "hi": "A",
+   "draw": "617/1000",
+   "key": "9Yc",
+   "error": ""
+  },
+  {
+   "lo": "Z",
+   "hi": "a",
+   "draw": "0/1",
+   "key": "ZFV",
+   "error": ""
+  },
+  {
+   "lo": "Z",
+   "hi": "a",
+   "draw": "1/1",
+   "key": "ZkU",
+   "error": ""
+  },
+  {
+   "lo": "Z",
+   "hi": "a",
+   "draw": "1/2",
+   "key": "ZUz",
+   "error": ""
+  },
+  {
+   "lo": "Z",
+   "hi": "a",
+   "draw": "1/3",
+   "key": "ZPp",
+   "error": ""
+  },
+  {
+   "lo": "Z",
+   "hi": "a",
+   "draw": "617/1000",
+   "key": "ZYc",
+   "error": ""
+  },
+  {
+   "lo": "1",
+   "hi": "z",
+   "draw": "0/1",
+   "key": "G",
+   "error": ""
+  },
+  {
+   "lo": "1",
+   "hi": "z",
+   "draw": "1/1",
+   "key": "jz",
+   "error": ""
+  },
+  {
+   "lo": "1",
+   "hi": "z",
+   "draw": "1/2",
+   "key": "Uz",
+   "error": ""
+  },
+  {
+   "lo": "1",
+   "hi": "z",
+   "draw": "1/3",
+   "key": "Pz",
+   "error": ""
+  },
+  {
+   "lo": "1",
+   "hi": "z",
+   "draw": "617/1000",
+   "key": "YV",
+   "error": ""
+  },
+  {
+   "lo": "V",
+   "hi": "V0001",
+   "draw": "0/1",
+   "key": "V0000FV",
+   "error": ""
+  },
+  {
+   "lo": "V",
+   "hi": "V0001",
+   "draw": "1/1",
+   "key": "V0000kU",
+   "error": ""
+  },
+  {
+   "lo": "V",
+   "hi": "V0001",
+   "draw": "1/2",
+   "key": "V0000Uz",
+   "error": ""
+  },
+  {
+   "lo": "V",
+   "hi": "V0001",
+   "draw": "1/3",
+   "key": "V0000Pp",
+   "error": ""
+  },
+  {
+   "lo": "V",
+   "hi": "V0001",
+   "draw": "617/1000",
+   "key": "V0000Yc",
+   "error": ""
+  },
+  {
+   "lo": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV",
+   "hi": "",
+   "draw": "0/1",
+   "key": "WSa",
+   "error": ""
+  },
+  {
+   "lo": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV",
+   "hi": "",
+   "draw": "1/1",
+   "key": "ZJp",
+   "error": ""
+  },
+  {
+   "lo": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV",
+   "hi": "",
+   "draw": "1/2",
+   "key": "XtC",
+   "error": ""
+  },
+  {
+   "lo": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV",
+   "hi": "",
+   "draw": "1/3",
+   "key": "XPf",
+   "error": ""
+  },
+  {
+   "lo": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV",
+   "hi": "",
+   "draw": "617/1000",
+   "key": "YDw",
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV",
+   "draw": "0/1",
+   "key": "UWT",
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV",
+   "draw": "1/1",
+   "key": "RZK",
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV",
+   "draw": "1/2",
+   "key": "T2u",
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV",
+   "draw": "1/3",
+   "key": "TXQ",
+   "error": ""
+  },
+  {
+   "lo": "",
+   "hi": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV",
+   "draw": "617/1000",
+   "key": "ShT",
+   "error": ""
+  },
+  {
+   "lo": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV",
+   "hi": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV1",
+   "draw": "0/1",
+   "key": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV0FV",
+   "error": ""
+  },
+  {
+   "lo": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV",
+   "hi": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV1",
+   "draw": "1/1",
+   "key": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV0kU",
+   "error": ""
+  },
+  {
+   "lo": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV",
+   "hi": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV1",
+   "draw": "1/2",
+   "key": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV0Uz",
+   "error": ""
+  },
+  {
+   "lo": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV",
+   "hi": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV1",
+   "draw": "1/3",
+   "key": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV0Pp",
+   "error": ""
+  },
+  {
+   "lo": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV",
+   "hi": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV1",
+   "draw": "617/1000",
+   "key": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV0Yc",
+   "error": ""
+  },
+  {
+   "lo": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV1",
+   "hi": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV2",
+   "draw": "0/1",
+   "key": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV1FV",
+   "error": ""
+  },
+  {
+   "lo": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV1",
+   "hi": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV2",
+   "draw": "1/1",
+   "key": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV1kU",
+   "error": ""
+  },
+  {
+   "lo": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV1",
+   "hi": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV2",
+   "draw": "1/2",
+   "key": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV1Uz",
+   "error": ""
+  },
+  {
+   "lo": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV1",
+   "hi": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV2",
+   "draw": "1/3",
+   "key": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV1Pp",
+   "error": ""
+  },
+  {
+   "lo": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV1",
+   "hi": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV2",
+   "draw": "617/1000",
+   "key": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV1Yc",
+   "error": ""
+  },
+  {
+   "lo": "V",
+   "hi": "V",
+   "draw": "0/1",
+   "key": "",
+   "error": "no_room"
+  },
+  {
+   "lo": "V",
+   "hi": "V",
+   "draw": "1/1",
+   "key": "",
+   "error": "no_room"
+  },
+  {
+   "lo": "V",
+   "hi": "V",
+   "draw": "1/2",
+   "key": "",
+   "error": "no_room"
+  },
+  {
+   "lo": "V",
+   "hi": "V",
+   "draw": "1/3",
+   "key": "",
+   "error": "no_room"
+  },
+  {
+   "lo": "V",
+   "hi": "V",
+   "draw": "617/1000",
+   "key": "",
+   "error": "no_room"
+  },
+  {
+   "lo": "W",
+   "hi": "V",
+   "draw": "0/1",
+   "key": "",
+   "error": "no_room"
+  },
+  {
+   "lo": "W",
+   "hi": "V",
+   "draw": "1/1",
+   "key": "",
+   "error": "no_room"
+  },
+  {
+   "lo": "W",
+   "hi": "V",
+   "draw": "1/2",
+   "key": "",
+   "error": "no_room"
+  },
+  {
+   "lo": "W",
+   "hi": "V",
+   "draw": "1/3",
+   "key": "",
+   "error": "no_room"
+  },
+  {
+   "lo": "W",
+   "hi": "V",
+   "draw": "617/1000",
+   "key": "",
+   "error": "no_room"
+  },
+  {
+   "lo": "a0",
+   "hi": "b",
+   "draw": "0/1",
+   "key": "",
+   "error": "invalid_key"
+  },
+  {
+   "lo": "a0",
+   "hi": "b",
+   "draw": "1/1",
+   "key": "",
+   "error": "invalid_key"
+  },
+  {
+   "lo": "a0",
+   "hi": "b",
+   "draw": "1/2",
+   "key": "",
+   "error": "invalid_key"
+  },
+  {
+   "lo": "a0",
+   "hi": "b",
+   "draw": "1/3",
+   "key": "",
+   "error": "invalid_key"
+  },
+  {
+   "lo": "a0",
+   "hi": "b",
+   "draw": "617/1000",
+   "key": "",
+   "error": "invalid_key"
+  },
+  {
+   "lo": "a",
+   "hi": "b c",
+   "draw": "0/1",
+   "key": "",
+   "error": "invalid_key"
+  },
+  {
+   "lo": "a",
+   "hi": "b c",
+   "draw": "1/1",
+   "key": "",
+   "error": "invalid_key"
+  },
+  {
+   "lo": "a",
+   "hi": "b c",
+   "draw": "1/2",
+   "key": "",
+   "error": "invalid_key"
+  },
+  {
+   "lo": "a",
+   "hi": "b c",
+   "draw": "1/3",
+   "key": "",
+   "error": "invalid_key"
+  },
+  {
+   "lo": "a",
+   "hi": "b c",
+   "draw": "617/1000",
+   "key": "",
+   "error": "invalid_key"
+  },
+  {
+   "lo": "é",
+   "hi": "",
+   "draw": "0/1",
+   "key": "",
+   "error": "invalid_key"
+  },
+  {
+   "lo": "é",
+   "hi": "",
+   "draw": "1/1",
+   "key": "",
+   "error": "invalid_key"
+  },
+  {
+   "lo": "é",
+   "hi": "",
+   "draw": "1/2",
+   "key": "",
+   "error": "invalid_key"
+  },
+  {
+   "lo": "é",
+   "hi": "",
+   "draw": "1/3",
+   "key": "",
+   "error": "invalid_key"
+  },
+  {
+   "lo": "é",
+   "hi": "",
+   "draw": "617/1000",
+   "key": "",
+   "error": "invalid_key"
+  }
+ ],
+ "plan": [
+  {
+   "name": "top of an empty container",
+   "cards": [
+    {
+     "id": "x",
+     "key": ""
+    }
+   ],
+   "moved": "x",
+   "pos": "top",
+   "other": {
+    "id": "",
+    "key": ""
+   },
+   "draw": "0/1",
+   "writes": [
+    {
+     "id": "x",
+     "key": "FV"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "top of an empty container",
+   "cards": [
+    {
+     "id": "x",
+     "key": ""
+    }
+   ],
+   "moved": "x",
+   "pos": "top",
+   "other": {
+    "id": "",
+    "key": ""
+   },
+   "draw": "617/1000",
+   "writes": [
+    {
+     "id": "x",
+     "key": "Yc"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "top of an empty container",
+   "cards": [
+    {
+     "id": "x",
+     "key": ""
+    }
+   ],
+   "moved": "x",
+   "pos": "top",
+   "other": {
+    "id": "",
+    "key": ""
+   },
+   "draw": "1/1",
+   "writes": [
+    {
+     "id": "x",
+     "key": "kU"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "bottom of an empty container",
+   "cards": [
+    {
+     "id": "x",
+     "key": ""
+    }
+   ],
+   "moved": "x",
+   "pos": "bottom",
+   "other": {
+    "id": "",
+    "key": ""
+   },
+   "draw": "0/1",
+   "writes": [
+    {
+     "id": "x",
+     "key": "FV"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "bottom of an empty container",
+   "cards": [
+    {
+     "id": "x",
+     "key": ""
+    }
+   ],
+   "moved": "x",
+   "pos": "bottom",
+   "other": {
+    "id": "",
+    "key": ""
+   },
+   "draw": "617/1000",
+   "writes": [
+    {
+     "id": "x",
+     "key": "Yc"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "bottom of an empty container",
+   "cards": [
+    {
+     "id": "x",
+     "key": ""
+    }
+   ],
+   "moved": "x",
+   "pos": "bottom",
+   "other": {
+    "id": "",
+    "key": ""
+   },
+   "draw": "1/1",
+   "writes": [
+    {
+     "id": "x",
+     "key": "kU"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "an unranked card to the top",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "n",
+   "pos": "top",
+   "other": {
+    "id": "",
+    "key": ""
+   },
+   "draw": "0/1",
+   "writes": [
+    {
+     "id": "n",
+     "key": "EWw"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "an unranked card to the top",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "n",
+   "pos": "top",
+   "other": {
+    "id": "",
+    "key": ""
+   },
+   "draw": "617/1000",
+   "writes": [
+    {
+     "id": "n",
+     "key": "Df9"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "an unranked card to the top",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "n",
+   "pos": "top",
+   "other": {
+    "id": "",
+    "key": ""
+   },
+   "draw": "1/1",
+   "writes": [
+    {
+     "id": "n",
+     "key": "D7k"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "an unranked card to the bottom",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "n",
+   "pos": "bottom",
+   "other": {
+    "id": "",
+    "key": ""
+   },
+   "draw": "0/1",
+   "writes": [
+    {
+     "id": "n",
+     "key": "ZqK"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "an unranked card to the bottom",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "n",
+   "pos": "bottom",
+   "other": {
+    "id": "",
+    "key": ""
+   },
+   "draw": "617/1000",
+   "writes": [
+    {
+     "id": "n",
+     "key": "bP9"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "an unranked card to the bottom",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "n",
+   "pos": "bottom",
+   "other": {
+    "id": "",
+    "key": ""
+   },
+   "draw": "1/1",
+   "writes": [
+    {
+     "id": "n",
+     "key": "cNG"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "the first card to the top: its own key is not its neighbour",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "a",
+   "pos": "top",
+   "other": {
+    "id": "",
+    "key": ""
+   },
+   "draw": "0/1",
+   "writes": [
+    {
+     "id": "a",
+     "key": "JNF"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "the first card to the top: its own key is not its neighbour",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "a",
+   "pos": "top",
+   "other": {
+    "id": "",
+    "key": ""
+   },
+   "draw": "617/1000",
+   "writes": [
+    {
+     "id": "a",
+     "key": "IDX"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "the first card to the top: its own key is not its neighbour",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "a",
+   "pos": "top",
+   "other": {
+    "id": "",
+    "key": ""
+   },
+   "draw": "1/1",
+   "writes": [
+    {
+     "id": "a",
+     "key": "HV"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "the last card to the bottom",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "e",
+   "pos": "bottom",
+   "other": {
+    "id": "",
+    "key": ""
+   },
+   "draw": "0/1",
+   "writes": [
+    {
+     "id": "e",
+     "key": "V"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "the last card to the bottom",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "e",
+   "pos": "bottom",
+   "other": {
+    "id": "",
+    "key": ""
+   },
+   "draw": "617/1000",
+   "writes": [
+    {
+     "id": "e",
+     "key": "Wql"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "the last card to the bottom",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "e",
+   "pos": "bottom",
+   "other": {
+    "id": "",
+    "key": ""
+   },
+   "draw": "1/1",
+   "writes": [
+    {
+     "id": "e",
+     "key": "Y"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "before a card in the middle",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "e",
+   "pos": "before",
+   "other": {
+    "id": "c",
+    "key": "P"
+   },
+   "draw": "0/1",
+   "writes": [
+    {
+     "id": "e",
+     "key": "LFV"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "before a card in the middle",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "e",
+   "pos": "before",
+   "other": {
+    "id": "c",
+    "key": "P"
+   },
+   "draw": "617/1000",
+   "writes": [
+    {
+     "id": "e",
+     "key": "Mn7"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "before a card in the middle",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "e",
+   "pos": "before",
+   "other": {
+    "id": "c",
+    "key": "P"
+   },
+   "draw": "1/1",
+   "writes": [
+    {
+     "id": "e",
+     "key": "NkU"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "after a card in the middle",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "a",
+   "pos": "after",
+   "other": {
+    "id": "c",
+    "key": "P"
+   },
+   "draw": "0/1",
+   "writes": [
+    {
+     "id": "a",
+     "key": "QFV"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "after a card in the middle",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "a",
+   "pos": "after",
+   "other": {
+    "id": "c",
+    "key": "P"
+   },
+   "draw": "617/1000",
+   "writes": [
+    {
+     "id": "a",
+     "key": "Rn7"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "after a card in the middle",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "a",
+   "pos": "after",
+   "other": {
+    "id": "c",
+    "key": "P"
+   },
+   "draw": "1/1",
+   "writes": [
+    {
+     "id": "a",
+     "key": "SkU"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "before the first card",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "d",
+   "pos": "before",
+   "other": {
+    "id": "a",
+    "key": "F"
+   },
+   "draw": "0/1",
+   "writes": [
+    {
+     "id": "d",
+     "key": "EWw"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "before the first card",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "d",
+   "pos": "before",
+   "other": {
+    "id": "a",
+    "key": "F"
+   },
+   "draw": "617/1000",
+   "writes": [
+    {
+     "id": "d",
+     "key": "Df9"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "before the first card",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "d",
+   "pos": "before",
+   "other": {
+    "id": "a",
+    "key": "F"
+   },
+   "draw": "1/1",
+   "writes": [
+    {
+     "id": "d",
+     "key": "D7k"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "after the last card",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "b",
+   "pos": "after",
+   "other": {
+    "id": "e",
+    "key": "Z"
+   },
+   "draw": "0/1",
+   "writes": [
+    {
+     "id": "b",
+     "key": "ZqK"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "after the last card",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "b",
+   "pos": "after",
+   "other": {
+    "id": "e",
+    "key": "Z"
+   },
+   "draw": "617/1000",
+   "writes": [
+    {
+     "id": "b",
+     "key": "bP9"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "after the last card",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "b",
+   "pos": "after",
+   "other": {
+    "id": "e",
+    "key": "Z"
+   },
+   "draw": "1/1",
+   "writes": [
+    {
+     "id": "b",
+     "key": "cNG"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "before its own lower neighbour's successor: the moved card is skipped",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "b",
+   "pos": "before",
+   "other": {
+    "id": "c",
+    "key": "P"
+   },
+   "draw": "0/1",
+   "writes": [
+    {
+     "id": "b",
+     "key": "HV"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "before its own lower neighbour's successor: the moved card is skipped",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "b",
+   "pos": "before",
+   "other": {
+    "id": "c",
+    "key": "P"
+   },
+   "draw": "617/1000",
+   "writes": [
+    {
+     "id": "b",
+     "key": "KaG"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "before its own lower neighbour's successor: the moved card is skipped",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "b",
+   "pos": "before",
+   "other": {
+    "id": "c",
+    "key": "P"
+   },
+   "draw": "1/1",
+   "writes": [
+    {
+     "id": "b",
+     "key": "MUz"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "after its own upper neighbour's predecessor",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "d",
+   "pos": "after",
+   "other": {
+    "id": "c",
+    "key": "P"
+   },
+   "draw": "0/1",
+   "writes": [
+    {
+     "id": "d",
+     "key": "RV"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "after its own upper neighbour's predecessor",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "d",
+   "pos": "after",
+   "other": {
+    "id": "c",
+    "key": "P"
+   },
+   "draw": "617/1000",
+   "writes": [
+    {
+     "id": "d",
+     "key": "UaG"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "after its own upper neighbour's predecessor",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "d",
+   "pos": "after",
+   "other": {
+    "id": "c",
+    "key": "P"
+   },
+   "draw": "1/1",
+   "writes": [
+    {
+     "id": "d",
+     "key": "WUz"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "an unranked card next to a ranked one",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "n",
+   "pos": "after",
+   "other": {
+    "id": "b",
+    "key": "K"
+   },
+   "draw": "0/1",
+   "writes": [
+    {
+     "id": "n",
+     "key": "LFV"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "an unranked card next to a ranked one",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "n",
+   "pos": "after",
+   "other": {
+    "id": "b",
+    "key": "K"
+   },
+   "draw": "617/1000",
+   "writes": [
+    {
+     "id": "n",
+     "key": "Mn7"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "an unranked card next to a ranked one",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "n",
+   "pos": "after",
+   "other": {
+    "id": "b",
+    "key": "K"
+   },
+   "draw": "1/1",
+   "writes": [
+    {
+     "id": "n",
+     "key": "NkU"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "the other card has no rank",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "a",
+   "pos": "before",
+   "other": {
+    "id": "n",
+    "key": ""
+   },
+   "draw": "0/1",
+   "writes": [],
+   "error": "no_rank"
+  },
+  {
+   "name": "the other card has no rank",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "a",
+   "pos": "before",
+   "other": {
+    "id": "n",
+    "key": ""
+   },
+   "draw": "617/1000",
+   "writes": [],
+   "error": "no_rank"
+  },
+  {
+   "name": "the other card has no rank",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "a",
+   "pos": "before",
+   "other": {
+    "id": "n",
+    "key": ""
+   },
+   "draw": "1/1",
+   "writes": [],
+   "error": "no_rank"
+  },
+  {
+   "name": "before the first card of a tied run: one write",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "t1",
+     "key": "K"
+    },
+    {
+     "id": "t2",
+     "key": "K"
+    },
+    {
+     "id": "t3",
+     "key": "K"
+    },
+    {
+     "id": "t4",
+     "key": "K"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    }
+   ],
+   "moved": "e",
+   "pos": "before",
+   "other": {
+    "id": "t1",
+    "key": "K"
+   },
+   "draw": "0/1",
+   "writes": [
+    {
+     "id": "e",
+     "key": "GFV"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "before the first card of a tied run: one write",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "t1",
+     "key": "K"
+    },
+    {
+     "id": "t2",
+     "key": "K"
+    },
+    {
+     "id": "t3",
+     "key": "K"
+    },
+    {
+     "id": "t4",
+     "key": "K"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    }
+   ],
+   "moved": "e",
+   "pos": "before",
+   "other": {
+    "id": "t1",
+    "key": "K"
+   },
+   "draw": "617/1000",
+   "writes": [
+    {
+     "id": "e",
+     "key": "Hn7"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "before the first card of a tied run: one write",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "t1",
+     "key": "K"
+    },
+    {
+     "id": "t2",
+     "key": "K"
+    },
+    {
+     "id": "t3",
+     "key": "K"
+    },
+    {
+     "id": "t4",
+     "key": "K"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    }
+   ],
+   "moved": "e",
+   "pos": "before",
+   "other": {
+    "id": "t1",
+    "key": "K"
+   },
+   "draw": "1/1",
+   "writes": [
+    {
+     "id": "e",
+     "key": "IkU"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "after the last card of a tied run: one write",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "t1",
+     "key": "K"
+    },
+    {
+     "id": "t2",
+     "key": "K"
+    },
+    {
+     "id": "t3",
+     "key": "K"
+    },
+    {
+     "id": "t4",
+     "key": "K"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    }
+   ],
+   "moved": "a",
+   "pos": "after",
+   "other": {
+    "id": "t4",
+    "key": "K"
+   },
+   "draw": "0/1",
+   "writes": [
+    {
+     "id": "a",
+     "key": "NkV"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "after the last card of a tied run: one write",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "t1",
+     "key": "K"
+    },
+    {
+     "id": "t2",
+     "key": "K"
+    },
+    {
+     "id": "t3",
+     "key": "K"
+    },
+    {
+     "id": "t4",
+     "key": "K"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    }
+   ],
+   "moved": "a",
+   "pos": "after",
+   "other": {
+    "id": "t4",
+    "key": "K"
+   },
+   "draw": "617/1000",
+   "writes": [
+    {
+     "id": "a",
+     "key": "SNO"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "after the last card of a tied run: one write",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "t1",
+     "key": "K"
+    },
+    {
+     "id": "t2",
+     "key": "K"
+    },
+    {
+     "id": "t3",
+     "key": "K"
+    },
+    {
+     "id": "t4",
+     "key": "K"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    }
+   ],
+   "moved": "a",
+   "pos": "after",
+   "other": {
+    "id": "t4",
+    "key": "K"
+   },
+   "draw": "1/1",
+   "writes": [
+    {
+     "id": "a",
+     "key": "VFU"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "into a tied run, before: the run is re-keyed",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "t1",
+     "key": "K"
+    },
+    {
+     "id": "t2",
+     "key": "K"
+    },
+    {
+     "id": "t3",
+     "key": "K"
+    },
+    {
+     "id": "t4",
+     "key": "K"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    }
+   ],
+   "moved": "e",
+   "pos": "before",
+   "other": {
+    "id": "t3",
+    "key": "K"
+   },
+   "draw": "0/1",
+   "writes": [
+    {
+     "id": "t1",
+     "key": "Mp"
+    },
+    {
+     "id": "t2",
+     "key": "Ue"
+    },
+    {
+     "id": "e",
+     "key": "cT"
+    },
+    {
+     "id": "t3",
+     "key": "kI"
+    },
+    {
+     "id": "t4",
+     "key": "s7"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "into a tied run, before: the run is re-keyed",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "t1",
+     "key": "K"
+    },
+    {
+     "id": "t2",
+     "key": "K"
+    },
+    {
+     "id": "t3",
+     "key": "K"
+    },
+    {
+     "id": "t4",
+     "key": "K"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    }
+   ],
+   "moved": "e",
+   "pos": "before",
+   "other": {
+    "id": "t3",
+    "key": "K"
+   },
+   "draw": "617/1000",
+   "writes": [
+    {
+     "id": "t1",
+     "key": "Mp"
+    },
+    {
+     "id": "t2",
+     "key": "Ue"
+    },
+    {
+     "id": "e",
+     "key": "cT"
+    },
+    {
+     "id": "t3",
+     "key": "kI"
+    },
+    {
+     "id": "t4",
+     "key": "s7"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "into a tied run, before: the run is re-keyed",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "t1",
+     "key": "K"
+    },
+    {
+     "id": "t2",
+     "key": "K"
+    },
+    {
+     "id": "t3",
+     "key": "K"
+    },
+    {
+     "id": "t4",
+     "key": "K"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    }
+   ],
+   "moved": "e",
+   "pos": "before",
+   "other": {
+    "id": "t3",
+    "key": "K"
+   },
+   "draw": "1/1",
+   "writes": [
+    {
+     "id": "t1",
+     "key": "Mp"
+    },
+    {
+     "id": "t2",
+     "key": "Ue"
+    },
+    {
+     "id": "e",
+     "key": "cT"
+    },
+    {
+     "id": "t3",
+     "key": "kI"
+    },
+    {
+     "id": "t4",
+     "key": "s7"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "into a tied run, after: the run is re-keyed",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "t1",
+     "key": "K"
+    },
+    {
+     "id": "t2",
+     "key": "K"
+    },
+    {
+     "id": "t3",
+     "key": "K"
+    },
+    {
+     "id": "t4",
+     "key": "K"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    }
+   ],
+   "moved": "a",
+   "pos": "after",
+   "other": {
+    "id": "t1",
+    "key": "K"
+   },
+   "draw": "0/1",
+   "writes": [
+    {
+     "id": "t1",
+     "key": "5p"
+    },
+    {
+     "id": "a",
+     "key": "Be"
+    },
+    {
+     "id": "t2",
+     "key": "HT"
+    },
+    {
+     "id": "t3",
+     "key": "NI"
+    },
+    {
+     "id": "t4",
+     "key": "T7"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "into a tied run, after: the run is re-keyed",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "t1",
+     "key": "K"
+    },
+    {
+     "id": "t2",
+     "key": "K"
+    },
+    {
+     "id": "t3",
+     "key": "K"
+    },
+    {
+     "id": "t4",
+     "key": "K"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    }
+   ],
+   "moved": "a",
+   "pos": "after",
+   "other": {
+    "id": "t1",
+    "key": "K"
+   },
+   "draw": "617/1000",
+   "writes": [
+    {
+     "id": "t1",
+     "key": "5p"
+    },
+    {
+     "id": "a",
+     "key": "Be"
+    },
+    {
+     "id": "t2",
+     "key": "HT"
+    },
+    {
+     "id": "t3",
+     "key": "NI"
+    },
+    {
+     "id": "t4",
+     "key": "T7"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "into a tied run, after: the run is re-keyed",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "t1",
+     "key": "K"
+    },
+    {
+     "id": "t2",
+     "key": "K"
+    },
+    {
+     "id": "t3",
+     "key": "K"
+    },
+    {
+     "id": "t4",
+     "key": "K"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    }
+   ],
+   "moved": "a",
+   "pos": "after",
+   "other": {
+    "id": "t1",
+    "key": "K"
+   },
+   "draw": "1/1",
+   "writes": [
+    {
+     "id": "t1",
+     "key": "5p"
+    },
+    {
+     "id": "a",
+     "key": "Be"
+    },
+    {
+     "id": "t2",
+     "key": "HT"
+    },
+    {
+     "id": "t3",
+     "key": "NI"
+    },
+    {
+     "id": "t4",
+     "key": "T7"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "a card of the tied run moved within it",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "t1",
+     "key": "K"
+    },
+    {
+     "id": "t2",
+     "key": "K"
+    },
+    {
+     "id": "t3",
+     "key": "K"
+    },
+    {
+     "id": "t4",
+     "key": "K"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    }
+   ],
+   "moved": "t4",
+   "pos": "before",
+   "other": {
+    "id": "t2",
+    "key": "K"
+   },
+   "draw": "0/1",
+   "writes": [
+    {
+     "id": "t1",
+     "key": "J"
+    },
+    {
+     "id": "t4",
+     "key": "N"
+    },
+    {
+     "id": "t2",
+     "key": "R"
+    },
+    {
+     "id": "t3",
+     "key": "V"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "a card of the tied run moved within it",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "t1",
+     "key": "K"
+    },
+    {
+     "id": "t2",
+     "key": "K"
+    },
+    {
+     "id": "t3",
+     "key": "K"
+    },
+    {
+     "id": "t4",
+     "key": "K"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    }
+   ],
+   "moved": "t4",
+   "pos": "before",
+   "other": {
+    "id": "t2",
+    "key": "K"
+   },
+   "draw": "617/1000",
+   "writes": [
+    {
+     "id": "t1",
+     "key": "J"
+    },
+    {
+     "id": "t4",
+     "key": "N"
+    },
+    {
+     "id": "t2",
+     "key": "R"
+    },
+    {
+     "id": "t3",
+     "key": "V"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "a card of the tied run moved within it",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "t1",
+     "key": "K"
+    },
+    {
+     "id": "t2",
+     "key": "K"
+    },
+    {
+     "id": "t3",
+     "key": "K"
+    },
+    {
+     "id": "t4",
+     "key": "K"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    }
+   ],
+   "moved": "t4",
+   "pos": "before",
+   "other": {
+    "id": "t2",
+    "key": "K"
+   },
+   "draw": "1/1",
+   "writes": [
+    {
+     "id": "t1",
+     "key": "J"
+    },
+    {
+     "id": "t4",
+     "key": "N"
+    },
+    {
+     "id": "t2",
+     "key": "R"
+    },
+    {
+     "id": "t3",
+     "key": "V"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "a tied run at the cap is re-keyed",
+   "cards": [
+    {
+     "id": "x",
+     "key": "A"
+    },
+    {
+     "id": "c0",
+     "key": "K"
+    },
+    {
+     "id": "c1",
+     "key": "K"
+    },
+    {
+     "id": "c2",
+     "key": "K"
+    },
+    {
+     "id": "c3",
+     "key": "K"
+    },
+    {
+     "id": "c4",
+     "key": "K"
+    },
+    {
+     "id": "c5",
+     "key": "K"
+    },
+    {
+     "id": "c6",
+     "key": "K"
+    }
+   ],
+   "moved": "x",
+   "pos": "after",
+   "other": {
+    "id": "c0",
+    "key": "K"
+   },
+   "draw": "0/1",
+   "writes": [
+    {
+     "id": "c0",
+     "key": "6t"
+    },
+    {
+     "id": "x",
+     "key": "Dm"
+    },
+    {
+     "id": "c1",
+     "key": "Kf"
+    },
+    {
+     "id": "c2",
+     "key": "RY"
+    },
+    {
+     "id": "c3",
+     "key": "YR"
+    },
+    {
+     "id": "c4",
+     "key": "fK"
+    },
+    {
+     "id": "c5",
+     "key": "mD"
+    },
+    {
+     "id": "c6",
+     "key": "t6"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "a tied run at the cap is re-keyed",
+   "cards": [
+    {
+     "id": "x",
+     "key": "A"
+    },
+    {
+     "id": "c0",
+     "key": "K"
+    },
+    {
+     "id": "c1",
+     "key": "K"
+    },
+    {
+     "id": "c2",
+     "key": "K"
+    },
+    {
+     "id": "c3",
+     "key": "K"
+    },
+    {
+     "id": "c4",
+     "key": "K"
+    },
+    {
+     "id": "c5",
+     "key": "K"
+    },
+    {
+     "id": "c6",
+     "key": "K"
+    }
+   ],
+   "moved": "x",
+   "pos": "after",
+   "other": {
+    "id": "c0",
+    "key": "K"
+   },
+   "draw": "617/1000",
+   "writes": [
+    {
+     "id": "c0",
+     "key": "6t"
+    },
+    {
+     "id": "x",
+     "key": "Dm"
+    },
+    {
+     "id": "c1",
+     "key": "Kf"
+    },
+    {
+     "id": "c2",
+     "key": "RY"
+    },
+    {
+     "id": "c3",
+     "key": "YR"
+    },
+    {
+     "id": "c4",
+     "key": "fK"
+    },
+    {
+     "id": "c5",
+     "key": "mD"
+    },
+    {
+     "id": "c6",
+     "key": "t6"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "a tied run at the cap is re-keyed",
+   "cards": [
+    {
+     "id": "x",
+     "key": "A"
+    },
+    {
+     "id": "c0",
+     "key": "K"
+    },
+    {
+     "id": "c1",
+     "key": "K"
+    },
+    {
+     "id": "c2",
+     "key": "K"
+    },
+    {
+     "id": "c3",
+     "key": "K"
+    },
+    {
+     "id": "c4",
+     "key": "K"
+    },
+    {
+     "id": "c5",
+     "key": "K"
+    },
+    {
+     "id": "c6",
+     "key": "K"
+    }
+   ],
+   "moved": "x",
+   "pos": "after",
+   "other": {
+    "id": "c0",
+    "key": "K"
+   },
+   "draw": "1/1",
+   "writes": [
+    {
+     "id": "c0",
+     "key": "6t"
+    },
+    {
+     "id": "x",
+     "key": "Dm"
+    },
+    {
+     "id": "c1",
+     "key": "Kf"
+    },
+    {
+     "id": "c2",
+     "key": "RY"
+    },
+    {
+     "id": "c3",
+     "key": "YR"
+    },
+    {
+     "id": "c4",
+     "key": "fK"
+    },
+    {
+     "id": "c5",
+     "key": "mD"
+    },
+    {
+     "id": "c6",
+     "key": "t6"
+    }
+   ],
+   "error": ""
+  },
+  {
+   "name": "a tied run past the cap is refused",
+   "cards": [
+    {
+     "id": "x",
+     "key": "A"
+    },
+    {
+     "id": "c0",
+     "key": "K"
+    },
+    {
+     "id": "c1",
+     "key": "K"
+    },
+    {
+     "id": "c2",
+     "key": "K"
+    },
+    {
+     "id": "c3",
+     "key": "K"
+    },
+    {
+     "id": "c4",
+     "key": "K"
+    },
+    {
+     "id": "c5",
+     "key": "K"
+    },
+    {
+     "id": "c6",
+     "key": "K"
+    },
+    {
+     "id": "c7",
+     "key": "K"
+    },
+    {
+     "id": "c8",
+     "key": "K"
+    }
+   ],
+   "moved": "x",
+   "pos": "after",
+   "other": {
+    "id": "c0",
+    "key": "K"
+   },
+   "draw": "0/1",
+   "writes": [],
+   "error": "tied_run_too_long"
+  },
+  {
+   "name": "a tied run past the cap is refused",
+   "cards": [
+    {
+     "id": "x",
+     "key": "A"
+    },
+    {
+     "id": "c0",
+     "key": "K"
+    },
+    {
+     "id": "c1",
+     "key": "K"
+    },
+    {
+     "id": "c2",
+     "key": "K"
+    },
+    {
+     "id": "c3",
+     "key": "K"
+    },
+    {
+     "id": "c4",
+     "key": "K"
+    },
+    {
+     "id": "c5",
+     "key": "K"
+    },
+    {
+     "id": "c6",
+     "key": "K"
+    },
+    {
+     "id": "c7",
+     "key": "K"
+    },
+    {
+     "id": "c8",
+     "key": "K"
+    }
+   ],
+   "moved": "x",
+   "pos": "after",
+   "other": {
+    "id": "c0",
+    "key": "K"
+   },
+   "draw": "617/1000",
+   "writes": [],
+   "error": "tied_run_too_long"
+  },
+  {
+   "name": "a tied run past the cap is refused",
+   "cards": [
+    {
+     "id": "x",
+     "key": "A"
+    },
+    {
+     "id": "c0",
+     "key": "K"
+    },
+    {
+     "id": "c1",
+     "key": "K"
+    },
+    {
+     "id": "c2",
+     "key": "K"
+    },
+    {
+     "id": "c3",
+     "key": "K"
+    },
+    {
+     "id": "c4",
+     "key": "K"
+    },
+    {
+     "id": "c5",
+     "key": "K"
+    },
+    {
+     "id": "c6",
+     "key": "K"
+    },
+    {
+     "id": "c7",
+     "key": "K"
+    },
+    {
+     "id": "c8",
+     "key": "K"
+    }
+   ],
+   "moved": "x",
+   "pos": "after",
+   "other": {
+    "id": "c0",
+    "key": "K"
+   },
+   "draw": "1/1",
+   "writes": [],
+   "error": "tied_run_too_long"
+  },
+  {
+   "name": "the other card was moved since it was read",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "a",
+   "pos": "before",
+   "other": {
+    "id": "c",
+    "key": "Q"
+   },
+   "draw": "0/1",
+   "writes": [],
+   "error": "changed"
+  },
+  {
+   "name": "the other card was moved since it was read",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "a",
+   "pos": "before",
+   "other": {
+    "id": "c",
+    "key": "Q"
+   },
+   "draw": "617/1000",
+   "writes": [],
+   "error": "changed"
+  },
+  {
+   "name": "the other card was moved since it was read",
+   "cards": [
+    {
+     "id": "a",
+     "key": "F"
+    },
+    {
+     "id": "b",
+     "key": "K"
+    },
+    {
+     "id": "c",
+     "key": "P"
+    },
+    {
+     "id": "d",
+     "key": "U"
+    },
+    {
+     "id": "e",
+     "key": "Z"
+    },
+    {
+     "id": "n",
+     "key": ""
+    }
+   ],
+   "moved": "a",
+   "pos": "before",
+   "other": {
+    "id": "c",
+    "key": "Q"
+   },
+   "draw": "1/1",
+   "writes": [],
+   "error": "changed"
+  }
+ ]
+}

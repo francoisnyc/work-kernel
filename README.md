@@ -15,6 +15,7 @@ and what was learned is in [`docs/journal.md`](docs/journal.md).
 - **Docker** with **Compose v2** (`docker compose`), to run the stack.
 - **Go 1.26** or newer, to build `pli` (and to run the tests).
 - **jq**, for the walkthrough below and the scenario script.
+- **Node 24**, only to work on the web UI (the stack builds it in Docker).
 - **curl**, for the scenario script (it reads the emails the stack sent).
 
 ## Start the stack
@@ -24,14 +25,17 @@ docker compose up -d --build --wait     # or: make up
 ```
 
 This builds the images and starts Postgres, the Temporal dev server, a one-shot
-migration, the item service (the API), the relay, the worker, and stub CRM,
+migration, the item service (the API), the relay, the worker, stub CRM,
 ERP, HR directory and email servers (`connstub`) for the ticket's and the
-vacation request's hooks. `--wait` returns once every
-service is healthy. Three ports are published:
+vacation request's hooks, and the web UI. `--wait` returns once every
+service is healthy. Four ports are published, all on 127.0.0.1 only:
 
-- `http://localhost:8080`: the public API (Connect, gRPC and gRPC-Web).
-- `http://localhost:8233`: the Temporal UI.
-- `http://localhost:8085`: dev only, the emails the stack sent, read-only
+- `http://localhost:8080`: the public API (Connect, gRPC and gRPC-Web),
+  **on 127.0.0.1 only**.
+- `http://localhost:8090`: [the web UI](#the-web-ui), **on 127.0.0.1 only**.
+- `http://localhost:8233`: the Temporal UI, **on 127.0.0.1 only** (it shows
+  workflow histories with field values, and can terminate and signal workflows).
+- `http://localhost:8085`: dev only, **on 127.0.0.1 only**, the emails the stack sent, read-only
   (`GET /messages?item=<id>`), for the scenario. The email stub itself
   (8084) is reachable inside the stack only.
 
@@ -54,6 +58,9 @@ other timeouts keep real time. A production worker never gets these flags.
   check: they serve no port and nothing waits on them; they start once
   Postgres, Temporal (and, for the worker, connstub and the item service,
   whose loaded Types its dev clock checks) are healthy.
+- **web** serves the web UI's built site with nginx and proxies `/api` to
+  the item service, so the browser talks to one origin. It is a client of
+  the public API like `pli`: nothing else.
 - **postgres** holds everything; **temporal** is the dev server, in memory.
 
 ## Build pli
@@ -72,7 +79,10 @@ agent `triage-bot` in namespace `acme`, among others, and `carol` in
 namespace `globex`. It also says what ana lets `triage-bot` do. The stack
 mounts the file read-only into the item service, which refuses to start
 without it and prints a **WARNING on every start**: anyone holding the file
-can act as all of them. Never expose a server that runs with it.
+can act as all of them. Never expose a server that runs with it. For that
+reason the stack publishes the API and the web UI on `127.0.0.1` only:
+Compose otherwise publishes a port on every network interface, which would
+let anyone on your network call the API with a dev token.
 
 `pli` reads the same file and picks a token with `--as NAME`:
 
@@ -181,6 +191,70 @@ moved while it runs can land out of place (measured: two in three).
 `XDG_CONFIG_HOME` is set (on every OS), else in the OS's config directory.
 `pli` with no arguments prints its usage.
 
+## The web UI
+
+```sh
+docker compose up -d --build --wait     # then open http://localhost:8090
+```
+
+One generic UI for playing with the proof of concept. No screen knows a
+Type: every form, button and list is built from what `GetType` and
+`ListTypes` say, so the ticket, the vacation request and the PLAT project
+all work with the same pages. It calls the public API only.
+
+- **Act as.** Choose a dev user in the yellow banner (`ana`, `bob`, `lea`,
+  `carol` in the other namespace...). The choice is kept per browser tab, so
+  two tabs can be two users.
+- **Items** lists the top level; **Search** takes words, Types, states,
+  categories, field conditions (`f_assignee eq me`) and an order. Both page
+  with "Load more".
+- **New Item**: choose a Type (the latest version unless you pick another),
+  optionally a container and readers, and fill the form built from its
+  fields.
+- **An Item's page** shows its fields as a form (fields its state freezes
+  and fields only the kernel writes are read-only), the transitions its
+  Type declares from its state, its links both ways (add and remove where
+  the link is not the kernel's to set), rollups, the Items it contains, and
+  its history.
+- **Transitions.** Every move the Type declares is offered, with its rules
+  (`allowed`, `except`, `guard`, `required`, `clears`) shown as text. The UI
+  evaluates none of them: it asks, and shows the server's answer, either an
+  outcome (`APPLIED`, `DENIED`, `PENDING`, `ERROR`) or a refusal with its
+  code, reason and metadata. A move only the system can make (a timer's) is
+  greyed out.
+- **Inbox**: the Items waiting for you, found from the Types: for every
+  transition whose `allowed` names a principal field, the Items in its
+  from-state where that field is you (today: vacation requests to approve).
+- **Board**: from an Item's page, "Board: sprint_issues" shows the Items
+  linked to it, ordered by `f_rank`. Drag a card onto the top or bottom
+  half of another, or use its arrows. A drop is one write, ranked against
+  the card's container as `pli rank` does (`web/src/rank` is a port of
+  `internal/rank`, held to it by shared test vectors). Past 32 bytes the
+  board says the container needs a rebalance; rebalancing stays with
+  `pli rank rebalance`.
+- Nothing updates by itself (the API has no Watch yet): pages reload after
+  an action, and each has a Refresh button.
+
+### What is dev-only
+
+**Every port the dev stack publishes is bound to 127.0.0.1**, including
+`compose.dev.yaml`'s Postgres (5432) and Temporal (7233): the stack is only
+reachable from this machine.
+
+- **The "act as" picker and the dev-token file.** The stack mounts
+  `dev-tokens.example.yaml` read-only into the web container, which serves
+  it at `/dev-tokens.yaml` so the picker can list the users. **Every dev
+  token is therefore readable by anyone who can reach port 8090**, which is
+  why the stack publishes 8090 (and the API's 8080) on `127.0.0.1` only. Do
+  not change those bindings, and never put this stack on a network.
+- The picker is compiled in only when the site is built with
+  `VITE_DEV_USERS=1`, which only `docker-compose.yml` sets. A build without
+  it contains no picker and no dev-user code, the image never contains the
+  token file, and such a build says it has no sign-on: there is no other
+  sign-on yet.
+- Agents are not in the picker: an agent needs a session, which the UI does
+  not start. Use `pli` for those.
+
 ## The scenario
 
 ```sh
@@ -218,6 +292,17 @@ only Postgres or only Temporal leaves the two out of step.
 - `make gen` regenerates `gen/` from `proto/` (committed; CI checks it is
   current); `make lint` and `make breaking` run `buf lint` and `buf breaking`
   (WIRE_JSON, against `origin/main`).
+- The web UI is in `web/` (TypeScript, Vite, React; Node 24). In `web/`:
+  `npm ci`, then `npm test` (unit tests), `npm run typecheck`, and
+  `npm run dev` (a dev server on 5173 against the running stack's API).
+  `npm run e2e` runs the browser smoke test against the running stack
+  (once: `npx playwright install chromium`). `make gen-web` regenerates the
+  TypeScript client in `web/src/gen/` (committed; CI checks it is current;
+  it needs `npm ci` first).
+- `internal/rank/testdata/vectors.json` holds the rank package's answers,
+  which the TypeScript port must match. After a change to `internal/rank`:
+  `go test ./internal/rank -run TestVectors -update`, then make
+  `web/src/rank` follow.
 - To run a service from the host against the stack, publish Postgres (5432)
   and Temporal's gRPC port (7233) too:
   `docker compose -f docker-compose.yml -f compose.dev.yaml up -d --build --wait`.
