@@ -262,12 +262,6 @@ Ideas noted during the spike, not built yet.
   next submit corrects it; a denied resubmission leaves it stale in draft.
   Harmless (deciding needs `submitted`), but misleading to read. (Step 2,
   part 1)
-- `TestDroppedAnswer_DefaultConnectors_NetHTTPResends` (internal/hooks) is
-  flaky: it failed once on main (9cccd7f) and passed 7 reruns. Likely cause:
-  the ERP stub counts a dropped answer after closing the connection, so
-  net/http can resend, get the invoice and return before the count; count
-  before `conn.Close()`. Output and details: the Step 2, part 2 entry.
-  (Step 2, part 2)
 - A stuck undo is visible (the workflow's `undos` query) but alerts no one.
   An undo or a `reaction_failed` must reach a person. (Step 2, part 2)
 - Nothing keeps a person to one open leave balance: two open balances make
@@ -307,6 +301,13 @@ Ideas noted during the spike, not built yet.
   with reaction hooks, not only for the reaction that has hooks. Harmless
   (the run finds nothing to do), but it could filter by reaction. (Step 2,
   part 3)
+- Refused undos are retried by every fresh run: `pendingUndos` ignores
+  `reaction_failed`, so an undo the target refused for good comes back
+  after each crash or continue-as-new, and is refused (and recorded) again.
+  Noise, not harm. (Consolidation after Step 2)
+- Acting runs are counted as completed, not started, after a crash: a run
+  that gave up (`hook_failed`) counts, so a given-up run 1 is never
+  retried. (Consolidation after Step 2)
 - Test harness: a delivered event reaches the same run even when the real
   system would start a new one (the run had finished). Two of this step's
   tests assumed a run stays alive in a state with nothing to do. A harness
@@ -1430,3 +1431,85 @@ retried, a per-worker dev clock, a real email connector, `StartsWorkflow` per re
 harness delivering to a finished run); two older ones (the held timer spent) are marked done.
 **Next session:** proof-of-concept Step 3 (the Jira scenarios), once this PR is merged; plan
 it per step as the build order says.
+
+## 2026-11-18 — Consolidation after Step 2: seven bugs where Step 2's primitives meet (finished)
+
+**Built:** fixes for seven bugs an adversarial review of Step 2 found by reading the code, each
+traced, each first reproduced by a failing test (Phase B), then fixed in its own commit with its
+tests named (Phase C). Plus the flaky stub test, fixed, and two noise items, Later only.
+
+**Kernel changes, counted** (seven, one per bug; no proto change):
+(1) workflow activity `RunReaction`: a target refused as held (`ErrHeld`, checked before
+`ErrStale`) is a retryable error, no longer nil. (2) workflow activity `RunCheck`: a correction
+`ResolveHold` refuses (Invalid, Rejected, Forbidden) closes the hold as error,
+`correction_refused`, under its own key `hold:<id>:refused`; typedef refuses a check writing a
+field its from-state freezes. (3) itemservice `React`: under the target lock, the resolve link's
+lookup runs again (`resolveCandidates`, now shared with resolution); none, several or another
+Item deny with `link_target_changed`. (4) itemservice `ListEvents`: a `causation_id` naming
+another Item is shown only to a reader who can see it, else omitted (as is one that does not
+parse). (5) typedef refuses a check or held reaction on an escape; the relay marks an escape's
+event `Canceled`; the workflow never reads a canceled hold as allowed, behind
+`GetVersion("canceled-hold-not-allowed")`, asked only of a `Canceled` event. (6) typedef refuses
+`resolve.on_enter` on the initial state, and a held reaction leaving a state other than its
+resolve link's `on_enter`. (7) lifecycle and relay: an event closing a hold any other way than
+allowed, on a Type with a held reaction leaving that state, starts the workflow. Not the kernel:
+(8) the connstub drop counter.
+
+**Each bug, before and after:**
+1. *A target's open hold left the source's hold open forever.* Before: `RunReaction` returned nil
+   while pot's hold was open; end to end, src was still held 15 s after pot's hold was allowed.
+   After: a retryable error; src allowed once pot's hold closed (1.2 s). The workflow test (budget
+   runs out: error, `budget_exhausted`) passed before too: the workflow half was right.
+2. *A refused correction left the hold open forever.* HR answering `bob`, not `user:bob`. Before:
+   the hold still open past the 2 s budget plus 3 s; the activity returned the Invalid refusal.
+   After: the hold closes as error, `correction_refused`, at once (0.2 s), one event, the request
+   in draft; a retried activity ends with nil or Stale, never a key reuse. The load rule was
+   missing; the guard (a non-correction refusal is not giving up) passed before and after.
+3. *A held deduction went to a balance resolution would no longer pick.* Before: closing ana's
+   balance, giving it to erin, or opening a second one, then approving: allowed, `f_used` 5 in all
+   three. After: DENIED `link_target_changed`, no balance touched.
+4. *Another Item's ID leaked through history.* Before: a reader who sees the balance but not the
+   (narrowed) request found the request's ID in the balance's history, in `causation_id` only,
+   through `ListEvents` and the API. After: omitted for that reader, kept for ana, who sees both.
+5. *Holds on escapes; a canceled hold read as allowed.* Before: such Types loaded; the relay sent
+   `Canceled: false`; a canceled event entering the requested state queued no undo. After: refused
+   at load; `Canceled: true`; the undo runs, caused by the cancel, and leaving that state later
+   runs no second one. A fourth recorded history (main at b0f92a4: v3's approval hold canceled
+   by the withdrawal, `canceled_hold_id` folded into `HoldID`) replays, with the other three.
+6. *Two resolve-link load rules.* Before: both Types loaded. After: refused; a link people set
+   stays exempt.
+7. *A lost undo when the run was dead.* Before: the escape started no workflow (relay test:
+   `Start` false); end to end (a real run took the request, then was terminated before deciding;
+   the deduction committed by hand; the withdrawal): after 15 s `f_used` was still 5, no refund,
+   the escape delivered and the workflow terminated. After: the escape starts a run, whose
+   LoadItem finds the undo: refunded once (3.5 s).
+8. *The flaky `TestDroppedAnswer_DefaultConnectors_NetHTTPResends`* is fixed: connstub counts the
+   dropped answer before closing the connection. The review saw 3 failures in 900 runs before, 0
+   in 1,800 after. Here, before: 0 of 900 idle, 75 of 2,700 with `-race` and 4 CPU burners (all
+   `dropped 0`). After: 0 of 1,800 idle, 0 of 2,700 with `-race` and the same 4 burners. Its Later
+   entry is removed.
+
+**Test changes:** none to existing tests. 19 new test functions, and the fourth recorded history
+(its own commit, recorded before any workflow change). `Event.Canceled` was a contract stub in
+Phase B.
+
+**Surprises:** the item 1 and item 7 reproductions needed a real run caught mid-decision: a row
+lock on the balance keeps the run's `React` waiting while the request is delivered, then the run
+is terminated. `activity.GetLogger` panics outside an activity (a test calling the activity
+directly), so `RunCheck` does not log the refusal; the `transition_failed` event records it.
+`GetVersion` works in an update handler, and asked only of a `Canceled` event it leaves every
+recorded history untouched. Item 2's error resolution needed its own key: the check's key
+`hold:<id>` is the correction's, and a retried activity sends the correction again. The flaky
+test only shows under load: 0 of 900 on an idle machine. The Docker daemon died twice.
+
+**Numbers:** `go test -race ./...` green in 161 s, no data race; the four recorded histories
+replay. Scenario, two runs on a fresh stack: 27.9 s and 26.9 s (stack up 8.3 s and 7.4 s). Steps,
+run 1 / run 2: vacation submit with the HR check 0.28 / 0.23 s; bob approves with the deduction
+0.16 / 0.16 s; leave: an approved request deducts 0.39 / 0.40 s, withdrawing refunds 0.18 / 0.29
+s, the race of two approvals 0.58 / 0.57 s; mail: reminders then expiry 10.43 / 10.39 s, approve
+and email 0.62 / 0.62 s, withdraw, refund and email 0.44 / 0.44 s, the final email check 4.07 /
+4.06 s.
+
+**Open:** Later has two new items (refused undos retried by every fresh run; acting runs counted
+as completed, so a given-up run is never retried) and loses one (the flaky test).
+**Next session:** proof-of-concept Step 3 (the Jira scenarios), once this PR is merged.
