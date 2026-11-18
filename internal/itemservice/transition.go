@@ -3,6 +3,7 @@ package itemservice
 import (
 	"context"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/google/uuid"
@@ -119,13 +120,31 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		if tr, ok := ty.Transition(it.State, req.ToState); ok {
 			declared = &tr
 		}
+		// A field the move clears counts as named by the write: it is
+		// judged like a patch's null (not writable, frozen), whether or not
+		// it has a value. A patch that sets such a field contradicts the
+		// move: malformed, before anything else.
+		named := req.Fields
+		if declared != nil && len(declared.Clears) > 0 {
+			named = maps.Clone(req.Fields)
+			if named == nil {
+				named = map[string]any{}
+			}
+			for _, id := range declared.Clears {
+				if v, set := req.Fields[id]; set && v != nil {
+					return WriteResult{}, &InvalidError{Field: id,
+						Reason: fmt.Sprintf("the transition %s -> %s clears %s; its patch may not set it", it.State, req.ToState, id)}
+				}
+				named[id] = nil
+			}
+		}
 		var writer *policy.Who
 		if kc == nil {
-			if writer, err = publicWriter(ctx, tx, ty, req.Principal, req.Fields); err != nil {
+			if writer, err = publicWriter(ctx, tx, ty, req.Principal, named); err != nil {
 				return WriteResult{}, err
 			}
 		}
-		if err := checkPatch(ty, it.State, declared, req.Fields, writer); err != nil {
+		if err := checkPatch(ty, it.State, declared, named, writer); err != nil {
 			return WriteResult{}, err
 		}
 		// While a hold is open, only an escape leaves the state, and it
@@ -158,9 +177,20 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		if err != nil {
 			return WriteResult{}, fromLifecycle(err)
 		}
-		// The move is legal. Whether this principal may make it is policy's
-		// question, asked second, so ErrForbidden always means "legal, but
-		// not for you".
+		// The move is legal, and says which fields it clears: they go now,
+		// after required fields and the guard were judged with them. Only a
+		// field that had a value is recorded as cleared.
+		clearedByMove := false
+		for _, id := range next.Clears {
+			if _, has := merged[id]; has {
+				delete(merged, id)
+				cleared[id] = nil
+				clearedByMove = true
+			}
+		}
+		// Whether this principal may make the move is policy's question,
+		// asked second, so ErrForbidden always means "legal, but not for
+		// you".
 		// A held transition is decided by its check hook, or by its held
 		// reaction (Step 2, part 2); their IDs share one space.
 		decider, checked := holdDecider(ty, it.State, next.State)
@@ -180,7 +210,7 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		}
 		// Last: the fields as the write leaves them keep the invariants
 		// (a held request's patch is written with the request).
-		if len(req.Fields) > 0 {
+		if len(req.Fields) > 0 || clearedByMove {
 			if err := checkInvariants(ty, merged); err != nil {
 				return WriteResult{}, err
 			}
@@ -208,12 +238,7 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		// A plain transition keeps its two-key payload; the field lists appear
 		// only when the request carried a patch.
 		payload := map[string]any{"from": it.State, "to": next.State}
-		if len(req.Fields) > 0 {
-			payload["field_ids"] = sortedKeys(set)
-			if len(cleared) > 0 {
-				payload["cleared_field_ids"] = sortedKeys(cleared)
-			}
-		}
+		addFieldIDs(payload, set, cleared)
 		if hold != nil { // an escape: it cancels the hold, in the same event
 			payload["canceled_hold_id"] = hold.id.String()
 		}
