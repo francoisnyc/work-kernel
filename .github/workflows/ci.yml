@@ -72,7 +72,57 @@ jobs:
       - name: Test (with race detector)
         run: go test -race -count=1 ./...
 
-  # The Step 0 scenario against the whole compose stack, through pli only.
+  # The web UI (web/): its generated client is current, it typechecks, its
+  # unit tests pass (the rank port against Go's golden vectors among them)
+  # and it builds.
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # buf runs through `go run`, as in the test job.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      # protoc-gen-es is the one package-lock.json pins.
+      - name: Generated TypeScript client is current
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          make gen-web
+          if [ -n "$(git status --porcelain -- web/src/gen)" ]; then
+            echo "web/src/gen is out of date: run make gen-web and commit the result"
+            git status --porcelain -- web/src/gen
+            git diff -- web/src/gen | head -50
+            exit 1
+          fi
+
+      - name: Typecheck
+        working-directory: web
+        run: npm run typecheck
+
+      - name: Unit tests
+        working-directory: web
+        run: npm test
+
+      - name: Build
+        working-directory: web
+        run: npm run build
+
+  # The Step 0 scenario against the whole compose stack, through pli only;
+  # then the web UI's browser smoke test against the same stack.
   scenario:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -97,6 +147,32 @@ jobs:
 
       - name: Run the scenario
         run: ./scripts/scenario.sh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install the browser test and its browser
+        working-directory: web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      # Against the stack the scenario just used: http://localhost:8090.
+      - name: Browser smoke test
+        working-directory: web
+        run: npm run e2e
+
+      - name: Upload the browser test's traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: web/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Stack logs
         if: failure()
