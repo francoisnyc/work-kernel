@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"strings"
 	"time"
 
@@ -15,12 +16,14 @@ import (
 
 	"github.com/francoisnyc/work-kernel/internal/item"
 	"github.com/francoisnyc/work-kernel/internal/policy"
+	"github.com/francoisnyc/work-kernel/internal/typedef"
 )
 
 // Paging (docs/design.md, "Reads"): a page size, an opaque token, no
 // offsets and no totals. Items page newest first on (created_at, id), a
 // key that new Items never come between, so a page never repeats or skips
-// one. Events page by item_seq.
+// one; or, with order_by, on (the field's value, id), Items without a
+// value last. Events page by item_seq.
 
 const (
 	defaultPageSize = 50
@@ -49,6 +52,9 @@ type pageToken struct {
 	CreatedAt time.Time `json:"t,omitzero"`
 	ID        uuid.UUID `json:"i,omitzero"`
 	Seq       int64     `json:"s,omitzero"`
+	// Value is the last Item's sort value under order_by, as text; nil
+	// when it had none (the page ended among the Items without a value).
+	Value *string `json:"v,omitempty"`
 }
 
 // requestKey fingerprints what a token is bound to: the kind of read, its
@@ -96,9 +102,84 @@ type itemQuery struct {
 	parent *uuid.UUID // List: the container; with top, the top level
 	list   bool       // List: only the container's (or the top level's) direct children
 	filter sqlFilter
+	order  *sqlOrder // nil: newest first
 	limit  int
 	after  *pageToken
 	key    string // the token fingerprint
+}
+
+// sqlOrder is an OrderBy checked against the registered Types: the SQL
+// that reads the sort value from the Items alias m (NULL when an Item has
+// none, or its Type does not declare the field), and what a token's value
+// is cast to for comparison with it.
+type sqlOrder struct {
+	field   string // the field ID, passed as the argument @o_field
+	expr    string
+	cast    string // "::numeric", or "::text" (compared under COLLATE "C")
+	numeric bool
+	desc    bool
+}
+
+// resolveOrder checks an OrderBy against the Types in play: the selected
+// Types, or every registered Type when none is selected. The field must be
+// declared by at least one of them, with one type across all that declare
+// it, and that type must have an order: string, int, date or enum. A
+// malformed order is an *InvalidError on order_by.
+func (k *Service) resolveOrder(ctx context.Context, typeIDs []string, o *OrderBy) (*sqlOrder, error) {
+	if o == nil {
+		return nil, nil
+	}
+	bad := func(reason string) error { return &InvalidError{Path: "order_by", Reason: reason} }
+	if o.Field == "" {
+		return nil, bad("order_by needs a field")
+	}
+	all, err := k.ListTypes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	types, _, err := declarations(inPlay(all, typeIDs), o.Field)
+	if err != nil {
+		return nil, bad(err.Error())
+	}
+	if len(types) > 1 {
+		return nil, bad("the field has different types across the Types that declare it")
+	}
+	out := &sqlOrder{field: o.Field, desc: o.Desc, expr: fieldRead(types[0], "o_field"), cast: "::text"}
+	switch types[0] {
+	case typedef.Int:
+		out.cast, out.numeric = "::numeric", true
+	case typedef.String, typedef.Date, typedef.Enum:
+	default:
+		return nil, bad("only string, int, date and enum fields have an order")
+	}
+	return out, nil
+}
+
+// after returns the keyset condition for the page that follows the token:
+// the Items that sort after (value, id) in this order. Items without a
+// value come last in both directions, and ties are broken by ID ascending
+// in both, so only the comparison of values turns around.
+func (o *sqlOrder) after(t *pageToken, args pgx.NamedArgs) (string, error) {
+	args["after_id"] = t.ID
+	if t.Value == nil {
+		// The last page ended among the Items without a value.
+		return "(" + o.expr + " is null and m.id > @after_id)", nil
+	}
+	if o.numeric {
+		// The token is unsigned: a value that is no number must be refused
+		// here, not fail in the database.
+		if _, ok := new(big.Rat).SetString(*t.Value); !ok {
+			return "", &InvalidError{Path: "page_token", Reason: "not a page token of this request"}
+		}
+	}
+	args["after_value"] = *t.Value
+	beyond := ">"
+	if o.desc {
+		beyond = "<"
+	}
+	value := "@after_value" + o.cast
+	return fmt.Sprintf("(%[1]s %[2]s %[3]s or (%[1]s = %[3]s and m.id > @after_id) or %[1]s is null)",
+		o.expr, beyond, value), nil
 }
 
 // hit is one Item a page found, with the narrowing scope it is read
@@ -106,6 +187,7 @@ type itemQuery struct {
 type hit struct {
 	it          item.Item
 	policyScope *uuid.UUID
+	sortValue   *string // under order_by: the Item's sort value as text, nil when it has none
 }
 
 // page runs the query and returns the Items found and the next token.
@@ -153,7 +235,28 @@ func (k *Service) page(ctx context.Context, q itemQuery) ([]hit, string, error) 
 	if _, cond := sessionFilter(c, "m", args); cond != "" {
 		conds = append(conds, strings.TrimPrefix(cond, " and "))
 	}
-	if q.after != nil {
+	// The order: newest first, or by the field's value with the Items that
+	// have none last, ties by ID. sortValue is the value as text, which the
+	// next page's token carries.
+	orderBy, sortValue := "m.created_at desc, m.id desc", "null::text"
+	if q.order != nil {
+		args["o_field"] = q.order.field
+		direction := "asc"
+		if q.order.desc {
+			direction = "desc"
+		}
+		orderBy = q.order.expr + " " + direction + " nulls last, m.id asc"
+		sortValue = "(" + q.order.expr + ")::text"
+	}
+	switch {
+	case q.after == nil:
+	case q.order != nil:
+		cond, err := q.order.after(q.after, args)
+		if err != nil {
+			return nil, "", err
+		}
+		conds = append(conds, cond)
+	default:
 		args["after_at"], args["after_id"] = q.after.CreatedAt, q.after.ID
 		conds = append(conds, "(m.created_at, m.id) < (@after_at, @after_id)")
 	}
@@ -165,10 +268,11 @@ func (k *Service) page(ctx context.Context, q itemQuery) ([]hit, string, error) 
 	}
 	rows, err := k.pool.Query(ctx, with+
 		`select m.id, m.type_id, m.type_version, m.container_id, m.scope_id, m.state, m.fields, m.item_seq,
-		        m.created_at, m.created_by, coalesce(m.created_on_behalf_of, ''), s.policy_scope_id
+		        m.created_at, m.created_by, coalesce(m.created_on_behalf_of, ''), s.policy_scope_id,
+		        `+sortValue+`
 		 from `+from+` join scopes s on s.id = m.scope_id
 		 where `+strings.Join(conds, "\n and ")+`
-		 order by m.created_at desc, m.id desc
+		 order by `+orderBy+`
 		 limit @limit`, args)
 	if err != nil {
 		return nil, "", fmt.Errorf("read items: %w", err)
@@ -177,7 +281,7 @@ func (k *Service) page(ctx context.Context, q itemQuery) ([]hit, string, error) 
 		var h hit
 		err := row.Scan(&h.it.ID, &h.it.TypeID, &h.it.TypeVersion, &h.it.ContainerID, &h.it.ScopeID,
 			&h.it.State, &h.it.Fields, &h.it.ItemSeq, &h.it.CreatedAt, &h.it.CreatedBy, &h.it.CreatedOnBehalfOf,
-			&h.policyScope)
+			&h.policyScope, &h.sortValue)
 		return h, err
 	})
 	if err != nil {
@@ -186,8 +290,14 @@ func (k *Service) page(ctx context.Context, q itemQuery) ([]hit, string, error) 
 	next := ""
 	if len(found) > q.limit {
 		found = found[:q.limit]
-		last := found[len(found)-1].it
-		next = encodeToken(pageToken{Request: q.key, CreatedAt: last.CreatedAt, ID: last.ID})
+		last := found[len(found)-1]
+		token := pageToken{Request: q.key, ID: last.it.ID}
+		if q.order != nil {
+			token.Value = last.sortValue
+		} else {
+			token.CreatedAt = last.it.CreatedAt
+		}
+		next = encodeToken(token)
 	}
 
 	return found, next, nil

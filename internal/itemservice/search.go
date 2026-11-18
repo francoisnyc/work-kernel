@@ -55,8 +55,8 @@ type OrderBy struct {
 	Desc  bool
 }
 
-// SearchResult holds the matching Items, newest first, as the principal may
-// see them.
+// SearchResult holds the matching Items, newest first or in the request's
+// order, as the principal may see them.
 type SearchResult struct {
 	Items         []item.Item
 	NextPageToken string // empty on the last page
@@ -90,10 +90,17 @@ func (k *Service) Search(ctx context.Context, req SearchRequest) (SearchResult, 
 	if err != nil {
 		return SearchResult{}, err
 	}
+	order, err := k.resolveOrder(ctx, req.Filter.TypeIDs, req.OrderBy)
+	if err != nil {
+		return SearchResult{}, err
+	}
+	// The order is part of what a token is bound to: a token of one order
+	// names a place that means nothing in another.
 	key := requestKey("search", req.Principal, struct {
-		Query  string
-		Filter Filter
-	}{strings.TrimSpace(req.Query), req.Filter})
+		Query   string
+		Filter  Filter
+		OrderBy *OrderBy
+	}{strings.TrimSpace(req.Query), req.Filter, req.OrderBy})
 	after, err := decodeToken(req.PageToken, key)
 	if err != nil {
 		return SearchResult{}, err
@@ -102,7 +109,8 @@ func (k *Service) Search(ctx context.Context, req SearchRequest) (SearchResult, 
 		return SearchResult{}, err
 	}
 	found, next, err := k.page(ctx, itemQuery{
-		p: req.Principal, words: strings.TrimSpace(req.Query), filter: filter, limit: limit, after: after, key: key,
+		p: req.Principal, words: strings.TrimSpace(req.Query), filter: filter, order: order,
+		limit: limit, after: after, key: key,
 	})
 	if err != nil {
 		return SearchResult{}, err
