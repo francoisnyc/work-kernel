@@ -247,11 +247,6 @@ func (c *cli) rankRebalance(ctx context.Context, args []string) error {
 		return usagef("want --in CONTAINER")
 	}
 	parent := c.itemRef(*in)
-	// A quiet-time batch: say so every time (measured in the rank bench:
-	// seven drags in ten made during a rebalance land out of place).
-	fmt.Fprintf(c.stderr, "pli: rebalancing rewrites every rank key in %s: run it when nobody is dragging cards there "+
-		"(a card moved while it runs can land out of place)\n", containerID(parent))
-
 	// Every ranked card, in order. Items without a rank come last: the
 	// first one ends the read.
 	var cards []*kernelv1.Item
@@ -278,6 +273,11 @@ read:
 	if err != nil {
 		return err
 	}
+	// A quiet-time batch: say so before the first write, every time (the
+	// rank bench: two drags in three made during a rebalance land out of
+	// place).
+	fmt.Fprintf(c.stderr, "pli: rebalancing rewrites the rank keys in %s: run it when nobody is dragging cards there "+
+		"(a card moved while it runs can land out of place)\n", containerID(parent))
 	report := struct {
 		Container string `json:"container"`
 		Rewritten int    `json:"rewritten"`
