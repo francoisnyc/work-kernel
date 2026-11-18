@@ -28,13 +28,14 @@ This builds the images and starts Postgres, the Temporal dev server, a one-shot
 migration, the item service (the API), the relay, the worker, stub CRM,
 ERP, HR directory and email servers (`connstub`) for the ticket's and the
 vacation request's hooks, and the web UI. `--wait` returns once every
-service is healthy. Four ports are published:
+service is healthy. Four ports are published, all on 127.0.0.1 only:
 
 - `http://localhost:8080`: the public API (Connect, gRPC and gRPC-Web),
   **on 127.0.0.1 only**.
 - `http://localhost:8090`: [the web UI](#the-web-ui), **on 127.0.0.1 only**.
-- `http://localhost:8233`: the Temporal UI.
-- `http://localhost:8085`: dev only, the emails the stack sent, read-only
+- `http://localhost:8233`: the Temporal UI, **on 127.0.0.1 only** (it shows
+  workflow histories with field values, and can terminate and signal workflows).
+- `http://localhost:8085`: dev only, **on 127.0.0.1 only**, the emails the stack sent, read-only
   (`GET /messages?item=<id>`), for the scenario. The email stub itself
   (8084) is reachable inside the stack only.
 
@@ -235,6 +236,10 @@ all work with the same pages. It calls the public API only.
   an action, and each has a Refresh button.
 
 ### What is dev-only
+
+**Every port the dev stack publishes is bound to 127.0.0.1**, including
+`compose.dev.yaml`'s Postgres (5432) and Temporal (7233): the stack is only
+reachable from this machine.
 
 - **The "act as" picker and the dev-token file.** The stack mounts
   `dev-tokens.example.yaml` read-only into the web container, which serves

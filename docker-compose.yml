@@ -2,12 +2,13 @@
 #
 # Postgres, the Temporal dev server, a one-shot migration, the item service
 # (the public API), the relay, the worker, stub CRM/ERP/HR/email
-# connectors, and the web UI. Published: the API (8080) and the web UI
-# (8090), both on 127.0.0.1 only (dev tokens are the only auth, and the web
-# container serves the dev-token file), the Temporal UI (8233) and, dev
-# only, the email stub's read-only port (8085) for the scenario;
-# compose.dev.yaml also publishes Postgres and Temporal's gRPC port for work
-# on the code.
+# connectors, and the web UI. Published, all on 127.0.0.1 only: the API
+# (8080) and the web UI (8090) (dev tokens are the only auth, and the web
+# container serves the dev-token file), the Temporal UI (8233, which shows
+# workflow histories and can terminate and signal workflows) and, dev only,
+# the email stub's read-only port (8085) for the scenario;
+# compose.dev.yaml also publishes Postgres and Temporal's gRPC port, local
+# only too, for work on the code.
 #
 # This is a dev stack: its worker runs vacation_request on a DEV CLOCK (a
 # day of its timers lasts 2 s), so the scenario can watch reminders and an
@@ -39,7 +40,7 @@ services:
     image: temporalio/temporal:1.10.0 # CLI 1.10.0, Server 1.32.2
     command: ["server", "start-dev", "--ip", "0.0.0.0"]
     ports:
-      - "8233:8233" # Web UI
+      - "127.0.0.1:8233:8233" # Temporal web UI, local only (it can terminate and signal workflows)
     healthcheck:
       test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "localhost:7233"]
       interval: 2s
@@ -140,7 +141,7 @@ services:
               "--hr-listen", ":8083", "--hr-directory", "/etc/connstub/hr-directory.json",
               "--email-listen", ":8084", "--email-read-listen", ":8085"]
     ports:
-      - "8085:8085" # dev only: the sent emails, read-only
+      - "127.0.0.1:8085:8085" # dev only: the sent emails, read-only, local only
     volumes:
       - ./deploy/customers.json:/etc/connstub/customers.json:ro
       - ./deploy/hr-directory.json:/etc/connstub/hr-directory.json:ro
