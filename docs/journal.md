@@ -374,6 +374,22 @@ Ideas noted during the spike, not built yet.
   than the cap is refused though one write would do (the run's last card
   cannot be read cheaply: ties sort by ID ascending in both directions).
   (Jira part 1)
+- Web UI: a "clear" action for an optional bool. A checkbox sends true or
+  false; it cannot put a bool back to unset. (Web UI)
+- Web UI, not built: a readers change or a move after creation, agent
+  sessions and `ApproveWiden`, board columns by state, a rebalance, live
+  updates (there is no Watch), ESLint. (Web UI)
+- What a generic UI misses in the API (none needed a change): a field has
+  no label and no `required` of its own (forms show field IDs and mark
+  nothing required); there is no "who am I" and no list of principals (the
+  UI reads both from the dev-token file); a link carries only the other
+  Item's name, so the Item page reads each linked Item for its title (one
+  GetItem each, the first 40): a batch get, or a title on a link. (Web UI)
+- The stack still publishes the Temporal UI (8233) and the email stub's
+  read port (8085) on every interface; only the API and the web UI moved to
+  127.0.0.1. (Web UI)
+- A production build of the web UI has no sign-on at all: real sign-on
+  (OIDC) replaces the dev picker as it replaces the interceptor. (Web UI)
 
 ## 2026-11-12 — Step 1 (finished)
 
@@ -1709,3 +1725,70 @@ move 29 / 34 ms, 47 open P1 Items in 3 pages 82 / 82 ms.
 `Threshold` 32 and `MaxGrowth` 4 held up (random drags reach 7 bytes); the Later list has this
 step's sixteen entries, the online rebalance first.
 **Next session:** the SLA design pass (paper only), then Jira part 2 (the IT service desk).
+
+## 2026-11-18 — A generic web UI for the proof of concept (finished)
+
+**Built:** `web/`, one generic UI (TypeScript, Vite, React, connect-es) that is a client of the
+public API only, like pli. No screen names a Type: forms come from `GetType`'s fields, buttons from
+its transitions, the inbox from every transition whose `allowed` names `field:X`, the board from a
+link and a rank field. Act as any dev user; browse the top level and search (words, Types, states,
+categories, field conditions, `order_by`, paging); an Item's page (fields, transitions, links both
+ways, rollups, contained Items, history); create in a container, with readers; link and unlink from
+either end; held moves with `wait` (APPLIED, DENIED, PENDING, ERROR); refusals shown with code,
+reason and metadata; a sprint board ranked by dragging. A `web` container in compose serves the
+site and proxies `/api`; `docker compose up` gives http://localhost:8090.
+
+**No kernel change, no proto change, no new call.** `buf breaking` has nothing to compare.
+
+**The one non-test Go change:** `internal/rank/rank.go` now draws its jitter through an unexported
+variable, `var int64N = rand.Int64N`, where it called `rand.Int64N` directly (two call sites in
+`random`). Nothing but the in-package test `vectors_test.go` assigns it. It exists so the golden
+vectors can fix the draw and hold the TypeScript port to exact keys, not to a window.
+
+**Rank in two languages.** `web/src/rank` ports `rank.go` and `move.go`'s `Plan` (BigInt for
+`big.Int`; `RewriteOrder` is not ported, the UI does no rebalance).
+`internal/rank/testdata/vectors.json` (67 KB) is written and verified by `TestVectors`: Valid,
+Compare, NeedsRebalance, Evenly (22 cases), Between (30 gaps at five fixed draws) and Plan (22
+cases at three draws: one write, re-keyed tied runs, the cap, no rank, changed). The port passed
+all 264 vector tests on its first run. A drop on the board is `Plan` over `ListItems` on the moved
+card's container, then one `UpdateItem`: the smoke test checks the container's order, with a story
+that is not on the board between two that are.
+
+**Codegen and CI.** `make gen-web` (`buf.gen.web.yaml`, protoc-gen-es from `web/node_modules`)
+writes `web/src/gen`, committed; `make gen` and the `test` job stay Node-free. A vendored
+`google/rpc/error_details.proto` gives the client `ErrorInfo` and `BadRequest`. New `web` job:
+client current, `tsc`, vitest, `vite build`. The `scenario` job runs the Playwright smoke test
+after `scenario.sh`, on the same stack, and uploads traces on failure.
+
+**Dev-only, and the ports.** The picker reads the real `dev-tokens.example.yaml`, mounted
+read-only into the web container and served at `/dev-tokens.yaml`: every dev token is readable on
+that port. So compose now publishes 8090 **and the item service's 8080** on 127.0.0.1 only (they
+were, and Compose's default is, every interface). The picker, the parser and the YAML library are
+compiled in only with `VITE_DEV_USERS=1` (checked: a build without it has no `devusers` chunk and
+no mention of the file).
+
+**Tests:** 388 vitest tests in 13 files (written failing in Phase B, 386 of them; none changed in
+Phase C), 2 new Go tests, 3 Playwright tests. Not changed: any existing test.
+
+**Numbers:** `go test -race -count=1 ./...` green. Scenario, two runs in a row on a fresh stack:
+41.5 s (it builds pli first) and 29.6 s. Smoke test: 3 tests in 3.5 s, twice. The site: 397 kB of
+JavaScript (120 kB gzipped), plus 97 kB for the dev-user chunk.
+
+**Surprises:** the Type says less than a form wants (no labels, no `required` on a field), and the
+UI is fine without: IDs as labels, and the server's refusal instead of a red asterisk. A generic
+Item page offers every link an Item could receive, so a story shows nine "add" rows and six
+boards: correct, and noisy. The inbox row leaves the list when its Item moves on, so the answer
+has to live on the page, not in the row. The ticket's enrich hooks write events in their own time:
+a test that counts history rows is a flake. TypeScript 7 (the native compiler) worked with Vite 8
+and vitest 5 with no change. Unranked cards are shown in the board's list with a "not ranked"
+badge, not in a group of their own as Phase A said: one list keeps a drop's arithmetic the same.
+
+**Not verified here:** the web image's build stage (`npm ci` and `vite build` inside Docker).
+This sandbox cannot reach npm from inside a build, so the stack was run with the site built on the
+host and copied into the same nginx stage; CI's `scenario` job is the first real run of
+`web/Dockerfile`.
+
+**Open:** 8233 and 8085 are still published on every interface (Later). The six "Board:" links
+per story suggest a Type could say which links make a board; that is a Type attribute, not built.
+**Next session:** unchanged: the SLA design pass (paper only), then Jira part 2 (the IT service
+desk).
