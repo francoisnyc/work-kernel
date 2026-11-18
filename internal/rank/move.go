@@ -174,3 +174,26 @@ func Plan(ctx context.Context, src Source, moved string, pos Position, other Car
 	}
 	return writes, nil
 }
+
+// RewriteOrder returns the order in which a rebalance writes its cards so
+// that the container never looks out of order in between: old[i] is card
+// i's key now, target[i] the key it gets, both in the container's order.
+// Cards whose key moves down are written first, from the top; then those
+// whose key moves up, from the bottom. A card that goes down then lands
+// below everything still above it, and one that goes up above everything
+// still below it, whatever mix of old and new keys its neighbours hold. So
+// a reader, or a move planned meanwhile, always sees the true order. Cards
+// whose key does not change are left out.
+func RewriteOrder(old, target []string) []int {
+	var down, up []int
+	for i := range old {
+		switch c := Compare(target[i], old[i]); {
+		case c < 0:
+			down = append(down, i)
+		case c > 0:
+			up = append(up, i)
+		}
+	}
+	slices.Reverse(up)
+	return append(down, up...)
+}

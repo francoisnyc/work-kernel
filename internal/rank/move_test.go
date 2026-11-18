@@ -188,3 +188,68 @@ func TestPlan_TheOtherCardMoved(t *testing.T) {
 		t.Errorf("Plan next to a card that moved, its old key taken = %v, %v; want ErrChanged", w, err)
 	}
 }
+
+// A rebalance written in RewriteOrder never puts the container out of
+// order: after every single write, the cards are still in the order they
+// started in, whatever the old keys looked like.
+func TestRewriteOrder_KeepsTheOrderAtEveryStep(t *testing.T) {
+	shapes := map[string]func(n int) []string{
+		// Bunched at the top, as after many inserts there.
+		"bunched at the top": func(n int) []string {
+			keys := []string{"zzz"}
+			for len(keys) < n {
+				k, _ := rank.Between("", keys[0])
+				keys = append([]string{k}, keys...)
+			}
+			return keys
+		},
+		"bunched at the bottom": func(n int) []string {
+			keys := []string{"1"}
+			for len(keys) < n {
+				k, _ := rank.Between(keys[len(keys)-1], "")
+				keys = append(keys, k)
+			}
+			return keys
+		},
+		"random inserts": func(n int) []string {
+			var keys []string
+			for len(keys) < n {
+				at := (len(keys) * 7919) % (len(keys) + 1)
+				lo, hi := "", ""
+				if at > 0 {
+					lo = keys[at-1]
+				}
+				if at < len(keys) {
+					hi = keys[at]
+				}
+				k, _ := rank.Between(lo, hi)
+				keys = slices.Insert(keys, at, k)
+			}
+			return keys
+		},
+	}
+	for name, shape := range shapes {
+		keys := shape(300)
+		if !slices.IsSortedFunc(keys, strings.Compare) {
+			t.Fatalf("%s: test bug, the starting keys are not in order", name)
+		}
+		target, err := rank.Evenly("", "", len(keys))
+		if err != nil {
+			t.Fatal(err)
+		}
+		order := rank.RewriteOrder(keys, target)
+		for step, i := range order {
+			keys[i] = target[i]
+			// Card i against its neighbours is enough: nothing else moved.
+			if (i > 0 && keys[i-1] >= keys[i]) || (i+1 < len(keys) && keys[i] >= keys[i+1]) {
+				t.Fatalf("%s: after write %d (card %d) the container is out of order", name, step, i)
+			}
+		}
+		if !slices.Equal(keys, target) {
+			t.Errorf("%s: after every write the keys are not the targets", name)
+		}
+	}
+	if got := rank.RewriteOrder([]string{"A", "V"}, []string{"A", "V"}); len(got) != 0 {
+		t.Errorf("RewriteOrder with nothing to change = %v", got)
+	}
+}

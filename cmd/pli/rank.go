@@ -230,7 +230,10 @@ func (c *cli) setRank(ctx context.Context, name, field, key, etag string) (*kern
 // the order they sort in now. It is a batch of ordinary updates, one per
 // card whose key changes, each with the card's etag: a card someone moved
 // meanwhile is skipped, their key stands. Cards without a rank, and other
-// containers, are not touched.
+// containers, are not touched. The container stays in order after every
+// write, but a move made while it runs is placed between keys the batch
+// may still change: run it when the board is quiet (the bench measures
+// what happens otherwise).
 func (c *cli) rankRebalance(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("rank rebalance", flag.ContinueOnError)
 	in := fs.String("in", "", "the container whose keys to rewrite")
@@ -275,10 +278,15 @@ read:
 		Rewritten int    `json:"rewritten"`
 		Skipped   int    `json:"skipped"`
 	}{Container: parent}
+	old := make([]string, len(cards))
 	for i, it := range cards {
-		if keyOf(it, *field) == keys[i] {
-			continue
-		}
+		old[i] = keyOf(it, *field)
+	}
+	// In the order that keeps the container in order after every write
+	// (rank.RewriteOrder): a reader, or a move made meanwhile, never sees
+	// old and new keys out of step.
+	for _, i := range rank.RewriteOrder(old, keys) {
+		it := cards[i]
 		_, err := c.setRank(ctx, it.Name, *field, keys[i], it.Etag)
 		var ce *connect.Error
 		switch {

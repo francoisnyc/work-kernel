@@ -132,6 +132,13 @@ func explainOrderMode(ctx context.Context) error {
 	if err := registerFile(ctx, pool, "ticket.v5.yaml"); err != nil {
 		return err
 	}
+	// "Fresh" must mean no statistics: without this, autovacuum analyzes
+	// the tables while they are being filled.
+	for _, table := range []string{"items", "links", "scopes", "scope_access", "item_events"} {
+		if _, err := plain.Exec(ctx, `alter table `+table+` set (autovacuum_enabled = false)`); err != nil {
+			return err
+		}
+	}
 	k := itemservice.New(pool)
 	me := item.Principal{Actor: "user:me", Namespace: "default"}
 	other := item.Principal{Actor: "user:other", Namespace: "default"}
@@ -479,6 +486,13 @@ func orderOf(ctx context.Context, pool *pgxpool.Pool, space uuid.UUID) ([]uuid.U
 // rebalanceSpace rewrites a container's keys as pli's rank rebalance does:
 // every ranked card, in order, an even key, under the card's item_seq.
 func rebalanceSpace(ctx context.Context, k *itemservice.Service, space uuid.UUID) (rewritten, skipped, pages int, took time.Duration, err error) {
+	return rebalanceIn(ctx, k, space, false)
+}
+
+// rebalanceIn is rebalanceSpace; topDown writes the cards from the top to
+// the bottom instead of in rank.RewriteOrder, for comparison: the
+// container is then out of order while it runs.
+func rebalanceIn(ctx context.Context, k *itemservice.Service, space uuid.UUID, topDown bool) (rewritten, skipped, pages int, took time.Duration, err error) {
 	start := time.Now()
 	var cards []item.Item
 	token := ""
@@ -503,10 +517,16 @@ func rebalanceSpace(ctx context.Context, k *itemservice.Service, space uuid.UUID
 	if err != nil {
 		return 0, 0, 0, 0, err
 	}
+	old := make([]string, len(cards))
 	for i, it := range cards {
-		if it.Fields["f_rank"] == keys[i] {
-			continue
-		}
+		old[i], _ = it.Fields["f_rank"].(string)
+	}
+	order := rank.RewriteOrder(old, keys)
+	if topDown {
+		slices.Sort(order)
+	}
+	for _, i := range order {
+		it := cards[i]
 		_, uerr := k.Update(ctx, itemservice.UpdateRequest{
 			IdempotencyKey: key(), Principal: lea, ItemID: it.ID, Fields: map[string]any{"f_rank": keys[i]},
 			ExpectedItemSeq: it.ItemSeq, // a card moved meanwhile is skipped: its new key stands
@@ -731,12 +751,16 @@ func rankMode(ctx context.Context) error {
 	fmt.Printf("Another 1,000 inserts at the top, rebalancing each time a move reports the threshold: %d rebalances, one every %v inserts.\n\n", rebalances, gaps)
 
 	// --- a rebalance while people drag ---
-	if err := racingRebalance(ctx, pool, k, true); err != nil {
-		return err
+	fmt.Println("## A rebalance while 4 users drag (400 drags next to cards that are never dragged)")
+	fmt.Println()
+	fmt.Println("| Run | Drags | Out of place | Anchors out of order | Rebalance: rewritten | skipped (moved meanwhile) | time (s) | Drag p50 (ms) | p95 (ms) | Re-keys | Largest tied run | Past the cap | Replans |")
+	fmt.Println("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+	for _, run := range []string{"a rebalance, order kept at every write (pli's)", "a rebalance written top to bottom (for comparison)", "control: no rebalance"} {
+		if err := racingRebalance(ctx, pool, k, run); err != nil {
+			return err
+		}
 	}
-	if err := racingRebalance(ctx, pool, k, false); err != nil {
-		return err
-	}
+	fmt.Println()
 
 	// --- the write path per drag ---
 	return writePath(ctx, pool, k)
@@ -756,9 +780,11 @@ func writeRows(ctx context.Context, pool *pgxpool.Pool) ([3]int, error) {
 // to anchors while the rebalance runs. A drag is out of place when, at the
 // end, its card is not between the anchor it was put next to and that
 // anchor's neighbouring anchor: it computed its key from keys the rebalance
-// was rewriting. With withRebalance false it is the control: the same
-// drags, no rebalance.
-func racingRebalance(ctx context.Context, pool *pgxpool.Pool, k *itemservice.Service, withRebalance bool) error {
+// was rewriting. A run named "control..." has no rebalance; one named
+// "...top to bottom..." writes the rebalance in the naive order.
+func racingRebalance(ctx context.Context, pool *pgxpool.Pool, k *itemservice.Service, name string) error {
+	withRebalance := !strings.HasPrefix(name, "control")
+	topDown := strings.Contains(name, "top to bottom")
 	const cards, users, perUser = 1000, 4, 100
 	space, ids, err := newBacklog(ctx, k, "story", cards)
 	if err != nil {
@@ -790,7 +816,7 @@ func racingRebalance(ctx context.Context, pool *pgxpool.Pool, k *itemservice.Ser
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			rewritten, skipped, _, took, rebErr = rebalanceSpace(ctx, k, space)
+			rewritten, skipped, _, took, rebErr = rebalanceIn(ctx, k, space, topDown)
 		}()
 	}
 	errs := make(chan error, users)
@@ -865,21 +891,8 @@ func racingRebalance(ctx context.Context, pool *pgxpool.Pool, k *itemservice.Ser
 		}
 	}
 	slices.Sort(st.lat)
-	if withRebalance {
-		fmt.Println("## A rebalance while 4 users drag (400 drags next to cards that are never dragged)")
-		fmt.Println()
-		fmt.Println("| Run | Drags | Out of place | Anchors out of order | Rebalance: rewritten | skipped (moved meanwhile) | time (s) | Drag p50 (ms) | p95 (ms) | Re-keys | Largest tied run | Past the cap | Replans |")
-		fmt.Println("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
-	}
-	name := "control: no rebalance"
-	if withRebalance {
-		name = "with a rebalance"
-	}
 	fmt.Printf("| %s | %d | %d | %d | %d | %d | %.2f | %s | %s | %d | %d | %d | %d |\n", name, len(drags), outOfPlace, anchorsOut,
 		rewritten, skipped, took.Seconds(), ms(st.lat.pct(0.50)), ms(st.lat.pct(0.95)), st.rekeys, st.largestRun, st.refused, st.retries)
-	if !withRebalance {
-		fmt.Println()
-	}
 	return nil
 }
 
