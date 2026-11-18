@@ -5,4 +5,5 @@ docs
 scripts
 deploy
 bin
+web
 *.md

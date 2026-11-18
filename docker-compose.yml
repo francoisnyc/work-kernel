@@ -1,8 +1,10 @@
 # The whole proof-of-concept stack: docker compose up -d --build --wait
 #
 # Postgres, the Temporal dev server, a one-shot migration, the item service
-# (the public API), the relay, the worker, and stub CRM/ERP/HR/email
-# connectors. Published: the API (8080), the Temporal UI (8233) and, dev
+# (the public API), the relay, the worker, stub CRM/ERP/HR/email
+# connectors, and the web UI. Published: the API (8080) and the web UI
+# (8090), both on 127.0.0.1 only (dev tokens are the only auth, and the web
+# container serves the dev-token file), the Temporal UI (8233) and, dev
 # only, the email stub's read-only port (8085) for the scenario;
 # compose.dev.yaml also publishes Postgres and Temporal's gRPC port for work
 # on the code.
@@ -63,11 +65,35 @@ services:
       - ./dev-tokens.example.yaml:/etc/pli/dev-tokens.yaml:ro
     environment: *database
     ports:
-      - "8080:8080" # the public API
+      # The public API, on this machine only: with dev tokens as its only
+      # auth it must not be reachable from the network (compose otherwise
+      # publishes on every interface).
+      - "127.0.0.1:8080:8080"
     depends_on:
       migrate: {condition: service_completed_successfully}
     healthcheck:
       test: ["CMD", "/itemservice", "--probe", "http://localhost:8080/healthz"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  # The web UI (web/): the built site, with /api proxied to the item
+  # service. DEV ONLY parts: the build arg compiles the "act as" picker in,
+  # and the dev-token file is mounted read-only where nginx serves it, so
+  # the picker can offer every dev user. That hands every dev token to
+  # whoever can reach the port: it is published on 127.0.0.1 only.
+  web:
+    build:
+      context: ./web
+      args: {VITE_DEV_USERS: "1"}
+    volumes:
+      - ./dev-tokens.example.yaml:/usr/share/nginx/html/dev-tokens.yaml:ro
+    ports:
+      - "127.0.0.1:8090:8080" # the web UI: http://localhost:8090
+    depends_on:
+      itemservice: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
       interval: 2s
       timeout: 5s
       retries: 30
