@@ -668,24 +668,71 @@ func rankMode(ctx context.Context) error {
 		float64(reads.Load())/float64(moves), float64(all.writes)/float64(moves),
 		all.rekeys, all.largestRun, all.refused, all.retries, all.crossings)
 
-	// --- always at the top ---
+	// --- always at one end ---
 	space, ids, err = newBacklog(ctx, k, "story", cards)
 	if err != nil {
 		return err
 	}
 	board = benchBoard{k: k, space: space, reads: &reads}
-	fmt.Println("## Adversarial: one user always inserts at the top, 1,000 times, no rebalance")
+	fmt.Println("## Adversarial: one user always inserts at the top, 3,000 times, no rebalance")
 	fmt.Println()
 	fmt.Println("| After inserts | The new key (bytes) | Longest key | Mean key |")
 	fmt.Println("| --- | --- | --- | --- |")
 	var top dragStats
 	firstCross := 0
-	for i := 1; i <= 1000; i++ {
+	for i := 1; i <= 3000; i++ {
 		d, err := moveCard(ctx, board, ids[rand.IntN(cards)], rank.Top, uuid.Nil)
 		if err != nil {
 			return err
 		}
 		top.add(d)
+		if firstCross == 0 && rank.NeedsRebalance(d.key) {
+			firstCross = i
+		}
+		if slices.Contains([]int{10, 50, 100, 200, 500, 1000, 2000, 3000}, i) {
+			longest, mean, _, err := keyLengths(ctx, pool, space)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("| %d | %d | %d | %.1f |\n", i, len(d.key), longest, mean)
+		}
+	}
+	slices.Sort(top.lat)
+	fmt.Println()
+	crossedAt := "never crossed"
+	if firstCross > 0 {
+		crossedAt = fmt.Sprintf("first crossed at insert %d", firstCross)
+	}
+	fmt.Printf("The threshold (%d bytes) was %s; %d of the 3,000 inserts produced a key past it. Move latency: p50 %s ms, p95 %s ms, p99 %s ms.\n\n",
+		rank.Threshold, crossedAt, top.crossings, ms(top.lat.pct(0.50)), ms(top.lat.pct(0.95)), ms(top.lat.pct(0.99)))
+
+	// --- always into the same gap ---
+	space, ids, err = newBacklog(ctx, k, "story", cards)
+	if err != nil {
+		return err
+	}
+	board = benchBoard{k: k, space: space, reads: &reads}
+	// Any card but the anchor itself.
+	anchor := ids[cards/2]
+	pick := func() uuid.UUID {
+		for {
+			if id := ids[rand.IntN(cards)]; id != anchor {
+				return id
+			}
+		}
+	}
+	fmt.Println("## Adversarial: one user always inserts right below the same card, 1,000 times, no rebalance")
+	fmt.Println()
+	fmt.Println("| After inserts | The new key (bytes) | Longest key | Mean key |")
+	fmt.Println("| --- | --- | --- | --- |")
+	var gap dragStats
+	firstCross = 0
+	for i := 1; i <= 1000; i++ {
+		d, err := moveCard(ctx, board, pick(), rank.After, anchor)
+		if err != nil {
+			return err
+		}
+		gap.add(d)
 		if firstCross == 0 && rank.NeedsRebalance(d.key) {
 			firstCross = i
 		}
@@ -697,10 +744,10 @@ func rankMode(ctx context.Context) error {
 			fmt.Printf("| %d | %d | %d | %.1f |\n", i, len(d.key), longest, mean)
 		}
 	}
-	slices.Sort(top.lat)
+	slices.Sort(gap.lat)
 	fmt.Println()
 	fmt.Printf("The threshold (%d bytes) was first crossed at insert %d; %d of the 1,000 inserts produced a key past it. Move latency: p50 %s ms, p95 %s ms, p99 %s ms.\n\n",
-		rank.Threshold, firstCross, top.crossings, ms(top.lat.pct(0.50)), ms(top.lat.pct(0.95)), ms(top.lat.pct(0.99)))
+		rank.Threshold, firstCross, gap.crossings, ms(gap.lat.pct(0.50)), ms(gap.lat.pct(0.95)), ms(gap.lat.pct(0.99)))
 
 	// --- the rebalance ---
 	before, _, _, err := keyLengths(ctx, pool, space)
@@ -732,23 +779,29 @@ func rankMode(ctx context.Context) error {
 		before, after, afterMean)
 
 	// With the deliberate rebalance run whenever a move reports the threshold.
-	rebalances, sinceLast, gaps := 0, 0, []int{}
-	for i := 1; i <= 1000; i++ {
-		d, err := moveCard(ctx, board, ids[rand.IntN(cards)], rank.Top, uuid.Nil)
-		if err != nil {
-			return err
-		}
-		sinceLast++
-		if rank.NeedsRebalance(d.key) {
-			if _, _, _, _, err := rebalanceSpace(ctx, k, space); err != nil {
+	for _, c := range []struct {
+		name string
+		pos  rank.Position
+	}{{"at the top", rank.Top}, {"right below the same card", rank.After}} {
+		rebalances, sinceLast, gaps := 0, 0, []int{}
+		for i := 1; i <= 1000; i++ {
+			d, err := moveCard(ctx, board, pick(), c.pos, anchor)
+			if err != nil {
 				return err
 			}
-			rebalances++
-			gaps = append(gaps, sinceLast)
-			sinceLast = 0
+			sinceLast++
+			if rank.NeedsRebalance(d.key) {
+				if _, _, _, _, err := rebalanceSpace(ctx, k, space); err != nil {
+					return err
+				}
+				rebalances++
+				gaps = append(gaps, sinceLast)
+				sinceLast = 0
+			}
 		}
+		fmt.Printf("Another 1,000 inserts %s, rebalancing each time a move reports the threshold: %d rebalances, after %v inserts.\n\n",
+			c.name, rebalances, gaps)
 	}
-	fmt.Printf("Another 1,000 inserts at the top, rebalancing each time a move reports the threshold: %d rebalances, one every %v inserts.\n\n", rebalances, gaps)
 
 	// --- a rebalance while people drag ---
 	fmt.Println("## A rebalance while 4 users drag (400 drags next to cards that are never dragged)")

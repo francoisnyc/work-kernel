@@ -106,7 +106,7 @@ const usage = `usage: pli [--server URL] [--tokens FILE] --as NAME [--session ID
   item unlink SRC LINK_TYPE TARGET [--etag E] [--request-id ID]
   rank ITEM before|after OTHER     (one write; ITEM and OTHER in one container; the field f_rank)
   rank ITEM top|bottom
-  rank rebalance --in CONTAINER    (rewrite the container's rank keys, short and even)
+  rank rebalance --in CONTAINER    (rewrite the container's rank keys, short and even; run it when nobody is dragging)
   type get TYPE
   type list
   agent start [--for USER] --scopes S,S --powers P,P

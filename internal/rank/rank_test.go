@@ -162,27 +162,49 @@ func TestBetween_RandomInsertsKeepOrder(t *testing.T) {
 	t.Logf("5,000 random inserts: longest key %d bytes", longest)
 }
 
-// The adversarial case: always insert at the top. Order still holds, and
-// keys grow slowly: each new key is at most MaxGrowth longer than the one
-// below it, and 60 inserts in a row stay under the threshold (the midpoint
-// halves the gap, so a base-62 digit lasts several inserts).
-func TestBetween_AlwaysAtTheTop(t *testing.T) {
-	top := between(t, "", "")
+// Always inserting at an end is the common case (a new card goes to the
+// top or the bottom), so Between steps a little past the last card there
+// instead of halving the gap. Order holds, each key is at most MaxGrowth
+// longer than its neighbour, and 1,000 inserts in a row at either end stay
+// under the threshold: no rebalance is due.
+func TestBetween_AlwaysAtAnEnd(t *testing.T) {
+	for name, next := range map[string]func(end string) string{
+		"the top":    func(end string) string { return between(t, "", end) },
+		"the bottom": func(end string) string { return between(t, end, "") },
+	} {
+		end := between(t, "", "")
+		longest := len(end)
+		for range 1000 {
+			end = next(end)
+			longest = max(longest, len(end))
+		}
+		if longest > rank.Threshold {
+			t.Errorf("1,000 inserts at %s: a key of %d bytes, past the threshold (%d)", name, longest, rank.Threshold)
+		}
+		t.Logf("always at %s: after 1,000 inserts the key is %d bytes", name, len(end))
+	}
+}
+
+// Room does run out when cards keep going into the same gap: always right
+// below one card. The midpoint halves the gap each time, so a base-62
+// digit lasts about six inserts: 60 in a row stay under the threshold, and
+// well before 1,000 a key crosses it and NeedsRebalance says so.
+func TestBetween_AlwaysIntoTheSameGap(t *testing.T) {
+	lo, hi := "A", "B"
 	crossed := 0
 	for i := 1; i <= 1000; i++ {
-		next := between(t, "", top)
-		if i == 60 && len(next) > rank.Threshold {
-			t.Errorf("after 60 inserts at the top the key is %d bytes, past the threshold (%d)", len(next), rank.Threshold)
+		hi = between(t, lo, hi) // the new card is now lo's lower neighbour
+		if i == 60 && len(hi) > rank.Threshold {
+			t.Errorf("after 60 inserts into one gap the key is %d bytes, past the threshold (%d)", len(hi), rank.Threshold)
 		}
-		if crossed == 0 && rank.NeedsRebalance(next) {
+		if crossed == 0 && rank.NeedsRebalance(hi) {
 			crossed = i
 		}
-		top = next
 	}
 	if crossed == 0 {
-		t.Errorf("1,000 inserts at the top never crossed the threshold (last key %d bytes): NeedsRebalance never said so", len(top))
+		t.Errorf("1,000 inserts into one gap never crossed the threshold (last key %d bytes): NeedsRebalance never said so", len(hi))
 	}
-	t.Logf("always at the top: the threshold (%d) was crossed at insert %d; after 1,000 the key is %d bytes", rank.Threshold, crossed, len(top))
+	t.Logf("always into the same gap: the threshold (%d) was crossed at insert %d; after 1,000 the key is %d bytes", rank.Threshold, crossed, len(hi))
 }
 
 func TestNeedsRebalance(t *testing.T) {

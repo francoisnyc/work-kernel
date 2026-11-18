@@ -49,6 +49,12 @@ const (
 	// room is how many keys Between wants to choose from: enough that two
 	// people who insert into the same gap at once rarely pick the same one.
 	room = 1000
+	// At an end of the list (no neighbour on one side) Between does not
+	// halve the gap: it steps a little way past the last card, between
+	// 1/endFar and 1/endNear of the room left. Putting cards at the top or
+	// the bottom is the common case, and halving there costs a digit every
+	// six inserts; a small step costs one every fifty.
+	endNear, endFar = 32, 8
 	// spacing is the least distance Evenly leaves between two keys, in
 	// units of its last digit: one whole digit of room.
 	spacing = base
@@ -77,22 +83,45 @@ func NeedsRebalance(key string) bool { return len(key) > Threshold }
 
 // Between returns a key strictly between lo and hi. An empty lo means "no
 // lower neighbour" (the top of the list), an empty hi "no upper neighbour"
-// (the bottom). The key is near the midpoint, moved by a random jitter so
-// two people who insert at the same place at once rarely pick the same key
-// (when they do, the Item ID breaks the tie). It is the shortest length
-// that leaves enough keys to choose from, at most MaxGrowth bytes longer
-// than the longer neighbour. lo >= hi is ErrNoRoom.
+// (the bottom).
+//
+// Between two cards the key is near the midpoint. At the top or the bottom
+// it is a small step past the last card instead (see endNear), so that
+// always adding at one end uses the room up slowly. Either way a random
+// jitter moves it, so two people who insert at the same place at once
+// rarely pick the same key (when they do, the Item ID breaks the tie). The
+// key is the shortest length that leaves enough keys to choose from, at
+// most MaxGrowth bytes longer than the longer neighbour. lo >= hi is
+// ErrNoRoom.
 func Between(lo, hi string) (string, error) {
-	n, first, last, err := window(lo, hi, room)
+	top, bottom := lo == "" && hi != "", lo != "" && hi == ""
+	want := int64(room)
+	if top || bottom {
+		// The step's window is 1/endFar - 1/endNear of the gap: the gap
+		// must be that much wider to leave `room` keys in it.
+		want = room * endNear * endFar / (endNear - endFar)
+	}
+	n, first, last, err := window(lo, hi, want)
 	if err != nil {
 		return "", err
 	}
+	span := new(big.Int).Sub(last, first)
+	k := new(big.Int)
+	if top || bottom {
+		// A step of span/endNear to span/endFar away from the end card.
+		near := new(big.Int).Div(span, big.NewInt(endNear))
+		far := new(big.Int).Div(span, big.NewInt(endFar))
+		step := near.Add(near, random(far.Sub(far, near)))
+		if top {
+			return format(k.Sub(last, step), n), nil
+		}
+		return format(k.Add(first, step), n), nil
+	}
 	// Somewhere in the middle half of the window: the midpoint, give or
 	// take a quarter of the gap.
-	span := new(big.Int).Sub(last, first)
 	quarter := new(big.Int).Rsh(span, 2)
 	half := new(big.Int).Rsh(span, 1)
-	k := new(big.Int).Add(first, quarter)
+	k.Add(first, quarter)
 	k.Add(k, random(half))
 	return format(k, n), nil
 }

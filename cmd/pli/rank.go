@@ -24,7 +24,8 @@ import (
 //	rank ITEM before|after OTHER   one write: ITEM lands next to OTHER in the
 //	                               container's order, so in every view of it
 //	rank ITEM top|bottom
-//	rank rebalance --in CONTAINER  rewrite the container's keys, short and even
+//	rank rebalance --in CONTAINER  rewrite the container's keys, short and even;
+//	                               a quiet-time batch: not while people drag
 //
 // A move never rebalances. When its key comes out longer than
 // rank.Threshold, pli says so on stderr and still succeeds.
@@ -246,6 +247,10 @@ func (c *cli) rankRebalance(ctx context.Context, args []string) error {
 		return usagef("want --in CONTAINER")
 	}
 	parent := c.itemRef(*in)
+	// A quiet-time batch: say so every time (measured in the rank bench:
+	// seven drags in ten made during a rebalance land out of place).
+	fmt.Fprintf(c.stderr, "pli: rebalancing rewrites every rank key in %s: run it when nobody is dragging cards there "+
+		"(a card moved while it runs can land out of place)\n", containerID(parent))
 
 	// Every ranked card, in order. Items without a rank come last: the
 	// first one ends the read.
