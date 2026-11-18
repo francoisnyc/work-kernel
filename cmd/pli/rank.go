@@ -128,25 +128,35 @@ func (c *cli) rankMove(ctx context.Context, args []string) error {
 		return err
 	}
 	container := moved.Msg.Item.Container
-	var other rank.Card
-	if relative {
-		o, err := c.c.GetItem(ctx, connect.NewRequest(&kernelv1.GetItemRequest{Name: c.itemRef(pos[2])}))
-		if err != nil {
-			return err
-		}
-		// A rank orders one container: a key of another says nothing here.
-		if o.Msg.Item.Container != container {
-			return fmt.Errorf("the two cards are not in the same container: a rank orders one container")
-		}
-		other = rank.Card{ID: o.Msg.Item.Name, Key: keyOf(o.Msg.Item, *field)}
-	}
 	parent, where2 := container, containerID(container)
 	if container == "" {
 		parent, where2 = "namespaces/"+c.ns, "the top level"
 	}
 
-	writes, err := rank.Plan(ctx, ranked{c: c, parent: parent, field: *field}, name, where, other)
+	// The plan's reads are not one snapshot: if someone moves a card in
+	// between, read the other card again and plan again, a few times.
+	var writes []rank.Write
+	for attempt := 0; ; attempt++ {
+		var other rank.Card
+		if relative {
+			o, err := c.c.GetItem(ctx, connect.NewRequest(&kernelv1.GetItemRequest{Name: c.itemRef(pos[2])}))
+			if err != nil {
+				return err
+			}
+			// A rank orders one container: a key of another says nothing here.
+			if o.Msg.Item.Container != container {
+				return fmt.Errorf("the two cards are not in the same container: a rank orders one container")
+			}
+			other = rank.Card{ID: o.Msg.Item.Name, Key: keyOf(o.Msg.Item, *field)}
+		}
+		writes, err = rank.Plan(ctx, ranked{c: c, parent: parent, field: *field}, name, where, other)
+		if !errors.Is(err, rank.ErrChanged) || attempt == 3 {
+			break
+		}
+	}
 	switch {
+	case errors.Is(err, rank.ErrChanged):
+		return fmt.Errorf("the cards there kept moving while the move was planned; nothing was written: try again")
 	case errors.Is(err, rank.ErrNoRank):
 		return fmt.Errorf("the other card has no rank yet: rank it first (pli rank ITEM top|bottom)")
 	case errors.Is(err, rank.ErrTiedRunTooLong):

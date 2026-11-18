@@ -170,3 +170,21 @@ func TestPlan_TiedRun(t *testing.T) {
 		t.Errorf("after a move below a short run the order is %q", got)
 	}
 }
+
+// The reads of a plan are not one snapshot. A card that was moved since the
+// caller read it is not where its old key says: the plan is refused as
+// changed, to be made again, never as a tied run.
+func TestPlan_TheOtherCardMoved(t *testing.T) {
+	b := &board{cards: []rank.Card{{"a", "F"}, {"b", "V"}, {"c", "k"}, {"x", ""}}}
+	stale := rank.Card{ID: "b", Key: "T"} // b as read before someone moved it to V
+	for _, pos := range []rank.Position{rank.Before, rank.After} {
+		if w, err := rank.Plan(context.Background(), b, "x", pos, stale); !errors.Is(err, rank.ErrChanged) {
+			t.Errorf("Plan next to a card that moved = %v, %v; want ErrChanged", w, err)
+		}
+	}
+	// Also when another card now holds the key it had.
+	b.cards = append(b.cards, rank.Card{ID: "d", Key: "T"})
+	if w, err := rank.Plan(context.Background(), b, "x", rank.Before, stale); !errors.Is(err, rank.ErrChanged) {
+		t.Errorf("Plan next to a card that moved, its old key taken = %v, %v; want ErrChanged", w, err)
+	}
+}

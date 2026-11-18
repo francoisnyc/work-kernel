@@ -58,6 +58,10 @@ var (
 	// MaxTiedRun cards. The move writes nothing; the container needs a
 	// rebalance.
 	ErrTiedRunTooLong = errors.New("rank: too many cards share one key; the container needs a rebalance")
+	// ErrChanged: the container changed between the reads of one plan (the
+	// other card was moved, or a neighbour was). Nothing is written; the
+	// caller reads the other card again and plans again.
+	ErrChanged = errors.New("rank: the cards moved while the move was planned")
 )
 
 // Plan works out what a move writes. In the usual case that is one key, for
@@ -67,7 +71,8 @@ var (
 // them, so the cards that share it are given fresh, evenly spaced keys
 // with the moved card in its place: one write per tied card, never more
 // than MaxTiedRun of them (ErrTiedRunTooLong beyond). other is ignored for
-// Top and Bottom.
+// Top and Bottom. The reads are not one snapshot: if the cards moved in
+// between, Plan says ErrChanged rather than guess.
 func Plan(ctx context.Context, src Source, moved string, pos Position, other Card) ([]Write, error) {
 	// neighbour returns the key of the first card of q that is not the
 	// moved card itself, "" when there is none.
@@ -86,6 +91,11 @@ func Plan(ctx context.Context, src Source, moved string, pos Position, other Car
 	}
 	one := func(lo, hi string) ([]Write, error) {
 		key, err := Between(lo, hi)
+		if errors.Is(err, ErrNoRoom) {
+			// Each bound was read as strictly beyond the other card's key:
+			// they can only meet if someone moved a card in between.
+			return nil, ErrChanged
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -130,6 +140,11 @@ func Plan(ctx context.Context, src Source, moved string, pos Position, other Car
 	if err != nil {
 		return nil, err
 	}
+	// The other card is not among the cards with its key, and they were
+	// all read: it was moved since the caller read it.
+	if at < 0 && complete {
+		return nil, ErrChanged
+	}
 	// The usual case: the other card is at the edge of its run on the side
 	// the moved card goes, so the neighbour there has another key.
 	switch {
@@ -139,7 +154,7 @@ func Plan(ctx context.Context, src Source, moved string, pos Position, other Car
 		return one(other.Key, above)
 	}
 	// Tied neighbours: re-key the run, the moved card in its place.
-	if !complete || at < 0 || len(run) > MaxTiedRun {
+	if !complete || len(run) > MaxTiedRun {
 		return nil, ErrTiedRunTooLong
 	}
 	if pos == After {
@@ -147,6 +162,9 @@ func Plan(ctx context.Context, src Source, moved string, pos Position, other Car
 	}
 	order := slices.Insert(slices.Clone(run), at, Card{ID: moved})
 	keys, err := Evenly(below, above, len(order))
+	if errors.Is(err, ErrNoRoom) {
+		return nil, ErrChanged
+	}
 	if err != nil {
 		return nil, err
 	}
