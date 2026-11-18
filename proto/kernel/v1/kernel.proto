@@ -292,7 +292,8 @@ message SearchItemsRequest {
   // The previous page's next_page_token, with the same request otherwise.
   string page_token = 6;
   // Sort by one declared field instead of newest first: a field ID, then
-  // optionally " desc" (f_rank, f_priority desc). Items without a value
+  // optionally " asc" (the default) or " desc" (f_rank, f_priority desc),
+  // AIP-132 style, one field only. Items without a value
   // come last in both directions; ties are broken by Item ID, ascending.
   // The field must be a string, int, date or enum, with one type across the
   // filter's Types (across every Type that declares it when the filter

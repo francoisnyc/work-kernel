@@ -1669,7 +1669,8 @@ type SearchItemsRequest struct {
 	// The previous page's next_page_token, with the same request otherwise.
 	PageToken string `protobuf:"bytes,6,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
 	// Sort by one declared field instead of newest first: a field ID, then
-	// optionally " desc" (f_rank, f_priority desc). Items without a value
+	// optionally " asc" (the default) or " desc" (f_rank, f_priority desc),
+	// AIP-132 style, one field only. Items without a value
 	// come last in both directions; ties are broken by Item ID, ascending.
 	// The field must be a string, int, date or enum, with one type across the
 	// filter's Types (across every Type that declares it when the filter
