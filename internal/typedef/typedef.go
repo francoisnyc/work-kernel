@@ -186,6 +186,10 @@ type Transition struct {
 	// Escape marks a move that may leave a state while a hold is open on it
 	// (cancel, say). Making it cancels the hold.
 	Escape bool `yaml:"escape" json:"escape,omitempty"`
+	// Clears are the fields the move unsets in the same write (reopening
+	// clears the resolution). Required fields and the guard are judged
+	// before the clear, the invariants after it.
+	Clears []string `yaml:"clears" json:"clears,omitempty"`
 
 	// Program is Guard compiled, filled when the Type is loaded; nil when
 	// there is no guard. The "-" tag keeps it out of YAML and JSON. Package
@@ -216,6 +220,10 @@ type Type struct {
 	AcceptsReactions map[string][]string `yaml:"accepts_reactions" json:"accepts_reactions,omitempty"`
 	// Invariants are rules over the fields every write must keep.
 	Invariants []Invariant `yaml:"invariants" json:"invariants,omitempty"`
+	// Incoming names links other Types declare towards this Type.
+	Incoming []Incoming `yaml:"incoming" json:"incoming,omitempty"`
+	// Rollups are values computed when an Item of this Type is read.
+	Rollups []Rollup `yaml:"rollups" json:"rollups,omitempty"`
 }
 
 // Parse reads a Type from YAML and checks it. Unknown keys are errors, so a

@@ -61,6 +61,16 @@ type Item struct {
 	// says more exist.
 	Links          []Link
 	LinksTruncated bool
+	// Rollups are the values the Item's Type version computes when the
+	// Item is read, keyed by rollup ID. Only Get fills them; they count
+	// only what the reader can see.
+	Rollups map[string]Rollup
+}
+
+// Rollup is one computed value: how many linked Items the reader can see,
+// by state category or by state. A key with no Item is absent.
+type Rollup struct {
+	Counts map[string]int64
 }
 
 // Hold is a request for a checked transition, held while its check runs.

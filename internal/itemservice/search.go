@@ -38,6 +38,21 @@ type SearchRequest struct {
 	// PageToken is the previous page's NextPageToken, sent with the same
 	// request; with any other request, caller or namespace it is ErrInvalid.
 	PageToken string
+	// OrderBy sorts by a declared field instead of newest first; nil keeps
+	// newest first.
+	OrderBy *OrderBy
+}
+
+// OrderBy sorts Search and List by one declared field: ascending unless
+// Desc, Items without a value last in both directions, ties by Item ID
+// ascending. The field must be a string, int, date or enum, with one type
+// across the selected Types (or across every registered Type that declares
+// it when none is selected); else an InvalidError on order_by. Strings and
+// enum names compare byte by byte, never by locale. Items whose Type does
+// not declare the field sort as unset.
+type OrderBy struct {
+	Field string
+	Desc  bool
 }
 
 // SearchResult holds the matching Items, newest first, as the principal may

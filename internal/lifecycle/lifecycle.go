@@ -54,6 +54,10 @@ func (r *Rejection) Error() string { return r.Reason }
 type Result struct {
 	State    string
 	Category string
+	// Clears are the fields the transition unsets in the same write, as
+	// the Type declares them (sorted). The caller applies them after the
+	// patch; required fields and the guard were judged before.
+	Clears []string
 }
 
 // CheckFrozen decides whether a write made while the Item is in state may

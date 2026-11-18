@@ -16,8 +16,9 @@ type ListRequest struct {
 	Principal   item.Principal
 	ContainerID *uuid.UUID // nil: the Items at the top level
 	Filter      Filter
-	Limit       int    // as SearchRequest.Limit
-	PageToken   string // as SearchRequest.PageToken
+	Limit       int      // as SearchRequest.Limit
+	PageToken   string   // as SearchRequest.PageToken
+	OrderBy     *OrderBy // as SearchRequest.OrderBy
 }
 
 // ListResult is one page, newest first (created_at, then id).
