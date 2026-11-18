@@ -1,8 +1,7 @@
 // Link writes. LinkItems and UnlinkItems are always called on the link's
 // source with the declared name; the page shows links from either end.
-//
-// Phase B: signatures only.
-import type { Item, Link, LinkDirection, Type } from "../gen/kernel/v1/kernel_pb";
+import { FieldWriter, LinkDirection, type Item, type Link, type Type } from "../gen/kernel/v1/kernel_pb";
+import { incomingLinkTypes } from "./typeinfo";
 
 // What LinkItems or UnlinkItems is called with.
 export type LinkWrite = { name: string; linkType: string; target: string };
@@ -13,13 +12,16 @@ export type LinkWrite = { name: string; linkType: string; target: string };
 // sourceType (other's Type) declares for that inverse. Throws when
 // sourceType declares no such link.
 export function linkWrite(
-  _item: Item,
-  _direction: LinkDirection,
-  _linkType: string,
-  _other: string,
-  _sourceType: Type,
+  item: Item,
+  direction: LinkDirection,
+  linkType: string,
+  other: string,
+  sourceType: Type,
 ): LinkWrite {
-  throw new Error("not implemented");
+  if (direction !== LinkDirection.INCOMING) return { name: item.name, linkType, target: other };
+  const declared = sourceType.linkTypes.find((lt) => lt.inverse === linkType);
+  if (!declared) throw new Error(`${sourceType.typeId} declares no link whose inverse is ${linkType}`);
+  return { name: other, linkType: declared.name, target: item.name };
 }
 
 // What a row of the links list may do. A restricted end has no name, so it
@@ -28,6 +30,14 @@ export type LinkRow = { link: Link; restricted: boolean; kernel: boolean; remova
 
 // The Item's links as rows. An incoming link's writability is read from
 // the Types that declare it (types: every Type, from ListTypes).
-export function linkRows(_item: Item, _type: Type, _types: Type[]): LinkRow[] {
-  throw new Error("not implemented");
+export function linkRows(item: Item, type: Type, types: Type[]): LinkRow[] {
+  const incoming = incomingLinkTypes(types, type.typeId);
+  return item.links.map((link) => {
+    const restricted = link.item?.restricted === true;
+    const kernel =
+      link.direction === LinkDirection.INCOMING
+        ? incoming.some((l) => l.name === link.linkType && !l.writable)
+        : type.linkTypes.find((lt) => lt.name === link.linkType)?.writableBy === FieldWriter.KERNEL;
+    return { link, restricted, kernel, removable: !restricted && !kernel };
+  });
 }

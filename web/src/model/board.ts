@@ -1,9 +1,7 @@
 // A drop on a board, as the rank move it asks for. A board shows the Items
 // linked to one Item, in rank order; a rank orders one container, so the
 // move is made next to a neighbour in the moved card's own container
-// (rank.Plan then ranks against that container).
-//
-// Phase B: signatures only.
+// (rank.plan then ranks against that container).
 
 // A card as the board shows it: key "" when the Item has no rank yet.
 // Ranked cards come first, in key order; unranked ones last.
@@ -22,6 +20,16 @@ export type Drop =
 // that one is ranked and in the same container; else before the card
 // below, on the same condition; when no neighbour is ranked, the bottom of
 // its container.
-export function dropToMove(_cards: BoardCard[], _from: number, _to: number): Drop {
-  throw new Error("not implemented");
+export function dropToMove(cards: BoardCard[], from: number, to: number): Drop {
+  const moved = cards[from];
+  if (!moved || to === from) return { kind: "none" };
+  const rest = cards.filter((_, i) => i !== from);
+  const above = rest[to - 1];
+  const below = rest[to];
+  const ranked = (c: BoardCard | undefined) => c !== undefined && c.key !== "";
+  const usable = (c: BoardCard | undefined): c is BoardCard => ranked(c) && c!.container === moved.container;
+  if (usable(above)) return { kind: "move", pos: "after", other: above };
+  if (usable(below)) return { kind: "move", pos: "before", other: below };
+  if (!ranked(above) && !ranked(below)) return { kind: "move", pos: "bottom" };
+  return { kind: "refused", reason: "other_container" };
 }

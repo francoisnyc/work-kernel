@@ -1,10 +1,12 @@
 // The form for an Item's fields, built from its Type: create (no item) and
 // edit (an item, whose state decides what is frozen).
-//
-// Phase B: signature only.
 import type { JsonObject } from "@bufbuild/protobuf";
-import type { ReactElement } from "react";
+import { useState, type FormEvent, type ReactElement } from "react";
 import type { Item, Type } from "../gen/kernel/v1/kernel_pb";
+import { fieldAccess } from "../model/typeinfo";
+import { createFields, formValues, patchFields } from "../model/values";
+import { FieldInput } from "./FieldInput";
+import { RefusalView } from "./RefusalView";
 
 export type ItemFormProps = {
   type: Type;
@@ -19,6 +21,46 @@ export type ItemFormProps = {
   onSubmit: (fields: JsonObject) => Promise<void>;
 };
 
-export function ItemForm(_props: ItemFormProps): ReactElement {
-  throw new Error("not implemented");
+export function ItemForm({ type, item, principals, submitLabel, onSubmit }: ItemFormProps): ReactElement {
+  const [form, setForm] = useState(() => formValues(type, item?.fields));
+  const [error, setError] = useState<unknown>();
+  const [busy, setBusy] = useState(false);
+
+  const fields = item ? patchFields(type, item.fields, form) : createFields(type, form);
+  // An edit with nothing changed has nothing to save; a create may be empty.
+  const nothingToSave = item !== undefined && Object.keys(fields).length === 0;
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(undefined);
+    try {
+      await onSubmit(fields);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="item-form">
+      {type.fields.map((f) => (
+        <FieldInput
+          key={f.id}
+          field={f}
+          value={form[f.id] ?? ""}
+          access={fieldAccess(type, f.id, item?.state ?? "")}
+          state={item?.state}
+          principals={principals}
+          onChange={(v) => setForm((old) => ({ ...old, [f.id]: v }))}
+        />
+      ))}
+      {type.fields.length === 0 && <p className="hint">This Type declares no fields.</p>}
+      <button type="submit" disabled={busy || nothingToSave}>
+        {submitLabel}
+      </button>
+      {error !== undefined && <RefusalView error={error} />}
+    </form>
+  );
 }
