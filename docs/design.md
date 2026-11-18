@@ -60,12 +60,15 @@ A Type is versioned YAML data that **names code but never contains it**.
   on the public door only holders of a role write it (see "Link reactions,
   the leave balance and the saga"). A Type may declare `invariants`, rules
   over its fields that every write keeps, and `reactions`, writes on the
-  Items it links to.
+  Items it links to. It may name the links other Types declare towards it
+  (`incoming`) and declare `rollups`, counts computed when an Item is read
+  (see "Jira part 1 as built").
 - States: each has a category — `triage, backlog, todo, active, waiting, done, canceled, none`.
   `none` means "not work": work views leave it out. A Type that declares no
   states gets one implicit state, `default`, with category `none`. A state may
   declare `frozen: [fields]`: no write changes them while the Item is in it.
-- Transitions: from/to, guard expression, required fields, who may act, action references.
+- Transitions: from/to, guard expression, required fields, fields to clear
+  (`clears`, see "Jira part 1 as built"), who may act, action references.
   - Who may act is the transition's `allowed` list. An entry is `role:<name>`,
     `principal:<id>`, `field:<id>` (whoever a principal field holds when the
     move runs) or `creator` (the requester: see below). Absent or empty means
@@ -492,6 +495,10 @@ client → item service (Go, stateless)
 - The text match runs first and the sort and limit after it, in a subquery the
   planner cannot flatten. Otherwise Postgres walks Items newest-first and
   discards non-matches, which grows with the size of the scope (Step A, `EXPLAIN`).
+- `order_by` sorts by one declared field instead of newest first (see "Jira
+  part 1 as built"). **String order is byte order** (`COLLATE "C"`) in every
+  sort and every string comparison, whatever the database's locale: rank
+  keys depend on it. Locale-aware sorting of human text is Later.
 - `min_seq`: Search waits until the watermark has passed the transaction that
   wrote `min_seq` (see Write path), up to a bound (default 2 s), then returns the
   retryable `ErrNotCaughtUp`. On one Postgres the wait ends at once; the contract
@@ -742,7 +749,8 @@ fields it names; JSON `null` clears one. No field masks.
 - Paging everywhere: `page_size` (default 50, max 500), `page_token`,
   `next_page_token`. Opaque tokens, no offsets, no exact totals.
 - Paging is keyset on `(created_at desc, id desc)` (history: `item_seq`),
-  never an offset. A page token is bound to its request (filters, words,
+  or under `order_by` on (the field's value, id) with the Items without a
+  value last, never an offset. A page token is bound to its request (filters, words,
   container), its caller and its namespace: used with anything else it is
   `INVALID_ARGUMENT` (decided in Step 0, part 2).
 - A filter with one value (one Type, one state) is `=` in SQL, which walks
@@ -750,8 +758,10 @@ fields it names; JSON `null` clears one. No field masks.
   which on Postgres 17 sorts every match before the page (26-36 ms at
   30,000 matches): a known cost, in the journal's Later with its fixes.
 - Filters on `SearchItems` and `ListItems`: Type, state, category, field
-  equality and ranges, principal fields ("assigned to me"), links ("linked to
-  X as `sprint`"). A filter alone is a valid search. Link conditions and "me"
+  equality and ranges (int, date and string), principal fields ("assigned
+  to me"), links ("linked to X as `sprint`"). A field filter works across
+  the selected Types, or across every Type that declares the field when
+  none is selected. A filter alone is a valid search. Link conditions and "me"
   are described in "Links, containment and people" (Step 1).
 - `min_seq` on search for read-your-writes; `UNAVAILABLE` / `NOT_CAUGHT_UP`
   after 2 s. `GetItem` always reads the latest state.
@@ -838,7 +848,8 @@ the base branch; from Step 0, part 3 on, `main` is the baseline.
 max: many, inverse_max: many}]`. `max` is per source, `inverse_max` per
 target; unwritten is `many`. Names and inverses are lower-case identifiers,
 unique among the Type's names and inverses. Targets are Type IDs, any version;
-they must exist in the set loaded at start (`ParseDir`). **A link name keeps
+they must exist in the set loaded at start (`ParseDir`); `targets: ['*']`,
+alone, means an Item of any Type (Jira part 1). **A link name keeps
 its inverse across a Type's versions**: a version that gives a declared name
 another inverse is refused at load and by `RegisterType`, naming the Type, the
 link and both inverses, so (source Type, name) always names one inverse.
@@ -884,9 +895,10 @@ source incoming). At most 200 per direction, restricted ones included, then
   ID. If a link listing ever shows titles or fields, it must record the read.
 
 **Guards.** `links.<name>` is a list of `{state, category}`, never fields.
-The names a Type's guards see are its declared names (outgoing) and the
-inverses of its link types that target the Type itself (incoming); incoming
-links declared by other Types are not visible yet. Each transition records
+The names a Type's guards see are its declared names (outgoing), the
+inverses of its link types that target the Type itself (incoming), and,
+since Jira part 1, the `incoming` names it declares for links of other
+Types. Each transition records
 the names its guard reads (from the CEL AST); only those transitions read and
 lock linked Items. Guards evaluate linked Items whatever the caller can see:
 **so a refusal caused by a hidden blocker tells the caller that something
@@ -1358,7 +1370,7 @@ in the journal.
 | 2, part 2 (**done**) | Link reactions, the leave balance, the held deduction and its compensation | Approving a vacation request deducts its days from the requester's balance exactly once, or is DENIED insufficient_balance; two approvals racing never overdraw; every non-allow end of the hold after a deduction refunds it once, never without one; withdrawing an approved request refunds it; the requester never chooses or changes the balance; through the API, pli and the scenario. **Done 2026-11-17**: [journal, Step 2, part 2](journal.md#2026-11-17--step-2-proof-of-concept-part-2-link-reactions-the-leave-balance-the-saga-finished) |
 | 2, part 3 (**done**) | Acting timers, timers deferred during holds, the stub email connector, the full scenario | A submitted request reminds its approver on schedule and expires when nobody decides, emailing the requester; approval and refund emails go out exactly once, none after a denial; a timer due during a hold waits for it; through the API, pli and the scenario on a dev clock. **Done 2026-11-17**: [journal, Step 2, part 3](journal.md#2026-11-17--step-2-proof-of-concept-part-3-acting-timers-deferred-timers-and-the-email-stub-finished) |
 | Consolidation (**done**) | An independent adversarial review of how Step 2's primitives combine; seven interaction bugs fixed, each reproduced by a failing test first; the flaky hooks test fixed | Every finding reproduced then fixed in its own commit; all recorded histories replay. **Done 2026-11-18** (PR #25) |
-| Jira 1 | The PLAT software project: ordering by a field, rank as an app field, incoming links from other Types, rollups, field effects on transitions, watching (see "Jira proof of concept" below) | Scenarios A and D below run through pli; ordering pages correctly; ranking costs measured |
+| Jira 1 (**done**) | The PLAT software project: ordering by a field, rank as an app field, incoming links from other Types, rollups, field effects on transitions, watching (see "Jira proof of concept" below) | Scenarios A and D below run through pli; ordering pages correctly; ranking costs measured. **Done 2026-11-18**: [journal, Jira part 1](journal.md#2026-11-18--jira-proof-of-concept-part-1-the-plat-software-project-finished) |
 | SLA design | A design pass on paper (questions and decisions, no code) for SLA objects and business calendars | SLA shape decided and recorded |
 | Jira 2 | The IT service desk: SLAs, business calendars, customers as principals, reactions that move a parent, several approvers (N of M) | Scenarios B and C run through pli |
 | Bonita | The company's real Bonita processes, mapped against the BPMN pattern table, then rebuilt | Planned after Jira 2 |
@@ -1453,6 +1465,112 @@ sprint and an epic by links, not by containment. Comments are contained Items.
    ordered by a field, 20 per page, and pages through all of them.
 3. ana watches PLAT-9: a Subscription Item linked to it by `watches`. Watching
    an Item she can't see is `NOT_FOUND`. Removing the subscription unwatches.
+
+### Jira part 1 as built (2026-11-18)
+
+Eight kernel changes; nothing in the kernel is named rank, epic, sprint or
+watch. `kernel.v1` only grew.
+
+**`order_by`** (`SearchItems`, `ListItems`): one field ID, optionally `asc`
+or `desc` (AIP-132). Items without a value come last in both directions;
+ties are broken by Item ID, ascending in both. Sortable types: string, int
+(as numbers), date, enum (by option name: declared order is Later); bool
+and principal are refused. The page token carries the sort value as text
+(none for an Item without one) and the ID, and the order is part of the
+request a token is bound to. Items whose Type does not declare the field
+are not dropped: they sort as Items without a value.
+
+**Fields across Types.** A field filter or `order_by` is resolved across
+the selected Types, or across every registered Type that declares the
+field when none is selected. It is refused (`INVALID_REQUEST`) only when no
+Type in play declares the field, or when their declarations disagree on its
+type; a string and a principal stay one type for equality (not for order).
+Enums with different options are one type. So one field ID should mean one
+thing everywhere: `f_priority` is an int on `ticket` and an enum on the PLAT
+Types, and a search by it must name its Types. Dates take equality and
+ranges; strings take ranges (byte order), which is how an app finds the
+rank keys next to a card's.
+
+**Rank is an app field.** `f_rank` is a string field on story, bug and
+task, scoped to the Item's container. `internal/rank`, which no kernel
+package may import (a test holds it), makes the keys: base-62 fractions
+compared byte by byte. `pli rank ITEM before|after OTHER` (or `top`,
+`bottom`) plans a move with `rank.Plan` over a few ordered reads of the
+container and makes **one write**, an ordinary `UpdateItem`.
+- Between two cards the key is near the midpoint; at the top or the bottom
+  it is a small step past the last card (1/32 to 1/8 of the room left), so
+  always adding at one end uses room up about nine times more slowly. A
+  random jitter makes two simultaneous inserts into one gap rarely collide;
+  when keys are equal the Item ID decides.
+- The key is computed against the container's order, so the card sits next
+  to the other one in every view that shows both (the backlog, a sprint's
+  board).
+- Equal neighbours leave no key between them: the move re-keys the run of
+  cards that share the key, at most `rank.MaxTiedRun` (8) of them, and is
+  refused past that with a pointer to the rebalance. If cards moved between
+  the plan's reads it plans again.
+- A move never rebalances. Past `rank.Threshold` (32 bytes) pli says a
+  rebalance is due and still succeeds.
+- `pli rank rebalance --in CONTAINER` rewrites one container's keys, short
+  and even, one update per card under the card's etag, in an order that
+  keeps the container in order after every write (`rank.RewriteOrder`).
+  **It is a quiet-time batch:** a card moved while it runs is placed
+  between keys the batch then moves, and two such moves in three land out
+  of place (measured). An online rebalance is Later.
+
+**Incoming links.** `incoming: [{name: issues, link: epic, from: [story,
+bug, task]}]`: the Items of the `from` Types that link to this Type's Items
+by their link `link`. The name must be the inverse every `from` Type
+declares for it, so one name serves reads, search, guards and rollups; it
+may not be one of the Type's own link names or inverses, nor name the Type
+itself. `ParseDir` checks it across Types (`CheckIncoming`): each `from`
+Type is loaded and some version of it declares the link towards this Type.
+Guards read it as any link, state and category only. Locking needed no new
+protocol: `lockForTransition` and `linkWrite` already order their locks by
+UUID, and the Step 1 race tests pass across Types.
+
+**Rollups.** `rollups: [{id: progress, over: issues, count_by: category}]`:
+`over` is any link name the Type can read, `count_by` is `category` or
+`state`. `GetItem` computes them in SQL, with visibility in the count:
+a user's count is what they can see, an agent session's what is inside its
+scopes, and counting Items of a narrowed scope is recorded as a read of
+it. On `GetItem` only (`Item.rollups`, int64 counts, a key with no Item
+absent): not on write answers, searches or lists; never stored, not
+searchable. No sums.
+
+**Clears.** `clears: [fields]` on a transition unsets them in the move's
+own write. Order of checks, on every door: malformed (a patch that sets a
+field the move clears) -> not writable -> frozen -> held -> required
+fields and the guard, **before the clear** -> the clear -> invariants. A
+cleared field counts as named by the write, so a role-written field is
+cleared only by a holder of the role, even when it is empty. The event
+lists `cleared_field_ids` for fields that had a value. Refused at load: a
+clear of a field the same transition requires, that the state it leaves
+freezes, that its own `allowed` names, or that only the kernel writes; and
+any clear on a transition a check or a held reaction holds (which of the
+two steps of a held move would clear is not designed: Later).
+
+**Watching.** A `subscription` Item, created readable by its owner alone,
+links to what it watches by `watches` (`targets: ['*']`, at most one).
+Unwatching is `UnlinkItems`; the subscription stays (Archive is Later). The
+watched Item shows `watched_by` only to those who can see the
+subscription.
+
+**The PLAT Types** (`types/`): `space` (the container: `f_key`, `f_name`),
+`story`, `bug` and `task` (three files with one lifecycle; done requires
+`f_resolution`, `done -> todo` clears it; links `epic` / `issues`, `sprint`
+/ `sprint_issues`, `blocks`, `relates`, `duplicates`), `epic` (`incoming`,
+the `progress` rollup, not done while an issue is open), `sprint` (closed
+by hand), `comment`, `subscription`. None has listeners: a write costs one
+row and one event, no outbox row. Issue keys (PLAT-12) are Later.
+
+**Measured** (journal, Jira part 1): sorting by a field sorts every match
+(no per-field index was needed at PLAT's size: the board of a 1,000-card
+sprint reads in 3 ms; at 30,000 cards in one container a move's reads are
+13 to 14 ms each); a drag is one event, one value row and no outbox row,
+and on a Type with listeners one outbox row and six workflow history
+events when its workflow is running. The "no rule reads this" field
+attribute is not needed yet.
 
 ## Out of scope for the spike
 
