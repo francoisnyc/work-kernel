@@ -144,6 +144,30 @@ var categoryNames = func() map[kernelv1.StateCategory]string {
 	return m
 }()
 
+// orderByIn reads order_by: a field ID, optionally followed by asc or desc
+// (AIP-132), one field only; empty is no order (newest first). Whether the
+// field can be sorted by is the kernel's question.
+func orderByIn(raw string) (*itemservice.OrderBy, *connect.Error) {
+	words := strings.Fields(raw)
+	switch {
+	case len(words) == 0:
+		return nil, nil
+	case len(words) > 2 || strings.Contains(raw, ","):
+		return nil, badField("order_by", "want one field ID, optionally followed by asc or desc")
+	}
+	o := &itemservice.OrderBy{Field: words[0]}
+	if len(words) == 2 {
+		switch words[1] {
+		case "asc":
+		case "desc":
+			o.Desc = true
+		default:
+			return nil, badField("order_by", "the direction is asc or desc")
+		}
+	}
+	return o, nil
+}
+
 func (s *server) ListItems(ctx context.Context, req *connect.Request[kernelv1.ListItemsRequest]) (*connect.Response[kernelv1.ListItemsResponse], error) {
 	p, m := caller(ctx), req.Msg
 	// The parent is a container's name, or the namespace for the top level.
@@ -167,9 +191,13 @@ func (s *server) ListItems(ctx context.Context, req *connect.Request[kernelv1.Li
 	if cerr != nil {
 		return nil, cerr
 	}
+	order, cerr := orderByIn(m.OrderBy)
+	if cerr != nil {
+		return nil, cerr
+	}
 	res, err := s.k.List(ctx, itemservice.ListRequest{
 		Principal: p, ContainerID: container.ContainerID, Filter: filter.Filter,
-		Limit: int(m.PageSize), PageToken: m.PageToken,
+		Limit: int(m.PageSize), PageToken: m.PageToken, OrderBy: order,
 	})
 	if err != nil {
 		return nil, errorIn(err, p.Namespace, "")
