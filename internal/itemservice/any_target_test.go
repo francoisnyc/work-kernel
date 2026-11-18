@@ -140,7 +140,8 @@ func TestAnyTarget_WatchersAreVisibleOnlyThroughTheirSubscriptions(t *testing.T)
 	// "What do I watch": the subscriptions linked to the page, as a search.
 	mine := w.mustSearch(t, w.ana, itemservice.Filter{Links: linked("watches", item.LinkOutgoing, page)})
 	assertSameIDs(t, "ana's subscriptions to the page", mine, anas)
-	// "What watches this", from the page's side.
-	watching := w.mustSearch(t, w.bob, itemservice.Filter{Links: linked("watched_by", item.LinkIncoming, page)})
+	// The same search as bob finds his own subscription, never ana's. (The
+	// link is named as the result Items see it: a subscription `watches`.)
+	watching := w.mustSearch(t, w.bob, itemservice.Filter{Links: linked("watches", item.LinkOutgoing, page)})
 	assertSameIDs(t, "the subscriptions bob sees on the page", watching, bobs)
 }

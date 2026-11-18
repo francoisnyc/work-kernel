@@ -920,9 +920,13 @@ expect "the board after a second move" "$(board)" "$plat4 $plat3 $plat2"
 expect "the backlog by rank" \
 	"$(ok lea item list "$plat" --type story --type bug --type task --order-by f_rank | in_order)" "$plat4 $plat3 $plat2"
 # A rebalance is a separate, deliberate command; it keeps the order.
+# (How many cards it rewrites is not asserted: a card's random key may
+# already be the one the rebalance would give it.)
 rebalanced=$(ok lea rank rebalance --in "$plat")
-expect "cards the rebalance rewrote" "$(j .rewritten <<<"$rebalanced")" "3"
+expect "cards the rebalance skipped" "$(j .skipped <<<"$rebalanced")" "0"
 expect "the board after the rebalance" "$(board)" "$plat4 $plat3 $plat2"
+expect "the backlog after the rebalance" \
+	"$(ok lea item list "$plat" --type story --type bug --type task --order-by f_rank | in_order)" "$plat4 $plat3 $plat2"
 refuse lea "INVALID_ARGUMENT INVALID_REQUEST" item search --linked "out:sprint=$sprint" --order-by 'f_rank sideways'
 
 step "A7: sam lists his open work: assignee = me, todo and active, by priority"
@@ -935,12 +939,14 @@ refuse sam "INVALID_ARGUMENT INVALID_REQUEST" item search "$w" --where f_assigne
 
 step "A8: lea reads PLAT-2's history"
 history=$(ok lea item history "$plat2")
-expect "PLAT-2's history" "$(j '[.events[].kind | sub("ITEM_EVENT_KIND_"; "")] | join(" ")' <<<"$history")" \
-	"CREATED LINK_ADDED UPDATED LINK_ADDED UPDATED LINK_ADDED TRANSITIONED UPDATED"
+expect "PLAT-2's history" "$(j '[.events[:7][].kind | sub("ITEM_EVENT_KIND_"; "")] | join(" ")' <<<"$history")" \
+	"CREATED LINK_ADDED UPDATED LINK_ADDED UPDATED LINK_ADDED TRANSITIONED"
 expect "who started it" "$(j '.events[6].actor' <<<"$history")" "user:sam"
-# Ranking is an ordinary update: the first key (A2) and the rebalance (A6).
+# Ranking is an ordinary update: the first key (A2), and the rebalance (A6)
+# if it gave PLAT-2 another key. Nothing else has happened to it since.
 expect "what the first rank write set" "$(j '.events[2].fields | keys | join(" ")' <<<"$history")" "f_rank"
-expect "what the rebalance set" "$(j '.events[7].fields | keys | join(" ")' <<<"$history")" "f_rank"
+expect "events after sam started it that are not rank writes" \
+	"$(j '[.events[7:][] | select(.kind != "ITEM_EVENT_KIND_UPDATED" or (.fields | keys) != ["f_rank"])] | length' <<<"$history")" "0"
 
 step "A9: lea shows PLAT-1: its progress counts only what she can see"
 hidden=$(ok sam item create --type task@1 --in "$plat" --narrow user:sam --set "f_summary=Rotate the signing key $w" | j .item.name)

@@ -162,7 +162,7 @@ func TestPli_Rank_MovesOneCardWithOneWrite(t *testing.T) {
 				t.Errorf("pli %v: the moved card was not written", s.args[2:])
 			case name != moved && etag != before[name]:
 				t.Errorf("pli %v: wrote a card it did not move (etag %s -> %s): a move is one write", s.args[2:], before[name], etag)
-			case !rank.Valid(key):
+			case key != "" && !rank.Valid(key): // d has no rank until it is moved
 				t.Errorf("pli %v: a card has the rank %q, not a valid key", s.args[2:], key)
 			}
 		}
@@ -379,11 +379,11 @@ func TestPli_Rank_TiedRunCap(t *testing.T) {
 func TestPli_Rank_Rebalance(t *testing.T) {
 	space, elsewhere := platSpace(t), platSpace(t)
 	long := strings.Repeat("V", rank.Threshold+8)
-	c1 := card(t, space, "1", "A")
-	c2 := card(t, space, "2", long)
-	c3 := card(t, space, "3", long) // the same key as c2: after it, by ID
-	c4 := card(t, space, "4", long+"V")
-	c5 := create(t, "ana", "--type", "bug@1", "--in", space, "--set", "f_summary=5", "--set", "f_rank=z")
+	c1 := card(t, space, "c1", "A")
+	c2 := card(t, space, "c2", long)
+	c3 := card(t, space, "c3", long) // the same key as c2: after it, by ID
+	c4 := card(t, space, "c4", long+"V")
+	c5 := create(t, "ana", "--type", "bug@1", "--in", space, "--set", "f_summary=c5", "--set", "f_rank=z")
 	unranked := card(t, space, "unranked", "")
 	epic := create(t, "ana", "--type", "epic@1", "--in", space, "--set", "f_summary=an epic has no rank")
 	other := card(t, elsewhere, "other", long)
