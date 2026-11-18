@@ -385,9 +385,10 @@ Ideas noted during the spike, not built yet.
   UI reads both from the dev-token file); a link carries only the other
   Item's name, so the Item page reads each linked Item for its title (one
   GetItem each, the first 40): a batch get, or a title on a link. (Web UI)
-- The stack still publishes the Temporal UI (8233) and the email stub's
+- ~~The stack still publishes the Temporal UI (8233) and the email stub's
   read port (8085) on every interface; only the API and the web UI moved to
-  127.0.0.1. (Web UI)
+  127.0.0.1. (Web UI)~~ Done in the same pull request: every published
+  port, compose.dev.yaml's included, is on 127.0.0.1.
 - A production build of the web UI has no sign-on at all: real sign-on
   (OIDC) replaces the dev picker as it replaces the interceptor. (Web UI)
 
@@ -1788,7 +1789,9 @@ This sandbox cannot reach npm from inside a build, so the stack was run with the
 host and copied into the same nginx stage; CI's `scenario` job is the first real run of
 `web/Dockerfile`.
 
-**Open:** 8233 and 8085 are still published on every interface (Later). The six "Board:" links
+**Open:** 8233 and 8085 were still published on every interface when this entry was written; a
+later commit of the same pull request bound them, and compose.dev.yaml's two ports, to 127.0.0.1.
+The six "Board:" links
 per story suggest a Type could say which links make a board; that is a Type attribute, not built.
 **Next session:** unchanged: the SLA design pass (paper only), then Jira part 2 (the IT service
 desk).
