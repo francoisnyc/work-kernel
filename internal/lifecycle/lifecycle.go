@@ -138,7 +138,12 @@ func TransitionWith(t *typedef.Type, current string, in Input, to string) (Resul
 	}
 
 	state, _ := t.State(to) // a loaded Type only has transitions between declared states
-	return Result{State: state.ID, Category: state.Category}, nil
+	// What the move clears is the Type's to say, and it is said here, after
+	// required fields and the guard were judged on the fields as given: a
+	// reopening guard reads the resolution the move then clears.
+	clears := slices.Clone(tr.Clears)
+	slices.Sort(clears)
+	return Result{State: state.ID, Category: state.Category, Clears: clears}, nil
 }
 
 // guardHolds evaluates the transition's CEL guard against the fields. Every

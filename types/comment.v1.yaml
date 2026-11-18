@@ -1,0 +1,6 @@
+# A comment: an Item contained in what it comments on. No lifecycle; its
+# author is its creator. It is not work (category none).
+id: comment
+version: 1
+fields:
+  - {id: f_body, type: string}

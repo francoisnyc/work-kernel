@@ -1,0 +1,24 @@
+# A sprint in a software project (Jira proof of concept, part 1). Issues
+# join it by their link type `sprint`; the board is a search for them,
+# ordered by rank, never a listing of the sprint as a container.
+#
+# It is closed by hand. A timer at a date (closing on f_end) is Later: a
+# state timer counts a duration from the entry into the state.
+id: sprint
+version: 1
+initial_state: planned
+
+fields:
+  - {id: f_name,  type: string}
+  - {id: f_start, type: date}
+  - {id: f_end,   type: date}
+  - {id: f_goal,  type: string}
+
+states:
+  - {id: planned, category: backlog}
+  - {id: active,  category: active}
+  - {id: closed,  category: done}
+
+transitions:
+  - {from: planned, to: active}
+  - {from: active,  to: closed}

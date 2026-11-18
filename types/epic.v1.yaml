@@ -1,0 +1,35 @@
+# An epic in a software project (Jira proof of concept, part 1): a goal that
+# stories, bugs and tasks work towards.
+#
+#   - The issues point to the epic through THEIR link type `epic`; the epic
+#     names them (incoming: issues), so its guard and its rollup can read
+#     them.
+#   - progress counts the issues by state category when the epic is read. It
+#     counts only what the reader can see, and is never stored.
+#   - An epic is not done while an issue is neither done nor canceled. The
+#     guard sees every issue, whoever asks: a rule holds for everyone.
+id: epic
+version: 1
+initial_state: todo
+
+fields:
+  - {id: f_summary, type: string}
+  - {id: f_owner,   type: principal}
+
+incoming:
+  - {name: issues, link: epic, from: [story, bug, task]}
+
+rollups:
+  - {id: progress, over: issues, count_by: category}
+
+states:
+  - {id: todo,        category: todo}
+  - {id: in_progress, category: active}
+  - {id: done,        category: done}
+
+transitions:
+  - {from: todo, to: in_progress}
+  - from: in_progress
+    to: done
+    guard: 'links.issues.all(i, i.category in ["done", "canceled"])'
+  - {from: done, to: in_progress}

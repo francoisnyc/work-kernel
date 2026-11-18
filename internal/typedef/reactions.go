@@ -255,7 +255,7 @@ func (t *Type) checkKernelLinks(fail func(string, ...any) error) error {
 		if !l.SourceSingle() {
 			return fail("%s: a resolved link has at most one target (max: one)", where)
 		}
-		if len(l.Targets) != 1 {
+		if len(l.Targets) != 1 || l.Targets[0] == AnyType {
 			return fail("%s: a resolved link has exactly one target Type, not %v", where, l.Targets)
 		}
 		if _, ok := t.State(r.OnEnter); !ok {

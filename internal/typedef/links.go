@@ -92,6 +92,9 @@ func (t *Type) checkLinks(fail func(string, ...any) error) error {
 		if slices.Contains(l.Targets, "") {
 			return fail("%s: an empty target Type", where)
 		}
+		if slices.Contains(l.Targets, AnyType) && len(l.Targets) != 1 {
+			return fail("%s: %q means any Type and stands alone in targets", where, AnyType)
+		}
 		for _, c := range []Cardinality{l.Max, l.InverseMax} {
 			if c != "" && c != One && c != Many {
 				return fail("%s: cardinality %q is not one or many", where, c)
@@ -102,16 +105,19 @@ func (t *Type) checkLinks(fail func(string, ...any) error) error {
 }
 
 // guardLinks are the names a guard of t may read as links.<name>: the
-// declared names (outgoing), and the inverses of link types that target t
-// itself (incoming). Incoming links declared by other Types are not visible
-// in Step 1.
+// declared names (outgoing), the inverses of link types that may target t
+// itself (incoming), and the incoming names t declares for links of other
+// Types (LinkSource resolves each).
 func (t *Type) guardLinks() []string {
 	var names []string
 	for _, l := range t.Links {
 		names = append(names, l.Name)
-		if slices.Contains(l.Targets, t.ID) {
+		if l.AllowsTarget(t.ID) {
 			names = append(names, l.Inverse)
 		}
+	}
+	for _, in := range t.Incoming {
+		names = append(names, in.Name)
 	}
 	sort.Strings(names)
 	return names
@@ -122,7 +128,7 @@ func (t *Type) guardLinks() []string {
 // is not a declared name.
 func (t *Type) IncomingName(name string) (LinkType, bool) {
 	for _, l := range t.Links {
-		if l.Inverse == name && slices.Contains(l.Targets, t.ID) {
+		if l.Inverse == name && l.AllowsTarget(t.ID) {
 			return l, true
 		}
 	}
@@ -146,6 +152,9 @@ func CheckLinkTargets(types []*Type) error {
 	for _, t := range types {
 		for _, l := range t.Links {
 			for _, target := range l.Targets {
+				if target == AnyType {
+					continue
+				}
 				if !ids[target] {
 					return fmt.Errorf("typedef %s v%d: link %s: target Type %q is not loaded", t.ID, t.Version, l.Name, target)
 				}

@@ -377,6 +377,13 @@ func (t *Type) check() error {
 	if err := t.checkKernelLinks(fail); err != nil {
 		return err
 	}
+	// Before the guards: they may read the incoming names.
+	if err := t.checkIncoming(fail); err != nil {
+		return err
+	}
+	if err := t.checkRollups(fail); err != nil {
+		return err
+	}
 	guards, err := newGuardEnv(t)
 	if err != nil {
 		return fail("%v", err)
@@ -498,6 +505,10 @@ func (t *Type) check() error {
 		return err
 	}
 	if err := t.checkAccepts(fail); err != nil {
+		return err
+	}
+	// Clears name fields, and may not sit on a held transition.
+	if err := t.checkClears(fail); err != nil {
 		return err
 	}
 	// A field only the kernel writes needs a writer: a hook that writes it,
