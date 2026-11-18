@@ -1371,8 +1371,11 @@ in the journal.
 | 2, part 3 (**done**) | Acting timers, timers deferred during holds, the stub email connector, the full scenario | A submitted request reminds its approver on schedule and expires when nobody decides, emailing the requester; approval and refund emails go out exactly once, none after a denial; a timer due during a hold waits for it; through the API, pli and the scenario on a dev clock. **Done 2026-11-17**: [journal, Step 2, part 3](journal.md#2026-11-17--step-2-proof-of-concept-part-3-acting-timers-deferred-timers-and-the-email-stub-finished) |
 | Consolidation (**done**) | An independent adversarial review of how Step 2's primitives combine; seven interaction bugs fixed, each reproduced by a failing test first; the flaky hooks test fixed | Every finding reproduced then fixed in its own commit; all recorded histories replay. **Done 2026-11-18** (PR #25) |
 | Jira 1 (**done**) | The PLAT software project: ordering by a field, rank as an app field, incoming links from other Types, rollups, field effects on transitions, watching (see "Jira proof of concept" below) | Scenarios A and D below run through pli; ordering pages correctly; ranking costs measured. **Done 2026-11-18**: [journal, Jira part 1](journal.md#2026-11-18--jira-proof-of-concept-part-1-the-plat-software-project-finished) |
-| SLA design | A design pass on paper (questions and decisions, no code) for SLA objects and business calendars | SLA shape decided and recorded |
-| Jira 2 | The IT service desk: SLAs, business calendars, customers as principals, reactions that move a parent, several approvers (N of M) | Scenarios B and C run through pli |
+| SLA design (**done**) | A design pass on paper for SLAs and multi-value fields | Decided 2026-11-18: "Decisions for Jira part 2" below |
+| Jira 2.1 | Date-time fields, a timer at a field's instant (proved by a sprint closing on its end date), computed field effects | The sprint closes itself on its end date; effects computed at the cause's time; through the API, pli and the scenario |
+| Jira 2.2 | Reactions that move or create, including those triggered by an Item created inside the source; multi-value fields | "A customer comment reopens the request"; labels with set operations and contains filters |
+| Jira 2.3 | Calendar Items and working-time arithmetic; the `sla_goal` Type; the incident Type with first-response and resolution goals | Scenario B runs through pli |
+| Jira 2.4 | Customers as principals and public or internal comments; the access request with N-of-M approvers | Scenario C runs through pli |
 | Bonita | The company's real Bonita processes, mapped against the BPMN pattern table, then rebuilt | Planned after Jira 2 |
 
 ## Jira proof of concept
@@ -1572,6 +1575,75 @@ and on a Type with listeners one outbox row and six workflow history
 events when its workflow is running. The "no rule reads this" field
 attribute is not needed yet.
 
+### Decisions for Jira part 2: SLAs and multi-value fields (2026-11-18)
+
+Decided on paper before any code (the design doc "Pli: SLAs and
+multi-value fields"), after comparing Jira Service Management, ServiceNow
+and YouTrack.
+
+**SLAs are app-level.** Each goal on a request ("time to first response",
+"time to resolution") is an Item of an `sla_goal` Type, contained in the
+request, one per metric per cycle; a reopened request starts a new cycle
+and the old goal stays as history. Containment gives a goal the request's
+readers; narrowing hides it from customers. This is ServiceNow's
+`task_sla` record, and it keeps the 2026-11-13 membership decision: nothing
+in the kernel is named SLA.
+
+- **States:** running (active), paused (waiting), met, missed (done),
+  canceled. The request's events drive them through reactions: start,
+  pause, resume, stop, cancel, declared on the request Type and checked at
+  load so a pause can never overlap a start.
+- **Time comes from the cause, never from the reaction.** Reactions run
+  after commit, so a goal learns of a pause slightly late. Every elapsed
+  time and due instant is computed from the timestamp of the request event
+  that caused it; a busy worker delays the bookkeeping, never the outcome.
+- **Breach is an event, not the end.** A timer at the due instant records
+  `breached_at`; the goal keeps running until its stop condition and then
+  completes as met or missed. A breach notification is an action hook,
+  through the normal visibility rules.
+- **Sorting queues:** each goal writes its due instant onto the request
+  (`f_due_first_response`, `f_due_resolution`), kernel-written, through a
+  reaction; a queue sorts by one metric with `order_by`. The copy lags the
+  goal by one reaction step; the goal Item is the truth.
+- **Rejected as the main model:** deadline fields only, on the request
+  (YouTrack's way). Paused state, remaining time, cycles and breach would
+  each become fields on every request Type, and SLA policy would be pinned
+  to the request's Type version.
+
+**Five generic kernel primitives** carry it, each with users beyond the
+helpdesk:
+
+1. A **date-time field type** (an instant, stored UTC, filterable, sortable).
+2. A **timer at a field's instant**, re-armed when the field changes (also a
+   sprint closing on its end date).
+3. **Reactions that move or create**: an `after` reaction that transitions
+   its target or creates a contained Item, triggered by a source's
+   transition or by an Item created inside it (also "a customer comment
+   reopens the request").
+4. **Computed field effects**: a transition sets fields from a CEL
+   expression evaluated at the cause event's time (`cause.at`).
+5. **Working-time arithmetic**: pure CEL functions
+   `working_after(t, minutes, cal)` and `working_between(t1, t2, cal)` over
+   a calendar Item (week schedule, holidays, time zone). In the kernel,
+   unlike rank, because a deadline must be recomputed inside the write that
+   pauses or resumes, deterministically, on every door.
+
+**Multi-value fields.** A field declared `multiple: true` (enum, principal,
+string, date) holds a set: unordered, no duplicates, stored sorted, empty
+stored as unset, optional `max:`. Patches may replace the set or send set
+operations (`{add: [...], remove: [...]}`) so concurrent additions are never
+lost. Equality filters mean *contains*, plus *contains all of* and *is
+empty*; sorting by one is refused. Guards see a list. `allowed:
+[field:f_approvers]` matches any member, with the agent rule unchanged.
+Going from single to multiple is a new field ID, never a type change.
+
+**Open for Jira part 2's Phase A:** a transition fired by a field change on
+the same Item (N-of-M approvers moving on); customers as a `customer:`
+principal kind with fixed permissions, or narrowed users; a running goal
+keeping the policy it started with (proposed) or being recalculated; the
+clock during holds (keeps running by default, `pause_while: held` opt-in);
+sorting by the nearest deadline of any metric (later).
+
 ## Web UI as built (2026-11-18)
 
 A generic web UI for playing with the proof of concept, in `web/`. It is
@@ -1619,6 +1691,6 @@ replaces the picker as it replaces the API's interceptor.
 ## Out of scope for the spike
 
 The real UI (the generic web UI above is a proof-of-concept client, not
-it), email intake, business-hours calendars, multi-tenancy (the
+it), email intake, multi-tenancy (the
 `namespace_id` column exists, with one default namespace), a dedicated search
-engine, SLA objects beyond one timer.
+engine. (Business-hours calendars and SLAs moved into Jira part 2.)
