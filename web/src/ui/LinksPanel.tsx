@@ -20,12 +20,15 @@ export type LinksPanelProps = {
   // pasted Item name only.
   search?: ItemSearch;
   titleOf?: (item: Item) => string;
+  // The other Items' titles by name, where the page has read them; a link
+  // always shows the other Item's short ID.
+  titles?: Record<string, string>;
 };
 
 // A link type that can be added from this Item's page.
 type Addable = { direction: LinkDirection; name: string; typeNames: string[] };
 
-export function LinksPanel({ item, type, types, onLink, onUnlink, search, titleOf }: LinksPanelProps): ReactElement {
+export function LinksPanel({ item, type, types, onLink, onUnlink, search, titleOf, titles }: LinksPanelProps): ReactElement {
   const id = useId();
   const [error, setError] = useState<unknown>();
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -71,7 +74,9 @@ export function LinksPanel({ item, type, types, onLink, onUnlink, search, titleO
               {row.restricted ? (
                 <em>restricted (an Item you cannot see)</em>
               ) : (
-                <a href={`#/items/${itemId(other)}`}>{shortId(other)}</a>
+                <a href={`#/items/${itemId(other)}`}>
+                  {titles?.[other] ? `${titles[other]} (${shortId(other)})` : shortId(other)}
+                </a>
               )}
               {row.kernel && <span className="hint"> set by the kernel</span>}
               {row.removable && (
