@@ -1572,8 +1572,53 @@ and on a Type with listeners one outbox row and six workflow history
 events when its workflow is running. The "no rule reads this" field
 attribute is not needed yet.
 
+## Web UI as built (2026-11-18)
+
+A generic web UI for playing with the proof of concept, in `web/`. It is
+not the real UI: it is a second client of the public API, beside `pli`,
+and it tests the claim that the API and the Types are enough to build one.
+It needed no kernel change, no proto change and no new call.
+
+**Generic, from the Types.** No screen names a Type. Forms are built from
+`GetType`'s fields, one input per field type; a field its state freezes or
+that only the kernel writes is read-only, a role-written field is editable
+and names its roles. Transitions are the Type's, offered whatever their
+rules say: `allowed`, `except`, `guard`, `required` and `clears` are shown
+as text and **never evaluated in the UI**, which shows the server's
+outcome or refusal (code, reason, metadata) instead. One label is read
+from the Type: a transition whose `allowed` names only
+`principal:system:...` is greyed out. The inbox is every transition whose
+`allowed` names `field:X`: the Items in its from-state where X is the
+caller. A board is the Items linked to one Item by one link, ordered by a
+string field.
+
+**What the Types do not say** (and the UI does without): a field has no
+label and no `required` of its own; links an Item can receive from other
+Types are found by scanning `ListTypes` (a sprint declares nothing); there
+is no "who am I".
+
+**Rank stays app code, now in two languages.** `web/src/rank` is a port of
+`internal/rank` (keys and `Plan`), held to it by golden vectors that the Go
+tests write and both suites read (`internal/rank/testdata/vectors.json`).
+A drop is one write, planned against the moved card's container through
+`ListItems`, as `pli rank` does. The UI never rebalances; past
+`rank.Threshold` it says the container needs one.
+
+**Serving.** A `web` container serves the built site and proxies `/api` to
+the item service: one origin, no CORS on the item service. Nothing updates
+by itself (there is no `Watch`): pages reload after an action and on
+demand.
+
+**Dev only.** Acting as a dev user needs the dev tokens in the browser:
+the stack mounts the dev-token file read-only into the web container,
+which serves it, and the picker is compiled in only by the stack's build
+(`VITE_DEV_USERS=1`). Because that port hands out every dev token, the
+stack publishes the web UI and the API on 127.0.0.1 only. Real sign-on
+replaces the picker as it replaces the API's interceptor.
+
 ## Out of scope for the spike
 
-Real UI, email intake, business-hours calendars, multi-tenancy (the
+The real UI (the generic web UI above is a proof-of-concept client, not
+it), email intake, business-hours calendars, multi-tenancy (the
 `namespace_id` column exists, with one default namespace), a dedicated search
 engine, SLA objects beyond one timer.
