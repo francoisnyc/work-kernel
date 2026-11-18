@@ -20,8 +20,9 @@
 //   - The one exception to "one write": the two neighbours have the SAME
 //     key (two people dropped cards into one gap and the jitter collided, or
 //     keys were set by hand). No key fits between equal keys, so pli gives
-//     the tied cards fresh keys too: a local re-spread, bounded by the run
-//     of equal keys, never the container.
+//     the tied cards fresh keys too: a local re-spread of the run of equal
+//     keys, never the container. A run longer than rank.MaxTiedRun is not
+//     re-keyed: the move is refused and says to run a rebalance.
 //   - rank rebalance rewrites one container's keys short and evenly spaced,
 //     keeping the order; it is a separate, deliberate command.
 package main
@@ -306,6 +307,68 @@ func TestPli_Rank_EqualNeighboursAreRespread(t *testing.T) {
 	if _, tag := rankOf(t, moved); tag != "2" {
 		t.Errorf("the moved card's etag = %s, want 2: it is written once", tag)
 	}
+}
+
+// The re-spread has a cap. A run of rank.MaxTiedRun cards with one key is
+// still re-keyed by the move, each card once; one card more and the move is
+// refused, writes nothing, and says to rebalance. After the rebalance the
+// same move is an ordinary one.
+func TestPli_Rank_TiedRunCap(t *testing.T) {
+	tied := func(space string, n int) []string {
+		var cards []string
+		for range n {
+			cards = append(cards, card(t, space, "tied", "V"))
+		}
+		return cards // in ID order: the order they sort in
+	}
+
+	// At the cap: re-keyed.
+	space := platSpace(t)
+	top, run, bottom := card(t, space, "top", "A"), tied(space, rank.MaxTiedRun), card(t, space, "bottom", "k")
+	moved := card(t, space, "moved", "")
+	ok(t, "ana", "rank", moved, "before", run[4])
+	want := slices.Concat([]string{top}, run[:4], []string{moved}, run[4:], []string{bottom})
+	assertBacklog(t, "a move into a run at the cap", space, want...)
+	keys := map[string]bool{}
+	for _, name := range want {
+		key, etag := rankOf(t, name)
+		if !rank.Valid(key) || keys[key] {
+			t.Errorf("after the re-spread the key %q is invalid or used twice", key)
+		}
+		keys[key] = true
+		if outside := name == top || name == bottom; outside && etag != "1" {
+			t.Errorf("the re-spread rewrote a card outside the tied run (etag %s)", etag)
+		} else if !outside && etag != "2" {
+			t.Errorf("a card of the tied run has etag %s after the re-spread, want 2: written once", etag)
+		}
+	}
+
+	// One past the cap: refused, nothing written.
+	space = platSpace(t)
+	run = tied(space, rank.MaxTiedRun+1)
+	moved = card(t, space, "moved", "")
+	r := pli(t, "ana", "rank", moved, "before", run[4])
+	if r.code != 1 || !strings.Contains(r.stderr, "rebalance") || !strings.Contains(r.stderr, bareID(space)) {
+		t.Fatalf("a move into a run past the cap: exit %d, stderr %q; want exit 1 saying to rebalance %s", r.code, r.stderr, bareID(space))
+	}
+	for _, name := range append(slices.Clone(run), moved) {
+		if _, etag := rankOf(t, name); etag != "1" {
+			t.Errorf("the refused move wrote a card (etag %s)", etag)
+		}
+	}
+	// The first card of the run still has room above it: one write.
+	ok(t, "ana", "rank", moved, "before", run[0])
+	assertBacklog(t, "a move above the whole run", space, append([]string{moved}, run...)...)
+	if _, etag := rankOf(t, run[0]); etag != "1" {
+		t.Errorf("a move above the run rewrote its first card (etag %s)", etag)
+	}
+
+	ok(t, "ana", "rank", "rebalance", "--in", space)
+	r = pli(t, "ana", "rank", moved, "before", run[4])
+	if r.code != 0 || r.stderr != "" {
+		t.Fatalf("the same move after a rebalance: exit %d, stderr %q", r.code, r.stderr)
+	}
+	assertBacklog(t, "the same move after a rebalance", space, slices.Concat(run[:4], []string{moved}, run[4:])...)
 }
 
 // --- rebalance ---
