@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -71,7 +72,9 @@ func (k *Service) write(ctx context.Context, p item.Principal, key, hash string,
 		if err := callTestHook(ctx, tx, "write"); err != nil {
 			return err
 		}
-		res, err = apply(tx)
+		// apply gets the transaction wrapped, so that the write's time can
+		// travel with it (stampWrite, appendEvent).
+		res, err = apply(&stampedTx{Tx: tx, skew: k.clockSkew})
 		if err != nil {
 			return err
 		}
@@ -234,18 +237,25 @@ func appendEvent(ctx context.Context, tx pgx.Tx, ty *typedef.Type, id uuid.UUID,
 	// locks nothing, so writes to different Items no longer queue behind each
 	// other. The numbers are not in commit order; min_seq waits on xid instead
 	// (see Search).
+	//
+	// created_at is the write's time: the one stampWrite read for this
+	// transaction, or else the clock at this insert. Either way it is read
+	// while the Item's row lock is held, so along item_seq an Item's event
+	// times never go backwards. (now(), the transaction's start, would: a
+	// write that waited for the lock started before the one it waited for.)
+	at, skew := writeTimeOf(tx)
 	var commitSeq int64
 	err := tx.QueryRow(ctx,
 		`insert into item_events (item_id, item_seq, actor, on_behalf_of,
 		                          agent_session, originating_hook, causation_id, correlation_id, hop,
-		                          op, payload)
+		                          op, payload, created_at)
 		 values ($1, $2, $3, nullif($4, ''),
 		         nullif($5, ''), nullif($6, ''), nullif($7, ''), nullif($8, ''), $9,
-		         $10, $11)
+		         $10, $11, coalesce($12::timestamptz, clock_timestamp() + $13::interval))
 		 returning commit_seq`,
 		id, itemSeq, p.Actor, p.OnBehalfOf,
 		a.AgentSession, a.OriginatingHook, a.CausationID, a.CorrelationID, a.Hop,
-		op, payload).Scan(&commitSeq)
+		op, payload, at, skew).Scan(&commitSeq)
 	if err != nil {
 		return WriteResult{}, fmt.Errorf("insert event: %w", err)
 	}
@@ -302,4 +312,50 @@ func sortedKeys(m map[string]any) []string {
 		keys = []string{}
 	}
 	return keys
+}
+
+// stampedTx is a write's transaction plus the time the write is stamped
+// with. It embeds pgx.Tx: every method of the transaction is promoted, so
+// a *stampedTx is a pgx.Tx wherever one is asked for (Go's composition in
+// place of a subclass).
+type stampedTx struct {
+	pgx.Tx
+	skew time.Duration // Options.ClockSkew; zero outside tests
+	at   *time.Time    // set by stampWrite
+}
+
+// stampWrite reads the write's time, once per transaction, and returns it:
+// the database's clock now (clock_timestamp(), not the transaction's start),
+// to the microsecond. Call it AFTER the write has taken its row locks. The
+// lock runs an Item's writes one after the other, so a time read under it
+// is later than the time of every earlier event of the Item. The write's
+// event carries this time (appendEvent), and so does anything computed from
+// it (cause.at).
+func stampWrite(ctx context.Context, tx pgx.Tx) (time.Time, error) {
+	st, ok := tx.(*stampedTx)
+	if ok && st.at != nil {
+		return *st.at, nil
+	}
+	var skew time.Duration
+	if ok {
+		skew = st.skew
+	}
+	var at time.Time
+	if err := tx.QueryRow(ctx, `select clock_timestamp() + $1::interval`, skew).Scan(&at); err != nil {
+		return time.Time{}, fmt.Errorf("read the write's time: %w", err)
+	}
+	at = at.UTC()
+	if ok {
+		st.at = &at
+	}
+	return at, nil
+}
+
+// writeTimeOf returns the time stampWrite read for this transaction (nil if
+// it was not called) and the clock's skew.
+func writeTimeOf(tx pgx.Tx) (*time.Time, time.Duration) {
+	if st, ok := tx.(*stampedTx); ok {
+		return st.at, st.skew
+	}
+	return nil, 0
 }

@@ -99,6 +99,7 @@ type Service struct {
 	writeTimeout time.Duration
 	maxWait      time.Duration    // the longest Transition.Wait accepted
 	now          func() time.Time // the clock guards read today from
+	clockSkew    time.Duration    // tests only: see Options.ClockSkew
 }
 
 // DefaultWriteTimeout bounds every statement of a write. A write that waits
@@ -136,7 +137,8 @@ func New(pool *pgxpool.Pool) *Service {
 
 // NewWithOptions returns a Service with the given options.
 func NewWithOptions(pool *pgxpool.Pool, opts Options) *Service {
-	k := &Service{pool: pool, writeTimeout: opts.WriteTimeout, maxWait: opts.MaxWait, now: opts.Now}
+	k := &Service{pool: pool, writeTimeout: opts.WriteTimeout, maxWait: opts.MaxWait, now: opts.Now,
+		clockSkew: opts.ClockSkew}
 	if k.now == nil {
 		k.now = time.Now
 	}
@@ -204,7 +206,8 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 	if err := checkPatch(ty, "", nil, req.Fields, writer); err != nil {
 		return WriteResult{}, err
 	}
-	fields := req.Fields
+	// Date-time values are stored in one form, whatever offset they came in.
+	fields := ty.NormalizeFields(req.Fields)
 	if fields == nil {
 		fields = map[string]any{}
 	}
@@ -248,15 +251,20 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 			return WriteResult{}, err
 		}
 
+		// The Item and its first event carry one time.
+		at, err := stampWrite(ctx, tx)
+		if err != nil {
+			return WriteResult{}, err
+		}
 		// A row inserted in this transaction is locked until commit, so no
 		// separate SELECT ... FOR UPDATE is needed for create.
 		const itemSeq = 1
 		_, err = tx.Exec(ctx,
 			`insert into items (id, namespace_id, type_id, type_version, container_id, scope_id, state, fields, item_seq,
 			                    created_at, created_by, created_on_behalf_of)
-			 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), $10, nullif($11, ''))`,
+			 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $12, $10, nullif($11, ''))`,
 			id, ns, ty.ID, ty.Version, req.ContainerID, scopeID, ty.InitialState, fields, itemSeq,
-			req.Principal.Actor, req.Principal.OnBehalfOf)
+			req.Principal.Actor, req.Principal.OnBehalfOf, at)
 		if err != nil {
 			return WriteResult{}, fmt.Errorf("insert item: %w", err)
 		}
