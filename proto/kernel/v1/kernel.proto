@@ -295,7 +295,7 @@ message SearchItemsRequest {
   // optionally " asc" (the default) or " desc" (f_rank, f_priority desc),
   // AIP-132 style, one field only. Items without a value
   // come last in both directions; ties are broken by Item ID, ascending.
-  // The field must be a string, int, date or enum, with one type across the
+  // The field must be a string, int, date, datetime or enum, with one type across the
   // filter's Types (across every Type that declares it when the filter
   // names none), else INVALID_ARGUMENT. Strings and enum names compare byte
   // by byte, not by locale. Part of what a page token is bound to.
@@ -341,9 +341,11 @@ message LinkFilter {
 
 // A condition on one field's value: eq, or a range of one or two bounds.
 // Values are plain JSON as in Item.fields (an int is a string, a date an
-// ISO 8601 string). Ranges are for ordered types only: int, date and string
-// (strings compare byte by byte, not by locale); enums, booleans and
-// principals take eq.
+// ISO 8601 string, a datetime an RFC 3339 string with an offset). Ranges
+// are for ordered types only: int, date, datetime and string (strings
+// compare byte by byte, not by locale; datetimes compare as instants,
+// whatever offset the bound is sent in); enums, booleans and principals
+// take eq.
 //
 // On a principal field, eq takes user:<id> or agent:<id>, or "me": the
 // caller (for an agent, the user it acts for, else the agent).
@@ -704,6 +706,11 @@ enum FieldType {
   FIELD_TYPE_PRINCIPAL = 5;
   // A calendar date, as an ISO 8601 string: 2026-12-01.
   FIELD_TYPE_DATE = 6;
+  // An instant, as an RFC 3339 string. Sent with an offset (Z or +01:00)
+  // and at most microseconds; without an offset it is refused
+  // (INVALID_ARGUMENT). Returned in one form whatever was sent: UTC with
+  // six fractional digits, 2026-12-04T17:00:00.000000Z.
+  FIELD_TYPE_DATETIME = 7;
 }
 
 message State {
@@ -716,6 +723,32 @@ message State {
   // Acting timers: each runs an action after a delay in the state, without
   // a transition, and again every interval, at most max times per entry.
   repeated ActingTimer acting = 4;
+  // Set when the state has a timer: an Item that stays in the state for
+  // `after` is moved to `to`, by principal system:timer.
+  StateTimer timer = 5;
+  // Set when the state has a timer at a field's instant: when the instant
+  // the datetime field holds passes while an Item is in the state, the Item
+  // is moved to `to`, by principal system:timer. Changing the field moves
+  // the timer; an unset field arms nothing. A state has timer or at, never
+  // both.
+  AtTimer at = 6;
+}
+
+// A state's timer after a duration.
+message StateTimer {
+  // A Go duration as the Type declares it (48h), counted from the event
+  // that entered the state.
+  string after = 1;
+  // The state the timer moves the Item to: a transition the Type declares.
+  string to_state = 2;
+}
+
+// A state's timer at the instant a datetime field holds.
+message AtTimer {
+  // The datetime field's ID.
+  string field = 1;
+  // The state the timer moves the Item to: a transition the Type declares.
+  string to_state = 2;
 }
 
 // An acting timer of a state.
@@ -764,6 +797,15 @@ message Transition {
   // Field IDs the move unsets in the same write. Required fields and the
   // guard are judged before the clear.
   repeated string clears = 9;
+  // Computed field effects: field ID -> CEL expression. The move sets each
+  // field to its expression's value in the same write, whoever makes it
+  // (such a field may be one only the kernel writes). The expressions read
+  // the fields as the guard does, plus cause.at (the time of the move's
+  // own event) and today; null unsets the field. A patch may not name
+  // these fields (INVALID_ARGUMENT). An expression that cannot be
+  // evaluated refuses the move (FAILED_PRECONDITION / EFFECT_FAILED,
+  // metadata field).
+  map<string, string> sets = 10;
 }
 
 message GetTypeRequest {
