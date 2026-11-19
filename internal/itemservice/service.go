@@ -125,7 +125,10 @@ type Options struct {
 	Now func() time.Time
 	// ClockSkew is for tests only: it is added to the time every write is
 	// stamped with (the event's created_at, cause.at), as if this service's
-	// clock ran that far from the worker's. Negative: behind.
+	// clock ran that far from the worker's. Negative: behind. No flag,
+	// environment variable or config file sets it, and none may: a test
+	// (TestClockSkew_NoProductionCodeSetsIt) reads the module's source and
+	// fails if anything but a test names it.
 	ClockSkew time.Duration
 }
 

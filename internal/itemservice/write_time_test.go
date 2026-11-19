@@ -14,6 +14,10 @@ package itemservice_test
 
 import (
 	"context"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -22,6 +26,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/francoisnyc/work-kernel/internal/itemservice"
+	"github.com/francoisnyc/work-kernel/internal/typedef"
 )
 
 // eventTimes returns the Item's event times and commit_seqs in item_seq
@@ -194,5 +199,131 @@ func TestWriteTime_ClockSkewIsForTests(t *testing.T) {
 	at, _ := eventTimes(t, id)
 	if d := time.Since(at[0]); d < 59*time.Minute || d > 61*time.Minute {
 		t.Errorf("with a clock an hour behind, the event is stamped %v ago; want about an hour", d)
+	}
+}
+
+// midnightTypeYAML: closing is guarded by the service's day (a guard reads
+// today from the service's clock) and stamps the write's day and time.
+const midnightTypeYAML = `
+id: TYPE
+version: 1
+initial_state: s_open
+fields:
+  - {id: f_day,       type: date}
+  - {id: f_closed_on, type: date}
+  - {id: f_closed_at, type: datetime}
+states:
+  - {id: s_open, category: todo}
+  - {id: s_done, category: done}
+transitions:
+  - from: s_open
+    to: s_done
+    guard: 'f_day == today'
+    sets: {f_closed_on: 'today', f_closed_at: 'cause.at'}
+`
+
+// A write just after midnight UTC, while the service's own clock still
+// says the day before. The effect's today is the UTC date of cause.at, the
+// write's stamp: f_closed_on and f_closed_at are the same day, so one
+// write never sees two nows. The guard keeps the service's clock in this
+// step: it holds for the day before.
+func TestWriteTime_TodayInAnEffectIsTheDateOfTheWritesStamp(t *testing.T) {
+	// The service's clock: one second before midnight on 4 December. The
+	// write's stamp: skewed so that it falls one second after it.
+	before := time.Date(2026, 12, 4, 23, 59, 59, 0, time.UTC)
+	after := time.Date(2026, 12, 5, 0, 0, 1, 0, time.UTC)
+	k := itemservice.NewWithOptions(pool, itemservice.Options{
+		CacheTypes: true, Now: func() time.Time { return before }, ClockSkew: time.Until(after),
+	})
+	typ := "midnight-" + uuid.NewString()[:8]
+	ty, err := typedef.Parse([]byte(strings.Replace(midnightTypeYAML, "TYPE", typ, 1)))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if err := k.RegisterType(testCtx(t), ty); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	ana := in(person("ana"), newNamespace(t, k))
+	res, err := k.Create(testCtx(t), itemservice.CreateRequest{
+		IdempotencyKey: newKey(), Principal: ana, TypeID: typ, TypeVersion: 1,
+		Fields: map[string]any{"f_day": "2026-12-04"},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := k.Transition(testCtx(t), itemservice.TransitionRequest{
+		IdempotencyKey: newKey(), Principal: ana, ItemID: res.ItemID, ToState: "s_done",
+	}); err != nil {
+		t.Fatalf("close (the guard reads the service's day, 4 December): %v", err)
+	}
+
+	at, _ := eventTimes(t, res.ItemID)
+	stamp := at[1].UTC()
+	if stamp.Format(time.DateOnly) != "2026-12-05" || stamp.Sub(after) < 0 || stamp.Sub(after) > 30*time.Second {
+		t.Fatalf("the closing event is stamped %v; the test wants it just after midnight on 5 December", stamp)
+	}
+	fields := fieldsOf(t, k, ana, res.ItemID)
+	if fields["f_closed_at"] != stamp.Format(typedef.DateTimeLayout) {
+		t.Errorf("f_closed_at = %v, want the event's time %s", fields["f_closed_at"], stamp.Format(typedef.DateTimeLayout))
+	}
+	if fields["f_closed_on"] != "2026-12-05" {
+		t.Errorf("f_closed_on = %v, want 2026-12-05: an effect's today is the date of cause.at, not the service's clock (4 December)",
+			fields["f_closed_on"])
+	}
+}
+
+// Options.ClockSkew is for tests only: nothing a deployment can set (a
+// flag, an environment variable, a config file) reaches it. Go cannot make
+// a struct field test-only, so this test reads the module's source: outside
+// this package's own code, no non-test file names ClockSkew at all.
+func TestClockSkew_NoProductionCodeSetsIt(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if name := d.Name(); path != root && (strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, _ := filepath.Rel(root, path)
+		rel = filepath.ToSlash(rel)
+		if !strings.HasSuffix(rel, ".go") || strings.HasSuffix(rel, "_test.go") {
+			return nil
+		}
+		checked++
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(src), "ClockSkew") && !strings.HasPrefix(rel, "internal/itemservice/") {
+			t.Errorf("%s names ClockSkew: only tests may set it", rel)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checked < 50 {
+		t.Errorf("read %d Go files; the test is not looking where it should", checked)
+	}
+	// Inside the package it is declared, copied into the Service and read
+	// by the write's stamp: no flag, no os.Getenv, no file.
+	for _, name := range []string{"service.go", "write.go"} {
+		src, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, banned := range []string{"os.Getenv", "os.LookupEnv", "flag."} {
+			if strings.Contains(string(src), banned) {
+				t.Errorf("%s uses %s: the item service reads no setting of its own", name, banned)
+			}
+		}
 	}
 }

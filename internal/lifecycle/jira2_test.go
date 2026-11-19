@@ -3,7 +3,9 @@
 // Computed field effects: a legal move returns what its `sets` expressions
 // evaluate to, in each field's stored form (nil to unset). They read one
 // view, the guard's: the fields as the patch leaves them, before the
-// clears, plus cause.at (the time of the event being written) and today.
+// clears, plus cause.at (the time of the event being written) and today,
+// which to an effect is the UTC date of cause.at (never Input.Today, the
+// service's clock that guards read): one write sees one now.
 // They do not see each other's results. A failing expression refuses the
 // move (effect_failed, naming the field).
 //
@@ -62,8 +64,8 @@ transitions:
 
 var (
 	causeAt = time.Date(2026, 12, 4, 17, 30, 15, 123456000, time.UTC)
-	// A day later than cause.at's date on purpose: the two are separate
-	// inputs here, and the test tells them apart.
+	// The service's clock, a day later than cause.at's date on purpose:
+	// guards read it, effects never do, and the tests tell them apart.
 	someDay = time.Date(2026, 12, 5, 9, 0, 0, 0, time.UTC)
 )
 
@@ -88,7 +90,7 @@ func TestTransition_ReturnsWhatItSets(t *testing.T) {
 	}
 	want := map[string]any{
 		"f_resolved_at": "2026-12-04T17:30:15.123456Z",
-		"f_closed_on":   "2026-12-05",
+		"f_closed_on":   "2026-12-04", // the date of cause.at, not Input.Today
 		"f_double":      int64(6),
 		"f_billable":    true, // f_note is read before it is cleared
 		"f_started_at":  "2026-12-04T17:30:15.123456Z",
@@ -306,5 +308,33 @@ func TestAtTimer_NeedsWorkflowAndListeners(t *testing.T) {
 func TestSets_AreNotListeners(t *testing.T) {
 	if lifecycle.HasListeners(setsTy(t)) {
 		t.Error("HasListeners = true for a Type whose only feature is sets")
+	}
+}
+
+// Around midnight UTC an effect's today follows cause.at to the
+// microsecond, whatever day the service's clock (Input.Today) says it is.
+func TestTransition_SetsTodayIsTheDateOfCauseAt(t *testing.T) {
+	ty := setsTy(t)
+	fields := map[string]any{"f_points": float64(1)}
+	for _, c := range []struct {
+		causeAt, today time.Time
+		want           string
+	}{
+		{time.Date(2026, 12, 4, 23, 59, 59, 999999000, time.UTC), time.Date(2026, 12, 5, 0, 0, 0, 0, time.UTC), "2026-12-04"},
+		{time.Date(2026, 12, 5, 0, 0, 0, 0, time.UTC), time.Date(2026, 12, 4, 23, 59, 59, 0, time.UTC), "2026-12-05"},
+		// The date is UTC's, whatever zone the time value carries.
+		{time.Date(2026, 12, 5, 1, 30, 0, 0, time.FixedZone("CET", 3600)), time.Date(2026, 12, 5, 0, 30, 0, 0, time.UTC), "2026-12-05"},
+		{time.Date(2026, 12, 5, 0, 30, 0, 0, time.FixedZone("CET", 3600)), time.Date(2026, 12, 5, 0, 30, 0, 0, time.UTC), "2026-12-04"},
+		// No service clock at all: an effect does not need it.
+		{time.Date(2026, 12, 31, 23, 59, 59, 0, time.UTC), time.Time{}, "2026-12-31"},
+	} {
+		res, err := lifecycle.TransitionWith(ty, "s_open",
+			lifecycle.Input{Fields: fields, Today: c.today, CauseAt: c.causeAt}, "s_done")
+		if err != nil {
+			t.Fatalf("cause.at %v: %v", c.causeAt, err)
+		}
+		if got := res.Sets["f_closed_on"]; got != c.want {
+			t.Errorf("cause.at %v, service clock %v: today = %v, want %s", c.causeAt, c.today, got, c.want)
+		}
 	}
 }

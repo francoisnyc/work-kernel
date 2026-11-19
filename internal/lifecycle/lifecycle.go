@@ -52,7 +52,8 @@ type Input struct {
 	// Today is a date (UTC); the time of day is ignored.
 	Today time.Time
 	// CauseAt is the time of the event being written: what a `sets`
-	// expression reads as cause.at.
+	// expression reads as cause.at, and its UTC date is that expression's
+	// today. Guards do not read it.
 	CauseAt time.Time
 }
 
@@ -165,7 +166,8 @@ func TransitionWith(t *typedef.Type, current string, in Input, to string) (Resul
 }
 
 // evalSets evaluates a transition's `sets` expressions, each on the fields
-// as given plus cause.at and today; they do not see each other's results.
+// as given plus cause.at and today (the UTC date of cause.at); they do not
+// see each other's results.
 // A value comes back in its field's stored form, nil for null (unset).
 //
 // An effect that cannot be computed refuses the move (EffectFailed, naming
@@ -189,7 +191,10 @@ func evalSets(t *typedef.Type, tr typedef.Transition, in Input) (map[string]any,
 	}
 	vars := make(map[string]any, len(t.Fields)+2)
 	vars[typedef.VarCauseAt] = in.CauseAt.UTC()
-	vars[typedef.VarToday] = dateOf(in.Today)
+	// today, to an effect, is the UTC date of cause.at: one write sees one
+	// now. (in.Today, the service's clock, is what guards read; around
+	// midnight the two can be different days.)
+	vars[typedef.VarToday] = dateOf(in.CauseAt)
 	addFieldVars(vars, t, in.Fields)
 
 	out := make(map[string]any, len(tr.Sets))
