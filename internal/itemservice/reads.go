@@ -123,7 +123,7 @@ type sqlOrder struct {
 // resolveOrder checks an OrderBy against the Types in play: the selected
 // Types, or every registered Type when none is selected. The field must be
 // declared by at least one of them, with one type across all that declare
-// it, and that type must have an order: string, int, date or enum. A
+// it, and that type must have an order: string, int, date, datetime or enum. A
 // malformed order is an *InvalidError on order_by.
 func (k *Service) resolveOrder(ctx context.Context, typeIDs []string, o *OrderBy) (*sqlOrder, error) {
 	if o == nil {
@@ -148,9 +148,11 @@ func (k *Service) resolveOrder(ctx context.Context, typeIDs []string, o *OrderBy
 	switch types[0] {
 	case typedef.Int:
 		out.cast, out.numeric = "::numeric", true
-	case typedef.String, typedef.Date, typedef.Enum:
+	case typedef.String, typedef.Date, typedef.DateTime, typedef.Enum:
+		// A datetime's stored form is fixed-width UTC: as text, in byte
+		// order, it sorts by the instant.
 	default:
-		return nil, bad("only string, int, date and enum fields have an order")
+		return nil, bad("only string, int, date, datetime and enum fields have an order")
 	}
 	return out, nil
 }

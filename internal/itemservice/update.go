@@ -113,6 +113,10 @@ func (k *Service) update(ctx context.Context, req UpdateRequest, kc *kernelCause
 		if err := ty.CheckFields(req.Fields, true); err != nil {
 			return WriteResult{}, fieldsInvalid(err)
 		}
+		// Date-time values are stored in one form. req is this closure's
+		// own copy from here on (a struct is copied on assignment).
+		req := req
+		req.Fields = ty.NormalizeFields(req.Fields)
 		if err := checkHookWrite(ty, kc, req.Fields); err != nil {
 			return WriteResult{}, err
 		}

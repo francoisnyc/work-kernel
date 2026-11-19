@@ -32,8 +32,9 @@ type Filter struct {
 
 // FieldFilter is a condition on one field: Eq, or a range of one or two
 // bounds. nil means "no such bound". Values are as Item.Fields holds them
-// (an int field takes any whole number, a date field an ISO 8601 date).
-// Ranges are for int, date and string fields; strings compare byte by
+// (an int field takes any whole number, a date field an ISO 8601 date, a
+// datetime field an RFC 3339 instant with an offset).
+// Ranges are for int, date, datetime and string fields; strings compare byte by
 // byte, never by the database's locale.
 type FieldFilter struct {
 	Field                string
@@ -210,8 +211,9 @@ func fieldConds(f typedef.Field, ff FieldFilter, i int, args pgx.NamedArgs, p it
 		return nil, fmt.Errorf("eq and a bound do not go together")
 	case ff.Gt != nil && ff.Gte != nil, ff.Lt != nil && ff.Lte != nil:
 		return nil, fmt.Errorf("one lower bound and one upper bound at most")
-	case len(bounds) > 0 && f.Type != typedef.Int && f.Type != typedef.Date && f.Type != typedef.String:
-		return nil, fmt.Errorf("ranges are for int, date and string fields")
+	case len(bounds) > 0 && f.Type != typedef.Int && f.Type != typedef.Date && f.Type != typedef.DateTime &&
+		f.Type != typedef.String:
+		return nil, fmt.Errorf("ranges are for int, date, datetime and string fields")
 	}
 	// On a principal field "me" is the caller: the user an agent acts for,
 	// else the actor itself.
@@ -257,6 +259,14 @@ func fieldConds(f typedef.Field, ff FieldFilter, i int, args pgx.NamedArgs, p it
 				return nil, fmt.Errorf("want a date, YYYY-MM-DD")
 			}
 			return v, nil
+		case typedef.DateTime:
+			// Compared in the stored form (UTC, fixed width), in which
+			// byte order is time order: the bound may come in any offset.
+			stored, ok := typedef.NormalizeDateTime(v)
+			if !ok {
+				return nil, fmt.Errorf("want an instant, RFC 3339 with an offset (2026-12-04T17:00:00Z)")
+			}
+			return stored, nil
 		default:
 			s, ok := v.(string)
 			if !ok {

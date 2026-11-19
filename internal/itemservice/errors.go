@@ -1,7 +1,6 @@
 package itemservice
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -89,6 +88,9 @@ func fromLifecycle(err error) error {
 		if rej.Code == lifecycle.FieldFrozen {
 			md["fields"], md["state"] = strings.Join(rej.Frozen, ","), rej.State
 		}
+		if rej.Code == lifecycle.EffectFailed && rej.Field != "" {
+			md["field"] = rej.Field
+		}
 		if rej.Code == lifecycle.InvariantFailed {
 			md = map[string]string{"invariant": rej.Invariant}
 		}
@@ -155,22 +157,3 @@ func (e *NotYetError) Error() string {
 	return fmt.Sprintf("%v: the instant is %v away", ErrNotYet, e.Remaining)
 }
 func (e *NotYetError) Unwrap() error { return ErrNotYet }
-
-// AtInstant is what the workflow may know of an Item's timer at a field's
-// instant: the instant held by the field its current state names in `at`.
-// It is the one field value that reaches the workflow (docs/design.md).
-type AtInstant struct {
-	State   string
-	ItemSeq int64
-	// Set is false when the state declares no `at`, or its field is unset.
-	Set bool
-	At  time.Time
-}
-
-// AtInstant reads the instant of the field the Item's current state names
-// in `at`, and nothing else. A kernel read, for the worker only.
-//
-// Phase B stub: not implemented.
-func (k *Service) AtInstant(ctx context.Context, id uuid.UUID) (AtInstant, error) {
-	return AtInstant{}, errors.New("itemservice: AtInstant is not implemented")
-}
