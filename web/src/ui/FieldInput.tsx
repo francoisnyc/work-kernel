@@ -2,6 +2,7 @@
 import { useId, type ReactElement } from "react";
 import { FieldType, type Field } from "../gen/kernel/v1/kernel_pb";
 import type { FieldAccess } from "../model/typeinfo";
+import { instantOf } from "../model/values";
 
 export type FieldInputProps = {
   field: Field;
@@ -57,6 +58,22 @@ export function FieldInput({ field, value, onChange, access, state, principals }
     case FieldType.DATE:
       input = <input {...common} type="date" value={text} onChange={(e) => onChange(e.target.value)} />;
       break;
+    case FieldType.DATETIME: {
+      // The form holds the instant on the browser's clock, to the second;
+      // the title says which instant that is in UTC.
+      const utc = instantOf(text);
+      input = (
+        <input
+          {...common}
+          type="datetime-local"
+          step="1"
+          title={utc === "" ? undefined : utc}
+          value={text}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      );
+      break;
+    }
     case FieldType.INT:
       // Text, not type=number: an int64 does not fit a JS number.
       input = <input {...common} type="text" inputMode="numeric" value={text} onChange={(e) => onChange(e.target.value)} />;
