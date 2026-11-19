@@ -37,7 +37,7 @@ func celType(t FieldType) *cel.Type {
 		return cel.NullableType(cel.IntType)
 	case Bool:
 		return cel.NullableType(cel.BoolType)
-	case Date:
+	case Date, DateTime:
 		return cel.NullableType(cel.TimestampType)
 	default: // String, Enum, Principal
 		return cel.NullableType(cel.StringType)
