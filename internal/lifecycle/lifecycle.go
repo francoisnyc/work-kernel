@@ -2,11 +2,13 @@ package lifecycle
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
 
 	"cel.dev/cel-go/common/types"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/francoisnyc/work-kernel/internal/typedef"
 )
@@ -153,7 +155,105 @@ func TransitionWith(t *typedef.Type, current string, in Input, to string) (Resul
 	// reopening guard reads the resolution the move then clears.
 	clears := slices.Clone(tr.Clears)
 	slices.Sort(clears)
-	return Result{State: state.ID, Category: state.Category, Clears: clears}, nil
+	// The computed effects are evaluated on the same view: the fields as
+	// given, before the clears.
+	sets, err := evalSets(t, tr, in)
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{State: state.ID, Category: state.Category, Clears: clears, Sets: sets}, nil
+}
+
+// evalSets evaluates a transition's `sets` expressions, each on the fields
+// as given plus cause.at and today; they do not see each other's results.
+// A value comes back in its field's stored form, nil for null (unset).
+//
+// An effect that cannot be computed refuses the move (EffectFailed, naming
+// the field): the expression fails (arithmetic on an unset field), its
+// result is no value of the field (a string that is no option, an instant
+// that is not a date), or nobody said when the event is written. The
+// reason never holds a value.
+func evalSets(t *typedef.Type, tr typedef.Transition, in Input) (map[string]any, error) {
+	if len(tr.Sets) == 0 {
+		return nil, nil
+	}
+	failed := func(field string) error {
+		reason := fmt.Sprintf("transition from %q to %q: its computed effects need the time of the write", tr.From, tr.To)
+		if field != "" {
+			reason = fmt.Sprintf("transition from %q to %q: the effect on %s could not be computed", tr.From, tr.To, field)
+		}
+		return &Rejection{Code: EffectFailed, From: tr.From, To: tr.To, Field: field, Reason: reason}
+	}
+	if in.CauseAt.IsZero() {
+		return nil, failed("")
+	}
+	vars := make(map[string]any, len(t.Fields)+2)
+	vars[typedef.VarCauseAt] = in.CauseAt.UTC()
+	vars[typedef.VarToday] = dateOf(in.Today)
+	addFieldVars(vars, t, in.Fields)
+
+	out := make(map[string]any, len(tr.Sets))
+	// Sorted: a map iterates in random order, and the first failure named
+	// must be the same every time.
+	for _, id := range slices.Sorted(maps.Keys(tr.Sets)) {
+		prg := tr.SetPrograms[id]
+		if prg == nil {
+			return nil, failed(id)
+		}
+		res, _, err := prg.Eval(vars)
+		if err != nil {
+			return nil, failed(id)
+		}
+		f, _ := t.Field(id)
+		v, ok := storedValue(f, res.Value())
+		if !ok {
+			return nil, failed(id)
+		}
+		if v != nil && t.CheckFields(map[string]any{id: v}, false) != nil {
+			return nil, failed(id)
+		}
+		out[id] = v
+	}
+	return out, nil
+}
+
+// storedValue turns a CEL result into the stored form of a value of field
+// f: nil for null, a datetime as its fixed-width UTC string, a date as
+// YYYY-MM-DD (only an instant at 00:00 UTC is a date).
+func storedValue(f typedef.Field, v any) (any, bool) {
+	if _, null := v.(structpb.NullValue); null || v == nil {
+		return nil, true
+	}
+	switch f.Type {
+	case typedef.DateTime:
+		at, ok := v.(time.Time)
+		if !ok {
+			return nil, false
+		}
+		s, ok := typedef.FormatDateTime(at)
+		return s, ok
+	case typedef.Date:
+		at, ok := v.(time.Time)
+		if !ok {
+			return nil, false
+		}
+		at = at.UTC()
+		if !at.Equal(time.Date(at.Year(), at.Month(), at.Day(), 0, 0, 0, 0, time.UTC)) || at.Year() < 1 || at.Year() > 9999 {
+			return nil, false
+		}
+		return at.Format(time.DateOnly), true
+	}
+	return v, true
+}
+
+// dateOf is today as guards and effects read it: 00:00 UTC of the day, or
+// null when nobody said what day it is.
+func dateOf(today time.Time) any {
+	if today.IsZero() {
+		return types.NullValue
+	}
+	u := today.UTC()
+	return time.Date(u.Year(), u.Month(), u.Day(), 0, 0, 0, 0, time.UTC)
 }
 
 // guardHolds evaluates the transition's CEL guard against the fields. Every
@@ -174,12 +274,7 @@ func guardHolds(t *typedef.Type, tr typedef.Transition, fields map[string]any, l
 	vars := make(map[string]any, len(t.Fields)+len(tr.GuardLinks)+1)
 	// today is a date: 00:00 UTC of the caller's day. Unknown (zero), it is
 	// null, and a guard reading it cannot be evaluated: it does not hold.
-	if today.IsZero() {
-		vars[typedef.VarToday] = types.NullValue
-	} else {
-		u := today.UTC()
-		vars[typedef.VarToday] = time.Date(u.Year(), u.Month(), u.Day(), 0, 0, 0, 0, time.UTC)
-	}
+	vars[typedef.VarToday] = dateOf(today)
 	for _, name := range tr.GuardLinks {
 		// A linked Item is its state and category, and nothing else.
 		list := make([]map[string]string, 0, len(links[name]))
@@ -215,6 +310,14 @@ func addFieldVars(vars map[string]any, t *typedef.Type, fields map[string]any) {
 			// rule reading it does not hold.
 			if d, ok := typedef.ParseDate(v); ok {
 				vars[f.ID] = d
+			} else {
+				vars[f.ID] = v
+			}
+		case f.Type == typedef.DateTime:
+			// As for a date: a stored value that does not parse cannot
+			// be compared.
+			if at, ok := typedef.ParseDateTime(v); ok {
+				vars[f.ID] = at
 			} else {
 				vars[f.ID] = v
 			}

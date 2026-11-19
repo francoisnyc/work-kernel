@@ -14,11 +14,14 @@ func TimerFor(t *typedef.Type, state string) (typedef.Timer, bool) {
 }
 
 // AtTimerFor returns the timer at a field's instant an Item of Type t runs
-// while it is in the given state. Pure, like TimerFor.
-//
-// Phase B stub: not implemented.
+// while it is in the given state. The second value is false when the state
+// has none or is not a state of the Type. Pure, like TimerFor.
 func AtTimerFor(t *typedef.Type, state string) (typedef.AtTimer, bool) {
-	return typedef.AtTimer{}, false
+	s, ok := t.State(state)
+	if !ok || s.At == nil {
+		return typedef.AtTimer{}, false
+	}
+	return *s.At, true
 }
 
 // NeedsWorkflow reports whether an Item entering the given state needs a
@@ -26,12 +29,16 @@ func AtTimerFor(t *typedef.Type, state string) (typedef.AtTimer, bool) {
 // place that rule lives; the relay asks it to choose between starting a
 // workflow and only notifying one that already runs.
 //
-// "Behavior" means a timer, enrich hooks or action hooks. A hold is opened by an event
+// "Behavior" means a timer (after a duration or at a field's instant),
+// enrich hooks or action hooks. A hold is opened by an event
 // that enters no state; StartsWorkflow covers it. Approvals and link
 // reactions will extend these functions, not their callers.
 func NeedsWorkflow(t *typedef.Type, state string) bool {
 	_, hasTimer := TimerFor(t, state)
-	return hasTimer || len(EnrichHooks(t, state)) > 0 || len(ActionHooks(t, state)) > 0 ||
+	// A timer at a field's instant needs a run even while the field is
+	// unset: the run must be there to hear the field being set.
+	_, hasAt := AtTimerFor(t, state)
+	return hasTimer || hasAt || len(EnrichHooks(t, state)) > 0 || len(ActionHooks(t, state)) > 0 ||
 		len(ActingTimers(t, state)) > 0
 }
 
