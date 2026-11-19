@@ -126,6 +126,17 @@ func (a *Activities) LoadItem(ctx context.Context, itemID string) (Snapshot, err
 	if se.EnteredHold != uuid.Nil {
 		snap.EnteredHold = se.EnteredHold.String()
 	}
+	// Timers at a field's instant: the state, the field's ID and the target
+	// state. Never scaled by the dev clock: an instant is not a duration.
+	// The instant itself is LoadInstant's to read.
+	for _, s := range ty.States {
+		if at, ok := lifecycle.AtTimerFor(ty, s.ID); ok {
+			if snap.At == nil {
+				snap.At = map[string]AtSpec{}
+			}
+			snap.At[s.ID] = AtSpec{Field: at.Field, To: at.To}
+		}
+	}
 	// Step 2, part 3: acting timers and reaction hooks. On a dev clock that
 	// names this Type, its declared durations are scaled (a day lasts
 	// DevDay); nothing else is (budgets, backoffs).
@@ -208,7 +219,13 @@ func (a *Activities) FireTimer(ctx context.Context, in FireTimerInput) error {
 			Hop:             in.Hop,
 		},
 	})
+	var notYet *itemservice.NotYetError
 	switch {
+	case errors.As(err, &notYet):
+		// A timer at an instant fired before the instant, by the item
+		// service's clock. Nothing was written; the remainder travels as
+		// the error's detail, and the workflow arms again for it.
+		return temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeNotYet, err, notYet.Remaining)
 	case errors.Is(err, itemservice.ErrNotFound):
 		return temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeNotFound, err)
 	case errors.Is(err, itemservice.ErrHeld):
@@ -232,11 +249,20 @@ func (a *Activities) FireTimer(ctx context.Context, in FireTimerInput) error {
 // LoadInstant reads the instant of the field the Item's current state names
 // in `at`. It is the declared exception to "the workflow never sees a field
 // value": that one value, of a field the Type names in `at`, and nothing
-// else.
-//
-// Phase B stub: not implemented.
+// else. The item service chooses the field; the workflow names none.
 func (a *Activities) LoadInstant(ctx context.Context, itemID string) (Instant, error) {
-	return Instant{}, temporal.NewNonRetryableApplicationError("LoadInstant is not implemented", "NotImplemented", nil)
+	id, err := uuid.Parse(itemID)
+	if err != nil {
+		return Instant{}, fmt.Errorf("item id %q: %w", itemID, err)
+	}
+	got, err := a.Items.AtInstant(ctx, id)
+	if errors.Is(err, itemservice.ErrNotFound) {
+		return Instant{}, temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeNotFound, err)
+	}
+	if err != nil {
+		return Instant{}, err
+	}
+	return Instant{Set: got.Set, At: got.At}, nil
 }
 
 // WorkerOptions tune a worker. The zero value is what production uses.
