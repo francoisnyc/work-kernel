@@ -7,7 +7,17 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import { StateCategory, TransitionItemResponseSchema, TransitionOutcome } from "../gen/kernel/v1/kernel_pb";
 import { inboxTransitions } from "../model/typeinfo";
-import { aSubmittedVacation, aTicket, item, itemName, refusal, ticket, vacation } from "../test/fixtures";
+import {
+  aSubmittedVacation,
+  aTicket,
+  item,
+  itemName,
+  refusal,
+  sprint2,
+  story2,
+  ticket,
+  vacation,
+} from "../test/fixtures";
 import { TransitionPanel } from "./TransitionPanel";
 
 const answer = (outcome: TransitionOutcome, reason = "", hold = "") =>
@@ -197,5 +207,42 @@ describe("the server's answer", () => {
     expect(second).toEqual(first); // the same state, patch and request ID
     expect(await screen.findByRole("status")).toHaveTextContent("APPLIED");
     expect(screen.queryByRole("button", { name: "Check again" })).not.toBeInTheDocument();
+  });
+});
+
+// Jira part 2, step 1: a Type says what a state will do by itself and what
+// a move computes. Shown as text, like every other rule; nothing is
+// evaluated here.
+describe("timers and computed effects", () => {
+  test("a move the state's timer makes at a field's instant says so, and stays offered", () => {
+    const active = item({ name: itemName(5), type: sprint2.name, state: "active", category: StateCategory.ACTIVE });
+    render(<TransitionPanel type={sprint2} item={active} onTransition={applied()} />);
+    expect(row("closed")).toHaveTextContent("made by the timer at f_end_at");
+    // A person may still close by hand: the transition has no allowed list.
+    expect(within(row("closed")).getByRole("button")).toBeEnabled();
+    expect(row("review")).not.toHaveTextContent(/timer/);
+  });
+
+  test("a move the state's timer makes after a duration says so", () => {
+    const review = item({ name: itemName(6), type: sprint2.name, state: "review", category: StateCategory.ACTIVE });
+    render(<TransitionPanel type={sprint2} item={review} onTransition={applied()} />);
+    expect(row("closed")).toHaveTextContent("made by the timer after 48h");
+  });
+
+  test("computed effects are shown as the Type states them", () => {
+    const todo = item({ name: itemName(7), type: story2.name, state: "todo", category: StateCategory.TODO });
+    render(<TransitionPanel type={story2} item={todo} onTransition={applied()} />);
+    expect(row("done")).toHaveTextContent("sets: f_resolved_at = cause.at");
+    expect(row("done")).toHaveTextContent("required: f_resolution");
+
+    const done = item({ name: itemName(8), type: story2.name, state: "done", category: StateCategory.DONE });
+    render(<TransitionPanel type={story2} item={done} onTransition={applied()} />);
+    expect(row("todo")).toHaveTextContent("sets: f_resolved_at = null");
+    expect(row("todo")).toHaveTextContent("clears: f_resolution");
+  });
+
+  test("a move without effects or timers says nothing of them", () => {
+    render(<TransitionPanel type={ticket} item={aTicket} onTransition={applied()} />);
+    expect(row("open")).not.toHaveTextContent(/sets:|timer/);
   });
 });

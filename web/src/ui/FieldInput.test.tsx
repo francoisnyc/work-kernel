@@ -5,7 +5,7 @@ import { useState } from "react";
 import { describe, expect, test, vi } from "vitest";
 import type { Type } from "../gen/kernel/v1/kernel_pb";
 import type { FieldAccess } from "../model/typeinfo";
-import { leaveBalance, ticket, vacation } from "../test/fixtures";
+import { leaveBalance, sprint2, story2, ticket, vacation } from "../test/fixtures";
 import { FieldInput } from "./FieldInput";
 
 const editable: FieldAccess = { mode: "editable", roles: [] };
@@ -88,6 +88,41 @@ describe("by field type", () => {
     const input = screen.getByLabelText("f_start");
     expect(input).toHaveAttribute("type", "date");
     expect(input).toHaveValue("2026-12-01");
+  });
+
+  // The stored instant is UTC; the form holds it on the browser's clock
+  // (model/values.ts), and that is what this input is given.
+  test("datetime: a datetime-local input, to the second, with the UTC instant as its title", () => {
+    const zone = process.env.TZ;
+    process.env.TZ = "America/New_York";
+    try {
+      render(<Harness type={sprint2} id="f_end_at" initial="2026-12-04T12:00:00" />);
+      const input = screen.getByLabelText("f_end_at");
+      expect(input).toHaveAttribute("type", "datetime-local");
+      expect(input).toHaveAttribute("step", "1");
+      expect(input).toHaveValue("2026-12-04T12:00:00");
+      expect(input).toHaveAttribute("title", "2026-12-04T17:00:00.000Z");
+    } finally {
+      if (zone === undefined) delete process.env.TZ;
+      else process.env.TZ = zone;
+    }
+  });
+
+  test("datetime: a change is reported as the input's local text", async () => {
+    const onChange = vi.fn();
+    render(<Harness type={sprint2} id="f_end_at" initial="" onChange={onChange} />);
+    const input = screen.getByLabelText("f_end_at");
+    expect(input).not.toHaveAttribute("title");
+    await userEvent.type(input, "2026-12-11T09:30:00");
+    expect(onChange).toHaveBeenLastCalledWith("2026-12-11T09:30:00");
+  });
+
+  test("datetime: a kernel-written instant is shown, disabled", () => {
+    render(<Harness type={story2} id="f_resolved_at" initial="2026-12-04T12:00:00" access={{ mode: "kernel", roles: [] }} />);
+    const input = screen.getByLabelText("f_resolved_at");
+    expect(input).toHaveAttribute("type", "datetime-local");
+    expect(input).toBeDisabled();
+    expect(input).toHaveAccessibleDescription("written by the kernel");
   });
 
   test("principal: a text box that suggests the known principals", async () => {
