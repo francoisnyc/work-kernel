@@ -273,7 +273,7 @@ func TestPLAT_ResolvedAtIsSetByDoneAndClearedByReopen(t *testing.T) {
 	if got := resolved(); !slices.Equal(got, []string{story, other}) {
 		t.Errorf("by resolution time = %v, want the resolved story, then the open one", got)
 	}
-	since := &kernelv1.FieldFilter{Field: "f_resolved_at", Gte: str(before.UTC().Format(time.RFC3339Nano))}
+	since := &kernelv1.FieldFilter{Field: "f_resolved_at", Gte: str(stored(before))} // to the microsecond: finer is refused
 	if got := resolved(since); !slices.Equal(got, []string{story}) {
 		t.Errorf("resolved since a moment ago = %v, want %v", got, story)
 	}

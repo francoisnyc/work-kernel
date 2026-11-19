@@ -262,7 +262,9 @@ states:
   - DONE
 transitions:
   - T
-  - {from: s_done, to: s_open}
+  # Reopening unsets the time: it also gives the kernel-written field the
+  # writer every such field must have, whatever T is.
+  - {from: s_done, to: s_open, sets: {f_resolved_at: 'null'}}
 HOOKS
 `
 

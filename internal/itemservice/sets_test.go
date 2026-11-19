@@ -69,9 +69,9 @@ transitions:
     sets: {f_resolved_at: 'null', f_double: 'null'}
   - {from: s_open,   to: s_parked}
   - {from: s_parked, to: s_done, sets: {f_resolved_at: 'cause.at'}}
-  # An effect that breaks an invariant, and one that is no option.
-  - {from: s_open, to: s_odd,  sets: {f_double: '99'}}
-  - {from: s_odd,  to: s_open, sets: {f_resolution: 'f_note'}}
+  # An effect that is no option of its enum, and one that breaks an invariant.
+  - {from: s_parked, to: s_open, sets: {f_resolution: 'f_note'}}
+  - {from: s_open,   to: s_odd,  sets: {f_double: '99'}}
 invariants:
   - {id: double_is_small, rule: 'f_double == null || f_double < 50'}
 `
@@ -184,17 +184,19 @@ func TestSets_ResolvedAtIsTheEventsTime(t *testing.T) {
 	}
 }
 
-// An effect reads the fields as the patch leaves them.
+// An effect reads the fields as the patch leaves them. (The patch cannot
+// carry f_note: the move clears it, and a patch may not set what its move
+// clears.)
 func TestSets_ReadThePatchedFields(t *testing.T) {
 	w := newSetsWorld(t)
 	id := w.open(t, map[string]any{"f_points": 4})
-	w.mustMove(t, id, "s_done", map[string]any{"f_resolution": "fixed", "f_points": 10, "f_note": "late"})
+	w.mustMove(t, id, "s_done", map[string]any{"f_resolution": "fixed", "f_points": 10})
 	fields := w.fields(t, id)
 	if n, _ := typedef.AsInt(fields["f_double"]); n != 20 {
 		t.Errorf("f_double = %v, want 20 (the patched points, doubled)", fields["f_double"])
 	}
-	if fields["f_had_note"] != true {
-		t.Errorf("f_had_note = %v, want true (the patched note)", fields["f_had_note"])
+	if fields["f_had_note"] != false {
+		t.Errorf("f_had_note = %v, want false (no note)", fields["f_had_note"])
 	}
 }
 
@@ -327,7 +329,7 @@ func TestSets_EffectFailed(t *testing.T) {
 
 	// A result that is no value of its field: a string that is no option.
 	other := w.open(t, map[string]any{"f_note": "a secret sentence"})
-	w.mustMove(t, other, "s_odd", nil)
+	w.mustMove(t, other, "s_parked", nil)
 	err = w.move(t, other, "s_open", nil)
 	assertRejectedCode(t, "an enum set to no option", err, itemservice.CodeEffectFailed)
 	if errors.As(err, &rej) && (rej.Metadata["field"] != "f_resolution" || strings.Contains(rej.Reason, "secret")) {

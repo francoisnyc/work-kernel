@@ -131,10 +131,14 @@ func TestAt_FiresAtTheInstant(t *testing.T) {
 }
 
 // Entering the state by an event reads the instant then. The entering
-// event's time does not matter: an instant is not counted from it.
+// event's time does not matter: an instant is not counted from it. (The
+// run starts in `waiting`, a state with a far-off duration timer: a run in
+// a state without behavior would complete at once, as it must.)
 func TestAt_EnteringTheStateReadsTheInstant(t *testing.T) {
-	h := newAtHarness(t, sprintSnapshot("planned", 5, 5), at(10*time.Hour))
-	h.deliver(time.Hour, transitionEvent(6, "planned", "active"))
+	snap := sprintSnapshot("waiting", 5, 5)
+	snap.Timers = map[string]wf.TimerSpec{"waiting": {After: 1000 * time.Hour, To: "planned"}}
+	h := newAtHarness(t, snap, at(10*time.Hour))
+	h.deliver(time.Hour, transitionEvent(6, "waiting", "active"))
 	h.deliver(10*time.Hour+time.Minute, closedEvent(7))
 	h.runToCompletion()
 

@@ -96,12 +96,13 @@ describe("by field type", () => {
     const zone = process.env.TZ;
     process.env.TZ = "America/New_York";
     try {
-      render(<Harness type={sprint2} id="f_end_at" initial="2026-12-04T12:00:00" />);
+      // A second that is not :00: a datetime-local input drops zero seconds.
+      render(<Harness type={sprint2} id="f_end_at" initial="2026-12-04T12:00:07" />);
       const input = screen.getByLabelText("f_end_at");
       expect(input).toHaveAttribute("type", "datetime-local");
       expect(input).toHaveAttribute("step", "1");
-      expect(input).toHaveValue("2026-12-04T12:00:00");
-      expect(input).toHaveAttribute("title", "2026-12-04T17:00:00.000Z");
+      expect(input).toHaveValue("2026-12-04T12:00:07");
+      expect(input).toHaveAttribute("title", "2026-12-04T17:00:07.000Z");
     } finally {
       if (zone === undefined) delete process.env.TZ;
       else process.env.TZ = zone;
@@ -113,8 +114,8 @@ describe("by field type", () => {
     render(<Harness type={sprint2} id="f_end_at" initial="" onChange={onChange} />);
     const input = screen.getByLabelText("f_end_at");
     expect(input).not.toHaveAttribute("title");
-    await userEvent.type(input, "2026-12-11T09:30:00");
-    expect(onChange).toHaveBeenLastCalledWith("2026-12-11T09:30:00");
+    await userEvent.type(input, "2026-12-11T09:30:07");
+    expect(onChange).toHaveBeenLastCalledWith("2026-12-11T09:30:07");
   });
 
   test("datetime: a kernel-written instant is shown, disabled", () => {
