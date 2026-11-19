@@ -391,6 +391,28 @@ Ideas noted during the spike, not built yet.
   port, compose.dev.yaml's included, is on 127.0.0.1.
 - A production build of the web UI has no sign-on at all: real sign-on
   (OIDC) replaces the dev picker as it replaces the interceptor. (Web UI)
+- A state's timer is cancelled and restarted on every event of its Item,
+  even one that does not touch what the timer hangs on (the `at` field, or
+  nothing at all for a duration timer): the wait is "the timer, or any
+  event". Keeping the timer when its deadline is unchanged would save two
+  history events (TimerCanceled, TimerStarted) per write. It changes the
+  commands of running workflows, so it needs `GetVersion`. (Jira 2.1)
+- Computed effects, not built: `sets` on Create ("started at"); on a
+  transition a check or a held reaction holds (which of the two writes
+  computes, at which event's time); `before.f_x` (a field before the
+  patch); links in scope; `cause.at` in guards and invariants; a marker in
+  the event saying which fields were computed rather than patched.
+  "Resolved by" (`cause.actor`) waits for a declared keyword resolved by
+  `policy`, never a CEL variable. (Jira 2.1)
+- Guards still read `today` from the item service's Go clock, effects from
+  the write's stamp: around midnight UTC a guard and an effect of one write
+  can see two days. Give guards the stamp's date too. (Jira 2.1)
+- An `at` timer with an offset (`at: {field, to, before: 1h}`: a warning
+  before a deadline), and a timer on a `date` field once a Type or a
+  calendar says which zone ends the day. (Jira 2.1)
+- The web UI's datetime input edits to the second and sends milliseconds;
+  the search form takes an instant as typed text, with its offset. (Jira
+  2.1)
 
 ## 2026-11-12 — Step 1 (finished)
 

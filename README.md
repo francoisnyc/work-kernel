@@ -178,8 +178,28 @@ pli --as sam item transition "$A" --to todo               # reopening clears the
 ```
 
 `--order-by 'FIELD [asc|desc]'` works on `item search` and `item list`, on
-string, int, date and enum fields; Items without a value come last. Strings
-sort byte by byte.
+string, int, date, datetime and enum fields; Items without a value come
+last. Strings sort byte by byte.
+
+Version 2 of these Types adds time. A `datetime` field holds an instant:
+send it as RFC 3339 with an offset, get it back in UTC. A `sprint@2` closes
+itself when its end instant passes, and moving the end moves the timer; a
+`story@2` records when it was resolved.
+
+```sh
+END=$(date -u -d '+30 seconds' +%Y-%m-%dT%H:%M:%SZ)        # macOS: date -u -v+30S +%Y-%m-%dT%H:%M:%SZ
+S2=$(pli --as lea item create --type sprint@2 --in "$PLAT" --set f_name="Sprint 13" \
+       --set f_end_at="$END" | jq -r .item.name)
+pli --as lea item transition "$S2" --to active
+pli --as lea item search --type sprint --where 'f_end_at>=2026-01-01T00:00:00+01:00' --order-by f_end_at
+sleep 31; pli --as lea item get "$S2" | jq -r .item.state  # closed, by system:timer
+pli --as lea type get sprint@2 | jq '.type.states[] | select(.at)'   # the Type says so
+
+C=$(pli --as lea item create --type story@2 --in "$PLAT" --set f_summary="Log out" | jq -r .item.name)
+pli --as lea item transition "$C" --to in_progress
+pli --as lea item transition "$C" --to done --set f_resolution=fixed   # sets f_resolved_at: the event's own time
+pli --as lea item transition "$C" --to todo                            # unsets it
+```
 
 A move is always one write. Rank keys grow as cards are squeezed into the
 same gap; past 32 bytes `pli rank` says the container needs a rebalance and

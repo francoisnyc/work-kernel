@@ -54,7 +54,8 @@ A Type is versioned YAML data that **names code but never contains it**.
 
 - Fields: stable ID, type, options, defaults, invariants as expressions.
   Types: `string`, `int`, `bool`, `enum`, `principal`, `date` (an ISO 8601
-  calendar date, `2026-12-01`). A field may be `writable_by: kernel`: only the
+  calendar date, `2026-12-01`), `datetime` (an instant: see "Jira part 2,
+  step 1 as built"). A field may be `writable_by: kernel`: only the
   internal door (a hook, or another Type's reaction it accepts) writes it
   (see "Approval as a business state"), or `writable_by: [role:<name>, ...]`:
   on the public door only holders of a role write it (see "Link reactions,
@@ -68,7 +69,8 @@ A Type is versioned YAML data that **names code but never contains it**.
   states gets one implicit state, `default`, with category `none`. A state may
   declare `frozen: [fields]`: no write changes them while the Item is in it.
 - Transitions: from/to, guard expression, required fields, fields to clear
-  (`clears`, see "Jira part 1 as built"), who may act, action references.
+  (`clears`, see "Jira part 1 as built"), fields to compute (`sets`, see
+  "Jira part 2, step 1 as built"), who may act, action references.
   - Who may act is the transition's `allowed` list. An entry is `role:<name>`,
     `principal:<id>`, `field:<id>` (whoever a principal field holds when the
     move runs) or `creator` (the requester: see below). Absent or empty means
@@ -87,6 +89,9 @@ A Type is versioned YAML data that **names code but never contains it**.
   `{id: in_progress, category: active, timer: {after: 48h, to: open}}`. `to` must
   be a transition the Type declares from that state, so a timer can never make a
   move a person couldn't. The timer counts from the event that entered the state.
+  Or, instead, one timer at the instant a datetime field holds:
+  `{id: active, category: active, at: {field: f_end_at, to: closed}}` (see
+  "Jira part 2, step 1 as built"). A state has `timer` or `at`, never both.
 - Approvals: a business state, decided by an ordinary transition; the kernel
   has no approval concept (see "Approval as a business state").
 - Items stay on the Type version they were created with. Versioning rule:
@@ -96,11 +101,12 @@ Guards are CEL expressions (`cel-go`), compiled when a Type loads. Every field
 is a variable named by its ID, typed by the schema and nullable: unset is
 `null`, so "is set" reads `f_x != null`. A guard that cannot be evaluated does
 not hold. A guard reads links as `links.<name>` (see "Links, containment and
-people"). A date field is a CEL timestamp at 00:00 UTC, and `today` is the
-date the write happens on, **in UTC** (the item service's clock; a user's
-local date can differ: Later). Who acts is not a guard variable: `caller`,
-`caller_on_behalf_of`, `created_by`, `created_on_behalf_of`, `today` and
-`links` are reserved names no field may take.
+people"). A date field is a CEL timestamp at 00:00 UTC, a datetime field a
+timestamp, and `today` is the date the write happens on, **in UTC** (the
+item service's clock; a user's local date can differ: Later). Who acts is
+not a guard variable: `caller`, `caller_on_behalf_of`, `created_by`,
+`created_on_behalf_of`, `today`, `links` and `cause` are reserved names no
+field may take.
 
 Hooks (Step 6) are declared in the Type version, pinned with the lifecycle:
 `{id, on: enter, state}` for an **enrich** hook (reads some fields, calls out,
@@ -132,6 +138,7 @@ client → item service (Go, stateless)
              claim idempotency key (namespace, actor, key)
                already used → return the stored result, write nothing
              lock Item row (SELECT … FOR UPDATE)
+             read the write's time (clock_timestamp()), now that the lock is held
              check the principal can see the Item (else: not found)
              validate schema + lifecycle + policy against the locked row
              write Item row (item_seq + 1)
@@ -167,6 +174,18 @@ client → item service (Go, stateless)
   numbers are taken in one order and committed in another, and a rolled-back
   write leaves a gap, so `commit_seq` is **not** a cursor: "everything up to S"
   cannot be read off it.
+- **The write's time** (Jira part 2, step 1). An event's `created_at` is the
+  database's clock read **after** the write has taken its row locks
+  (`clock_timestamp()`), never `now()`, which is the transaction's start: a
+  write that waited for the lock started before the write it waited for,
+  and would be stamped earlier. The lock runs an Item's writes one after
+  the other, so **along `item_seq` an Item's event times never go
+  backwards**, and a duration between two of its events is never negative.
+  A create and a transition read it once (`stampWrite`) and use it for
+  everything the write computes from "now" (`cause.at`, the Item's
+  `created_at`); every other write takes it at the event's insert, under
+  the same lock. `commit_seq` and the outbox are unaffected. The guards'
+  `today` still comes from the item service's own clock.
 - **What `min_seq` guarantees.** Every event stores the ID of the transaction
   that wrote it. A transaction ID below `pg_snapshot_xmin(pg_current_snapshot())`
   belongs to a transaction that has finished; no later commit can carry it. So a
@@ -217,7 +236,9 @@ client → item service (Go, stateless)
 - **Relay** (`cmd/relay`, single instance): reads undelivered outbox rows and
   delivers each Item's events **in item_seq order**, one at a time, with update
   ID = `item:seq` (a redelivery reuses it). It sends the event's shape only,
-  never field values.
+  never field values. (For a Type with a timer at a field's instant the
+  shape includes the IDs of those fields the event set or cleared: IDs,
+  still no value.)
   - The Type decides how: one function, `lifecycle.NeedsWorkflow`, answers "does
     this event enter a state with behavior?" (a timer today). Yes →
     **Update-With-Start** (workflow ID = item ID, conflict policy USE_EXISTING).
@@ -231,7 +252,12 @@ client → item service (Go, stateless)
 - **Workflow** (`internal/workflow`, run by `cmd/worker`): keeps
   `lastAppliedSeq`. Every new run first loads the Item's state, `item_seq` and
   a small timer table from Postgres, sets `lastAppliedSeq = item_seq`, and never
-  sees the Type itself. Duplicate (at or below `lastAppliedSeq`) → accept and
+  sees the Type itself. **It never sees a field value, with one declared
+  exception:** the instant held by a datetime field that the Item's current
+  state names in `at`, read by the `LoadInstant` activity
+  (`Service.AtInstant`, which chooses the field itself; the workflow names
+  none). A timer's length is in the workflow's history anyway, so the value
+  could not be hidden; nothing else of an Item's fields reaches Temporal. Duplicate (at or below `lastAppliedSeq`) → accept and
   ignore. Gap → refused by the update's validator, so the relay retries from the
   lowest undelivered seq and the refusal is not written to history. Continue-as-new
   carries the loaded state. A run completes when the Item's state has no behavior.
@@ -409,6 +435,10 @@ client → item service (Go, stateless)
   only receives event shapes without field values (relay → our Temporal) is not
   a principal, so those payloads do not pass through `Project`. For the same
   reason a timer's write is not subject to visibility; it is subject to `allowed`.
+  **One field value does reach our Temporal:** the instant of a datetime
+  field that a state names in `at`, and nothing else. It is the declared
+  exception (see "Durable behavior"), listed with its reason in the test
+  that holds every read to `Project`.
 - **One door, enforced.** Every exported read of the item service calls
   `policy.Project`; a test parses the package and fails if a new read does not.
   `StateEntry` and `Type` are the only exemptions: they feed the workflow, not a
@@ -728,7 +758,10 @@ and update times, and creator.
 
 Plain JSON values (`google.protobuf.Value`), converted and checked against the
 field's type in the Type on the server: int64 and decimals as strings, dates
-and timestamps as ISO 8601 strings, principals as `user:ana`, enums by name. A
+and timestamps as ISO 8601 strings, principals as `user:ana`, enums by name.
+A `datetime` is an RFC 3339 string: sent with an offset (refused without
+one) and at most microseconds, returned as UTC with six fractional digits
+(`2026-12-04T17:00:00.000000Z`) whatever was sent. A
 mismatch is `INVALID_ARGUMENT` naming the field. A patch changes only the
 fields it names; JSON `null` clears one. No field masks.
 
@@ -1372,9 +1405,9 @@ in the journal.
 | Consolidation (**done**) | An independent adversarial review of how Step 2's primitives combine; seven interaction bugs fixed, each reproduced by a failing test first; the flaky hooks test fixed | Every finding reproduced then fixed in its own commit; all recorded histories replay. **Done 2026-11-18** (PR #25) |
 | Jira 1 (**done**) | The PLAT software project: ordering by a field, rank as an app field, incoming links from other Types, rollups, field effects on transitions, watching (see "Jira proof of concept" below) | Scenarios A and D below run through pli; ordering pages correctly; ranking costs measured. **Done 2026-11-18**: [journal, Jira part 1](journal.md#2026-11-18--jira-proof-of-concept-part-1-the-plat-software-project-finished) |
 | SLA design (**done**) | A design pass on paper for SLAs and multi-value fields | Decided 2026-11-18: "Decisions for Jira part 2" below |
-| Jira 2.1 | Date-time fields, a timer at a field's instant (proved by a sprint closing on its end date), computed field effects | The sprint closes itself on its end date; effects computed at the cause's time; through the API, pli and the scenario |
+| Jira 2.1 (**done**) | Date-time fields, a timer at a field's instant (proved by a sprint closing on its end instant), computed field effects | The sprint closes itself when its end instant passes, and moving the end re-arms it; effects computed at the cause's time; through the API, pli, the web UI and the scenario. **Done 2026-11-19**: "Jira part 2, step 1 as built" below, and the journal |
 | Jira 2.2 | Reactions that move or create, including those triggered by an Item created inside the source; multi-value fields | "A customer comment reopens the request"; labels with set operations and contains filters |
-| Jira 2.3 | Calendar Items and working-time arithmetic; the `sla_goal` Type; the incident Type with first-response and resolution goals | Scenario B runs through pli |
+| Jira 2.3 | Calendar Items and working-time arithmetic; an **acting timer at a field's instant** (the SLA breach records `breached_at` and the goal keeps running: step 1's `at` only moves); the `sla_goal` Type; the incident Type with first-response and resolution goals | Scenario B runs through pli |
 | Jira 2.4 | Customers as principals and public or internal comments; the access request with N-of-M approvers | Scenario C runs through pli |
 | Bonita | The company's real Bonita processes, mapped against the BPMN pattern table, then rebuilt | Planned after Jira 2 |
 
@@ -1643,6 +1676,105 @@ principal kind with fixed permissions, or narrowed users; a running goal
 keeping the policy it started with (proposed) or being recalculated; the
 clock during holds (keeps running by default, `pause_while: held` opt-in);
 sorting by the nearest deadline of any metric (later).
+
+### Jira part 2, step 1 as built (2026-11-19)
+
+Primitives 1, 2 and 4 of the decisions above, with six kernel changes
+(journal). Nothing in the kernel is named sprint, resolution or SLA;
+`kernel.v1` only grew.
+
+**Date-time fields.** `type: datetime` holds an instant. A value is sent as
+an RFC 3339 string with an offset (`Z` or `+01:00`) and at most six
+fractional digits. Refused as malformed: no offset, finer than a
+microsecond (never rounded), a leap second, a space or a lower-case `t` or
+`z`, a year outside 0001 to 9999 once in UTC. It is stored, returned and
+recorded in **one form: UTC, six fractional digits, `Z`**
+(`2026-12-04T17:00:00.000000Z`); the caller's offset is not kept. The form
+is fixed-width, so byte order is time order, and filters (equality,
+ranges, bounds in any offset), `order_by` and page tokens use the text
+machinery dates use. A `date` and a `datetime` declared under one field ID
+disagree across Types. CEL sees a timestamp; a guard may compare it with a
+date (00:00 UTC).
+
+**A timer at a field's instant.** `at: {field: f_end_at, to: closed}` on a
+state: when the instant the field holds passes while the Item is in the
+state, the move is made as `system:timer`, attributed like a duration
+timer's (caused by the event that entered the state, key
+`timer:<item>:<entered seq>:<expected seq>`). Load rules as for `timer`: a
+datetime field, a declared transition, an `allowed` list that names the
+timer; a state has `timer` or `at`, not both. A date field is refused: a
+date has no zone, and which instant ends that day is not decided.
+- *Unset arms nothing*, but the state still needs a workflow
+  (`lifecycle.NeedsWorkflow`): the run must be there to hear the field
+  being set. So such a Type has listeners.
+- *How the workflow learns the instant.* This is the declared exception to
+  "the workflow never sees a field value" (see "Durable behavior"). The
+  relay adds to an event's shape the IDs of the at-fields it set or cleared
+  (`Event.FieldIDs`; nil for every Type without `at`). The workflow runs
+  `LoadInstant` on entering such a state, or starting in one, and again
+  after an event naming its field: never for another event. A read that an
+  event overtook is discarded and made again.
+- *Re-arming.* The wait is the instant minus `workflow.Now`, in a timer
+  with a cancellable context of its own; an event cancels it and the loop
+  starts the next. A cleared field disarms; an instant moved into the past
+  fires at once. Today every event of the Item, not only one naming the
+  field, cancels and restarts the timer, as duration timers do (Later).
+- *Never early.* The item service refuses an `at` timer's move while the
+  write's time is still before the instant: `ErrNotYet` with the remainder
+  (nothing written, the key not used up), and the workflow arms again for
+  that long. So a worker whose clock runs ahead cannot record a closing, or
+  later an SLA breach, before its instant. With the field unset the answer
+  is `ErrStale`. A person making the same move by hand is not checked.
+- *Holds* defer it like any state timer. *The dev time scale* does not
+  apply: it scales declared durations, and an instant is not one.
+- *Continue-as-new* carries the instant read (`Snapshot.AtInstant`,
+  `AtLoaded`): the next run reads nothing again. No `GetVersion`: only a
+  run whose Snapshot has an `At` table enters the new branch.
+
+**Computed field effects.** `sets: {f_resolved_at: 'cause.at'}` on a
+transition: each expression is evaluated by `lifecycle.TransitionWith`
+inside the move's own write, and its value set; `null` unsets. In scope:
+the fields, **on the guard's view** (after the patch, before the clears);
+`cause.at`, the write's time, which is the `created_at` of the event being
+written; and `today`, which to an effect is **the UTC date of `cause.at`**
+(guards keep the service's clock in this step). Expressions do not see
+each other's results. No links, and nobody's identity: "resolved by" waits
+for a declared keyword resolved by `policy`.
+- *Order of checks, on every door:* malformed (a patch that names, with a
+  value or with null, a field the move sets; or sets a field it clears) ->
+  not writable -> frozen -> held -> required fields and the guard -> the
+  clears -> the sets -> invariants.
+- *The Type writes.* A field written by `sets` is exempt from
+  `writable_by` (kernel or roles), and `sets` counts as the writer a
+  kernel-written field must have. That is how a kernel-written field is
+  unset: `sets: {f: 'null'}` (a `clears` of one is still refused at load).
+- *Refused at load:* an unknown field; one the same transition requires or
+  clears, that the state it leaves freezes, or that its own `allowed`
+  names; a principal field; an expression that does not compile or does
+  not yield a value of the field's type; any `sets` on a transition a
+  check or a held reaction holds (as for clears: Later).
+- *A failing effect refuses the move:* `effect_failed` (`FAILED_PRECONDITION
+  / EFFECT_FAILED`, metadata `field`), for an expression that errors (an
+  unset field in arithmetic) or a result that is no value of the field (a
+  string that is no option, an instant that is not 00:00 UTC for a date).
+  The reason names the field, never a value.
+- A computed field shows in the event like a patched one (`field_ids`,
+  `cleared_field_ids`, its value in `item_event_values`). No write, event
+  or outbox row of its own: a Type whose only feature is `sets` has no
+  listeners.
+
+**What a Type shows.** `GetType` gives `FIELD_TYPE_DATETIME`, each state's
+`timer` (`after`, `to_state`) and `at` (`field`, `to_state`), and each
+transition's `sets`. The web UI's form has a `datetime-local` input on the
+browser's clock, sent as UTC, with the UTC instant as its title; the
+transition panel says "made by the timer at f_end_at" and "sets:
+f_resolved_at = cause.at".
+
+**The Types.** `sprint@2` adds `f_end_at` and closes itself (`active` has
+`at`; closing by hand stays open to anyone). `story`, `bug` and `task` `@2`
+add `f_resolved_at` (kernel-written): both moves to done set it to
+`cause.at`, `done -> todo` sets it to null beside clearing `f_resolution`.
+Version 1 of each still loads, and Items stay on their version.
 
 ## Web UI as built (2026-11-18)
 
