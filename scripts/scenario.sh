@@ -11,7 +11,10 @@
 # clock (vacation_request only); it needs curl. Jira part 1 added the PLAT
 # software project (scenarios A and D of docs/design.md): lea leads, sam
 # works, ana watches; order_by, rank through pli, the epic's progress,
-# resolution on done, watching as a Subscription.
+# resolution on done, watching as a Subscription. Jira part 2, step 1 added
+# date-time fields, sprints that close themselves at their end instant (and
+# re-arm when it moves) and a story's resolution time, on version 2 of the
+# PLAT Types.
 #
 #   scripts/scenario.sh          (or: make scenario, which starts the stack first)
 #
@@ -982,6 +985,130 @@ closed=$(ok lea item transition "$sprint" --to closed)
 expect "the sprint's state" "$(j .item.state <<<"$closed")" "closed"
 expect "the sprint's category" "$(j .item.category <<<"$closed")" "STATE_CATEGORY_DONE"
 
+# ---------------------------------------------------------------------------
+# Jira part 2, step 1: date-time fields, a timer at a field's instant, and
+# computed field effects, on version 2 of the PLAT Types (the steps above
+# stay on version 1: Items keep the version they were created with).
+#
+# The stack's dev clock scales declared durations for vacation_request
+# only; an instant is not a duration and is never scaled. So the sprints
+# below end a few seconds from now, by the real clock, and the script waits
+# for them: about 12 s in all.
+# ---------------------------------------------------------------------------
+
+# instant_in SECONDS: the instant that many seconds from now (negative:
+# ago), in UTC, to the second. GNU date first, then BSD's.
+instant_in() {
+	local at=$(($(date +%s) + $1))
+	date -u -d "@$at" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$at" +%Y-%m-%dT%H:%M:%SZ
+}
+# stored INSTANT: an instant to the second, as the API returns it.
+stored() { printf '%s\n' "${1%Z}.000000Z"; }
+# not_before A B: instant A is not before instant B. Both are RFC 3339 in
+# UTC and B has its six fractional digits, so byte order is time order
+# whatever fraction A is printed with (none, 3 or 6 digits).
+not_before() { [ "$(printf '%s\n%s\n' "$1" "$2" | LC_ALL=C sort | head -n 1)" = "$2" ]; }
+# closings ITEM: who closed it, one actor per closing event.
+closings() {
+	ok lea item history "$1" | j '[.events[] | select(.to_state == "closed") | .actor] | join(" ")'
+}
+sprint2() { # NAME [--set ...]...: a sprint@2 in PLAT, tagged with this run's word; prints its name
+	local name=$1
+	shift
+	ok lea item create --type sprint@2 --in "$plat" --set "f_name=$name $w" "$@" | j .item.name
+}
+
+step "J1: a date-time is sent with an offset and comes back in UTC; without one it is refused"
+s14=$(sprint2 "Sprint 14" --set f_end=2026-12-18 --set f_end_at=2026-12-18T18:00:00+01:00)
+expect "Sprint 14's end, as stored" "$(ok lea item get "$s14" | j .item.fields.f_end_at)" "2026-12-18T17:00:00.000000Z"
+expect "Sprint 14's end date is still a date" "$(ok lea item get "$s14" | j .item.fields.f_end)" "2026-12-18"
+refuse lea "INVALID_ARGUMENT INVALID_REQUEST" item update "$s14" --set f_end_at=2026-12-18T18:00:00
+refuse lea "INVALID_ARGUMENT INVALID_REQUEST" item update "$s14" --set f_end_at=2026-12-18
+expect "sprint@2 says what its active state will do" \
+	"$(ok lea type get sprint@2 | j '.type.states[] | select(.id == "active") | "\(.at.field) \(.at.to_state)"')" \
+	"f_end_at closed"
+
+step "J2: lea filters and orders sprints by their end instant"
+s15=$(sprint2 "Sprint 15" --set f_end_at=2027-01-08T12:00:00-05:00) # 17:00Z
+s16=$(sprint2 "Sprint 16")                                          # no end
+expect "sprints of this run by end instant, those without one last" \
+	"$(ok lea item search "$w" --type sprint --where 'f_end_at>=2026-01-01T00:00:00Z' --order-by f_end_at | in_order)" \
+	"$s14 $s15"
+expect "version 2 sprints of this run, latest end first" \
+	"$(ok lea item search "$w" --type sprint --where "f_name>=Sprint 14" --where "f_name<Sprint 17" --order-by 'f_end_at desc' | in_order)" \
+	"$s15 $s14 $s16"
+expect "sprints ending on 18 December in Paris (a range with offset bounds)" \
+	"$(ok lea item search "$w" --type sprint --where 'f_end_at>=2026-12-18T00:00:00+01:00' --where 'f_end_at<2026-12-19T00:00:00+01:00' | names)" \
+	"$s14"
+refuse lea "INVALID_ARGUMENT INVALID_REQUEST" item search "$w" --type sprint --where 'f_end_at>=2026-12-18'
+
+step "J3: a sprint closes itself when its end instant passes"
+end17=$(instant_in 5)
+s17=$(sprint2 "Sprint 17" --set "f_end_at=$end17")
+ok lea item transition "$s17" --to active >/dev/null
+expect "Sprint 17, started, before its end" "$(ok lea item get "$s17" | j .item.state)" "active"
+began=$(now_ms)
+wait_until 30 "Sprint 17 closes itself" state_is lea "$s17" closed
+echo "    Sprint 17 closed itself $(($(now_ms) - began)) ms after it was started (its end was at most 5 s away)"
+expect "who closed Sprint 17" "$(closings "$s17")" "system:timer"
+closed_at=$(ok lea item history "$s17" | j '.events[-1].create_time')
+not_before "$closed_at" "$(stored "$end17")" || fail "Sprint 17 was closed at $closed_at, before its end $end17"
+
+step "J4: moving a running sprint's end re-arms the timer"
+end18=$(instant_in 4)
+s18=$(sprint2 "Sprint 18" --set "f_end_at=$end18")
+ok lea item transition "$s18" --to active >/dev/null
+ok lea item update "$s18" --set "f_end_at=$(instant_in 3600)" >/dev/null
+sleep 6 # past the first end
+expect "Sprint 18, past its first end" "$(ok lea item get "$s18" | j .item.state)" "active"
+expect "nobody closed Sprint 18" "$(closings "$s18")" ""
+end18=$(instant_in 3)
+ok lea item update "$s18" --set "f_end_at=$end18" >/dev/null
+wait_until 30 "Sprint 18 closes at its new end" state_is lea "$s18" closed
+expect "who closed Sprint 18, once" "$(closings "$s18")" "system:timer"
+# A sprint whose end has already passed closes as soon as it starts.
+s19=$(sprint2 "Sprint 19" --set "f_end_at=$(instant_in -3600)")
+ok lea item transition "$s19" --to active >/dev/null
+wait_until 30 "Sprint 19, already over, closes at once" state_is lea "$s19" closed
+# A sprint without an end stays open; lea closes it by hand, as before.
+ok lea item transition "$s16" --to active >/dev/null
+expect "Sprint 16, no end" "$(ok lea item get "$s16" | j .item.state)" "active"
+ok lea item transition "$s16" --to closed >/dev/null
+expect "who closed Sprint 16" "$(closings "$s16")" "user:lea"
+
+step "J5: done sets a story's resolution time from its own event; reopening clears it"
+issue2() { # SUMMARY: a story@2 in PLAT; prints its name
+	ok lea item create --type story@2 --in "$plat" --set "f_summary=$1 $w" | j .item.name
+}
+r1=$(issue2 "Resolved first")
+r2=$(issue2 "Resolved second")
+r3=$(issue2 "Never resolved")
+expect "story@2 says what done computes" \
+	"$(ok lea type get story@2 | j '[.type.transitions[] | select(.sets != null) | "\(.from_state)>\(.to_state)=\(.sets.f_resolved_at)"] | sort | join(" ")')" \
+	"done>todo=null in_progress>done=cause.at in_review>done=cause.at"
+for i in "$r1" "$r2"; do ok lea item transition "$i" --to in_progress >/dev/null; done
+refuse lea "PERMISSION_DENIED FIELD_NOT_WRITABLE" item update "$r1" --set f_resolved_at=2026-12-04T17:00:00Z
+refuse lea "INVALID_ARGUMENT INVALID_REQUEST" item transition "$r1" --to done --set f_resolution=fixed --set f_resolved_at=2026-12-04T17:00:00Z
+done1=$(ok lea item transition "$r1" --to done --set f_resolution=fixed)
+resolved1=$(j .item.fields.f_resolved_at <<<"$done1")
+# The event's time, in the form a datetime field holds (six fractional digits).
+event_at=$(ok lea item history "$r1" | j '.events[-1].create_time | sub("Z$"; "") | split(".") | "\(.[0]).\(((.[1] // "") + "000000")[0:6])Z"')
+expect "R1's resolution time is its done event's time" "$resolved1" "$event_at"
+expect "the done event carries it" "$(ok lea item history "$r1" | j '.events[-1].fields.f_resolved_at')" "$resolved1"
+ok lea item transition "$r2" --to done --set f_resolution=wontfix >/dev/null
+expect "stories of this run by resolution time, latest first, unresolved last" \
+	"$(ok lea item search "$w" --type story --where "f_summary>=Never" --where "f_summary<Resolved t" --order-by 'f_resolved_at desc' | in_order)" \
+	"$r2 $r1 $r3"
+expect "stories resolved since R1 was" \
+	"$(ok lea item search "$w" --type story --where "f_resolved_at>$resolved1" | names)" "$r2"
+reopened=$(ok lea item transition "$r1" --to todo)
+expect "R1's resolution time after reopening" "$(j '.item.fields.f_resolved_at // "cleared"' <<<"$reopened")" "cleared"
+expect "R1's resolution after reopening" "$(j '.item.fields.f_resolution // "cleared"' <<<"$reopened")" "cleared"
+expect "history shows both cleared on the reopening event" \
+	"$(ok lea item history "$r1" | j '.events[-1] | "\(.fields.f_resolved_at) \(.fields.f_resolution)"')" "null null"
+expect "stories of this run still resolved" \
+	"$(ok lea item search "$w" --type story --where 'f_resolved_at>=2026-01-01T00:00:00Z' | names)" "$r2"
+
 step "D1: lea searches VPN in the active category"
 vpn=$(issue lea story "VPN drops on wifi")
 issue lea task "VPN setup guide" >/dev/null
@@ -1087,6 +1214,8 @@ cat <<'EOF'
     Not triggered here (a client cannot cause them; Go tests cover each):
       NOT_INITIAL_STATE  a create cannot name a state through the API
       HOP_LIMIT          only chains of hook writes reach it
+      EFFECT_FAILED      story@2's only effect is cause.at, which cannot
+                         fail; a Type whose effect can is in the Go tests
       LINK_UNRESOLVED    only a direct transition into a resolve state; the
                          vacation request enters submitted through a hold, so
                          a missing balance is DENIED no_balance (above)

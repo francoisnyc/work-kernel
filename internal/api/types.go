@@ -25,6 +25,7 @@ var fieldTypes = map[typedef.FieldType]kernelv1.FieldType{
 	typedef.Enum:      kernelv1.FieldType_FIELD_TYPE_ENUM,
 	typedef.Principal: kernelv1.FieldType_FIELD_TYPE_PRINCIPAL,
 	typedef.Date:      kernelv1.FieldType_FIELD_TYPE_DATE,
+	typedef.DateTime:  kernelv1.FieldType_FIELD_TYPE_DATETIME,
 }
 
 var fieldWriters = map[typedef.WritableBy]kernelv1.FieldWriter{
@@ -57,6 +58,13 @@ func typeOut(ns string, t *typedef.Type) *kernelv1.Type {
 	}
 	for _, s := range t.States {
 		st := &kernelv1.State{Id: s.ID, Category: categories[s.Category], Frozen: s.Frozen}
+		// Types are not secret: a client sees what a state will do by itself.
+		if s.Timer != nil {
+			st.Timer = &kernelv1.StateTimer{After: s.Timer.After, ToState: s.Timer.To}
+		}
+		if s.At != nil {
+			st.At = &kernelv1.AtTimer{Field: s.At.Field, ToState: s.At.To}
+		}
 		for _, a := range s.Acting {
 			st.Acting = append(st.Acting, &kernelv1.ActingTimer{Id: a.ID, After: a.After, Every: a.Every, Max: int32(a.Max)})
 		}
@@ -72,6 +80,7 @@ func typeOut(ns string, t *typedef.Type) *kernelv1.Type {
 		out.Transitions = append(out.Transitions, &kernelv1.Transition{
 			FromState: tr.From, ToState: tr.To, Guard: tr.Guard, Required: tr.Required,
 			Allowed: tr.Allowed, Except: tr.Except, Escape: tr.Escape, Checked: checked, Clears: tr.Clears,
+			Sets: tr.Sets,
 		})
 	}
 	for _, l := range t.Links {

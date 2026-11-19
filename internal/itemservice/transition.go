@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -114,11 +115,39 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		if err != nil {
 			return WriteResult{}, err
 		}
+		// Date-time values are stored in one form, whatever offset they
+		// came in. req is this closure's own copy from here on (a struct is
+		// copied on assignment); a value that is no instant is left as it
+		// is, and CheckFields refuses it below.
+		req := req
+		req.Fields = ty.NormalizeFields(req.Fields)
+		// The write's time, read now that every row lock is taken: the
+		// move's event carries it, its computed effects read it as
+		// cause.at, and a timer at an instant is judged against it.
+		at, err := stampWrite(ctx, tx)
+		if err != nil {
+			return WriteResult{}, err
+		}
+		if err := checkAtTimer(ty, req.Principal, it, req.ToState, at); err != nil {
+			return WriteResult{}, err
+		}
 		// Not writable, then frozen (against the state the move leaves),
 		// then held.
 		var declared *typedef.Transition
 		if tr, ok := ty.Transition(it.State, req.ToState); ok {
 			declared = &tr
+		}
+		// A field the move computes (`sets`) is the Type's to write: a
+		// patch that names it, with a value or with null, contradicts the
+		// move. Malformed, before anything else. Such a field is not
+		// "named by the write" below, so writable_by does not apply to it.
+		if declared != nil {
+			for _, id := range slices.Sorted(maps.Keys(declared.Sets)) {
+				if _, named := req.Fields[id]; named {
+					return WriteResult{}, &InvalidError{Field: id,
+						Reason: fmt.Sprintf("the transition %s -> %s sets %s; its patch may not name it", it.State, req.ToState, id)}
+				}
+			}
 		}
 		// A field the move clears counts as named by the write: it is
 		// judged like a patch's null (not writable, frozen), whether or not
@@ -173,7 +202,7 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		}
 		merged, set, cleared := applyPatch(it.Fields, req.Fields)
 		next, err := lifecycle.TransitionWith(ty, it.State,
-			lifecycle.Input{Fields: merged, Links: links, Today: k.today()}, req.ToState)
+			lifecycle.Input{Fields: merged, Links: links, Today: k.today(), CauseAt: at}, req.ToState)
 		if err != nil {
 			return WriteResult{}, fromLifecycle(err)
 		}
@@ -187,6 +216,24 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 				cleared[id] = nil
 				clearedByMove = true
 			}
+		}
+		// Then the computed effects, evaluated by the lifecycle on the
+		// fields as the patch left them (before the clears): a value is
+		// set, null unsets. Recorded like a patch's fields.
+		for _, id := range slices.Sorted(maps.Keys(next.Sets)) {
+			v := next.Sets[id]
+			if v == nil {
+				if _, has := merged[id]; has {
+					delete(merged, id)
+					cleared[id] = nil
+				}
+				delete(set, id)
+			} else {
+				merged[id] = v
+				set[id] = v
+				delete(cleared, id)
+			}
+			clearedByMove = true // the fields changed: the invariants are asked
 		}
 		// Whether this principal may make the move is policy's question,
 		// asked second, so ErrForbidden always means "legal, but not for

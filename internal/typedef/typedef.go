@@ -33,6 +33,9 @@ const (
 	// Date is a calendar date, stored as an ISO 8601 string (2026-12-01).
 	// Guards see it as a CEL timestamp at 00:00 UTC.
 	Date FieldType = "date"
+	// DateTime is an instant, stored in UTC as an RFC 3339 string in one
+	// fixed-width form (DateTimeLayout), so byte order is time order.
+	DateTime FieldType = "datetime"
 )
 
 // WritableBy says who may write a field. The zero value is anyone who may
@@ -70,7 +73,7 @@ const (
 
 // reservedNames may not be field IDs: guard variables, the creator
 // attributes a hook may read, and the links prefix.
-var reservedNames = []string{VarToday, VarCaller, VarCallerOnBehalfOf, AttrCreatedBy, AttrCreatedOnBehalfOf, AttrCreator, "links"}
+var reservedNames = []string{VarToday, VarCaller, VarCallerOnBehalfOf, AttrCreatedBy, AttrCreatedOnBehalfOf, AttrCreator, "links", "cause"}
 
 // IsAttribute reports whether name is an Item attribute a hook may read
 // besides its fields: created_by or created_on_behalf_of.
@@ -92,6 +95,22 @@ const (
 	ImplicitState         = "default"
 	ImplicitStateCategory = "none"
 )
+
+// DateTimeLayout is the one stored and returned form of a datetime value:
+// UTC, six fractional digits, "Z".
+const DateTimeLayout = "2006-01-02T15:04:05.000000Z"
+
+// VarCauseAt is the variable a `sets` expression reads the write's time
+// from: the timestamp of the event being written.
+const VarCauseAt = "cause.at"
+
+// AtTimer moves an Item out of a state when the instant held by one of its
+// datetime fields passes. Like Timer, it names a transition the Type
+// declares from that state.
+type AtTimer struct {
+	Field string `yaml:"field" json:"field"`
+	To    string `yaml:"to" json:"to"`
+}
 
 // TimerPrincipal is the principal a timer's move is made as. A timer gets no
 // silent exemption from `allowed`: the Type must name it (see check).
@@ -136,6 +155,9 @@ type State struct {
 	// Timer is nil for a state without one. A pointer field plays the role of
 	// an Optional here; omitempty leaves it out of the stored JSON when nil.
 	Timer *Timer `yaml:"timer" json:"timer,omitempty"`
+	// At is nil for a state without a timer at a field's instant. A state
+	// has Timer or At, never both.
+	At *AtTimer `yaml:"at" json:"at,omitempty"`
 	// Frozen are the fields no write may change while an Item is in this
 	// state. The transition entering the state may set them.
 	Frozen []string `yaml:"frozen" json:"frozen,omitempty"`
@@ -190,6 +212,10 @@ type Transition struct {
 	// clears the resolution). Required fields and the guard are judged
 	// before the clear, the invariants after it.
 	Clears []string `yaml:"clears" json:"clears,omitempty"`
+	// Sets are computed field effects: field ID -> CEL expression,
+	// evaluated in the move's own write, on the guard's view of the fields
+	// plus cause.at and today. A result of null unsets the field.
+	Sets map[string]string `yaml:"sets" json:"sets,omitempty"`
 
 	// Program is Guard compiled, filled when the Type is loaded; nil when
 	// there is no guard. The "-" tag keeps it out of YAML and JSON. Package
@@ -199,6 +225,9 @@ type Transition struct {
 	// filled when the Type is loaded. A transition with none needs no link
 	// read and no lock beyond its own Item.
 	GuardLinks []string `yaml:"-" json:"-"`
+	// SetPrograms are the Sets expressions compiled, by field ID; filled
+	// when the Type is loaded. Package lifecycle evaluates them.
+	SetPrograms map[string]cel.Program `yaml:"-" json:"-"`
 }
 
 // Type is one version of a Type definition.
@@ -320,7 +349,7 @@ func (t *Type) check() error {
 			return fail("%v", err)
 		}
 		switch f.Type {
-		case String, Int, Bool, Principal, Date:
+		case String, Int, Bool, Principal, Date, DateTime:
 			if len(f.Options) > 0 {
 				return fail("field %s: only enum fields take options", f.ID)
 			}
@@ -492,6 +521,9 @@ func (t *Type) check() error {
 		}
 		s.Timer.Duration = d
 	}
+	if err := t.checkAtTimers(fail); err != nil {
+		return err
+	}
 
 	// Hooks last: they name states, transitions and fields checked above.
 	if err := t.checkHooks(); err != nil {
@@ -511,6 +543,11 @@ func (t *Type) check() error {
 	if err := t.checkClears(fail); err != nil {
 		return err
 	}
+	// Computed effects: the same, and each expression compiles to a value
+	// of its field.
+	if err := t.checkSets(fail); err != nil {
+		return err
+	}
 	// A field only the kernel writes needs a writer: a hook that writes it,
 	// or another Type's reaction this Type accepts for it.
 	for _, f := range t.Fields {
@@ -520,6 +557,11 @@ func (t *Type) check() error {
 		written := slices.ContainsFunc(t.Hooks, func(h Hook) bool { return slices.Contains(h.Writes, f.ID) })
 		for _, fields := range t.AcceptsReactions {
 			written = written || slices.Contains(fields, f.ID)
+		}
+		// Or a transition computes it (`sets`): the Type itself writes it.
+		for _, tr := range t.Transitions {
+			_, set := tr.Sets[f.ID]
+			written = written || set
 		}
 		if !written {
 			return fail("field %s is writable_by kernel, but no hook writes it", f.ID)
@@ -669,6 +711,11 @@ func (t *Type) CheckFields(values map[string]any, allowNull bool) error {
 		case Date:
 			if s, ok := v.(string); !ok || !isDate(s) {
 				return fail("field %s: want a date, YYYY-MM-DD", id)
+			}
+		case DateTime:
+			if _, ok := NormalizeDateTime(v); !ok {
+				return fail("field %s: want an instant, RFC 3339 with an offset and at most microseconds "+
+					"(2026-12-04T17:00:00Z)", id)
 			}
 		}
 	}

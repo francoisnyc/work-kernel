@@ -6,6 +6,9 @@
 //   3. as lea: drag a card on a sprint's board; the order holds in the
 //      container too.
 //
+//   4. as lea: set a sprint's end instant through the generic form (a
+//      datetime field) and read it back, on the page and from the server.
+//
 // Run: docker compose up -d --build --wait, then `npm run e2e` in web/.
 import { expect, test, type Page } from "@playwright/test";
 import { api, boardOrder, containerOrder, idOf, seedProject, seedVacation } from "./seed";
@@ -122,4 +125,53 @@ test("lea drags a card on a sprint's board", async ({ page, baseURL }) => {
   await page.getByRole("button", { name: `Move ${two} up` }).click();
   await expect(cards).toHaveText([new RegExp(three), new RegExp(two), new RegExp(one)]);
   expect(await containerOrder(baseURL!, project.space)).toEqual([three, two, one, outsider]);
+});
+
+// A datetime field in the generic form (Jira part 2, step 1). The form
+// edits the instant on the browser's clock and the server keeps it in UTC,
+// so the browser's zone is fixed here: New York, UTC-4 in June and UTC-5 in
+// December.
+test.describe("a datetime field", () => {
+  test.use({ timezoneId: "America/New_York" });
+
+  test("lea sets a sprint's end instant and reads it back", async ({ page, baseURL }) => {
+    const name = `Sprint with an end ${run}`;
+    await actAs(page, "lea");
+
+    await page.getByRole("link", { name: "New Item" }).click();
+    // The latest version of sprint has f_end_at; nothing here knows that.
+    await page.getByLabel("Type", { exact: true }).selectOption("sprint");
+    await page.getByLabel("f_name").fill(name);
+    const end = page.getByLabel("f_end_at");
+    await expect(end).toHaveAttribute("type", "datetime-local");
+    await end.fill("2030-06-01T12:30:15");
+    await page.getByRole("button", { name: "Create" }).click();
+
+    // The new Item's page: the form shows the instant on the browser's
+    // clock again, and says which instant that is in UTC.
+    await expect(page.getByTestId("item-state")).toHaveText("planned");
+    await expect(page.getByLabel("f_end_at")).toHaveValue("2030-06-01T12:30:15");
+    await expect(page.getByLabel("f_end_at")).toHaveAttribute("title", "2030-06-01T16:30:15.000Z");
+    // The Type says what the active state will do with it.
+    await page.getByRole("button", { name: "Move to active" }).click();
+    await expect(page.getByTestId("item-state")).toHaveText("active");
+    await expect(page.getByRole("button", { name: "Move to closed" }).locator("xpath=ancestor::li")).toContainText(
+      "made by the timer at f_end_at",
+    );
+
+    // The server holds the instant in UTC, in its one form.
+    const id = page.url().split("/").pop()!;
+    const item = `namespaces/acme/items/${id}`;
+    expect((await api(baseURL!, "lea").getItem({ name: item })).item?.fields?.f_end_at).toBe("2030-06-01T16:30:15.000000Z");
+
+    // Moving the end through the same form: winter time now.
+    await page.getByLabel("f_end_at").fill("2030-12-01T09:00:05");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByLabel("f_end_at")).toHaveValue("2030-12-01T09:00:05");
+    await expect
+      .poll(async () => (await api(baseURL!, "lea").getItem({ name: item })).item?.fields?.f_end_at)
+      .toBe("2030-12-01T14:00:05.000000Z");
+    // Years away: the sprint is still running.
+    expect((await api(baseURL!, "lea").getItem({ name: item })).item?.state).toBe("active");
+  });
 });

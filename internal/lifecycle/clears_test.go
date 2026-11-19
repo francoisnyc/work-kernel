@@ -77,7 +77,9 @@ func TestTransition_GuardIsJudgedBeforeTheClear(t *testing.T) {
 
 // A drag on a PLAT story must cost no outbox row: its Type has no
 // listeners (no hooks, timers or reactions), like the container, comments
-// and subscriptions around it.
+// and subscriptions around it. The one exception is sprint@2 (Jira part 2,
+// step 1), which listens by design: its active state closes itself at
+// f_end_at, so a run must hear its events.
 func TestHasListeners_PLATTypesHaveNone(t *testing.T) {
 	types, err := typedef.ParseDir("../../types")
 	if err != nil {
@@ -88,6 +90,12 @@ func TestHasListeners_PLATTypesHaveNone(t *testing.T) {
 		switch ty.ID {
 		case "story", "bug", "task", "epic", "sprint", "space", "comment", "subscription":
 			seen[ty.ID] = true
+			if ty.ID == "sprint" && ty.Version == 2 {
+				if !lifecycle.HasListeners(ty) {
+					t.Errorf("sprint v2 has no listeners: its at-timer needs a workflow")
+				}
+				continue
+			}
 			if lifecycle.HasListeners(ty) {
 				t.Errorf("%s v%d has listeners: every write to it would cost an outbox row", ty.ID, ty.Version)
 			}

@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -233,6 +234,9 @@ func (r *Relay) delivery(ctx context.Context, id uuid.UUID, ev pendingEvent) (De
 		HoldID         string `json:"hold_id"`          // every event that opens or closes a hold
 		CanceledHoldID string `json:"canceled_hold_id"` // an escape
 		Reaction       string `json:"reaction"`         // reaction_applied: <type>:<reaction>
+		// The fields the event set and cleared: IDs, never values.
+		FieldIDs        []string `json:"field_ids"`
+		ClearedFieldIDs []string `json:"cleared_field_ids"`
 	}
 	if err := json.Unmarshal(ev.Payload, &shape); err != nil {
 		return Delivery{}, fmt.Errorf("decode payload of event %d: %w", ev.Seq, err)
@@ -265,12 +269,23 @@ func (r *Relay) delivery(ctx context.Context, id uuid.UUID, ev pendingEvent) (De
 	if err != nil {
 		return Delivery{}, err
 	}
+	// For a Type with a timer at a field's instant: which of those fields
+	// the event set or cleared, so the workflow reads the instant again.
+	// Still a shape: IDs the Type itself declares, no value. Every other
+	// Type, and every other field, adds nothing to what is sent.
+	var atFields []string
+	for _, f := range ty.AtFields() { // sorted
+		if slices.Contains(shape.FieldIDs, f) || slices.Contains(shape.ClearedFieldIDs, f) {
+			atFields = append(atFields, f)
+		}
+	}
 	return Delivery{
 		ItemID:   id.String(),
 		UpdateID: fmt.Sprintf("%s:%d", id, ev.Seq),
 		Event: workflow.Event{
 			Seq: ev.Seq, Op: ev.Op, From: shape.From, To: entered, At: ev.At,
 			RequestedTo: shape.RequestedTo, HoldID: holdID, Canceled: canceled, Reaction: reaction,
+			FieldIDs:      atFields,
 			CorrelationID: ev.CorrelationID, Hop: ev.Hop,
 		},
 		// The Type decides, in one place, whether this event needs a

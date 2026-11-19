@@ -391,6 +391,28 @@ Ideas noted during the spike, not built yet.
   port, compose.dev.yaml's included, is on 127.0.0.1.
 - A production build of the web UI has no sign-on at all: real sign-on
   (OIDC) replaces the dev picker as it replaces the interceptor. (Web UI)
+- A state's timer is cancelled and restarted on every event of its Item,
+  even one that does not touch what the timer hangs on (the `at` field, or
+  nothing at all for a duration timer): the wait is "the timer, or any
+  event". Keeping the timer when its deadline is unchanged would save two
+  history events (TimerCanceled, TimerStarted) per write. It changes the
+  commands of running workflows, so it needs `GetVersion`. (Jira 2.1)
+- Computed effects, not built: `sets` on Create ("started at"); on a
+  transition a check or a held reaction holds (which of the two writes
+  computes, at which event's time); `before.f_x` (a field before the
+  patch); links in scope; `cause.at` in guards and invariants; a marker in
+  the event saying which fields were computed rather than patched.
+  "Resolved by" (`cause.actor`) waits for a declared keyword resolved by
+  `policy`, never a CEL variable. (Jira 2.1)
+- Guards still read `today` from the item service's Go clock, effects from
+  the write's stamp: around midnight UTC a guard and an effect of one write
+  can see two days. Give guards the stamp's date too. (Jira 2.1)
+- An `at` timer with an offset (`at: {field, to, before: 1h}`: a warning
+  before a deadline), and a timer on a `date` field once a Type or a
+  calendar says which zone ends the day. (Jira 2.1)
+- The web UI's datetime input edits to the second and sends milliseconds;
+  the search form takes an instant as typed text, with its offset. (Jira
+  2.1)
 
 ## 2026-11-12 — Step 1 (finished)
 
@@ -1795,3 +1817,99 @@ The six "Board:" links
 per story suggest a Type could say which links make a board; that is a Type attribute, not built.
 **Next session:** unchanged: the SLA design pass (paper only), then Jira part 2 (the IT service
 desk).
+
+## 2026-11-19 — Jira proof of concept, part 2, step 1: date-time fields, a timer at a field's instant, computed effects (finished)
+
+**Built:** primitives 1, 2 and 4 of "Decisions for Jira part 2". A `datetime` field holds an instant
+(sent as RFC 3339 with an offset, stored and returned as UTC with six fractional digits), with
+equality, ranges and `order_by`. A state may declare `at: {field, to}`: a `sprint@2` closes itself
+when `f_end_at` passes, and moving the end re-arms the timer in the same run. A transition may
+declare `sets`: `story`, `bug` and `task` `@2` stamp `f_resolved_at` with their done event's own time
+and unset it on reopening. Through the API, pli, the web UI's generic form and the scenario
+(steps J1 to J5). design.md: "Jira part 2, step 1 as built".
+
+**Kernel changes, counted** (six; proto v1 only grew, `buf breaking` green; no migration):
+(1) The `datetime` field type: one stored form, filters and ranges with bounds in any offset,
+`order_by`, CEL timestamp. (2) The timer at a field's instant: `at` on a state, its load rules,
+`NeedsWorkflow`, the relay naming the at-fields an event touched (`Event.FieldIDs`), the workflow's
+branch. (3) Computed effects: `sets` on a transition, evaluated by `lifecycle.TransitionWith` on the
+guard's view plus `cause.at` and `today`; exempt from `writable_by`; `effect_failed`. (4) **The
+write's time**: an event's `created_at` is `clock_timestamp()` read after the row locks, not
+`now()`; along `item_seq` an Item's event times never go backwards. (5) **Not yet**: the item
+service refuses an `at` timer's move while the write's time is before the instant (`ErrNotYet`
+with the remainder; unset is `ErrStale`). (6) `Service.AtInstant`, the one read that gives the
+workflow a field's value, and the `LoadInstant` activity. Proto: `FIELD_TYPE_DATETIME`,
+`State.timer`, `State.at`, `Transition.sets`. New refusal: `EFFECT_FAILED`. Not the kernel: the
+four version 2 Types, the web input, the scenario.
+
+**The declared exception.** "The workflow never sees a field value" now has one exception,
+written next to the rule in design.md ("Durable behavior", and the Policy boundary): the instant of
+a datetime field that the Item's current state names in `at`. `AtInstant` takes no field name, so
+the workflow cannot ask for another. It is on the exemption list of
+`TestEveryExportedReadCallsProject`, with its reason. The recorded histories hold the instant and
+nothing else of the Item (checked: no field text in either file).
+
+**Determinism, and how each point was proven:**
+- *The wait is the instant minus `workflow.Now(ctx)`.* By grep: `internal/workflow/item.go` and
+  `hooks.go` have no `time.Now`, `time.Until`, `time.Since` or `rand.`.
+- *Re-arming cancels the old timer through its own context.* Each wait is a `NewTimer` in a
+  `WithCancel` context, in a selector with a buffered SDK channel that the update handler feeds
+  (`SendAsync`). An applied event always wins, whatever fired with it, so nothing depends on which
+  coroutine wakes first. Proven by `TestAt_MovedLater_Rearms` and its neighbours (no firing at the
+  old instant), and in the recorded history: three TimerStarted, three TimerCanceled in run 1.
+- *Continue-as-new keeps a pending timer.* The instant travels in the input (`Snapshot.AtInstant`,
+  `AtLoaded`). Proven twice: `TestAt_ContinueAsNew_CarriesTheInstant` (test environment), and
+  `TestE2E_At_ContinueAsNew_KeepsTheTimer` on a second Temporal dev server started with
+  `limit.historyCount.suggestContinueAsNew=40`: the first run ends ContinuedAsNew with its timer
+  pending, the second closes the lap at its instant, once.
+- *`LoadInstant` runs only on entering an `at` state and on events naming its field.* Counted from
+  the real histories in that test: run 1 has 1 LoadItem and 2 LoadInstant (the entry, the moved
+  end; none for the renames), run 2 has neither and 1 FireTimer. Also
+  `TestAt_OtherEventsDoNotReadTheField`.
+- *Old histories.* No `GetVersion`: only a run whose Snapshot has an `At` table enters the new
+  branch. The four histories recorded from main replay unchanged. Two more are recorded from this
+  code (`lap_at_rearm_then_continue_as_new.json`, 46 events; `lap_at_carried_timer_fires.json`, 21)
+  and replayed by `TestReplay_AtTimerHistories`: the fifth history, with its continue-as-new, is
+  two files because it is two runs.
+
+**Never early.** With the item service's clock 800 ms behind the worker's
+(`Options.ClockSkew`, test-only), Temporal fires at its own instant, the item service answers
+NotYet, the workflow arms again for the remainder, and the closing event is stamped at or after
+the instant (`TestE2E_At_ServiceClockBehind_NeverClosesEarly`: one to three NotYet, one closing).
+`ClockSkew` cannot be set by a flag, an environment variable or a file:
+`TestClockSkew_NoProductionCodeSetsIt` reads the module's source.
+
+**One write, one now.** `cause.at` is the event's `created_at` exactly, and `today` inside `sets`
+is its UTC date (tested one second either side of midnight, with the service's Go clock on the
+other day). Guards still read `today` from the Go clock (Later).
+
+**Tests:** 95 new Go test functions in 12 files, 21 new vitest tests (409 in all), 1 new Playwright test (4
+in all). Changed existing tests, each agreed in review: `TestPli_Types` (19 to 23 Types),
+`TestParseDir_ReadsTheRepositorysTypes` and `TestListTypes_EveryVersionInOrder` (the four version 2
+Types), `TestHasListeners_PLATTypesHaveNone` (sprint@2 listens by design), and one entry added to
+the Project test's exemption list. Six of my own Phase B tests had fixture mistakes, found in
+Phase C and fixed after review; one more changed its expectation when `today` in an effect became
+the stamp's date.
+
+**Numbers:** `go test -race -count=1 ./...` green, no data race (workflow package 162 s, item
+service 63 s). Scenario, two runs in a row on a fresh stack: **43.5 s and 44.0 s** (30 to 41 s
+before; steps J3 and J4 wait about 12 s for real instants, since the dev clock scales durations
+only). A sprint ending "5 s from now" closed itself 4.8 s after it was started, in both runs.
+Playwright: 4 tests in 4.5 s.
+
+**Surprises:** `now()` is the transaction's start, so events could already go backwards in time
+along `item_seq`; the test reproduced it on the first try (a write held before its lock, another
+committing meanwhile). A `datetime-local` input drops zero seconds from its value, in jsdom as in
+browsers. A run in a state without behavior completes at once, so a workflow test cannot start
+there and wait for an event. The existing rule "a kernel-written field needs a writer" met `sets`
+immediately: `sets` now counts as that writer, which is also how such a field is unset (null).
+Every event of an Item cancels and restarts its state's timer, even a rename (Later).
+
+**Not verified here:** the images' build stages. This sandbox cannot download modules inside a
+Docker build, so the stack ran from binaries and a site built on the host, packaged with a
+throwaway override; CI's `scenario` job runs the repository's own Dockerfiles.
+
+**Open:** the acting timer at an instant (the SLA breach records `breached_at` and the goal keeps
+running) is Jira 2.3 scope, not Later: step 1's `at` only moves. A sprint@2 has a workflow for as
+long as it is active, even without an end.
+**Next session:** Jira 2.2: reactions that move or create, and multi-value fields.

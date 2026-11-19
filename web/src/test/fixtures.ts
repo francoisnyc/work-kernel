@@ -200,6 +200,54 @@ export const sprint = t({
   states: [{ id: "planned", category: StateCategory.BACKLOG }],
 });
 
+// Version 2 (Jira part 2, step 1): an end instant, and the active state
+// closes itself when it passes. Not in allTypes: the tests that count Types
+// were written for version 1.
+export const sprint2 = t({
+  name: typeName("sprint", 2),
+  typeId: "sprint",
+  version: 2,
+  initialState: "planned",
+  fields: [
+    { id: "f_name", type: FieldType.STRING },
+    { id: "f_end", type: FieldType.DATE },
+    { id: "f_end_at", type: FieldType.DATETIME },
+  ],
+  states: [
+    { id: "planned", category: StateCategory.BACKLOG },
+    { id: "active", category: StateCategory.ACTIVE, at: { field: "f_end_at", toState: "closed" } },
+    { id: "review", category: StateCategory.ACTIVE, timer: { after: "48h", toState: "closed" } },
+    { id: "closed", category: StateCategory.DONE },
+  ],
+  transitions: [
+    { fromState: "planned", toState: "active" },
+    { fromState: "active", toState: "closed" },
+    { fromState: "active", toState: "review" },
+    { fromState: "review", toState: "closed" },
+  ],
+});
+
+// Version 2 of a story: done stamps f_resolved_at, reopening unstamps it.
+export const story2 = t({
+  name: typeName("story", 2),
+  typeId: "story",
+  version: 2,
+  initialState: "todo",
+  fields: [
+    { id: "f_summary", type: FieldType.STRING },
+    { id: "f_resolution", type: FieldType.ENUM, options: ["fixed", "wontfix"] },
+    { id: "f_resolved_at", type: FieldType.DATETIME, writableBy: FieldWriter.KERNEL },
+  ],
+  states: [
+    { id: "todo", category: StateCategory.TODO },
+    { id: "done", category: StateCategory.DONE },
+  ],
+  transitions: [
+    { fromState: "todo", toState: "done", required: ["f_resolution"], sets: { f_resolved_at: "cause.at" } },
+    { fromState: "done", toState: "todo", clears: ["f_resolution"], sets: { f_resolved_at: "null" } },
+  ],
+});
+
 export const epic = t({
   name: typeName("epic"),
   typeId: "epic",

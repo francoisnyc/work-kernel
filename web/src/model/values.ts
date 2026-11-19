@@ -13,6 +13,7 @@ export function formValues(type: Type, fields: JsonObject | undefined): FormValu
   for (const f of type.fields) {
     const v = fields?.[f.id];
     if (f.type === FieldType.BOOL) out[f.id] = v === true;
+    else if (f.type === FieldType.DATETIME) out[f.id] = typeof v === "string" ? localInput(v) : "";
     else out[f.id] = v === undefined || v === null ? "" : String(v);
   }
   return out;
@@ -22,6 +23,8 @@ export function formValues(type: Type, fields: JsonObject | undefined): FormValu
 // trimmed.
 function sent(field: Field, value: string | boolean | undefined): string {
   const text = typeof value === "string" ? value : "";
+  // A datetime is edited on the browser's clock and sent in UTC.
+  if (field.type === FieldType.DATETIME) return instantOf(text.trim());
   return field.type === FieldType.STRING ? text : text.trim();
 }
 
@@ -50,6 +53,9 @@ export function patchFields(type: Type, original: JsonObject | undefined, form: 
       if (form[f.id] !== before[f.id]) out[f.id] = form[f.id] === true;
       continue;
     }
+    // Changed or not is judged on what the input holds: an instant nobody
+    // touched is not sent, so its microseconds are never cut to a second.
+    if (f.type === FieldType.DATETIME && form[f.id] === before[f.id]) continue;
     const now = sent(f, form[f.id]);
     if (now !== before[f.id]) out[f.id] = now === "" ? null : now;
   }
@@ -61,4 +67,32 @@ export function patchFields(type: Type, original: JsonObject | undefined, form: 
 // principal).
 export function filterValue(fieldType: FieldType, text: string): JsonValue {
   return fieldType === FieldType.BOOL ? text === "true" : text;
+}
+
+// --- date-time fields ---
+//
+// The wire holds an instant as an RFC 3339 string in UTC
+// (2026-12-04T17:00:00.000000Z). A form holds it as a datetime-local input
+// does: the same instant on the browser's clock, without an offset, to the
+// second (2026-12-04T12:00:00 in New York).
+
+const two = (n: number) => String(n).padStart(2, "0");
+
+// localInput is a stored instant as a datetime-local input shows it; "" for
+// anything that is not an instant. A fraction of a second is not shown.
+export function localInput(stored: string): string {
+  const at = new Date(stored);
+  if (stored === "" || Number.isNaN(at.getTime())) return "";
+  const date = `${String(at.getFullYear()).padStart(4, "0")}-${two(at.getMonth() + 1)}-${two(at.getDate())}`;
+  return `${date}T${two(at.getHours())}:${two(at.getMinutes())}:${two(at.getSeconds())}`;
+}
+
+// instantOf is a datetime-local input's text (with or without seconds) as
+// it is sent: the instant in UTC, with an offset (Z). "" for an empty or
+// unreadable input. A text without an offset is read on the browser's
+// clock, which is what the input shows.
+export function instantOf(local: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(local)) return "";
+  const at = new Date(local);
+  return Number.isNaN(at.getTime()) ? "" : at.toISOString();
 }

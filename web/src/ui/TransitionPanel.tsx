@@ -32,14 +32,19 @@ export type TransitionPanelProps = {
 // A move that was asked, and the server's answer to it.
 type Asked = { toState: string; fields: JsonObject; requestId: string; answer: TransitionItemResponse };
 
-// The transition's rules, as the Type states them.
-function rules(t: Transition): string[] {
+// The transition's rules, as the Type states them: who, when, what it
+// needs, clears and computes, and whether the state's own timer makes it.
+function rules(type: Type, t: Transition): string[] {
   const out: string[] = [];
+  const from = type.states.find((s) => s.id === t.fromState);
+  if (from?.at?.toState === t.toState) out.push(`made by the timer at ${from.at.field}`);
+  if (from?.timer?.toState === t.toState) out.push(`made by the timer after ${from.timer.after}`);
   if (t.allowed.length > 0) out.push(`allowed: ${t.allowed.join(", ")}`);
   if (t.except.length > 0) out.push(`except: ${t.except.join(", ")}`);
   if (t.guard !== "") out.push(`guard: ${t.guard}`);
   if (t.required.length > 0) out.push(`required: ${t.required.join(", ")}`);
   if (t.clears.length > 0) out.push(`clears: ${t.clears.join(", ")}`);
+  for (const field of Object.keys(t.sets).sort()) out.push(`sets: ${field} = ${t.sets[field]}`);
   if (t.checked) out.push("a check runs before the move");
   return out;
 }
@@ -108,7 +113,7 @@ export function TransitionPanel({ type, item, principals, only, onTransition }: 
               Move to {t.toState}
             </button>
             {systemOnly && <span className="hint"> only the system can do this</span>}
-            {rules(t).map((r) => (
+            {rules(type, t).map((r) => (
               <span key={r} className="rule">
                 {r}
               </span>

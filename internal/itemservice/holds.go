@@ -294,6 +294,9 @@ func (in *Internal) ResolveHold(ctx context.Context, req ResolveHoldRequest) (Wr
 		if err := ty.CheckFields(req.Fields, false); err != nil {
 			return WriteResult{}, fmt.Errorf("%w: correction: %v", ErrInvalid, err)
 		}
+		// Date-time values are stored in one form (req: this closure's copy).
+		req := req
+		req.Fields = ty.NormalizeFields(req.Fields)
 		// A correction travels with the move out of the held state: it may
 		// not write what that state freezes. (What the transition's allowed
 		// names, it may not write either: refused at load.)

@@ -21,6 +21,9 @@ const (
 	UpdateApply       = "apply"     // the update that delivers one event
 	ActivityLoadItem  = "LoadItem"  // reads a Snapshot from Postgres
 	ActivityFireTimer = "FireTimer" // asks the item service to make a timer's move
+	// ActivityLoadInstant reads the instant of the field the Item's state
+	// names in `at`: the one field value the workflow sees.
+	ActivityLoadInstant = "LoadInstant"
 
 	// Hooks (Step 6). Each hook activity reads its inputs, calls out, and
 	// writes back through the item service itself: the workflow never sees
@@ -54,6 +57,10 @@ const (
 	ErrTypeInvalid    = "Invalid"    // the request is malformed; the same request can never succeed
 	ErrTypeHeld       = "Held"       // an open hold refuses the move; for a timer, final
 	ErrTypeHookFailed = "HookFailed" // the hook failed for good (unknown customer, bad input)
+	// ErrTypeNotYet: a timer at an instant fired before the instant, by
+	// the item service's clock. Its details hold the remainder (a
+	// time.Duration); the workflow arms again for it.
+	ErrTypeNotYet = "NotYet"
 	// ErrTypeKeyConflict: an action ran again for the same key and got a
 	// different result (a second invoice), or the connector saw the key with
 	// a different request. A duplicate, never "already written".
@@ -86,6 +93,20 @@ const DefaultHookBudget = 15 * time.Minute
 type TimerSpec struct {
 	After time.Duration
 	To    string
+}
+
+// AtSpec is one state's timer at a field's instant, reduced to what the
+// workflow needs. Field is an ID, for the events that name it.
+type AtSpec struct {
+	Field string
+	To    string
+}
+
+// Instant is LoadInstant's answer: the instant of the field the Item's
+// state names in `at`, unset or not.
+type Instant struct {
+	Set bool
+	At  time.Time
 }
 
 // Snapshot is all a run knows about its Item. The first run loads it from
@@ -161,6 +182,15 @@ type Snapshot struct {
 	// DevDay is the length of a day the Type's durations were scaled to
 	// (zero: real time), recorded so the history shows the clock it ran on.
 	DevDay time.Duration
+
+	// At maps each state with a timer at a field's instant to it (never
+	// scaled by DevDay: an instant is not a duration). AtInstant is the
+	// instant last read for the current state (LoadInstant), nil when the
+	// field is unset; AtLoaded says it was read, so a run that continues
+	// as new does not read it again.
+	At        map[string]AtSpec
+	AtInstant *time.Time
+	AtLoaded  bool
 }
 
 // ActingSpec is one acting timer, reduced to what the workflow needs (its
@@ -327,6 +357,11 @@ type Event struct {
 	HoldID      string
 	// Reaction: a reaction_applied event's reaction (Step 2, part 3).
 	Reaction string
+	// FieldIDs are the fields the event set or cleared, among those a state
+	// of the Item's Type names in `at`: IDs only, sorted; nil for every
+	// other Type and event. The workflow reads them to re-arm a timer at a
+	// field's instant.
+	FieldIDs []string
 	// Canceled: the event closes HoldID by canceling it (an escape,
 	// canceled_hold_id), never by allowing it (consolidation, item 5).
 	Canceled bool
@@ -430,7 +465,20 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 		actingLive    int
 		cancelActing  workflow.CancelFunc
 		actingStarted bool
+
+		// A timer at a field's instant (Jira part 2, step 1). atEpoch
+		// counts the reasons to read the instant again (a state entered, an
+		// event naming the field), so that a read which an event overtook
+		// is not taken for current. atNotBefore is set when the item
+		// service answered NotYet: no firing before that moment.
+		atEpoch     int
+		atNotBefore time.Time
 	)
+	// news gets one token per applied event, so the at-timer's selector can
+	// wait for "the timer, or an event". Buffered and sent without
+	// blocking: an update handler never waits on the main loop. A channel
+	// of the SDK, not a Go channel: it is replayed like everything else.
+	news := workflow.NewBufferedChannel(ctx, 1)
 
 	apply := func(ctx workflow.Context, ev Event) (ApplyResult, error) {
 		// An update can arrive together with the start, before the load.
@@ -448,6 +496,15 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 		s.LastAppliedSeq = ev.Seq
 		changes++
 		wake++
+		news.SendAsync(true)
+		// The event names the field the current state's timer hangs on:
+		// the instant is read again, and a timer the item service had
+		// refused is armed again. (An entry into a state is handled below.)
+		if at, ok := s.At[s.State]; ok && ev.To == "" && slices.Contains(ev.FieldIDs, at.Field) {
+			s.AtLoaded, s.AtInstant, s.TimerDone = false, nil, false
+			atNotBefore = time.Time{}
+			atEpoch++
+		}
 		enteredBy := "" // the hold whose allowed resolution this event is
 		switch {
 		case ev.Op == lifecycle.OpTransitionRequested:
@@ -516,6 +573,11 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 			s.EnteredSeq, s.EnteredAt = ev.Seq, ev.At
 			s.CorrelationID, s.Hop = ev.CorrelationID, ev.Hop
 			s.TimerDone = false
+			// A timer at a field's instant belongs to the state: the new
+			// state's, if it has one, is read afresh.
+			s.AtLoaded, s.AtInstant = false, nil
+			atNotBefore = time.Time{}
+			atEpoch++
 			// The new state's enrich hooks. Those of a state already left
 			// and not yet started are dropped: the check is the backstop.
 			s.PendingEnrich = nil
@@ -863,6 +925,135 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 			}
 			carried := s
 			return workflow.NewContinueAsNewError(ctx, Name, Input{ItemID: in.ItemID, Carried: &carried})
+		}
+
+		// A timer at a field's instant (Jira part 2, step 1). Only a Type
+		// that declares one has an At table, so every other run never
+		// enters this branch and issues the commands it always did. A state
+		// has `at` or `timer`, never both: every path below goes round the
+		// loop again or ends the run.
+		if at, hasAt := s.At[s.State]; hasAt && !gone {
+			seen, entry := changes, entries
+			changed := func() bool { return changes != seen }
+
+			// Read the instant: once on entering the state (or starting in
+			// it), and again after an event that names its field. It is the
+			// one field value this workflow sees. If an event overtook the
+			// read (atEpoch moved), the answer may be old: read again.
+			if !s.AtLoaded {
+				epoch := atEpoch
+				var inst Instant
+				err := workflow.ExecuteActivity(ctx, ActivityLoadInstant, in.ItemID).Get(ctx, &inst)
+				var appErr *temporal.ApplicationError
+				switch {
+				case errors.As(err, &appErr) && appErr.Type() == ErrTypeNotFound:
+					log.Info("the item no longer exists; nothing to wait for", "item", in.ItemID)
+					gone = true
+				case err != nil:
+					return err // only a canceled workflow gets here
+				case epoch == atEpoch:
+					s.AtLoaded, s.AtInstant = true, nil
+					if inst.Set {
+						t := inst.At
+						s.AtInstant = &t
+					}
+				}
+				continue
+			}
+
+			// Nothing armed (the field is unset), or the timer has had its
+			// turn: wait for news. The run stays, to hear the field change.
+			if s.AtInstant == nil || s.TimerDone {
+				woke := wake
+				if err := workflow.Await(ctx, func() bool { return wake != woke }); err != nil {
+					return err
+				}
+				continue
+			}
+
+			// Wait until the instant, or until an event changes the
+			// picture. The time left is the instant minus workflow.Now, the
+			// replay-safe clock: never the machine's own. The timer lives
+			// in a context of its own, so re-arming is: cancel that
+			// context (the server drops the timer), go round, start a new
+			// one. The selector waits for the timer or for an event; which
+			// of the two it reports does not matter, because an event
+			// always wins below (changed), whatever fired with it.
+			due := *s.AtInstant
+			if atNotBefore.After(due) {
+				due = atNotBefore
+			}
+			if wait := due.Sub(workflow.Now(ctx)); wait > 0 {
+				for news.ReceiveAsync(nil) { // tokens of events already taken into account
+				}
+				timerCtx, cancelTimer := workflow.WithCancel(ctx)
+				sel := workflow.NewSelector(ctx)
+				sel.AddFuture(workflow.NewTimer(timerCtx, wait), func(workflow.Future) {})
+				sel.AddReceive(news, func(c workflow.ReceiveChannel, _ bool) { c.Receive(ctx, nil) })
+				sel.Select(ctx)
+				cancelTimer() // a no-op once it fired; else the old timer is gone
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if changed() {
+					continue
+				}
+			}
+
+			// Due while a hold is open: wait for the hold to close (or
+			// anything else to happen), then look again, as a duration
+			// timer does.
+			if s.Hold != nil {
+				if err := workflow.Await(ctx, changed); err != nil {
+					return err
+				}
+				continue
+			}
+
+			req := FireTimerInput{
+				ItemID: in.ItemID, TypeID: s.TypeID, TypeVersion: s.TypeVersion,
+				FromState: s.State, ToState: at.To,
+				ExpectedItemSeq: s.LastAppliedSeq, EnteredSeq: s.EnteredSeq,
+				CorrelationID: s.CorrelationID, Hop: s.Hop + 1,
+				IdempotencyKey: fmt.Sprintf("timer:%s:%d:%d", in.ItemID, s.EnteredSeq, s.LastAppliedSeq),
+			}
+			err := workflow.ExecuteActivity(ctx, ActivityFireTimer, req).Get(ctx, nil)
+			var appErr *temporal.ApplicationError
+			switch {
+			case err == nil:
+				// The move is written; its event will arrive like any other.
+			case errors.As(err, &appErr) && appErr.Type() == ErrTypeNotYet:
+				// The item service's clock has not reached the instant: it
+				// wrote nothing and says how long remains. Arm again for
+				// that long (unless an event moves the instant meanwhile).
+				var remaining time.Duration
+				if appErr.Details(&remaining) != nil || remaining <= 0 {
+					remaining = time.Second
+				}
+				if !changed() {
+					atNotBefore = workflow.Now(ctx).Add(remaining)
+				}
+				continue
+			case errors.As(err, &appErr) && (appErr.Type() == ErrTypeStale || appErr.Type() == ErrTypeHeld):
+				// The item service is ahead of this run (an event is on its
+				// way), or a hold it has not heard of is open: wait for the
+				// next event, then look again.
+				if err := workflow.Await(ctx, changed); err != nil {
+					return err
+				}
+				continue
+			case errors.As(err, &appErr) && (appErr.Type() == ErrTypeRejected || appErr.Type() == ErrTypeNotFound ||
+				appErr.Type() == ErrTypeInvalid):
+				// Final: the timer is spent, until the field changes.
+				log.Info("the item service refused a timer's move",
+					"item", in.ItemID, "from", req.FromState, "to", req.ToState, "reason", appErr.Message())
+			default:
+				return err // only a canceled workflow gets here
+			}
+			if entries == entry && !changed() {
+				s.TimerDone = true
+			}
+			continue
 		}
 
 		timer, hasTimer := s.Timers[s.State]
