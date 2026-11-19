@@ -62,3 +62,27 @@ export function patchFields(type: Type, original: JsonObject | undefined, form: 
 export function filterValue(fieldType: FieldType, text: string): JsonValue {
   return fieldType === FieldType.BOOL ? text === "true" : text;
 }
+
+// --- date-time fields ---
+//
+// The wire holds an instant as an RFC 3339 string in UTC
+// (2026-12-04T17:00:00.000000Z). A form holds it as a datetime-local input
+// does: the same instant on the browser's clock, without an offset, to the
+// second (2026-12-04T12:00:00 in New York).
+
+// localInput is a stored instant as a datetime-local input shows it; "" for
+// anything that is not an instant.
+//
+// Phase B stub: not implemented.
+export function localInput(_stored: string): string {
+  throw new Error("localInput is not implemented");
+}
+
+// instantOf is a datetime-local input's text (with or without seconds) as
+// it is sent: the instant in UTC, with an offset (Z). "" for an empty or
+// unreadable input.
+//
+// Phase B stub: not implemented.
+export function instantOf(_local: string): string {
+  throw new Error("instantOf is not implemented");
+}

@@ -13,6 +13,14 @@ func TimerFor(t *typedef.Type, state string) (typedef.Timer, bool) {
 	return *s.Timer, true
 }
 
+// AtTimerFor returns the timer at a field's instant an Item of Type t runs
+// while it is in the given state. Pure, like TimerFor.
+//
+// Phase B stub: not implemented.
+func AtTimerFor(t *typedef.Type, state string) (typedef.AtTimer, bool) {
+	return typedef.AtTimer{}, false
+}
+
 // NeedsWorkflow reports whether an Item entering the given state needs a
 // workflow: the state has behavior that plays out over time. It is the one
 // place that rule lives; the relay asks it to choose between starting a

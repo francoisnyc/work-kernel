@@ -229,6 +229,16 @@ func (a *Activities) FireTimer(ctx context.Context, in FireTimerInput) error {
 	return err
 }
 
+// LoadInstant reads the instant of the field the Item's current state names
+// in `at`. It is the declared exception to "the workflow never sees a field
+// value": that one value, of a field the Type names in `at`, and nothing
+// else.
+//
+// Phase B stub: not implemented.
+func (a *Activities) LoadInstant(ctx context.Context, itemID string) (Instant, error) {
+	return Instant{}, temporal.NewNonRetryableApplicationError("LoadInstant is not implemented", "NotImplemented", nil)
+}
+
 // WorkerOptions tune a worker. The zero value is what production uses.
 type WorkerOptions struct {
 	// CloseDelay is for tests only. It makes a workflow pause this long
@@ -266,6 +276,7 @@ func NewWorker(c client.Client, taskQueue string, k *itemservice.Service, opts W
 		HookAttemptTimeout: opts.HookAttemptTimeout, DevDay: opts.DevDay, DevTypes: opts.DevTypes}
 	w.RegisterActivityWithOptions(a.LoadItem, activity.RegisterOptions{Name: ActivityLoadItem})
 	w.RegisterActivityWithOptions(a.FireTimer, activity.RegisterOptions{Name: ActivityFireTimer})
+	w.RegisterActivityWithOptions(a.LoadInstant, activity.RegisterOptions{Name: ActivityLoadInstant})
 	w.RegisterActivityWithOptions(a.RunEnrich, activity.RegisterOptions{Name: ActivityRunEnrich})
 	w.RegisterActivityWithOptions(a.EnrichFallback, activity.RegisterOptions{Name: ActivityEnrichFallback})
 	w.RegisterActivityWithOptions(a.RunCheck, activity.RegisterOptions{Name: ActivityRunCheck})

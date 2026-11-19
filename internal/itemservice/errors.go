@@ -1,9 +1,11 @@
 package itemservice
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -28,6 +30,7 @@ const (
 	CodeWidenNotConfirmed = "widen_not_confirmed"           // a move widens who can see; the caller must confirm it
 	CodeAudienceChanged   = "audience_changed"              // an approval's audience is not the one the approver was shown
 	CodeFieldFrozen       = string(lifecycle.FieldFrozen)   // a write names a field the Item's state freezes
+	CodeEffectFailed      = string(lifecycle.EffectFailed)  // a transition's `sets` expression failed (metadata: field)
 )
 
 // FieldNotWritableError is an ErrForbidden naming the fields a write may not
@@ -135,3 +138,39 @@ func (e *HeldError) Error() string {
 	return fmt.Sprintf("%v: hold %s: %s", ErrHeld, e.HoldID, e.Reason)
 }
 func (e *HeldError) Unwrap() error { return ErrHeld }
+
+// ErrNotYet answers a timer at a field's instant that fired early: the
+// write's time is still before the instant. Nothing is written and the key
+// is not used up; the workflow arms again for the remainder. It is none of
+// ErrRejected, ErrStale or ErrInvalid.
+var ErrNotYet = errors.New("not yet")
+
+// NotYetError is ErrNotYet with how long remains until the instant, by the
+// item service's clock. Never zero or negative.
+type NotYetError struct {
+	Remaining time.Duration
+}
+
+func (e *NotYetError) Error() string {
+	return fmt.Sprintf("%v: the instant is %v away", ErrNotYet, e.Remaining)
+}
+func (e *NotYetError) Unwrap() error { return ErrNotYet }
+
+// AtInstant is what the workflow may know of an Item's timer at a field's
+// instant: the instant held by the field its current state names in `at`.
+// It is the one field value that reaches the workflow (docs/design.md).
+type AtInstant struct {
+	State   string
+	ItemSeq int64
+	// Set is false when the state declares no `at`, or its field is unset.
+	Set bool
+	At  time.Time
+}
+
+// AtInstant reads the instant of the field the Item's current state names
+// in `at`, and nothing else. A kernel read, for the worker only.
+//
+// Phase B stub: not implemented.
+func (k *Service) AtInstant(ctx context.Context, id uuid.UUID) (AtInstant, error) {
+	return AtInstant{}, errors.New("itemservice: AtInstant is not implemented")
+}

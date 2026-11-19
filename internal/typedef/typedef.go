@@ -33,6 +33,9 @@ const (
 	// Date is a calendar date, stored as an ISO 8601 string (2026-12-01).
 	// Guards see it as a CEL timestamp at 00:00 UTC.
 	Date FieldType = "date"
+	// DateTime is an instant, stored in UTC as an RFC 3339 string in one
+	// fixed-width form (DateTimeLayout), so byte order is time order.
+	DateTime FieldType = "datetime"
 )
 
 // WritableBy says who may write a field. The zero value is anyone who may
@@ -93,6 +96,34 @@ const (
 	ImplicitStateCategory = "none"
 )
 
+// DateTimeLayout is the one stored and returned form of a datetime value:
+// UTC, six fractional digits, "Z".
+const DateTimeLayout = "2006-01-02T15:04:05.000000Z"
+
+// VarCauseAt is the variable a `sets` expression reads the write's time
+// from: the timestamp of the event being written.
+const VarCauseAt = "cause.at"
+
+// AtTimer moves an Item out of a state when the instant held by one of its
+// datetime fields passes. Like Timer, it names a transition the Type
+// declares from that state.
+type AtTimer struct {
+	Field string `yaml:"field" json:"field"`
+	To    string `yaml:"to" json:"to"`
+}
+
+// NormalizeDateTime reads a datetime value as sent (an RFC 3339 string with
+// an offset, at most microseconds) and returns its stored form
+// (DateTimeLayout). The second value is false for anything else.
+//
+// Phase B stub: not implemented.
+func NormalizeDateTime(v any) (string, bool) { return "", false }
+
+// ParseDateTime reads a stored datetime value as a time.
+//
+// Phase B stub: not implemented.
+func ParseDateTime(v any) (time.Time, bool) { return time.Time{}, false }
+
 // TimerPrincipal is the principal a timer's move is made as. A timer gets no
 // silent exemption from `allowed`: the Type must name it (see check).
 const TimerPrincipal = "system:timer"
@@ -136,6 +167,9 @@ type State struct {
 	// Timer is nil for a state without one. A pointer field plays the role of
 	// an Optional here; omitempty leaves it out of the stored JSON when nil.
 	Timer *Timer `yaml:"timer" json:"timer,omitempty"`
+	// At is nil for a state without a timer at a field's instant. A state
+	// has Timer or At, never both.
+	At *AtTimer `yaml:"at" json:"at,omitempty"`
 	// Frozen are the fields no write may change while an Item is in this
 	// state. The transition entering the state may set them.
 	Frozen []string `yaml:"frozen" json:"frozen,omitempty"`
@@ -190,6 +224,10 @@ type Transition struct {
 	// clears the resolution). Required fields and the guard are judged
 	// before the clear, the invariants after it.
 	Clears []string `yaml:"clears" json:"clears,omitempty"`
+	// Sets are computed field effects: field ID -> CEL expression,
+	// evaluated in the move's own write, on the guard's view of the fields
+	// plus cause.at and today. A result of null unsets the field.
+	Sets map[string]string `yaml:"sets" json:"sets,omitempty"`
 
 	// Program is Guard compiled, filled when the Type is loaded; nil when
 	// there is no guard. The "-" tag keeps it out of YAML and JSON. Package

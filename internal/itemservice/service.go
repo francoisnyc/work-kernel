@@ -122,6 +122,10 @@ type Options struct {
 	// Now is the clock guards read `today` from (as a UTC date); nil means
 	// time.Now. Tests set a fixed clock.
 	Now func() time.Time
+	// ClockSkew is for tests only: it is added to the time every write is
+	// stamped with (the event's created_at, cause.at), as if this service's
+	// clock ran that far from the worker's. Negative: behind.
+	ClockSkew time.Duration
 }
 
 // New returns a Service that uses the given connection pool, with the Type

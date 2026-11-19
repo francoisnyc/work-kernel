@@ -21,6 +21,9 @@ const (
 	UpdateApply       = "apply"     // the update that delivers one event
 	ActivityLoadItem  = "LoadItem"  // reads a Snapshot from Postgres
 	ActivityFireTimer = "FireTimer" // asks the item service to make a timer's move
+	// ActivityLoadInstant reads the instant of the field the Item's state
+	// names in `at`: the one field value the workflow sees.
+	ActivityLoadInstant = "LoadInstant"
 
 	// Hooks (Step 6). Each hook activity reads its inputs, calls out, and
 	// writes back through the item service itself: the workflow never sees
@@ -54,6 +57,10 @@ const (
 	ErrTypeInvalid    = "Invalid"    // the request is malformed; the same request can never succeed
 	ErrTypeHeld       = "Held"       // an open hold refuses the move; for a timer, final
 	ErrTypeHookFailed = "HookFailed" // the hook failed for good (unknown customer, bad input)
+	// ErrTypeNotYet: a timer at an instant fired before the instant, by
+	// the item service's clock. Its details hold the remainder (a
+	// time.Duration); the workflow arms again for it.
+	ErrTypeNotYet = "NotYet"
 	// ErrTypeKeyConflict: an action ran again for the same key and got a
 	// different result (a second invoice), or the connector saw the key with
 	// a different request. A duplicate, never "already written".
@@ -86,6 +93,20 @@ const DefaultHookBudget = 15 * time.Minute
 type TimerSpec struct {
 	After time.Duration
 	To    string
+}
+
+// AtSpec is one state's timer at a field's instant, reduced to what the
+// workflow needs. Field is an ID, for the events that name it.
+type AtSpec struct {
+	Field string
+	To    string
+}
+
+// Instant is LoadInstant's answer: the instant of the field the Item's
+// state names in `at`, unset or not.
+type Instant struct {
+	Set bool
+	At  time.Time
 }
 
 // Snapshot is all a run knows about its Item. The first run loads it from
@@ -161,6 +182,15 @@ type Snapshot struct {
 	// DevDay is the length of a day the Type's durations were scaled to
 	// (zero: real time), recorded so the history shows the clock it ran on.
 	DevDay time.Duration
+
+	// At maps each state with a timer at a field's instant to it (never
+	// scaled by DevDay: an instant is not a duration). AtInstant is the
+	// instant last read for the current state (LoadInstant), nil when the
+	// field is unset; AtLoaded says it was read, so a run that continues
+	// as new does not read it again.
+	At        map[string]AtSpec
+	AtInstant *time.Time
+	AtLoaded  bool
 }
 
 // ActingSpec is one acting timer, reduced to what the workflow needs (its
@@ -327,6 +357,11 @@ type Event struct {
 	HoldID      string
 	// Reaction: a reaction_applied event's reaction (Step 2, part 3).
 	Reaction string
+	// FieldIDs are the fields the event set or cleared, among those a state
+	// of the Item's Type names in `at`: IDs only, sorted; nil for every
+	// other Type and event. The workflow reads them to re-arm a timer at a
+	// field's instant.
+	FieldIDs []string
 	// Canceled: the event closes HoldID by canceling it (an escape,
 	// canceled_hold_id), never by allowing it (consolidation, item 5).
 	Canceled bool

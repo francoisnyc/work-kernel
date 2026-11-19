@@ -19,6 +19,7 @@ const (
 	MissingFields Code = "missing_fields" // a required field is not set
 	GuardFailed   Code = "guard_failed"   // the guard does not hold
 	FieldFrozen   Code = "field_frozen"   // a write names a field the current state freezes
+	EffectFailed  Code = "effect_failed"  // a `sets` expression failed, or its result is no value of the field
 )
 
 // Rejection is the error returned for an illegal transition. Any type with
@@ -36,6 +37,8 @@ type Rejection struct {
 	Frozen []string
 	// For InvariantFailed: the invariant's ID.
 	Invariant string
+	// For EffectFailed: the field whose `sets` expression failed.
+	Field string
 }
 
 // Input is what a transition's guards see besides the Type: the fields as
@@ -46,6 +49,9 @@ type Input struct {
 	Links  Links
 	// Today is a date (UTC); the time of day is ignored.
 	Today time.Time
+	// CauseAt is the time of the event being written: what a `sets`
+	// expression reads as cause.at.
+	CauseAt time.Time
 }
 
 func (r *Rejection) Error() string { return r.Reason }
@@ -58,6 +64,10 @@ type Result struct {
 	// the Type declares them (sorted). The caller applies them after the
 	// patch; required fields and the guard were judged before.
 	Clears []string
+	// Sets are the transition's computed field effects, evaluated: field
+	// ID -> value in the field's stored form, nil to unset. The caller
+	// applies them after the clears and before the invariants.
+	Sets map[string]any
 }
 
 // CheckFrozen decides whether a write made while the Item is in state may
