@@ -22,7 +22,8 @@ func TestParseDir_ReadsTheRepositorysTypes(t *testing.T) {
 	for _, ty := range types {
 		got = append(got, fmt.Sprintf("%s@%d", ty.ID, ty.Version))
 	}
-	want := "bug@1 channel@1 comment@1 epic@1 leave_balance@1 message@1 space@1 sprint@1 story@1 subscription@1 task@1 " +
+	want := "bug@1 bug@2 channel@1 comment@1 epic@1 leave_balance@1 message@1 space@1 sprint@1 sprint@2 " +
+		"story@1 story@2 subscription@1 task@1 task@2 " +
 		"ticket@1 ticket@2 ticket@3 ticket@4 ticket@5 vacation_request@1 vacation_request@2 vacation_request@3"
 	if strings.Join(got, " ") != want {
 		t.Errorf("ParseDir = %v, want %s", got, want)
