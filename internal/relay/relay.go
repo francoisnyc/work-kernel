@@ -38,6 +38,10 @@ type Delivery struct {
 	// can recognize it as a duplicate.
 	UpdateID string
 	Event    workflow.Event
+	// Child, when set, makes this a different delivery: not an event of
+	// ItemID, but "an Item was created inside ItemID" (workflow.UpdateChild),
+	// sent to a container whose Type reacts to it. Event is then empty.
+	Child *workflow.ChildEvent
 	// Start asks for Update-With-Start: start the workflow if none runs.
 	// Without it the update only reaches a workflow that already runs.
 	Start bool

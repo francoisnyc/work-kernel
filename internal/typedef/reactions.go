@@ -34,7 +34,26 @@ const (
 	// does not hold it. For now it only undoes a held reaction (`undoes`);
 	// an after reaction with a free patch is Later.
 	ReactionAfter ReactionKind = "after"
+	// ReactionMove runs once its trigger has committed and moves its target
+	// into To, by the target's own transition rules. On entering a state
+	// the target is the Item Link points to, whose Type must accept the
+	// move; on created_inside it is the Item itself.
+	ReactionMove ReactionKind = "move"
+	// ReactionCreate runs once its trigger (entering a state) has committed
+	// and creates an Item of Type@Version contained in the Item.
+	ReactionCreate ReactionKind = "create"
 )
+
+// ByCreator is the one value Reaction.By takes: the Item created inside was
+// created by the declaring Item's creator (policy.IsRequester).
+const ByCreator = "creator"
+
+// ChildPrefix starts the CEL variable of a created Item's field in a
+// created_inside reaction's `when`: child.f_public.
+const ChildPrefix = "child."
+
+// ContainerLink is reserved: no link type may take the name.
+const ContainerLink = "container"
 
 // Reaction is one link reaction. Its principal is reaction:<type>:<id>.
 type Reaction struct {
@@ -56,6 +75,29 @@ type Reaction struct {
 	// Undoes (after only): the held reaction whose committed write this
 	// reaction reverses, by the delta that write recorded.
 	Undoes string `yaml:"undoes" json:"undoes,omitempty"`
+
+	// Jira part 2, step 2: move and create reactions.
+	//
+	// Of (on: created_inside): the Types whose creation inside the Item
+	// triggers the reaction.
+	Of []string `yaml:"of" json:"of,omitempty"`
+	// When is a CEL condition, bool. on: enter: over the Item's own fields.
+	// on: created_inside: over the created Item's fields, as child.<id>.
+	When string `yaml:"when" json:"when,omitempty"`
+	// By (on: created_inside): who must have created the Item inside.
+	By string `yaml:"by" json:"by,omitempty"`
+	// To (move): the state the target is moved into.
+	To string `yaml:"to" json:"to,omitempty"`
+	// TargetFrom (move, on: enter): the target is moved only from these
+	// states. (From keeps its meaning there: the states the trigger comes
+	// from. On created_inside, From is the Item's own states: it is both.)
+	TargetFrom []string `yaml:"target_from" json:"target_from,omitempty"`
+	// Type, Version and Fields (create): the Type version of the Item
+	// created inside this one, and its fields as CEL over the Item's
+	// fields plus cause.at.
+	Type    string            `yaml:"type" json:"type,omitempty"`
+	Version int               `yaml:"version" json:"version,omitempty"`
+	Fields  map[string]string `yaml:"fields" json:"fields,omitempty"`
 
 	// Programs are Add's expressions compiled, by target field; Reads are
 	// the source fields they read, sorted (frozen while the reaction's hold
@@ -571,3 +613,15 @@ func (f *Field) UnmarshalYAML(n *yaml.Node) error {
 	}
 	return nil
 }
+
+// AcceptsMove reports whether this Type accepts reaction key (<type>:<id>)
+// moving its Items into state.
+//
+// Phase B stub: not implemented.
+func (t *Type) AcceptsMove(key, state string) bool { return false }
+
+// AcceptsCreate reports whether this Type accepts reaction key creating
+// its Items with exactly these fields set.
+//
+// Phase B stub: not implemented.
+func (t *Type) AcceptsCreate(key string, fields []string) bool { return false }

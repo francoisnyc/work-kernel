@@ -265,6 +265,21 @@ func (a *Activities) LoadInstant(ctx context.Context, itemID string) (Instant, e
 	return Instant{Set: got.Set, At: got.At}, nil
 }
 
+// RunAfterReaction runs one move or create reaction for one trigger and
+// records its outcome on the Item.
+//
+// Phase B stub: not implemented.
+func (a *Activities) RunAfterReaction(ctx context.Context, in AfterReactionInput) error {
+	return temporal.NewNonRetryableApplicationError("RunAfterReaction is not implemented", "NotImplemented", nil)
+}
+
+// AfterReactionFailed records that a move or create reaction gave up.
+//
+// Phase B stub: not implemented.
+func (a *Activities) AfterReactionFailed(ctx context.Context, in AfterReactionFailedInput) error {
+	return temporal.NewNonRetryableApplicationError("AfterReactionFailed is not implemented", "NotImplemented", nil)
+}
+
 // WorkerOptions tune a worker. The zero value is what production uses.
 type WorkerOptions struct {
 	// CloseDelay is for tests only. It makes a workflow pause this long
@@ -303,6 +318,8 @@ func NewWorker(c client.Client, taskQueue string, k *itemservice.Service, opts W
 	w.RegisterActivityWithOptions(a.LoadItem, activity.RegisterOptions{Name: ActivityLoadItem})
 	w.RegisterActivityWithOptions(a.FireTimer, activity.RegisterOptions{Name: ActivityFireTimer})
 	w.RegisterActivityWithOptions(a.LoadInstant, activity.RegisterOptions{Name: ActivityLoadInstant})
+	w.RegisterActivityWithOptions(a.RunAfterReaction, activity.RegisterOptions{Name: ActivityRunAfterReaction})
+	w.RegisterActivityWithOptions(a.AfterReactionFailed, activity.RegisterOptions{Name: ActivityAfterReactionFailed})
 	w.RegisterActivityWithOptions(a.RunEnrich, activity.RegisterOptions{Name: ActivityRunEnrich})
 	w.RegisterActivityWithOptions(a.EnrichFallback, activity.RegisterOptions{Name: ActivityEnrichFallback})
 	w.RegisterActivityWithOptions(a.RunCheck, activity.RegisterOptions{Name: ActivityRunCheck})

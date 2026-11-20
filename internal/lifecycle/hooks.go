@@ -276,7 +276,12 @@ func ReactionAdds(r typedef.Reaction, fields map[string]any) (map[string]int64, 
 // on its source.
 const (
 	OpHookRan         = "hook_ran"         // an action hook with no writes ran (for an acting timer: which run)
-	OpReactionApplied = "reaction_applied" // an undo committed: what it gave back, and where
+	OpReactionApplied = "reaction_applied" // a reaction committed (an undo, a move, a create): which, and where
+	// OpReactionSkipped: a move or create reaction rightly did nothing for
+	// one trigger (Jira part 2, step 2): its condition was false, the
+	// creator was someone else, the target was not in `from`, or there was
+	// no target.
+	OpReactionSkipped = "reaction_skipped"
 )
 
 // ActingTimers returns the acting timers of a state, in the order declared.
@@ -300,3 +305,15 @@ func ReactionHooks(t *typedef.Type, reaction string) []typedef.Hook {
 	}
 	return out
 }
+
+// EnterReactions returns the move and create reactions an Item of Type t
+// runs on entering `to` from `from`, in the Type's order.
+//
+// Phase B stub: not implemented.
+func EnterReactions(t *typedef.Type, from, to string) []typedef.Reaction { return nil }
+
+// InsideReactions returns the reactions of Type t that the creation of an
+// Item of childType inside one of its Items triggers, in the Type's order.
+//
+// Phase B stub: not implemented.
+func InsideReactions(t *typedef.Type, childType string) []typedef.Reaction { return nil }

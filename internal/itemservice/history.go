@@ -65,6 +65,11 @@ type Event struct {
 	Values map[string]any
 	Erased []string
 
+	// SetOps: for each multi-value field the write changed with a set
+	// operation, what it asked for ("add" and "remove"); Values holds the
+	// resulting sets.
+	SetOps map[string]map[string][]any
+
 	Readers []string // a narrowing: the new readers
 	Inherit bool     // the Item dropped its own readers
 

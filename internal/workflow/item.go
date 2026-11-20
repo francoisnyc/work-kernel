@@ -17,10 +17,18 @@ import (
 // that calls it. Workflows and activities are looked up by name, not by Go
 // function, so the names are part of the contract with running workflows.
 const (
-	Name              = "item"      // the workflow type; the workflow ID is the Item's ID
-	UpdateApply       = "apply"     // the update that delivers one event
-	ActivityLoadItem  = "LoadItem"  // reads a Snapshot from Postgres
-	ActivityFireTimer = "FireTimer" // asks the item service to make a timer's move
+	Name        = "item"  // the workflow type; the workflow ID is the Item's ID
+	UpdateApply = "apply" // the update that delivers one event
+	// UpdateChild delivers "an Item was created inside this one" (a
+	// ChildEvent) to a container whose Type reacts to it.
+	UpdateChild = "child"
+	// Move and create reactions (Jira part 2, step 2): one activity runs a
+	// reaction for one trigger and records its outcome; the other records
+	// that it gave up (its budget ran out).
+	ActivityRunAfterReaction    = "RunAfterReaction"
+	ActivityAfterReactionFailed = "AfterReactionFailed"
+	ActivityLoadItem            = "LoadItem"  // reads a Snapshot from Postgres
+	ActivityFireTimer           = "FireTimer" // asks the item service to make a timer's move
 	// ActivityLoadInstant reads the instant of the field the Item's state
 	// names in `at`: the one field value the workflow sees.
 	ActivityLoadInstant = "LoadInstant"
@@ -191,6 +199,62 @@ type Snapshot struct {
 	At        map[string]AtSpec
 	AtInstant *time.Time
 	AtLoaded  bool
+
+	// Move and create reactions (Jira part 2, step 2), reduced like
+	// Actions. EnterReactions maps a state to the reactions entering it
+	// runs, in the Type's order (each with the states the entry must come
+	// from; none: any). InsideReactions maps a Type ID to the reactions the
+	// creation of such an Item inside this one runs. PendingReactions are
+	// those not yet finished: LoadItem reports them, events add to them,
+	// and a run never completes with one.
+	EnterReactions   map[string][]EnterReaction
+	InsideReactions  map[string][]string
+	PendingReactions []PendingReaction
+}
+
+// EnterReaction is one move or create reaction run on entering a state.
+type EnterReaction struct {
+	ID   string
+	From []string
+}
+
+// PendingReaction is one reaction to run for one trigger: the event of
+// CauseItem (this Item, or an Item created inside it) at CauseSeq.
+type PendingReaction struct {
+	ReactionID    string
+	CauseItem     string
+	CauseSeq      int64
+	CorrelationID string
+	Hop           int // of the cause
+}
+
+// ChildEvent says an Item was created inside this one: its ID, its Type,
+// and its create event's attribution. Shape only, no field value.
+type ChildEvent struct {
+	ChildID       string
+	TypeID        string
+	Seq           int64 // the create event: 1
+	At            time.Time
+	CorrelationID string
+	Hop           int
+}
+
+// AfterReactionInput is what RunAfterReaction needs: opaque IDs only.
+type AfterReactionInput struct {
+	ItemID        string // the Item whose Type declares the reaction
+	TypeID        string
+	TypeVersion   int
+	ReactionID    string
+	CauseItem     string
+	CauseSeq      int64
+	CorrelationID string
+	Hop           int // the cause's hop + 1
+}
+
+// AfterReactionFailedInput records that a move or create reaction gave up.
+type AfterReactionFailedInput struct {
+	Reaction AfterReactionInput
+	Reason   string // budget_exhausted
 }
 
 // ActingSpec is one acting timer, reduced to what the workflow needs (its

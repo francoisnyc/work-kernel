@@ -39,6 +39,9 @@ type Filter struct {
 type FieldFilter struct {
 	Field                string
 	Eq, Gt, Gte, Lt, Lte any
+	// Empty: the field has no value (a multi-value field: no member).
+	// Alone, never with Eq or a bound.
+	Empty bool
 }
 
 // empty reports whether the filter says nothing.

@@ -146,6 +146,12 @@ type Field struct {
 	// agent and the user it acts for must both hold one). The kernel's own
 	// writers are not affected. Role names, without the role: prefix.
 	WritableByRoles []string `yaml:"-" json:"writable_by_roles,omitempty"`
+	// Multiple makes the field hold a set of values of its type (string,
+	// enum, principal or date): unordered, no duplicates, stored sorted; an
+	// empty set is an unset field. Max, when set, is the most members it
+	// may have.
+	Multiple bool `yaml:"multiple" json:"multiple,omitempty"`
+	Max      int  `yaml:"max" json:"max,omitempty"`
 }
 
 // State is one lifecycle state. Every state has a category.

@@ -39,6 +39,9 @@ const (
 	// OnReaction: run when the Item records that its reaction Reaction (an
 	// undo) committed (the reaction_applied event). Action hooks only.
 	OnReaction HookOn = "reaction"
+	// OnCreatedInside: a reaction (never a hook) triggered by the creation
+	// of an Item inside an Item of the declaring Type (Jira part 2, step 2).
+	OnCreatedInside HookOn = "created_inside"
 )
 
 // Hook binds an action (code, named here, never contained) to a point in
