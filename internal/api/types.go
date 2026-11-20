@@ -118,8 +118,9 @@ func typeOut(ns string, t *typedef.Type) *kernelv1.Type {
 		})
 	}
 	for _, key := range slices.Sorted(maps.Keys(t.AcceptsReactions)) {
-		out.AcceptsReactions = append(out.AcceptsReactions,
-			&kernelv1.AcceptedReaction{Reaction: key, Fields: t.AcceptsReactions[key]})
+		acc := t.AcceptsReactions[key]
+		out.AcceptsReactions = append(out.AcceptsReactions, &kernelv1.AcceptedReaction{
+			Reaction: key, Fields: acc.Fields, Moves: acc.Moves, Creates: acc.MayCreate, CreatesFields: acc.Creates})
 	}
 	return out
 }

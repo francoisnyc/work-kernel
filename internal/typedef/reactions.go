@@ -104,6 +104,13 @@ type Reaction struct {
 	// is open). Filled when the Type is loaded.
 	Programs map[string]cel.Program `yaml:"-" json:"-"`
 	Reads    []string               `yaml:"-" json:"-"`
+	// Move and create reactions, filled when the Type is loaded: When
+	// compiled; the created Item's fields When reads as child.<id>
+	// (created_inside), sorted; Fields compiled, with each expression's type.
+	WhenProgram   cel.Program            `yaml:"-" json:"-"`
+	ChildReads    []string               `yaml:"-" json:"-"`
+	FieldPrograms map[string]cel.Program `yaml:"-" json:"-"`
+	fieldTypes    map[string]*cel.Type
 }
 
 // Invariant is a rule over an Item's fields that every write must keep, on
@@ -150,12 +157,12 @@ func (t *Type) Reaction(id string) (Reaction, bool) {
 // Accepts reports whether this Type accepts reaction key (<type>:<id>)
 // writing every one of fields.
 func (t *Type) Accepts(key string, fields []string) bool {
-	allowed, ok := t.AcceptsReactions[key]
+	a, ok := t.AcceptsReactions[key]
 	if !ok {
 		return false
 	}
 	for _, f := range fields {
-		if !slices.Contains(allowed, f) {
+		if !slices.Contains(a.Fields, f) {
 			return false
 		}
 	}
@@ -183,7 +190,7 @@ func CheckReactions(types []*Type) error {
 			}
 			for _, tgt := range byID[l.Targets[0]] {
 				f, ok := tgt.Field(l.Resolve.Field)
-				if !ok || f.Type != Principal {
+				if !ok || f.Type != Principal || f.Multiple {
 					return fail("link %s: resolve field %q is not a principal field of %s v%d",
 						l.Name, l.Resolve.Field, tgt.ID, tgt.Version)
 				}
@@ -193,6 +200,9 @@ func CheckReactions(types []*Type) error {
 			}
 		}
 		for _, r := range src.Reactions {
+			if r.Kind == ReactionMove || r.Kind == ReactionCreate {
+				continue // checked by checkAfterAcross, below
+			}
 			held := r
 			if r.Kind == ReactionAfter {
 				held, _ = src.Reaction(r.Undoes) // an undo writes what its held reaction wrote
@@ -219,6 +229,12 @@ func CheckReactions(types []*Type) error {
 			}
 		}
 	}
+	if err := checkAfterAcross(types, byID); err != nil {
+		return err
+	}
+	if err := checkReactionCycles(types); err != nil {
+		return err
+	}
 	// What each Type accepts must exist and point at it.
 	for _, tgt := range types {
 		for _, key := range slices.Sorted(maps.Keys(tgt.AcceptsReactions)) {
@@ -233,6 +249,10 @@ func CheckReactions(types []*Type) error {
 					r, _ = src.Reaction(r.Undoes)
 				}
 				if l, ok := src.Link(r.Link); ok && slices.Contains(l.Targets, tgt.ID) {
+					found = true
+				}
+				// A create names the Type it creates, not a link.
+				if r.Kind == ReactionCreate && r.Type == tgt.ID {
 					found = true
 				}
 			}
@@ -328,7 +348,7 @@ func (t *Type) checkKernelLinks(fail func(string, ...any) error) error {
 func newFieldEnv(t *Type) (*cel.Env, error) {
 	opts := make([]cel.EnvOption, 0, len(t.Fields))
 	for _, f := range t.Fields {
-		opts = append(opts, cel.Variable(f.ID, celType(f.Type)))
+		opts = append(opts, cel.Variable(f.ID, fieldCELType(f)))
 	}
 	return cel.NewEnv(opts...)
 }
@@ -394,17 +414,27 @@ func (t *Type) checkAccepts(fail func(string, ...any) error) error {
 		if _, _, ok := item.ReactionParts(item.KindReaction + ":" + key); !ok {
 			return fail("accepts_reactions key %q must be <type>:<reaction>, without a version", key)
 		}
-		fields := t.AcceptsReactions[key]
-		if len(fields) == 0 {
-			return fail("accepts_reactions %s names no fields", key)
+		acc := t.AcceptsReactions[key]
+		if len(acc.Fields) == 0 && len(acc.Moves) == 0 && !acc.MayCreate {
+			return fail("accepts_reactions %s accepts nothing: name fields, moves or creates", key)
 		}
-		for _, id := range fields {
+		for _, id := range acc.Fields {
 			f, ok := t.Field(id)
 			if !ok {
 				return fail("accepts_reactions %s: field %s is not declared", key, id)
 			}
 			if f.Type != Int {
 				return fail("accepts_reactions %s: field %s is not an int (a reaction adds)", key, id)
+			}
+		}
+		for _, st := range acc.Moves {
+			if _, ok := t.State(st); !ok {
+				return fail("accepts_reactions %s: moves into %q, which is not a state", key, st)
+			}
+		}
+		for _, id := range acc.Creates {
+			if _, ok := t.Field(id); !ok {
+				return fail("accepts_reactions %s: creates with field %s, which is not declared", key, id)
 			}
 		}
 	}
@@ -430,6 +460,15 @@ func (t *Type) checkReactions(fail func(string, ...any) error) error {
 		seen[r.ID] = true
 		if _, ok := t.Hook(r.ID); ok {
 			return fail("%s: a hook has the same ID; holds name either, so the IDs are shared", where)
+		}
+		if r.Kind == ReactionMove || r.Kind == ReactionCreate {
+			if err := t.checkAfterReaction(r, where, fail); err != nil {
+				return err
+			}
+			continue
+		}
+		if len(r.Of) > 0 || r.When != "" || r.By != "" || r.To != "" || len(r.TargetFrom) > 0 || r.Type != "" || len(r.Fields) > 0 {
+			return fail("%s: of, when, by, to, target_from, type and fields are for move and create reactions", where)
 		}
 		if r.On != OnEnter {
 			return fail("%s: on must be enter, not %q", where, r.On)
@@ -507,7 +546,7 @@ func (t *Type) checkReactions(fail func(string, ...any) error) error {
 				return fail("%s: an after reaction names the held reaction it undoes (undoes)", where)
 			}
 		default:
-			return fail("%s: unknown kind %q: want held or after", where, r.Kind)
+			return fail("%s: unknown kind %q: want held, after, move or create", where, r.Kind)
 		}
 	}
 	// Undos: each names a held reaction, and each held reaction has one.
@@ -572,7 +611,7 @@ func (f *Field) UnmarshalYAML(n *yaml.Node) error {
 			case "writable_by":
 				wb = n.Content[i+1]
 				continue
-			case "id", "type", "options":
+			case "id", "type", "options", "multiple", "max":
 			default:
 				// Node.Decode does not carry the decoder's KnownFields, so
 				// unknown keys are refused here, as everywhere else.
@@ -613,15 +652,3 @@ func (f *Field) UnmarshalYAML(n *yaml.Node) error {
 	}
 	return nil
 }
-
-// AcceptsMove reports whether this Type accepts reaction key (<type>:<id>)
-// moving its Items into state.
-//
-// Phase B stub: not implemented.
-func (t *Type) AcceptsMove(key, state string) bool { return false }
-
-// AcceptsCreate reports whether this Type accepts reaction key creating
-// its Items with exactly these fields set.
-//
-// Phase B stub: not implemented.
-func (t *Type) AcceptsCreate(key string, fields []string) bool { return false }

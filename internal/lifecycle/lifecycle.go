@@ -305,6 +305,21 @@ func addFieldVars(vars map[string]any, t *typedef.Type, fields map[string]any) {
 		switch {
 		case v == nil:
 			vars[f.ID] = types.NullValue
+		case f.Multiple:
+			// A set is a list to CEL: of strings, or of timestamps for
+			// dates. (An empty one is stored as unset: null, above.)
+			members := typedef.SetMembers(v)
+			if f.Type != typedef.Date {
+				vars[f.ID] = members
+				break
+			}
+			dates := make([]time.Time, 0, len(members))
+			for _, m := range members {
+				if d, ok := typedef.ParseDate(m); ok {
+					dates = append(dates, d)
+				}
+			}
+			vars[f.ID] = dates
 		case f.Type == typedef.Int:
 			if n, ok := typedef.AsInt(v); ok {
 				v = n

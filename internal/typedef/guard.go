@@ -56,7 +56,7 @@ func newGuardEnv(t *Type) (*cel.Env, error) {
 	// today is a date (00:00 UTC), set by the caller; never null.
 	opts = append(opts, cel.Variable(VarToday, cel.TimestampType))
 	for _, f := range t.Fields {
-		opts = append(opts, cel.Variable(f.ID, celType(f.Type)))
+		opts = append(opts, cel.Variable(f.ID, fieldCELType(f)))
 	}
 	for _, name := range t.guardLinks() {
 		opts = append(opts, cel.Variable(LinksPrefix+name, linkedItems))
@@ -98,4 +98,18 @@ func compileGuard(env *cel.Env, guard string) (cel.Program, []string, error) {
 	sort.Strings(links)
 	prg, err := env.Program(ast)
 	return prg, links, err
+}
+
+// fieldCELType is a field's CEL type: its type's, or for a multi-value
+// field a list of strings (every type that may be multiple is text to CEL
+// but date; a set of dates is a list of timestamps). Unset is null, as for
+// any field, so "has members" reads f != null.
+func fieldCELType(f Field) *cel.Type {
+	if !f.Multiple {
+		return celType(f.Type)
+	}
+	if f.Type == Date {
+		return cel.NullableType(cel.ListType(cel.TimestampType))
+	}
+	return cel.NullableType(cel.ListType(cel.StringType))
 }

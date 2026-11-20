@@ -1,0 +1,13 @@
+# A checklist (Jira part 2, step 2): created inside a ticket by the
+# ticket's reaction `open_checklist` when work on it starts. Nobody creates
+# its f_opened_at by hand: the consent below is its writer, and its value
+# is the time of the ticket's event (cause.at).
+id: checklist
+version: 1
+fields:
+  - {id: f_title,     type: string}
+  - {id: f_opened_at, type: datetime, writable_by: kernel}
+  - {id: f_done,      type: bool}
+
+accepts_reactions:
+  ticket:open_checklist: {creates: [f_title, f_opened_at]}

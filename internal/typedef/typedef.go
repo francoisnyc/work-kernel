@@ -252,7 +252,7 @@ type Type struct {
 	// AcceptsReactions: which reactions of other Types (<type>:<id>, no
 	// version) may write which fields of this Type's Items. Anything else
 	// is refused (reaction_not_accepted).
-	AcceptsReactions map[string][]string `yaml:"accepts_reactions" json:"accepts_reactions,omitempty"`
+	AcceptsReactions map[string]Accepted `yaml:"accepts_reactions" json:"accepts_reactions,omitempty"`
 	// Invariants are rules over the fields every write must keep.
 	Invariants []Invariant `yaml:"invariants" json:"invariants,omitempty"`
 	// Incoming names links other Types declare towards this Type.
@@ -365,6 +365,16 @@ func (t *Type) check() error {
 			}
 		default:
 			return fail("field %s: unknown type %q", f.ID, f.Type)
+		}
+		// A set of values: for types whose values are text. One value or
+		// several is part of what a field is (a new field ID to change it).
+		switch {
+		case f.Multiple && f.Type != String && f.Type != Enum && f.Type != Principal && f.Type != Date:
+			return fail("field %s: multiple is for string, enum, principal and date fields, not %s", f.ID, f.Type)
+		case f.Max < 0:
+			return fail("field %s: max cannot be negative", f.ID)
+		case f.Max > 0 && !f.Multiple:
+			return fail("field %s: max is for a multiple field", f.ID)
 		}
 	}
 
@@ -545,6 +555,9 @@ func (t *Type) check() error {
 	if err := t.checkAccepts(fail); err != nil {
 		return err
 	}
+	if err := t.checkMultiUses(fail); err != nil {
+		return err
+	}
 	// Clears name fields, and may not sit on a held transition.
 	if err := t.checkClears(fail); err != nil {
 		return err
@@ -561,8 +574,9 @@ func (t *Type) check() error {
 			continue
 		}
 		written := slices.ContainsFunc(t.Hooks, func(h Hook) bool { return slices.Contains(h.Writes, f.ID) })
-		for _, fields := range t.AcceptsReactions {
-			written = written || slices.Contains(fields, f.ID)
+		for _, a := range t.AcceptsReactions {
+			// A reaction that may write it, or set it on the Items it creates.
+			written = written || slices.Contains(a.Fields, f.ID) || slices.Contains(a.Creates, f.ID)
 		}
 		// Or a transition computes it (`sets`): the Type itself writes it.
 		for _, tr := range t.Transitions {
@@ -689,6 +703,12 @@ func (t *Type) CheckFields(values map[string]any, allowNull bool) error {
 		if v == nil {
 			if !allowNull {
 				return fail("field %s: null is not a value", id)
+			}
+			continue
+		}
+		if f.Multiple {
+			if reason := checkSetValue(f, v); reason != "" {
+				return fail("field %s: %s", id, reason)
 			}
 			continue
 		}

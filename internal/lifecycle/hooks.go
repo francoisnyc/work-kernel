@@ -305,15 +305,3 @@ func ReactionHooks(t *typedef.Type, reaction string) []typedef.Hook {
 	}
 	return out
 }
-
-// EnterReactions returns the move and create reactions an Item of Type t
-// runs on entering `to` from `from`, in the Type's order.
-//
-// Phase B stub: not implemented.
-func EnterReactions(t *typedef.Type, from, to string) []typedef.Reaction { return nil }
-
-// InsideReactions returns the reactions of Type t that the creation of an
-// Item of childType inside one of its Items triggers, in the Type's order.
-//
-// Phase B stub: not implemented.
-func InsideReactions(t *typedef.Type, childType string) []typedef.Reaction { return nil }

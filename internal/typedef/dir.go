@@ -52,6 +52,10 @@ func ParseDir(dir string) ([]*Type, error) {
 	if err := CheckIncoming(types); err != nil {
 		return nil, err
 	}
+	// One value or several is part of what a field is, in every version.
+	if err := CheckFieldShapes(types); err != nil {
+		return nil, err
+	}
 	// Reactions and link resolution name other Types too.
 	if err := CheckReactions(types); err != nil {
 		return nil, err

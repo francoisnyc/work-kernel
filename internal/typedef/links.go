@@ -71,6 +71,9 @@ func (t *Type) checkLinks(fail func(string, ...any) error) error {
 			return fail("a link type has no name")
 		}
 		where := fmt.Sprintf("link %s", l.Name)
+		if l.Name == ContainerLink || l.Inverse == ContainerLink {
+			return fail("%s: %q is a reserved name (containment is not a link)", where, ContainerLink)
+		}
 		if l.Inverse == "" {
 			return fail("%s: no inverse name", where)
 		}

@@ -1,0 +1,68 @@
+# A story in a software project (Jira proof of concept, part 1). Story, bug and
+# task share one lifecycle, one set of fields and one set of links: three
+# files, because a Type names no parent Type.
+#
+#   - An issue is contained in its project (a space). It belongs to an epic
+#     and to a sprint by links, at most one of each: never by containment.
+#   - f_rank orders the project's backlog by hand. It is an ordinary string
+#     field: pli writes it (`pli rank`), the kernel only sorts by it, byte
+#     by byte. Nothing here listens to it, so a drag costs one row and one
+#     event, and no outbox row.
+#   - f_priority sorts by name, so the options are named to sort: P1 first.
+#   - Done needs a resolution; reopening clears it in the same write.
+#   - Links to other issues say what blocks, relates to or duplicates what;
+#     no guard reads them.
+#
+# Version 2 (Jira part 2, step 1): done records when, in f_resolved_at,
+# computed in the move's own write from its event's time (cause.at).
+# Still nothing listens: no outbox row. Version 1 Items stay on version 1.
+#
+# Version 3 (Jira part 2, step 2): f_labels and f_reviewers, multi-value
+# fields. Still nothing listens.
+id: story
+version: 3
+initial_state: todo
+
+fields:
+  - {id: f_summary,     type: string}
+  - {id: f_description, type: string}
+  - {id: f_assignee,    type: principal}
+  - {id: f_priority,    type: enum, options: [P1, P2, P3, P4]}
+  - {id: f_points,      type: int}
+  - {id: f_resolution,  type: enum, options: [fixed, wontfix, duplicate, cannot_reproduce]}
+  - {id: f_rank,        type: string}
+  # When it was resolved: the time of the done event itself, set by the
+  # move (`sets`), never by hand. A queue sorts and filters by it.
+  - {id: f_resolved_at, type: datetime, writable_by: kernel}
+  # Sets (multiple: true): unordered, no duplicates. Labels are free text;
+  # reviewers are people to keep in the loop. Nothing in the kernel reads
+  # either: watching an issue is a Subscription Item, as before.
+  - {id: f_labels,      type: string,    multiple: true, max: 20}
+  - {id: f_reviewers,   type: principal, multiple: true}
+
+links:
+  - {name: epic,       inverse: issues,        targets: [epic],   max: one}
+  - {name: sprint,     inverse: sprint_issues, targets: [sprint], max: one}
+  - {name: blocks,     inverse: blocked_by,    targets: [story, bug, task]}
+  - {name: relates,    inverse: related_by,    targets: [story, bug, task]}
+  - {name: duplicates, inverse: duplicated_by, targets: [story, bug, task], max: one}
+
+states:
+  - {id: todo,        category: todo}
+  - {id: in_progress, category: active}
+  - {id: in_review,   category: active}
+  - {id: done,        category: done}
+  - {id: canceled,    category: canceled}
+
+transitions:
+  - {from: todo,        to: in_progress}
+  - {from: in_progress, to: in_review}
+  - {from: in_review,   to: in_progress}
+  - {from: in_review,   to: done, required: [f_resolution], sets: {f_resolved_at: 'cause.at'}}
+  - {from: in_progress, to: done, required: [f_resolution], sets: {f_resolved_at: 'cause.at'}}
+  # Reopen: the resolution no longer stands, nor its time (null unsets).
+  - {from: done,        to: todo, clears: [f_resolution], sets: {f_resolved_at: 'null'}}
+  - {from: todo,        to: canceled}
+  - {from: in_progress, to: canceled}
+  - {from: in_review,   to: canceled}
+  - {from: canceled,    to: todo}
