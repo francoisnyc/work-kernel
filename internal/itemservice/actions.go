@@ -23,6 +23,10 @@ const (
 	ReasonBudgetExhausted = "budget_exhausted" // the hook's budget ran out
 	ReasonKeyConflict     = "key_conflict"     // the same key came back with a different result: a duplicate
 	ReasonActionFailed    = "action_failed"    // failed for good (unknown customer, bad input)
+	// ReasonNoRecipient (Jira part 2, step 3b; a contract stub: HookFailed
+	// does not accept it yet): the hook reads an offer of its container and
+	// there is nobody to tell.
+	ReasonNoRecipient = "no_recipient"
 )
 
 // HookFailedRequest records that an action hook gave up for one entry of its

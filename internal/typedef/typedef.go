@@ -271,7 +271,16 @@ type Type struct {
 	// ReadableByReactions are the fields a create reaction of another Type
 	// may read from an Item of this Type (Jira part 2, step 3).
 	ReadableByReactions []string `yaml:"readable_by_reactions" json:"readable_by_reactions,omitempty"`
+	// Offers (Jira part 2, step 3b; a contract stub, not checked yet): what
+	// this Type offers to the hooks of the Items contained in its Items,
+	// offer name -> one of its principal fields. A hook there reads
+	// container:<name> (ContainerOfferPrefix).
+	Offers map[string]string `yaml:"offers" json:"offers,omitempty"`
 }
+
+// ContainerOfferPrefix starts a hook read that names an offer of the
+// Item's container: container:<offer>.
+const ContainerOfferPrefix = "container:"
 
 // Parse reads a Type from YAML and checks it. Unknown keys are errors, so a
 // typo in a Type file is caught at load time.

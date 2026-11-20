@@ -90,6 +90,10 @@ type Event struct {
 	// Reaction: reaction_failed's reaction (<type>:<id>); Reason its code.
 	// Also reaction_applied's.
 	Reaction string
+	// ReactionTarget (Jira part 2, step 3b; a contract stub, not filled
+	// yet): the Item a reaction record names, through visibility; nil when
+	// it names none.
+	ReactionTarget *ItemRef
 	// Timer and Run: hook_ran and hook_failed of an acting timer's run
 	// (Step 2, part 3).
 	Timer string

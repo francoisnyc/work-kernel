@@ -39,6 +39,10 @@ type LinkType struct {
 	// WritableBy: kernel blocks LinkItems and UnlinkItems on the public door
 	// (LINK_NOT_WRITABLE); only the kernel sets the link (Resolve).
 	WritableBy WritableBy `yaml:"writable_by" json:"writable_by,omitempty"`
+	// WritableByRoles (from writable_by: [role:<name>, ...]; Jira part 2,
+	// step 3b, a contract stub, not parsed yet): only holders of one of
+	// these roles add or remove the link on the public door.
+	WritableByRoles []string `yaml:"-" json:"writable_by_roles,omitempty"`
 	// Resolve makes the kernel set the link on entering a state.
 	Resolve *LinkResolve `yaml:"resolve" json:"resolve,omitempty"`
 }

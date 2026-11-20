@@ -23,6 +23,9 @@ export type LinksPanelProps = {
   // The other Items' titles by name, where the page has read them; a link
   // always shows the other Item's short ID.
   titles?: Record<string, string>;
+  // The other Items' states by name, where the page has read them (Jira
+  // part 2, step 3b). A contract stub: accepted, not shown yet.
+  states?: Record<string, string>;
 };
 
 // A link type that can be added from this Item's page.
