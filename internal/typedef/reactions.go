@@ -327,6 +327,9 @@ func (t *Type) checkKernelLinks(fail func(string, ...any) error) error {
 	resolvedOn := map[string]string{} // on_enter -> the link set there
 	for _, l := range t.Links {
 		where := "link " + l.Name
+		if err := l.checkRoles(); err != nil {
+			return fail("%v", err)
+		}
 		switch l.WritableBy {
 		case WritableByAnyone, WritableByKernel:
 		default:

@@ -252,8 +252,22 @@ all work with the same pages. It calls the public API only.
   `internal/rank`, held to it by shared test vectors). Past 32 bytes the
   board says the container needs a rebalance; rebalancing stays with
   `pli rank rebalance`.
+- A date-time value says how far away it is, **on the wall clock** ("in 2 h
+  (wall clock)"): an instant such as an incident's due instant was computed
+  in working time on a calendar the page does not know. A link shows the
+  linked Item's state, read when the page loads; a reaction's record in the
+  history links to the Item the reaction wrote.
 - Nothing updates by itself (the API has no Watch yet): pages reload after
   an action, and each has a Refresh button.
+- **Known limit: a save right after a move can be refused as stale.** A
+  save sends the Item's etag, and today the etag changes with every event
+  of the Item, including the ones the kernel writes a moment after a move:
+  a reaction's outcome record, a hook's record, a field only the kernel
+  writes. An incident gets several within half a second of being created
+  or moved (its goals write their due instants on it), so saving its form
+  in that window answers `ABORTED / STALE`: press Refresh and save again.
+  The fix is the next step (the etag will change only when something a
+  caller could overwrite changes); see `docs/journal.md`, Later.
 
 ### What is dev-only
 
@@ -290,7 +304,10 @@ approver set by the HR check, the terms frozen, no self-approval, agents
 unable to approve) that deducts from a leave balance HR owns (refunded on
 withdrawal, never overdrawn, even by two approvals at once), and the PLAT
 software project: a sprint's board ordered by rank, rank moves, an epic's
-progress, a resolution on done, 47 Items paged 20 at a time, watching. It drives only `pli`, keeps its saved sessions in a temporary
+progress, a resolution on done, 47 Items paged 20 at a time, watching, and
+the IT service desk: incidents whose first-response and resolution goals
+start, pause, breach (an email to the assignee) and end, and a queue sorted
+by due instant. It drives only `pli`, keeps its saved sessions in a temporary
 `XDG_CONFIG_HOME`, cleans up after itself, and stops at the first wrong
 outcome, naming the step. It can run any number of times on the same stack.
 

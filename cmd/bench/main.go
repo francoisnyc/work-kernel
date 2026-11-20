@@ -51,6 +51,7 @@ func main() {
 	explainLinks := flag.Bool("explain-links", false, "print query plans for the link reads and the link and principal filters")
 	explainOrder := flag.Bool("explain-order", false, "print query plans for the ordered and cross-Type reads (Jira part 1)")
 	explainSets := flag.Bool("explain-sets", false, "print query plans for the contains and empty filters on multi-value fields (Jira part 2)")
+	sla := flag.Bool("sla", false, "print the plans of the queue and the breached search, and a goal's row size (Jira part 2, step 3b)")
 	rankBench := flag.Bool("rank", false, "measure ranking a backlog by hand: key length, move latency, a rebalance, the write path (Jira part 1)")
 	flag.Parse()
 	run := run
@@ -77,6 +78,9 @@ func main() {
 	}
 	if *explainSets {
 		run = func() error { return explainOrderMode(context.Background(), true) }
+	}
+	if *sla {
+		run = func() error { return slaMode(context.Background()) }
 	}
 	if *rankBench {
 		run = func() error { return rankMode(context.Background()) }

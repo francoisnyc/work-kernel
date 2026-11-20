@@ -469,6 +469,11 @@ message ItemEvent {
   // with a set operation, what it asked for: {"f": {"add": [...],
   // "remove": [...]}} (fields holds the resulting sets).
   google.protobuf.Struct set_ops = 34;
+  // REACTION_APPLIED, REACTION_FAILED and REACTION_SKIPPED: the Item the
+  // reaction wrote, created or was refused by (a child it moved, the Item
+  // it created, its container, the Item one link away); restricted when
+  // the caller cannot see it. Unset when the record names no Item.
+  ItemRef reaction_target = 35;
 }
 
 enum ItemEventKind {
@@ -594,6 +599,17 @@ message Type {
   // source's container (linked.<link>.<field>,
   // container.linked.<link>.<field>). Any other field is refused.
   repeated string readable_by_reactions = 14;
+  // What this version offers to the hooks of the Items contained in its
+  // Items: a hook there reads container:<name>, and gets the value of the
+  // offer's field on its container when it runs.
+  repeated Offer offers = 15;
+}
+
+// A named principal field a Type offers to the hooks of contained Items.
+message Offer {
+  string name = 1;
+  // A principal field of this Type, holding one value.
+  string field = 2;
 }
 
 // Links declared by other Types that point to Items of this Type: the
@@ -762,6 +778,10 @@ message LinkType {
   FieldWriter writable_by = 6;
   // Set when the kernel sets the link itself on entering a state.
   LinkResolve resolve = 7;
+  // When set, only principals holding one of these roles may add or remove
+  // links of this type (as Field.writable_by_roles); anyone else is refused
+  // PERMISSION_DENIED / LINK_NOT_WRITABLE. Role names, without role:.
+  repeated string writable_by_roles = 8;
 }
 
 // The kernel sets a link in the write that enters on_enter: to the unique

@@ -6,6 +6,15 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
+- **Next, before Jira 2.4: the etag changes only when something a caller
+  could overwrite changes (a caller-writable field or the state); outcome
+  records, hook records and kernel-written field writes leave it alone.**
+  Today the etag is `item_seq`, which every event bumps. Measured in Jira
+  2.3b: a save of an incident with the etag read right after its creation
+  was `ABORTED STALE` 10 times in 10 at 100 ms, 500 ms and 2 s; one cycle of
+  an incident is 20 events, 15 of them the kernel's own (6 due-instant
+  writes by its goals, 9 reaction records). Both kinds bump it: exempting
+  kernel-written fields alone would not be enough. (Jira 2.3b)
 - Rename the repo and Go module to Pli once the name checks pass (domains,
   GitHub organization, trademark). The CLI is already `pli`. (2026-11-15)
 - `idempotency` rows never expire. Add a retention period and a cleanup job.
@@ -429,18 +438,29 @@ Ideas noted during the spike, not built yet.
   per pause, in the agent's favour. Keep finer time if that ever matters.
   (Jira 2.3a)
 - A Type that copies a calendar onto each Item it creates (pinned at creation)
-  carries the holiday list on every such Item. Measure the row size with the
-  real `sla_goal` (Jira 2.3b), and share or reference the calendar if it hurts.
-- A kernel-written field set by a reaction bumps its Item's etag, so a
+  carries the holiday list on every such Item. Measured with the real
+  `sla_goal` (Jira 2.3b): a goal's row is 783 bytes with no days off, 1,111
+  with 10 and 4,279 with 366 (its fields alone: 293, 453, 1,526), and its
+  create event's values as much again. Share or reference the calendar if
+  that hurts.
+- ~~A kernel-written field set by a reaction bumps its Item's etag, so a
   person's save made in that window is `ABORTED STALE`. Measure the count in
-  scenario B (Jira 2.3b); the fix would be that such fields do not bump the etag.
+  scenario B (Jira 2.3b).~~ Measured in 2.3b: see the first entry above,
+  which replaces this one.
 - `CreateItem` with links in the same write (an Item that needs a link from
   its first moment). (Jira 2.3 Phase A)
-- A reaction's outcome record does not show its target through the API, so
-  the records of a children move look alike there. Expose it through the
-  visibility filter. (Jira 2.3b Phase A)
-- A hook on an Item a reaction created has no recipient to read: no human
-  creator, and a create reaction sets no principal field. (Jira 2.3b Phase A)
+- ~~A reaction's outcome record does not show its target through the API.~~
+  Done in Jira 2.3b (`ItemEvent.reaction_target`).
+- ~~A hook on an Item a reaction created has no recipient to read.~~ Done in
+  Jira 2.3b (offers: `container:<name>`).
+- From Jira 2.3b: closing a resolved incident by hand (today the timer's
+  only); recomputing a running goal when the priority, the policy or the
+  calendar changes; a third metric (`sla_goal@2`); a fallback recipient (a
+  role) when a breach has nobody to tell; anyone can create a bare
+  `sla_goal` with no fields outside a host (harmless: every field is the
+  kernel's, but it should be refused); the queue and the breached search
+  sort every match after a sequential scan (fine at 5,000 incidents; an
+  index on a sorted field is the lever at 100 times that).
 
 ## 2026-11-12 — Step 1 (finished)
 
@@ -2140,3 +2160,106 @@ through the visibility filter. From the decisions, still open: a transition fire
 change on the same Item.
 **Next session:** Jira 2.3b: `types/sla/` (`sla_goal@1`, `calendar@1`, README), `incident@1`,
 scenario B, pli and the web UI; EXPLAIN for the queue sort and the breached search.
+
+## 2026-11-20 — Jira proof of concept, part 2, step 3b: the sla package, incident@1, scenario B (finished)
+
+**Built:** `types/sla/` (`sla_goal@1`, `calendar@1`, `sla_policy@1`, a README that is the contract with a
+host), `desk@1` and `incident@1`, scenario B (B1 to B10) through pli, and the web UI's three generic
+pieces. An incident starts a first-response and a resolution goal when it is created, with the target its
+desk's policy gives its priority; the goals pause, resume, breach (a mark at the instant and one email to
+the assignee of that moment), complete as met or missed, or are canceled; each shows its due instant on
+the incident, which the queue sorts by. design.md: scenario B and "Jira part 2, step 3b as built".
+
+**Kernel changes, counted** (three; proto v1 only grew, `buf breaking` green; no migration; no new
+dependency; no workflow code changed): (1) **Offers**: a Type offers a principal field to the hooks of
+contained Items; an action hook reads `container:<name>`, resolved when it runs, as the offered principal
+sees the container; `ErrNoRecipient`, recorded once as `hook_failed no_recipient`. (2) **A link only a
+role writes** (`writable_by: ['role:…']` on a link). (3) **A reaction record names its target**
+(`ItemEvent.reaction_target`, through visibility). Proto: `ItemEvent.reaction_target`, `Type.offers`
+(`Offer`), `LinkType.writable_by_roles`. Not the kernel: pli's `--not-empty`, the Types, the web UI.
+
+**Two visible behaviour changes** (approved in the Phase C review): a reaction's outcome record no longer
+fills `link_target` in a history (it did, with an empty link type); it fills `reaction_target` only. The
+fixed message of `LINK_NOT_WRITABLE` is now "the caller may not set links of this type" (it said "only
+the kernel sets links of this type").
+
+**Decided in the reviews:** the goal's end state is `completed`, with `f_outcome` met or missed (design.md
+amended; it had two end states); a met goal never carries a breach mark (a stop or a pause caused at or
+before the due instant clears it); resolving requires `f_resolution`, and reopening clears it; resolved ->
+closed is the timer's only; only action hooks read an offer, and no multi-value principal is offered; a
+goal resumed with no time left is due at the resume instant (`working_after` refuses zero seconds).
+
+**FOUND, NOT FIXED: the etag changes too often.** The etag is `item_seq`, and every event bumps it: a
+reaction's outcome record and a hook's record as much as a kernel-written field. A save made with the
+etag read right after an incident's create: 0 of 10 STALE with no delay, **10 of 10 at 100 ms, at 500 ms
+and at 2 s**. Both due instants are on the incident 322 ms after its create (p50; p90 387 ms, max 401 ms).
+One cycle (create, answer, wait, customer reply, resolve) is 20 events on the incident: 1 create, 4
+transitions, 6 due-instant writes by its goals, 9 reaction records. So exempting kernel-written fields
+alone (the fix noted in step 3a) would not be enough. Top of Later, the next step before Jira 2.4; the
+README's web UI section warns of it.
+
+**Tests that failed on their own logic once the Types existed** (most Phase B tests failed at the
+fixture: the Type files did not exist): three, fixed after review. Two item service tests counted a
+goal's events from 1, forgetting the goal's own outcome records (now `item_seq` before and after); the API
+test's `UnlinkItems` sent no `request_id`. A fourth was met in the code instead: pli's test expected the
+server to refuse `--empty f --not-empty f`, which as two filters is legal, so pli sends them as one
+filter, which the server does refuse. Every other new test passed on first contact with the real Types,
+the eight end-to-end tests and scenario B included. Existing tests changed, agreed: the three Type-list
+tests gain the five Types (34).
+
+**Determinism.** No workflow code changed: nobody to tell is answered inside the `RunAction` activity
+(the item service judges, the activity records and succeeds). Two histories recorded from this code as
+baselines of the first real host: `incident_cycle.json` (63 events: both starts, the pause, the
+requester's comment, the resume, the stop, the scaled close timer) and `sla_goal_breach_and_mail.json`
+(76 events: the set reactions, LoadActingInstants, ActAt at the instant, the breach hook). With the eight
+earlier ones they replay (`TestReplay_*`).
+
+**Numbers.** `go run ./cmd/bench -sla`, 5,000 incidents and 10,000 goals, analyzed: the queue by
+`f_due_resolution` (3,003 of 5,000 with a due instant) 8.9 ms; open incidents by due instant 5.3 ms;
+overdue now 4.3 ms; ever breached (`f_breached_at` not empty, latest first) 4.0 ms (a first run gave
+9.3, 6.3, 6.4 and 5.5). All four are one
+shape: a sequential scan of `items` filtered by Type and by the field's presence, a hash join to the
+readable scopes, a top-N heapsort (52 to 128 kB); no index serves the field. A goal's row: 783 bytes
+with no days off, 1,111 with 10, 4,279 with 366. Scenario: twice in a row on a fresh stack, 84 s each
+(both goals exist 293 ms after an incident). Playwright: 6 tests in 10.9 s. vitest: 438.
+
+**Surprises:** YAML's merge key (`<<: *pause`) lets the stop reuse the pause's three effects, so the
+correction is written once. Two existing source-reading guards caught the new bench mode: it
+borrowed a skewed clock to breach goals (`TestClockSkew_NoProductionCodeSetsIt`; it now uses a
+one-second policy and waits) and called the internal door itself
+(`TestInternalDoor_OnlyTheWorkerAndHookRunnerCallIt`; it now runs the reactions through the worker's
+activities). The second was found only by the full rerun, after the PR was open. A count of an Item's
+events is a brittle assertion wherever reactions record their outcomes on it.
+
+**A flaky step 3a test, found by CI on this PR and fixed in it.**
+`TestE2E_Step3_AStoppedWorker_ComputesTheSameElapsedAndDue` failed once in CI ("not within 15s: the same
+instant on the job") and passed on the re-run. *Cause, from the failed run's log:* the test stopped the
+worker the moment the meter was paused. At 17:23:56 the meter's workflow scheduled its own `hide`
+reaction (`RunAfterReaction`, activity 34) and the worker stopped in that same second. The log has no
+"Activity error" line for it (a reported failure logs one, as another test's did at 17:23:52) and no
+completion: the attempt was handed out and never answered. The worker came back at 17:23:58, the meter
+resumed (LoadActingInstants, a new timer), and its `show` reaction, queued behind the unanswered `hide`,
+never ran before the test gave up at 17:24:13. An attempt nobody answers is retried only when its
+**StartToClose timeout (30 s)** runs out, plus the retry policy's first interval (1 s): 31 s, against a
+wait of 15 s. It is a test race, not a reaction that never resumes: nothing in the log contradicts it,
+and the new test below reproduces exactly that and sees the reaction complete at 31 s. *Fix (approved):*
+the test waits for the job's `f_due` to clear (the `hide` done) before it stops the worker again.
+*New test,* for what the old timing probed by accident:
+`TestE2E_Step3_AWorkerStoppedMidReaction_TheReactionCompletesOnce_WithinItsTimeout`. A worker with a
+connection of its own holds a reaction's activity in flight (the row it needs is locked); the connection
+is cut, then the worker stopped, as a crash would; a new worker starts. The reaction completes **exactly
+once** (one move, one record) with the times computed from the cause, and within a bound derived from
+the activity's own options: **StartToCloseTimeout 30 s + InitialInterval 1 s (+ 5 s to hand the retry
+over) = 36 s**; measured 31 s, three runs in three. (A worker that is merely stopped in-process reports
+the cancelled attempt and is retried after 1 s: the first version of the test measured 2.1 s and proved
+nothing, hence the cut connection.) So after a worker crash, whatever a reaction or a hook was doing
+comes about half a minute late: a goal's pause, the due instant on its host, a breach notice. Never the
+computed times. Under a minute, so not in Later.
+
+**Not verified here:** the images' build stages (module download fails inside the build container: the
+stack ran from host-built binaries on the real distroless and nginx bases, with a throwaway override)
+and the pinned Playwright's own browser (the tests ran on this container's Chromium). CI's `scenario` job
+verifies both.
+
+**Open:** a transition fired by a field change on the same Item (N-of-M approvers), from the decisions.
+**Next session:** the etag rule (top of Later), then Jira 2.4.

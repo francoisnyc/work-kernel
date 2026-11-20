@@ -129,3 +129,61 @@ export async function boardOrder(baseURL: string, sprint: Item): Promise<string[
 }
 
 export const idOf = (item: Item) => item.name.split("/").pop()!;
+
+// --- Jira part 2, step 3b: an incident in a desk, with its goals ---
+
+async function until<T>(what: string, read: () => Promise<T | undefined>, seconds = 30): Promise<T> {
+  for (let i = 0; i < seconds * 4; i++) {
+    const got = await read();
+    if (got !== undefined) return got;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error(`seed: ${what}: not within ${seconds} s`);
+}
+
+export type Desk = { desk: Item; incident: Item; firstResponse: Item; resolution: Item; bug: Item };
+
+// lea's IT desk (she holds sla_admin: only she links its calendar and its
+// policy), ana's P3 incident in it, assigned to sam, and a bug of sam's
+// linked to the incident by caused_by. The worker creates the two goals;
+// this waits for them and for the due instants they show on the incident.
+// The P3 targets are hours: nothing breaches while the test runs.
+export async function seedIncident(baseURL: string, run: string): Promise<Desk> {
+  const lea = api(baseURL, "lea");
+  const ana = api(baseURL, "ana");
+  const sam = api(baseURL, "sam");
+  const week = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"].map((d) => `${d} 00:00-24:00`);
+  const calendar = await createItem(lea, type("calendar", 1), { f_name: `Always ${run}`, f_week: week, f_zone: "UTC" });
+  const targets: JsonObject = { f_name: `Standard ${run}` };
+  ["p1", "p2", "p3", "p4"].forEach((p, i) => {
+    targets[`f_first_response_s_${p}`] = String(3600 * (i + 1));
+    targets[`f_resolution_s_${p}`] = String(4 * 3600 * (i + 1)); // P3: 12 hours
+  });
+  const policy = await createItem(lea, type("sla_policy", 1), targets);
+  const desk = await createItem(lea, type("desk", 1), { f_key: `IT${run}`, f_name: `IT desk ${run}` });
+  await lea.linkItems({ name: desk.name, requestId: randomUUID(), linkType: "calendar", target: calendar.name });
+  await lea.linkItems({ name: desk.name, requestId: randomUUID(), linkType: "sla_policy", target: policy.name });
+
+  const incident = await createItem(
+    ana,
+    type("incident", 1),
+    { f_title: `VPN down ${run}`, f_priority: "P3", f_assignee: "user:sam" },
+    { container: desk.name },
+  );
+  const goal = (metric: string) =>
+    until(`the incident's ${metric} goal`, async () => {
+      const res = await ana.listItems({ parent: incident.name, pageSize: 50 });
+      return res.items.find((i) => i.type === type("sla_goal", 1) && i.fields?.f_metric === metric);
+    });
+  const firstResponse = await goal("first_response");
+  const resolution = await goal("resolution");
+  await until("both due instants on the incident", async () => {
+    const got = (await ana.getItem({ name: incident.name })).item;
+    return got?.fields?.f_due_resolution && got.fields.f_due_first_response ? got : undefined;
+  });
+
+  const space = await createItem(sam, type("space", 1), { f_key: `B${run}`, f_name: `Bugs ${run}` });
+  const bug = await createItem(sam, type("bug", 3), { f_summary: `Gateway leaks memory ${run}` }, { container: space.name });
+  await sam.linkItems({ name: incident.name, requestId: randomUUID(), linkType: "caused_by", target: bug.name });
+  return { desk, incident, firstResponse, resolution, bug };
+}

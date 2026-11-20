@@ -1,0 +1,124 @@
+# An incident (Jira part 2, step 3b; scenario B of docs/design.md): something
+# is broken for someone, in a service desk (desk@1). It is the first host of
+# the `sla` package (types/sla/README.md): it carries two goals, time to
+# first response and time to resolution, as Items contained in it.
+#
+#   - new -> in_progress <-> waiting_for_customer -> resolved -> closed.
+#     Resolving says how (f_resolution); reopening (resolved -> in_progress)
+#     clears it. A resolved incident is closed by a timer 120 hours later,
+#     and by nobody else (closing by hand is Later). new and in_progress
+#     may be canceled.
+#   - Priority (P1 to P4) is required from creation: the goals' targets are
+#     picked by it, from the desk's SLA policy.
+#   - Both goals start when the incident is created. Only resolution
+#     pauses, and only while the incident waits for its customer. A public
+#     comment by someone other than the requester stops first response;
+#     the requester's own public comment sets a waiting incident back in
+#     progress (which resumes resolution). Resolving stops the goals;
+#     reopening starts a new resolution goal (first response is measured
+#     once); canceling cancels them.
+#   - f_due_first_response and f_due_resolution are written by the goals,
+#     nobody else: a queue sorts by them.
+#   - The goals tell the assignee of a breach (offers: breach_contact), as
+#     assigned at that moment.
+#   - caused_by links the bugs behind it. No rule runs over the link: the
+#     incident's page shows each bug's state by reading the bug.
+id: incident
+version: 1
+initial_state: new
+
+fields:
+  - {id: f_title,      type: string}
+  - {id: f_priority,   type: enum, options: [P1, P2, P3, P4]}
+  - {id: f_impact,     type: enum, options: [extensive, significant, moderate, minor]}
+  - {id: f_assignee,   type: principal}
+  - {id: f_resolution, type: enum, options: [fixed, workaround, wontfix, duplicate]}
+  - {id: f_due_first_response, type: datetime, writable_by: kernel}
+  - {id: f_due_resolution,     type: datetime, writable_by: kernel}
+
+invariants:
+  - {id: priority_missing, rule: 'f_priority != null'}
+
+links:
+  - {name: caused_by, inverse: causes, targets: [bug]}
+
+offers:
+  breach_contact: f_assignee
+
+states:
+  - {id: new,                  category: triage}
+  - {id: in_progress,          category: active}
+  - {id: waiting_for_customer, category: waiting}
+  - {id: resolved,             category: done, timer: {after: 120h, to: closed}}
+  - {id: closed,               category: done}
+  - {id: canceled,             category: canceled}
+
+transitions:
+  - {from: new,                  to: in_progress}
+  - {from: in_progress,          to: waiting_for_customer}
+  - {from: waiting_for_customer, to: in_progress}
+  - {from: in_progress,          to: resolved, required: [f_resolution]}
+  - {from: waiting_for_customer, to: resolved, required: [f_resolution]}
+  - {from: resolved,             to: closed, allowed: ['principal:system:timer']}
+  - {from: resolved,             to: in_progress, clears: [f_resolution]}
+  - {from: new,                  to: canceled}
+  - {from: in_progress,          to: canceled}
+
+reactions:
+  # The contract of the sla package: these IDs, moving or creating sla_goals.
+  - id: sla_start_first_response
+    kind: create
+    on: enter
+    state: new
+    type: sla_goal
+    version: 1
+    fields:
+      f_metric: '"first_response"'
+      f_target_s: 'f_priority == "P1" ? container.linked.sla_policy.f_first_response_s_p1 : f_priority == "P2" ? container.linked.sla_policy.f_first_response_s_p2 : f_priority == "P3" ? container.linked.sla_policy.f_first_response_s_p3 : container.linked.sla_policy.f_first_response_s_p4'
+      f_started_at: 'cause.at'
+      f_week: 'container.linked.calendar.f_week'
+      f_days_off: 'container.linked.calendar.f_days_off'
+      f_zone: 'container.linked.calendar.f_zone'
+      f_due_at: >-
+        working_after(cause.at,
+        f_priority == "P1" ? container.linked.sla_policy.f_first_response_s_p1 : f_priority == "P2" ? container.linked.sla_policy.f_first_response_s_p2 : f_priority == "P3" ? container.linked.sla_policy.f_first_response_s_p3 : container.linked.sla_policy.f_first_response_s_p4,
+        calendar(container.linked.calendar.f_week, container.linked.calendar.f_days_off, container.linked.calendar.f_zone))
+  - id: sla_start_resolution
+    kind: create
+    on: enter
+    state: new
+    type: sla_goal
+    version: 1
+    fields: &resolution
+      f_metric: '"resolution"'
+      f_target_s: 'f_priority == "P1" ? container.linked.sla_policy.f_resolution_s_p1 : f_priority == "P2" ? container.linked.sla_policy.f_resolution_s_p2 : f_priority == "P3" ? container.linked.sla_policy.f_resolution_s_p3 : container.linked.sla_policy.f_resolution_s_p4'
+      f_started_at: 'cause.at'
+      f_week: 'container.linked.calendar.f_week'
+      f_days_off: 'container.linked.calendar.f_days_off'
+      f_zone: 'container.linked.calendar.f_zone'
+      f_due_at: >-
+        working_after(cause.at,
+        f_priority == "P1" ? container.linked.sla_policy.f_resolution_s_p1 : f_priority == "P2" ? container.linked.sla_policy.f_resolution_s_p2 : f_priority == "P3" ? container.linked.sla_policy.f_resolution_s_p3 : container.linked.sla_policy.f_resolution_s_p4,
+        calendar(container.linked.calendar.f_week, container.linked.calendar.f_days_off, container.linked.calendar.f_zone))
+  - {id: sla_restart_resolution, kind: create, on: enter, state: in_progress, from: [resolved], type: sla_goal, version: 1, fields: *resolution}
+  - {id: sla_pause,  kind: move, on: enter, state: waiting_for_customer,
+     children: {of: [sla_goal], when: 'child.f_metric == "resolution"'}, to: paused, target_from: [running]}
+  - {id: sla_resume, kind: move, on: enter, state: in_progress, from: [waiting_for_customer],
+     children: {of: [sla_goal], when: 'child.f_metric == "resolution"'}, to: running, target_from: [paused]}
+  - {id: sla_stop,   kind: move, on: enter, state: resolved, children: {of: [sla_goal]}, to: completed, target_from: [running, paused]}
+  - {id: sla_cancel, kind: move, on: enter, state: canceled, children: {of: [sla_goal]}, to: canceled,  target_from: [running, paused]}
+  - {id: sla_answered, kind: move, on: created_inside, of: [comment], when: 'child.f_public == true', by: not_creator,
+     children: {of: [sla_goal], when: 'child.f_metric == "first_response"'}, to: completed, target_from: [running]}
+  # The incident's own rule (as ticket@6's reopen).
+  - {id: customer_replied, kind: move, on: created_inside, of: [comment], when: 'child.f_public == true', by: creator,
+     from: [waiting_for_customer], to: in_progress}
+
+accepts_reactions:
+  sla_goal:show_first_response:   {sets: [f_due_first_response]}
+  sla_goal:hide_first_response:   {sets: [f_due_first_response]}
+  sla_goal:clear_first_response:  {sets: [f_due_first_response]}
+  sla_goal:cancel_first_response: {sets: [f_due_first_response]}
+  sla_goal:show_resolution:       {sets: [f_due_resolution]}
+  sla_goal:hide_resolution:       {sets: [f_due_resolution]}
+  sla_goal:clear_resolution:      {sets: [f_due_resolution]}
+  sla_goal:cancel_resolution:     {sets: [f_due_resolution]}

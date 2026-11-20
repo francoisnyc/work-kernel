@@ -3,6 +3,7 @@ import { useId, useState, type KeyboardEvent, type ReactElement } from "react";
 import { FieldType, type Field } from "../gen/kernel/v1/kernel_pb";
 import type { FieldAccess } from "../model/typeinfo";
 import { instantOf, type FormValue } from "../model/values";
+import { relativeTime } from "../model/reltime";
 
 export type FieldInputProps = {
   field: Field;
@@ -74,15 +75,21 @@ export function FieldInput({ field, value, onChange, access, state, principals }
       // The form holds the instant on the browser's clock, to the second;
       // the title says which instant that is in UTC.
       const utc = instantOf(text);
+      // How far away it is, on the wall clock (and labelled so: the
+      // instant may have been computed in working time on a calendar).
+      const away = relativeTime(utc, new Date());
       input = (
-        <input
-          {...common}
-          type="datetime-local"
-          step="1"
-          title={utc === "" ? undefined : utc}
-          value={text}
-          onChange={(e) => onChange(e.target.value)}
-        />
+        <>
+          <input
+            {...common}
+            type="datetime-local"
+            step="1"
+            title={utc === "" ? undefined : utc}
+            value={text}
+            onChange={(e) => onChange(e.target.value)}
+          />
+          {away !== "" && <span className="meta relative-time"> {away}</span>}
+        </>
       );
       break;
     }

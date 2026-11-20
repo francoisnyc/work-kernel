@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -22,8 +23,8 @@ import (
 
 // filterOpts are the FILTERS flags, shared by item search and item list.
 type filterOpts struct {
-	types, states, categories, wheres, links, empties listFlag
-	orderBy                                           string
+	types, states, categories, wheres, links, empties, notEmpties listFlag
+	orderBy                                                       string
 }
 
 func filterFlags(fs *flag.FlagSet) *filterOpts {
@@ -33,6 +34,7 @@ func filterFlags(fs *flag.FlagSet) *filterOpts {
 	fs.Var(&f.categories, "category", "a state category (active, done); repeatable")
 	fs.Var(&f.wheres, "where", "F=V, F>V, F>=V, F<V or F<=V on a field (on a principal field, V may be me); repeatable")
 	fs.Var(&f.empties, "empty", "a field ID: Items where the field has no value; repeatable")
+	fs.Var(&f.notEmpties, "not-empty", "a field ID: Items where the field has a value; repeatable")
 	fs.Var(&f.links, "linked", "out:NAME=ITEM (Items that link to ITEM) or in:NAME=ITEM (Items ITEM links to, by the inverse name); repeatable")
 	fs.StringVar(&f.orderBy, "order-by", "", "sort by a field: 'FIELD', 'FIELD asc' or 'FIELD desc' (default: newest first)")
 	return f
@@ -40,7 +42,7 @@ func filterFlags(fs *flag.FlagSet) *filterOpts {
 
 // filter builds the ItemFilter; nil when no flag was given.
 func (f *filterOpts) filter(ns string) (*kernelv1.ItemFilter, error) {
-	if len(f.types)+len(f.states)+len(f.categories)+len(f.wheres)+len(f.links)+len(f.empties) == 0 {
+	if len(f.types)+len(f.states)+len(f.categories)+len(f.wheres)+len(f.links)+len(f.empties)+len(f.notEmpties) == 0 {
 		return nil, nil
 	}
 	out := &kernelv1.ItemFilter{States: f.states}
@@ -64,8 +66,15 @@ func (f *filterOpts) filter(ns string) (*kernelv1.ItemFilter, error) {
 		}
 		out.Fields = append(out.Fields, ff)
 	}
+	// --empty and --not-empty of one field are one filter saying both: the
+	// server refuses the contradiction, rather than pli finding nothing.
 	for _, id := range f.empties {
-		out.Fields = append(out.Fields, &kernelv1.FieldFilter{Field: id, Empty: true})
+		out.Fields = append(out.Fields, &kernelv1.FieldFilter{Field: id, Empty: true, NotEmpty: slices.Contains(f.notEmpties, id)})
+	}
+	for _, id := range f.notEmpties {
+		if !slices.Contains(f.empties, id) {
+			out.Fields = append(out.Fields, &kernelv1.FieldFilter{Field: id, NotEmpty: true})
+		}
 	}
 	for _, l := range f.links {
 		lf, err := linked(ns, l)

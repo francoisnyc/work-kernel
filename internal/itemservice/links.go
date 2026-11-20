@@ -144,6 +144,22 @@ func (k *Service) linkWrite(ctx context.Context, req LinkRequest, add bool) (Wri
 		if lt.WritableBy == typedef.WritableByKernel {
 			return WriteResult{}, &LinkNotWritableError{LinkType: lt.Name}
 		}
+		// A link only roles write (Jira part 2, step 3b): the rule of a
+		// role-written field, so an agent and its user must both hold one.
+		if len(lt.WritableByRoles) > 0 {
+			who := policy.Who{Actor: req.Principal.Actor, OnBehalfOf: req.Principal.OnBehalfOf}
+			if who.ActorRoles, err = policy.Roles(ctx, tx, nsOf(req.Principal), who.Actor); err != nil {
+				return WriteResult{}, err
+			}
+			if who.OnBehalfOf != "" {
+				if who.OnBehalfOfRoles, err = policy.Roles(ctx, tx, nsOf(req.Principal), who.OnBehalfOf); err != nil {
+					return WriteResult{}, err
+				}
+			}
+			if !policy.MayWriteRoleField(typedef.Field{ID: lt.Name, WritableByRoles: lt.WritableByRoles}, who) {
+				return WriteResult{}, &LinkNotWritableError{LinkType: lt.Name, Roles: lt.WritableByRoles}
+			}
+		}
 		if err := checkAgentWrite(ctx, tx, req.Principal, src.ScopeID, &req.SourceID); err != nil {
 			return WriteResult{}, err
 		}

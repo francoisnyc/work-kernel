@@ -23,6 +23,9 @@ const (
 	ReasonBudgetExhausted = "budget_exhausted" // the hook's budget ran out
 	ReasonKeyConflict     = "key_conflict"     // the same key came back with a different result: a duplicate
 	ReasonActionFailed    = "action_failed"    // failed for good (unknown customer, bad input)
+	// ReasonNoRecipient (Jira part 2, step 3b): the hook reads an offer of
+	// its container and there is nobody to tell.
+	ReasonNoRecipient = "no_recipient"
 )
 
 // HookFailedRequest records that an action hook gave up for one entry of its
@@ -50,10 +53,10 @@ func (in *Internal) HookFailed(ctx context.Context, req HookFailedRequest) (Writ
 		return WriteResult{}, fmt.Errorf("%w: an idempotency key is required", ErrInvalid)
 	}
 	switch req.Reason {
-	case ReasonBudgetExhausted, ReasonKeyConflict, ReasonActionFailed:
+	case ReasonBudgetExhausted, ReasonKeyConflict, ReasonActionFailed, ReasonNoRecipient:
 	default:
-		return WriteResult{}, fmt.Errorf("%w: hook_failed reason %q is not one of %s, %s, %s",
-			ErrInvalid, req.Reason, ReasonBudgetExhausted, ReasonKeyConflict, ReasonActionFailed)
+		return WriteResult{}, fmt.Errorf("%w: hook_failed reason %q is not one of %s, %s, %s, %s",
+			ErrInvalid, req.Reason, ReasonBudgetExhausted, ReasonKeyConflict, ReasonActionFailed, ReasonNoRecipient)
 	}
 	kc, err := checkKernel(req.Principal, req.ItemID, req.Attribution)
 	if err != nil {

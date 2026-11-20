@@ -17,7 +17,10 @@
 # PLAT Types. Jira part 2, step 2 added multi-value fields (labels and
 # reviewers on version 3 of the PLAT issues) and reactions that move or
 # create (ticket@6: a customer's comment sets a waiting ticket back in
-# progress; starting work creates a checklist).
+# progress; starting work creates a checklist). Jira part 2, step 3b added
+# scenario B, the IT service desk: incidents in a desk, with first-response
+# and resolution goals (the `sla` package), breach marks and emails, the
+# queue by due instant; lea holds the role sla_admin.
 #
 #   scripts/scenario.sh          (or: make scenario, which starts the stack first)
 #
@@ -1235,6 +1238,244 @@ sleep 2 # were anything to react, it would have by now
 expect "the story's events, unchanged" "$(ok lea item history "$k3" | j '.events | length')" "$before"
 expect "the story's etag, unchanged" "$(ok lea item get "$k3" | j .item.etag)" "$before"
 expect "the comment: its create, nothing else" "$(ok lea item history "$quiet" | j '.events | length')" "1"
+
+# ---------------------------------------------------------------------------
+# Jira part 2, step 3b: scenario B, the IT service desk (docs/design.md).
+# The `sla` package (types/sla/: sla_goal@1, calendar@1, sla_policy@1) and
+# its first host: incident@1 in a desk@1. lea runs the desk (role
+# sla_admin), ana opens incidents, sam works on them.
+#
+# An incident starts two goals when it is created, first response and
+# resolution, each an Item contained in it, with the target the desk's
+# policy gives its priority. The goals are moved by the incident's own
+# reactions and marked breached by a timer at their due instant; each shows
+# its due instant on the incident (f_due_first_response, f_due_resolution),
+# which is what the queue sorts by. Nothing here is a command of its own:
+# pli creates, moves, lists, searches and reads histories.
+#
+# Time: the calendar is open around the clock in UTC, so working time is
+# time; the policy's P1 targets are seconds (3 and 6), so a P1 breaches
+# while the script watches, and its P3 targets are hours, so a P3 never
+# does. The dev clock does not apply: an instant is not a duration.
+# Working hours, holidays and the 120-hour close are in the Go tests.
+# ---------------------------------------------------------------------------
+
+# goals INCIDENT METRIC: the names of the incident's goals of a metric,
+# oldest first by f_started_at.
+goals() {
+	ok lea item list "$1" --type sla_goal --page-size 100 |
+		jqx -r --arg m "$2" '[.items[]? | select(.fields.f_metric == $m)] | sort_by(.fields.f_started_at) | map(.name) | join(" ")'
+}
+goal() { goals "$1" "$2" | awk '{print $NF}'; } # the current one: the newest
+has_goals() { [ -n "$(goal "$1" first_response)" ] && [ -n "$(goal "$1" resolution)" ]; }
+fld() { ok lea item get "$1" | j ".item.fields.$2 // \"\""; } # ITEM FIELD: its value, "" if unset
+fld_is() { [ "$(fld "$1" "$2")" = "$3" ]; }
+fld_set() { [ -n "$(fld "$1" "$2")" ]; }
+incident() { # WHO PRIORITY TITLE [--set ...]...: an incident in the IT desk; prints its name
+	local who=$1 prio=$2 title=$3
+	shift 3
+	ok "$who" item create --type incident@1 --in "$desk" --set "f_title=$title $w" --set "f_priority=$prio" "$@" | j .item.name
+}
+# targets ITEM: what the Item's reaction records name, in order, as
+# "APPLIED incident:sla_stop <name|restricted|none>", joined by ", ".
+targets() {
+	ok "$1" item history "$2" --page-size 100 | j '[.events[]
+		| select(.kind | test("REACTION_(APPLIED|SKIPPED|FAILED)$"))
+		| "\(.kind | sub("ITEM_EVENT_KIND_REACTION_"; "")) \(.reaction) \(if .reaction_target == null then "none" elif .reaction_target.restricted then "restricted" else .reaction_target.name end)"]
+		| join(", ")'
+}
+# The breach hook's ID, which is the email's template: read from the Type.
+breach_hook=$(ok lea type get sla_goal@1 | j '[.type.states[] | select(.id == "running") | .acting[]?.hook][0] // ""')
+
+step "B1: lea sets up the IT desk: a calendar, a policy with a target per priority, both linked by her alone"
+[ -n "$breach_hook" ] || fail "sla_goal@1's running state has no acting timer with a hook"
+cal=$(ok lea item create --type calendar@1 --set "f_name=Always $w" --set f_zone=UTC \
+	--set 'f_week=["mon 00:00-24:00","tue 00:00-24:00","wed 00:00-24:00","thu 00:00-24:00","fri 00:00-24:00","sat 00:00-24:00","sun 00:00-24:00"]' | j .item.name)
+policy=$(ok lea item create --type sla_policy@1 --set "f_name=Standard $w" \
+	--set f_first_response_s_p1=3 --set f_resolution_s_p1=6 \
+	--set f_first_response_s_p2=1800 --set f_resolution_s_p2=14400 \
+	--set f_first_response_s_p3=3600 --set f_resolution_s_p3=28800 \
+	--set f_first_response_s_p4=7200 --set f_resolution_s_p4=57600 | j .item.name)
+desk=$(ok lea item create --type desk@1 --set f_key=IT --set "f_name=IT service desk $w" | j .item.name)
+# Not sam's to choose, nor ana's: a requester never picks her own targets.
+refuse sam "PERMISSION_DENIED LINK_NOT_WRITABLE" item link "$desk" calendar "$cal"
+refuse ana "PERMISSION_DENIED LINK_NOT_WRITABLE" item link "$desk" sla_policy "$policy"
+refuse ana "PERMISSION_DENIED FIELD_NOT_WRITABLE" item update "$policy" --set f_resolution_s_p1=999999
+refuse lea "FAILED_PRECONDITION INVARIANT_FAILED" item update "$policy" --set f_resolution_s_p1=0
+ok lea item link "$desk" calendar "$cal" >/dev/null
+ok lea item link "$desk" sla_policy "$policy" >/dev/null
+refuse ana "PERMISSION_DENIED LINK_NOT_WRITABLE" item unlink "$desk" calendar "$cal"
+expect "the desk's links" "$(ok ana item get "$desk" | j '[.item.links[].link_type] | sort | join(" ")')" "calendar sla_policy"
+expect "what the incident offers its goals' hooks" \
+	"$(ok ana type get incident@1 | j '[.type.offers[]? | "\(.name)=\(.field)"] | join(" ")')" "breach_contact=f_assignee"
+
+step "B2: ana opens a P3 incident; its two goals start from its creation, with the policy's P3 targets"
+refuse ana "FAILED_PRECONDITION INVARIANT_FAILED" item create --type incident@1 --in "$desk" --set "f_title=No priority $w"
+refuse ana "PERMISSION_DENIED FIELD_NOT_WRITABLE" item create --type incident@1 --in "$desk" --set "f_title=Mine $w" \
+	--set f_priority=P4 --set f_due_resolution=2099-01-01T00:00:00Z
+b3=$(incident ana P3 "Laptop will not wake")
+began=$(now_ms)
+wait_until 30 "the incident's two goals" has_goals "$b3"
+echo "    both goals existed $(($(now_ms) - began)) ms after the incident"
+fr3=$(goal "$b3" first_response)
+res3=$(goal "$b3" resolution)
+expect "the incident starts in" "$(ok ana item get "$b3" | j .item.state)" "new"
+expect "the goals' targets (P3)" "$(fld "$fr3" f_target_s) $(fld "$res3" f_target_s)" "3600 28800"
+opened_at=$(ok ana item history "$b3" | j '.events[0].create_time | sub("Z$"; "") | split(".") | "\(.[0]).\(((.[1] // "") + "000000")[0:6])Z"')
+expect "the goals started at the incident's own create time" "$(fld "$fr3" f_started_at) $(fld "$res3" f_started_at)" "$opened_at $opened_at"
+expect "the goals are running" "$(ok ana item get "$fr3" | j .item.state) $(ok ana item get "$res3" | j .item.state)" "running running"
+expect "a goal's creator: the incident's reaction, no person" "$(ok ana item get "$res3" | j .item.creator)" "reaction:incident:sla_start_resolution"
+refuse ana "PERMISSION_DENIED FIELD_NOT_WRITABLE" item update "$res3" --set f_target_s=999999
+wait_until 30 "both due instants shown on the incident" fld_set "$b3" f_due_resolution
+wait_until 30 "both due instants shown on the incident" fld_set "$b3" f_due_first_response
+expect "the incident's f_due_resolution is its goal's f_due_at" "$(fld "$b3" f_due_resolution)" "$(fld "$res3" f_due_at)"
+expect "the incident's f_due_first_response is its goal's f_due_at" "$(fld "$b3" f_due_first_response)" "$(fld "$fr3" f_due_at)"
+expect "the start records name the goals they created" "$(targets ana "$b3")" \
+	"APPLIED incident:sla_start_first_response $fr3, APPLIED incident:sla_start_resolution $res3"
+
+step "B3: sam is assigned and answers in public: first response is met; resolution runs on"
+ok ana item update "$b3" --set f_assignee=user:sam >/dev/null
+ok sam item transition "$b3" --to in_progress >/dev/null
+comment_in ana "$b3" true >/dev/null  # the requester's own words answer nothing
+comment_in sam "$b3" false >/dev/null # nor does a private note
+sleep 2
+expect "first response after ana's comment and sam's private note" "$(ok ana item get "$fr3" | j .item.state)" "running"
+comment_in sam "$b3" true >/dev/null
+wait_until 30 "first response stopped by sam's public answer" state_is ana "$fr3" completed
+expect "first response" "$(fld "$fr3" f_outcome)" "met"
+wait_until 30 "f_due_first_response unset" fld_is "$b3" f_due_first_response ""
+expect "resolution is still running, and shown" "$(ok ana item get "$res3" | j .item.state) $(fld "$b3" f_due_resolution)" \
+	"running $(fld "$res3" f_due_at)"
+
+step "B4: waiting for the customer pauses resolution; ana's public comment brings the incident back and resumes it"
+due_before=$(fld "$res3" f_due_at)
+ok sam item transition "$b3" --to waiting_for_customer >/dev/null
+wait_until 30 "resolution paused" state_is ana "$res3" paused
+wait_until 30 "f_due_resolution unset while waiting" fld_is "$b3" f_due_resolution ""
+expect "a paused goal has no due instant" "$(fld "$res3" f_due_at)" ""
+sleep 3 # three seconds the customer is asked to wait for nothing
+comment_in sam "$b3" true >/dev/null # someone else's comment does not bring it back
+sleep 2
+expect "the incident after sam's comment" "$(ok ana item get "$b3" | j .item.state)" "waiting_for_customer"
+comment_in ana "$b3" true >/dev/null
+wait_until 30 "ana's public comment sets the incident back in progress" state_is ana "$b3" in_progress
+expect "who moved it, and for whom" \
+	"$(ok ana item history "$b3" --page-size 100 | j '[.events[] | select(.from_state == "waiting_for_customer")][0] | "\(.actor | sub(":[^:]*$"; "")) \(.on_behalf_of)"')" \
+	"reaction:incident user:ana"
+wait_until 30 "resolution running again" state_is ana "$res3" running
+wait_until 30 "f_due_resolution shown again" fld_set "$b3" f_due_resolution
+due_after=$(fld "$res3" f_due_at)
+expect "the incident shows the new due instant" "$(fld "$b3" f_due_resolution)" "$due_after"
+[ "$due_after" != "$due_before" ] && not_before "$due_after" "$due_before" ||
+	fail "after a pause of five seconds the due instant went from $due_before to $due_after; want it later"
+expect "the time worked before the pause is kept" "$([ "$(fld "$res3" f_elapsed_s)" -ge 0 ] && echo kept)" "kept"
+
+step "B5: a P1 breaches: marked at its due instant, never before, still running; sam is emailed once per goal"
+b1=$(incident ana P1 "VPN down for everyone" --set f_assignee=user:sam)
+wait_until 30 "the P1's goals" has_goals "$b1"
+fr1=$(goal "$b1" first_response)
+res1=$(goal "$b1" resolution)
+expect "the goals' targets (P1)" "$(fld "$fr1" f_target_s) $(fld "$res1" f_target_s)" "3 6"
+due1=$(fld "$res1" f_due_at)
+began=$(now_ms)
+wait_until 30 "the resolution goal breached" fld_set "$res1" f_breached_at
+echo "    the mark was visible $(($(now_ms) - began)) ms after the goal was read (its target is 6 s)"
+expect "f_breached_at is the due instant itself" "$(fld "$res1" f_breached_at)" "$due1"
+marked_at=$(ok lea item history "$res1" | j '[.events[] | select(.actor == "system:timer")][0].create_time')
+not_before "$marked_at" "$due1" || fail "the breach was written at $marked_at, before the due instant $due1"
+expect "breach is not the end" "$(ok ana item get "$res1" | j .item.state) $(fld "$res1" f_outcome)" "running "
+expect "the incident goes on showing the missed instant" "$(fld "$b1" f_due_resolution)" "$due1"
+wait_until 30 "sam emailed about the resolution breach" sent_is "$res1" "$breach_hook" user:sam
+wait_until 30 "sam emailed about the first response breach" sent_is "$fr1" "$breach_hook" user:sam
+expect "the first response goal's mark" "$(fld "$fr1" f_breached_at)" "$(fld "$fr1" f_due_at)"
+
+step "B6: the breach of an incident nobody is assigned to tells nobody: one HOOK_FAILED NO_RECIPIENT, no email"
+b0=$(incident ana P1 "Printer offline")
+wait_until 30 "its goals" has_goals "$b0"
+res0=$(goal "$b0" resolution)
+no_recipient() {
+	[ "$(ok lea item history "$res0" --page-size 100 |
+		j '[.events[] | select(.kind == "ITEM_EVENT_KIND_HOOK_FAILED" and .reason == "NO_RECIPIENT")] | length')" = "$1" ]
+}
+wait_until 30 "the failed notification recorded" no_recipient 1
+expect "the mark stands" "$(fld "$res0" f_breached_at)" "$(fld "$res0" f_due_at)"
+ok ana item update "$b0" --set f_assignee=user:sam >/dev/null # assigned too late to be told
+sleep 3
+no_recipient 1 || fail "the notification was tried again"
+expect "no email about it, to anyone" "$(sent "$res0" "$breach_hook")" ""
+kinds_seen="$kinds_seen$(ok lea item history "$res0" --page-size 100 | jqx -r '[.events[].kind] | unique | join(" ")') "
+
+step "B7: the queue: lea sorts open incidents by resolution due instant; the overdue and the ever-breached searches"
+expect "this run's incidents with a resolution due, most urgent first" \
+	"$(ok lea item search "$w" --type incident --not-empty f_due_resolution --order-by f_due_resolution | in_order)" \
+	"$b1 $b0 $b3"
+now=$(instant_in 0)
+expect "overdue now: due before this instant" \
+	"$(ok lea item search "$w" --type incident --where "f_due_resolution<$now" --order-by f_due_resolution | in_order)" "$b1 $b0"
+breached=$(ok lea item search --type sla_goal --not-empty f_breached_at --order-by 'f_breached_at desc' --page-size 100 | j '[.items[]?.name] | join(" ")')
+for g in "$fr1" "$res1" "$res0"; do
+	case " $breached " in *" $g "*) ;; *) fail "the ever-breached search does not find $g" ;; esac
+done
+for g in "$fr3" "$res3"; do
+	case " $breached " in *" $g "*) fail "the ever-breached search finds $g, which never breached" ;; esac
+done
+
+step "B8: sam links the bug that caused the P1 and resolves it, late: both goals missed. No rule runs over the link"
+cause=$(ok sam item create --type bug@3 --in "$plat" --set "f_summary=VPN gateway leaks memory $w" | j .item.name)
+ok sam item link "$b1" caused_by "$cause" >/dev/null
+expect "the incident's link, and the bug's from its end" \
+	"$(ok sam item get "$b1" | links_of) / $(ok sam item get "$cause" | links_of)" \
+	"OUTGOING caused_by $cause / INCOMING causes $b1"
+expect "the linked bug's state, read from the bug" "$(ok sam item get "$cause" | j .item.state)" "todo"
+ok sam item transition "$b1" --to in_progress >/dev/null
+refuse sam "FAILED_PRECONDITION MISSING_FIELDS" item transition "$b1" --to resolved # resolving says how
+ok sam item transition "$b1" --to resolved --set f_resolution=fixed >/dev/null
+refuse sam "PERMISSION_DENIED NOT_ALLOWED" item transition "$b1" --to closed # the timer's only, 120 hours on
+wait_until 30 "the P1's resolution goal stopped" state_is ana "$res1" completed
+wait_until 30 "the P1's first response goal stopped" state_is ana "$fr1" completed
+expect "both goals, resolved after their instants" "$(fld "$fr1" f_outcome) $(fld "$res1" f_outcome)" "missed missed"
+expect "the marks are kept" "$(fld "$res1" f_breached_at)" "$due1"
+wait_until 30 "the resolved incident shows no due instant" fld_is "$b1" f_due_resolution ""
+expect "one stop record per goal, each naming its goal" "$(targets ana "$b1" | tr ',' '\n' | grep -c 'APPLIED incident:sla_stop namespaces/')" "2"
+# Fixing the bug is the bug's business: the incident hears nothing of it.
+before=$(ok sam item history "$b1" --page-size 100 | j '.events | length')
+ok sam item transition "$cause" --to in_progress >/dev/null
+ok sam item transition "$cause" --to in_review >/dev/null
+ok sam item transition "$cause" --to done --set f_resolution=fixed >/dev/null
+sleep 2
+expect "the incident's events after the bug was fixed" "$(ok sam item history "$b1" --page-size 100 | j '.events | length')" "$before"
+expect "the incident is still" "$(ok sam item get "$b1" | j .item.state)" "resolved"
+expect "the emails, once each, after everything" "$(sent "$res1" "$breach_hook") / $(sent "$fr1" "$breach_hook")" "user:sam / user:sam"
+expect "HOOK_RAN on the breached goal" "$(ok lea item history "$res1" --page-size 100 |
+	jqx -r --arg h "$breach_hook" '[.events[] | select(.kind == "ITEM_EVENT_KIND_HOOK_RAN" and .hook == $h)] | length')" "1"
+
+step "B9: the P3 is resolved in time (met), then reopened: a second resolution goal, and only that"
+ok sam item transition "$b3" --to resolved --set f_resolution=fixed >/dev/null
+wait_until 30 "the P3's resolution goal stopped" state_is ana "$res3" completed
+expect "resolved in time" "$(fld "$res3" f_outcome) $(fld "$res3" f_breached_at)" "met "
+ok ana item transition "$b3" --to in_progress >/dev/null
+second_cycle() { [ "$(goals "$b3" resolution | wc -w | tr -d ' ')" = "2" ]; }
+wait_until 30 "a second resolution goal" second_cycle
+res3b=$(goal "$b3" resolution)
+[ "$res3b" != "$res3" ] || fail "the current resolution goal is still the first cycle's"
+expect "the second cycle: a whole new target, running" "$(fld "$res3b" f_target_s) $(ok ana item get "$res3b" | j .item.state)" "28800 running"
+expect "the first cycle stays as it ended" "$(ok ana item get "$res3" | j .item.state) $(fld "$res3" f_outcome)" "completed met"
+expect "first response is measured once" "$(goals "$b3" first_response)" "$fr3"
+wait_until 30 "the incident shows the second cycle's due instant" fld_is "$b3" f_due_resolution "$(fld "$res3b" f_due_at)"
+
+step "B10: a canceled incident ends its goals with no outcome; nothing breaches, nobody is told"
+bx=$(incident ana P1 "Opened by mistake" --set f_assignee=user:sam)
+wait_until 30 "its goals" has_goals "$bx"
+frx=$(goal "$bx" first_response)
+resx=$(goal "$bx" resolution)
+ok ana item transition "$bx" --to canceled >/dev/null
+wait_until 30 "the resolution goal canceled" state_is ana "$resx" canceled
+wait_until 30 "the first response goal canceled" state_is ana "$frx" canceled
+wait_until 30 "the canceled incident shows no due instant" fld_is "$bx" f_due_resolution ""
+sleep 8 # past both due instants
+expect "no outcome, no late mark" "$(fld "$resx" f_outcome)$(fld "$frx" f_outcome)$(fld "$resx" f_breached_at)" ""
+expect "no email about the canceled incident's resolution goal" "$(sent "$resx" "$breach_hook")" ""
+refuse ana "FAILED_PRECONDITION NO_TRANSITION" item transition "$bx" --to in_progress
 
 step "D1: lea searches VPN in the active category"
 vpn=$(issue lea story "VPN drops on wifi")

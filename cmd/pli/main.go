@@ -17,7 +17,7 @@
 //	  agent start [--for USER] --scopes S,S --powers P,P
 //	  agent approve SESSION SCOPE [--expect-audience A] [--yes] [--request-id ID]  (run it --as the user who approves)
 //
-//	FILTERS: [--type TYPE]... [--state S]... [--category C]... [--where F=V|F>V|F>=V|F<V|F<=V]... [--empty F]...
+//	FILTERS: [--type TYPE]... [--state S]... [--category C]... [--where F=V|F>V|F>=V|F<V|F<=V]... [--empty F]... [--not-empty F]...
 //	         [--linked out:NAME=ITEM | in:NAME=ITEM]...
 //	PAGING:  [--page-size N] [--page-token T]
 //
@@ -114,7 +114,7 @@ const usage = `usage: pli [--server URL] [--tokens FILE] --as NAME [--session ID
   agent start [--for USER] --scopes S,S --powers P,P
   agent approve SESSION SCOPE [--expect-audience A] [--yes] [--request-id ID]  (run it --as the user who approves)
 
-FILTERS: [--type TYPE]... [--state S]... [--category C]... [--where F=V|F>V|F>=V|F<V|F<=V]... [--empty F]...
+FILTERS: [--type TYPE]... [--state S]... [--category C]... [--where F=V|F>V|F>=V|F<V|F<=V]... [--empty F]... [--not-empty F]...
          [--linked out:NAME=ITEM | in:NAME=ITEM]...   (on a principal field, --where F=me is the caller)
          [--order-by 'FIELD [asc|desc]']             (default: newest first)
 PAGING:  [--page-size N] [--page-token T]`

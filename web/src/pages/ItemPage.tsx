@@ -25,21 +25,28 @@ export function ItemPage({ id }: { id: string }): ReactElement {
   const refresh = () => setVersion((v) => v + 1);
   const { data: item, error } = useLoad(async () => (await session.api.getItem({ name })).item, [name, version]);
 
-  // The titles of the Items this one links to and of its container: one
-  // read each, for the first 40 (a link itself carries only a name).
+  // The titles and states of the Items this one links to and of its
+  // container: one read each, for the first 40 (a link itself carries only
+  // a name). Read again after each action and on Refresh: a linked Item's
+  // state is shown as it is now, with no rule carrying it here.
   const others = [...new Set([item?.container ?? "", ...(item?.links ?? []).map((l) => l.item?.name ?? "")])]
     .filter((n) => n !== "")
     .slice(0, 40);
-  const { data: titles } = useLoad(async () => {
-    const found: Record<string, string> = {};
+  const { data: linked } = useLoad(async () => {
+    const titles: Record<string, string> = {};
+    const states: Record<string, string> = {};
     await Promise.all(
       others.map(async (n) => {
         const other = (await session.api.getItem({ name: n }).catch(() => undefined))?.item;
-        if (other) found[n] = session.titleOf(other);
+        if (other) {
+          titles[n] = session.titleOf(other);
+          states[n] = other.state;
+        }
       }),
     );
-    return found;
-  }, [others.join(" ")]);
+    return { titles, states };
+  }, [others.join(" "), version]);
+  const titles = linked?.titles;
 
   if (error !== undefined) return <RefusalView error={error} />;
   if (!item) return <p>Loading…</p>;
@@ -129,6 +136,7 @@ export function ItemPage({ id }: { id: string }): ReactElement {
           search={session.search}
           titleOf={session.titleOf}
           titles={titles}
+          states={linked?.states}
           onLink={async (direction, linkType, other) => {
             const otherName = session.itemName(other);
             const w = linkWrite(item, direction, linkType, otherName, await sourceType(direction, otherName, type));
@@ -243,6 +251,8 @@ function details(e: ItemEvent): (ReactElement | string)[] {
   if (e.hook !== "") out.push(`hook ${e.hook}`);
   if (e.originatingHook !== "") out.push(`from hook ${e.originatingHook}`);
   if (e.reaction !== "") out.push(`reaction ${e.reaction}`);
+  // What the reaction wrote, created or was refused by.
+  if (e.reactionTarget) out.push(<>on {ref(e.reactionTarget)}</>);
   if (e.timer !== "") out.push(`timer ${e.timer}, run ${e.run}`);
   if (e.linkType !== "") out.push(<>link {e.linkType} to {ref(e.linkTarget)}</>);
   if (e.linkReplaced) out.push(<>replacing {ref(e.linkReplaced)}</>);

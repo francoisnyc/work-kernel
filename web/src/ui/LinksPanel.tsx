@@ -23,12 +23,16 @@ export type LinksPanelProps = {
   // The other Items' titles by name, where the page has read them; a link
   // always shows the other Item's short ID.
   titles?: Record<string, string>;
+  // The other Items' states by name, where the page has read them (Jira
+  // part 2, step 3b): shown beside the link, so a page shows the state of
+  // what it is linked to with no rule carrying it. A restricted end has none.
+  states?: Record<string, string>;
 };
 
 // A link type that can be added from this Item's page.
 type Addable = { direction: LinkDirection; name: string; typeNames: string[] };
 
-export function LinksPanel({ item, type, types, onLink, onUnlink, search, titleOf, titles }: LinksPanelProps): ReactElement {
+export function LinksPanel({ item, type, types, onLink, onUnlink, search, titleOf, titles, states }: LinksPanelProps): ReactElement {
   const id = useId();
   const [error, setError] = useState<unknown>();
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -77,6 +81,12 @@ export function LinksPanel({ item, type, types, onLink, onUnlink, search, titleO
                 <a href={`#/items/${itemId(other)}`}>
                   {titles?.[other] ? `${titles[other]} (${shortId(other)})` : shortId(other)}
                 </a>
+              )}
+              {!row.restricted && states?.[other] && (
+                <span className="meta" data-testid="link-state">
+                  {" "}
+                  · {states[other]}
+                </span>
               )}
               {row.kernel && <span className="hint"> set by the kernel</span>}
               {row.removable && (

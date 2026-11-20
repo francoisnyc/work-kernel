@@ -197,11 +197,22 @@ func (t *Type) checkHooks() error {
 		}
 		// A hook reads fields or the creator attributes; it writes fields only.
 		for _, id := range h.Reads {
+			// container:<offer>: read from the Item's container when the
+			// hook runs (jira23b.go).
+			if _, offer := OfferOf(id); offer {
+				if err := checkOfferRead(h, id); err != nil {
+					return fail("%v", err)
+				}
+				continue
+			}
 			if _, ok := t.Field(id); !ok && !IsAttribute(id) {
 				return fail("field %q is not declared", id)
 			}
 		}
 		for _, id := range h.Writes {
+			if _, offer := OfferOf(id); offer {
+				return fail("%q is the container's to offer: no hook writes it", id)
+			}
 			if IsAttribute(id) {
 				return fail("%q is set by the kernel at create: no hook writes it", id)
 			}

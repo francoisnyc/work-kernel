@@ -1,0 +1,20 @@
+# A service desk (Jira part 2, step 3b): the container of its incidents,
+# and the first host of the `sla` package (types/sla/README.md). No
+# lifecycle, so no listeners.
+#
+#   - Its calendar and its SLA policy are links, at most one of each, and
+#     only a holder of the role sla_admin sets or removes them: whoever
+#     opens an incident never chooses the hours it is measured on or the
+#     time it may take.
+#   - An incident's goals read both through the desk when they start
+#     (container.linked.calendar.*, container.linked.sla_policy.*).
+id: desk
+version: 1
+
+fields:
+  - {id: f_key,  type: string}
+  - {id: f_name, type: string}
+
+links:
+  - {name: calendar,   inverse: desks,          targets: [calendar],   max: one, writable_by: ['role:sla_admin']}
+  - {name: sla_policy, inverse: governed_desks, targets: [sla_policy], max: one, writable_by: ['role:sla_admin']}
