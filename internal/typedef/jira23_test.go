@@ -365,7 +365,20 @@ func TestConsent_WildcardOnlyThroughContainment(t *testing.T) {
 	if !ok || !c.MayCreate || !slices.Contains(c.Creates, "f_due_at") {
 		t.Errorf("Consent(job, start, contained) = %+v, %v; want creates", c, ok)
 	}
+	// The third way through containment: a contained Item setting a field
+	// on its container. A host may accept `show` from whatever it contains.
+	j := roundTrip(t, mustParse(t, job(startR, pauseR, answeredR, "'*:show': {sets: [f_due]}\n  meter:hide: {sets: [f_due]}")))
+	if a, ok := j.Consent("gauge", "show", true); !ok || !slices.Equal(a.Sets, []string{"f_due"}) {
+		t.Errorf("Consent(gauge, show, contained) = %+v, %v; want sets [f_due]", a, ok)
+	}
+	if _, ok := j.Consent("gauge", "show", false); ok {
+		t.Error("a wildcard consent to sets is given to a reaction that does not come from a contained Item")
+	}
+	if a, ok := j.Consent("meter", "hide", true); !ok || !slices.Equal(a.Sets, []string{"f_due"}) {
+		t.Errorf("Consent(meter, hide, contained) = %+v, %v; want the exact key's sets", a, ok)
+	}
 }
+
 
 func TestConsent_WildcardKeys_RefusedAtLoad(t *testing.T) {
 	for name, accepts := range map[string]string{
@@ -493,6 +506,11 @@ func TestParseDir_SetReactions(t *testing.T) {
 	// it nothing writes the field, and the Type is refused as before.
 	mustRefuseSet(t, "a kernel-written field nothing writes",
 		replaced("job.yaml", job(startR, pauseR, answeredR, "meter:other: [f_budget_s]")), "f_due")
+	// A host that accepts `show` by ID, from whatever it contains, loads
+	// with the meter too.
+	if err := parseSet(t, replaced("job.yaml", job(startR, pauseR, answeredR, "'*:show': {sets: [f_due]}\n  '*:hide': {sets: [f_due]}"))); err != nil {
+		t.Errorf("a host consenting to sets by reaction ID: %v", err)
+	}
 	// job moves meters (children), a meter sets a field on its job: that
 	// is no cycle, since a set enters no state.
 	if err := parseSet(t, step3Set()); err != nil {
