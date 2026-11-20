@@ -27,7 +27,13 @@ type TransitionRequest struct {
 	Fields         map[string]any // optional; keyed by stable field ID
 	// ExpectedItemSeq is the same optional if-match as on UpdateRequest.
 	ExpectedItemSeq int64
-	Attribution     item.Attribution // optional; what caused this write
+	// ExpectedContentSeq is the if-match behind the public etag: when set,
+	// the write happens only if the Item's content_seq is still this one,
+	// and fails with ErrStale otherwise. Zero means "no check". It is left
+	// out of the idempotency hash when zero (omitempty), so a request
+	// without it hashes as it did before the field existed.
+	ExpectedContentSeq int64            `json:",omitempty"`
+	Attribution        item.Attribution // optional; what caused this write
 	// Wait is how long to wait for a held transition's check, up to the
 	// service's cap (MaxWait). Zero answers at once. It is not part of the
 	// request's identity (the "-" tag keeps it out of the idempotency hash):
@@ -68,7 +74,7 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 	if err := checkPrincipal(req.Principal); err != nil {
 		return WriteResult{}, holdUnknown, err
 	}
-	if err := checkOptions(req.ExpectedItemSeq, req.Attribution); err != nil {
+	if err := checkOptions(req.ExpectedItemSeq, req.ExpectedContentSeq, req.Attribution); err != nil {
 		return WriteResult{}, holdUnknown, err
 	}
 	attr, err := sessionAttribution(req.Principal, req.Attribution)
@@ -101,7 +107,7 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		if err != nil {
 			return WriteResult{}, err
 		}
-		if err := checkExpectedSeq(it, req.ExpectedItemSeq); err != nil {
+		if err := checkExpectedSeq(it, req.ExpectedItemSeq, req.ExpectedContentSeq); err != nil {
 			return WriteResult{}, err
 		}
 		// A transition with fields puts content into the Item's scope; a
@@ -303,14 +309,6 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		}
 		kind = holdNone
 
-		itemSeq := it.ItemSeq + 1
-		_, err = tx.Exec(ctx,
-			`update items set state = $2, fields = $3, item_seq = $4, updated_at = now() where id = $1`,
-			req.ItemID, next.State, merged, itemSeq)
-		if err != nil {
-			return WriteResult{}, fmt.Errorf("update item: %w", err)
-		}
-
 		// A plain transition keeps its two-key payload; the field lists appear
 		// only when the request carried a patch.
 		payload := map[string]any{"from": it.State, "to": next.State}
@@ -319,10 +317,24 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		if hold != nil { // an escape: it cancels the hold, in the same event
 			payload["canceled_hold_id"] = hold.id.String()
 		}
+		bump, err := decideContent(ty, "transition", payload)
+		if err != nil {
+			return WriteResult{}, err
+		}
+		itemSeq := it.ItemSeq + 1
+		_, err = tx.Exec(ctx,
+			`update items set state = $2, fields = $3, item_seq = $4, content_seq = content_seq + $5, updated_at = now()
+			 where id = $1`,
+			req.ItemID, next.State, merged, itemSeq, bump.n)
+		if err != nil {
+			return WriteResult{}, fmt.Errorf("update item: %w", err)
+		}
+		// The links entering the state sets: they add to the payload what
+		// the rule does not read.
 		if err := applyResolutions(ctx, tx, nsOf(req.Principal), ty, req.ItemID, resolutions, payload); err != nil {
 			return WriteResult{}, err
 		}
-		res, err := appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, attr, "transition", payload, set)
+		res, err := appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, attr, bump, payload, set)
 		if err == nil {
 			err = storeSetOps(ctx, tx, req.ItemID, itemSeq, setOps)
 		}

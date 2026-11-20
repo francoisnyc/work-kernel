@@ -110,7 +110,7 @@ func TestMessages_FixedPerReasonAndFreeOfIDs(t *testing.T) {
 		},
 		"STALE": func(ctx context.Context) error {
 			_, err := as("ana").UpdateItem(ctx, connect.NewRequest(&kernelv1.UpdateItemRequest{
-				Name: open, RequestId: newID(), Etag: "99", Fields: fields(t, map[string]any{"f_priority": 1}),
+				Name: open, RequestId: newID(), Etag: "c99", Fields: fields(t, map[string]any{"f_priority": 1}),
 			}))
 			return err
 		},

@@ -102,14 +102,14 @@ func TestLinkItems_AddAndRemove(t *testing.T) {
 	t1, t2 := ticket5(t, "ana"), ticket5(t, "ana")
 
 	res := mustLinkItems(t, "ana", t1, "blocks", t2)
-	if res.Item.GetName() != t1 || res.ItemSeq != 2 || res.CommitSeq == 0 || res.Item.Etag != "2" {
+	if res.Item.GetName() != t1 || res.ItemSeq != 2 || res.CommitSeq == 0 || res.Item.Etag != "c2" {
 		t.Errorf("LinkItems = item %s at %d (etag %q), commit %d; want the source at 2",
 			res.Item.GetName(), res.ItemSeq, res.Item.GetEtag(), res.CommitSeq)
 	}
 	assertWireLinks(t, "the answer", res.Item.Links, "OUTGOING blocks "+t2)
 	assertWireLinks(t, "t2", get(t, "bob", t2).Links, "INCOMING blocked_by "+t1)
-	if e := get(t, "ana", t2).Etag; e != "1" {
-		t.Errorf("target etag = %q, want 1: a link writes nothing on its target", e)
+	if e := get(t, "ana", t2).Etag; e != "c1" {
+		t.Errorf("target etag = %q, want c1: a link writes nothing on its target", e)
 	}
 
 	un, err := unlinkItems("ana", t1, "blocks", t2)

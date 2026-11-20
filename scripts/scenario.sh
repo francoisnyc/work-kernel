@@ -409,7 +409,7 @@ refuse ana "FAILED_PRECONDITION NOT_LINKED" item unlink "$x" blocks "$y"
 ok ana item link "$x" blocks "$y" >/dev/null
 refuse ana "FAILED_PRECONDITION ALREADY_LINKED" item link "$x" blocks "$y"
 refuse ana "FAILED_PRECONDITION LINK_TARGET_TYPE" item link "$x" blocks "$board"
-refuse ana "ABORTED STALE" item link "$x" duplicate_of "$y" --etag 1
+refuse ana "ABORTED STALE" item link "$x" duplicate_of "$y" --etag c1
 
 step "LINK_CARDINALITY: a ticket is a duplicate of one ticket at most"
 d=$(link_ticket ana)
@@ -1233,10 +1233,11 @@ case $kinds_seen in *" ITEM_EVENT_KIND_REACTION_SKIPPED "* | *" ITEM_EVENT_KIND_
 
 step "K7: a comment inside a story, whose Type declares no such rule, costs the story nothing"
 before=$(ok lea item history "$k3" | j '.events | length')
+etag_before=$(ok lea item get "$k3" | j .item.etag)
 quiet=$(comment_in lea "$k3" true)
 sleep 2 # were anything to react, it would have by now
 expect "the story's events, unchanged" "$(ok lea item history "$k3" | j '.events | length')" "$before"
-expect "the story's etag, unchanged" "$(ok lea item get "$k3" | j .item.etag)" "$before"
+expect "the story's etag, unchanged" "$(ok lea item get "$k3" | j .item.etag)" "$etag_before"
 expect "the comment: its create, nothing else" "$(ok lea item history "$quiet" | j '.events | length')" "1"
 
 # ---------------------------------------------------------------------------
@@ -1476,6 +1477,28 @@ sleep 8 # past both due instants
 expect "no outcome, no late mark" "$(fld "$resx" f_outcome)$(fld "$frx" f_outcome)$(fld "$resx" f_breached_at)" ""
 expect "no email about the canceled incident's resolution goal" "$(sent "$resx" "$breach_hook")" ""
 refuse ana "FAILED_PRECONDITION NO_TRANSITION" item transition "$bx" --to in_progress
+
+step "B11: ana saves an incident with the etag read at its create, after its goals wrote on it; a real conflict is still STALE"
+created=$(ok ana item create --type incident@1 --in "$desk" --set "f_title=Printer jam $w" --set f_priority=P4)
+be=$(j .item.name <<<"$created")
+etag_read=$(j .item.etag <<<"$created")
+wait_until 30 "its goals" has_goals "$be"
+wait_until 30 "both due instants shown on the incident" fld_set "$be" f_due_resolution
+wait_until 30 "both due instants shown on the incident" fld_set "$be" f_due_first_response
+wait_until 30 "both start records on the incident" records_are "$be" \
+	"APPLIED incident:sla_start_first_response, APPLIED incident:sla_start_resolution"
+events=$(ok ana item history "$be" --page-size 100 | j '.events | length')
+expect "the incident's events: its create, two records, two due instants" "$events" "5"
+expect "the etag, unchanged by the kernel's four writes" "$(ok ana item get "$be" | j .item.etag)" "$etag_read"
+saved=$(ok ana item update "$be" --set f_impact=minor --etag "$etag_read")
+expect "ana's save with the etag read at the create" "$(j .item.fields.f_impact <<<"$saved")" "minor"
+[ "$(j .item.etag <<<"$saved")" != "$etag_read" ] || fail "the etag did not change with ana's save"
+# sam read the incident before ana saved: his writes are real conflicts.
+refuse sam "ABORTED STALE" item update "$be" --set f_impact=extensive --etag "$etag_read"
+refuse sam "ABORTED STALE" item transition "$be" --to in_progress --etag "$etag_read"
+# The etag is not item_seq: a decimal one, as before this step, is STALE.
+refuse ana "ABORTED STALE" item update "$be" --set f_impact=moderate --etag "$(j .item_seq <<<"$saved")"
+expect "the refused writes wrote nothing" "$(fld "$be" f_impact) $(ok ana item get "$be" | j .item.state)" "minor new"
 
 step "D1: lea searches VPN in the active category"
 vpn=$(issue lea story "VPN drops on wifi")

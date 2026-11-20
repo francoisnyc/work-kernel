@@ -97,16 +97,21 @@ func (in *Internal) HookFailed(ctx context.Context, req HookFailedRequest) (Writ
 		if err := checkRun(ty, h, req.Timer, req.Run); err != nil {
 			return WriteResult{}, err
 		}
-		itemSeq := it.ItemSeq + 1
-		if _, err := tx.Exec(ctx,
-			`update items set item_seq = $2, updated_at = now() where id = $1`, req.ItemID, itemSeq); err != nil {
-			return WriteResult{}, fmt.Errorf("update item: %w", err)
-		}
 		payload := map[string]any{"hook": h.ID, "reason": req.Reason}
 		if req.Timer != "" {
 			payload["timer"], payload["run"] = req.Timer, req.Run
 		}
-		return appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, req.Attribution, lifecycle.OpHookFailed, payload, nil)
+		bump, err := decideContent(ty, lifecycle.OpHookFailed, payload)
+		if err != nil {
+			return WriteResult{}, err
+		}
+		itemSeq := it.ItemSeq + 1
+		if _, err := tx.Exec(ctx,
+			`update items set item_seq = $2, content_seq = content_seq + $3, updated_at = now() where id = $1`,
+			req.ItemID, itemSeq, bump.n); err != nil {
+			return WriteResult{}, fmt.Errorf("update item: %w", err)
+		}
+		return appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, req.Attribution, bump, payload, nil)
 	})
 }
 

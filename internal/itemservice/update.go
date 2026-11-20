@@ -26,7 +26,13 @@ type UpdateRequest struct {
 	// if the Item is still at this item_seq, and fails with ErrStale otherwise.
 	// Zero means "no check" (an Item's first item_seq is 1).
 	ExpectedItemSeq int64
-	Attribution     item.Attribution // optional; what caused this write
+	// ExpectedContentSeq is the if-match behind the public etag: when set,
+	// the write happens only if the Item's content_seq is still this one,
+	// and fails with ErrStale otherwise. Zero means "no check". It is left
+	// out of the idempotency hash when zero (omitempty), so a request
+	// without it hashes as it did before the field existed.
+	ExpectedContentSeq int64            `json:",omitempty"`
+	Attribution        item.Attribution // optional; what caused this write
 	// Policy is an optional change to who may read the Item.
 	Policy *PolicyPatch
 	// Move is an optional change of the Item's container. A request carries
@@ -65,7 +71,7 @@ func (k *Service) update(ctx context.Context, req UpdateRequest, kc *kernelCause
 	if err := checkPrincipal(req.Principal); err != nil {
 		return WriteResult{}, err
 	}
-	if err := checkOptions(req.ExpectedItemSeq, req.Attribution); err != nil {
+	if err := checkOptions(req.ExpectedItemSeq, req.ExpectedContentSeq, req.Attribution); err != nil {
 		return WriteResult{}, err
 	}
 	attr, err := sessionAttribution(req.Principal, req.Attribution)
@@ -104,7 +110,7 @@ func (k *Service) update(ctx context.Context, req UpdateRequest, kc *kernelCause
 		if err != nil {
 			return WriteResult{}, err
 		}
-		if err := checkExpectedSeq(it, req.ExpectedItemSeq); err != nil {
+		if err := checkExpectedSeq(it, req.ExpectedItemSeq, req.ExpectedContentSeq); err != nil {
 			return WriteResult{}, err
 		}
 		ty, err := k.loadType(ctx, tx, it.TypeID, it.TypeVersion)
@@ -203,20 +209,6 @@ func (k *Service) update(ctx context.Context, req UpdateRequest, kc *kernelCause
 			}
 		}
 
-		itemSeq := it.ItemSeq + 1
-		_, err = tx.Exec(ctx,
-			`update items set fields = $2, item_seq = $3, scope_id = $4, container_id = $5, updated_at = now()
-			 where id = $1`,
-			req.ItemID, merged, itemSeq, scopeID, container)
-		if err != nil {
-			return WriteResult{}, fmt.Errorf("update item: %w", err)
-		}
-		if remove != uuid.Nil {
-			if err := removeNode(ctx, tx, remove); err != nil {
-				return WriteResult{}, err
-			}
-		}
-
 		payload := map[string]any{"field_ids": sortedKeys(set)}
 		if len(cleared) > 0 {
 			payload["cleared_field_ids"] = sortedKeys(cleared)
@@ -237,7 +229,25 @@ func (k *Service) update(ctx context.Context, req UpdateRequest, kc *kernelCause
 			payload["container_to"] = req.Move.To
 		}
 		addSetOps(payload, setOps)
-		res, err := appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, attr, "update", payload, set)
+		bump, err := decideContent(ty, "update", payload)
+		if err != nil {
+			return WriteResult{}, err
+		}
+		itemSeq := it.ItemSeq + 1
+		_, err = tx.Exec(ctx,
+			`update items set fields = $2, item_seq = $3, content_seq = content_seq + $6, scope_id = $4, container_id = $5,
+			                  updated_at = now()
+			 where id = $1`,
+			req.ItemID, merged, itemSeq, scopeID, container, bump.n)
+		if err != nil {
+			return WriteResult{}, fmt.Errorf("update item: %w", err)
+		}
+		if remove != uuid.Nil {
+			if err := removeNode(ctx, tx, remove); err != nil {
+				return WriteResult{}, err
+			}
+		}
+		res, err := appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, attr, bump, payload, set)
 		if err != nil {
 			return WriteResult{}, err
 		}

@@ -133,6 +133,7 @@ type lockedItem struct {
 	State       string
 	Fields      map[string]any
 	ItemSeq     int64
+	ContentSeq  int64 // what the public etag is derived from (content.go)
 	// Who created it: set at create, never changed. `allowed` and `except`
 	// read them for creator.
 	CreatedBy, CreatedOnBehalfOf string
@@ -144,11 +145,11 @@ type lockedItem struct {
 func lockItem(ctx context.Context, tx pgx.Tx, ns string, id uuid.UUID) (lockedItem, error) {
 	var it lockedItem
 	err := tx.QueryRow(ctx,
-		`select type_id, type_version, container_id, scope_id, state, fields, item_seq,
+		`select type_id, type_version, container_id, scope_id, state, fields, item_seq, content_seq,
 		        created_by, coalesce(created_on_behalf_of, '')
 		 from items where id = $1 and namespace_id = $2 for update`,
 		id, ns,
-	).Scan(&it.TypeID, &it.TypeVersion, &it.ContainerID, &it.ScopeID, &it.State, &it.Fields, &it.ItemSeq,
+	).Scan(&it.TypeID, &it.TypeVersion, &it.ContainerID, &it.ScopeID, &it.State, &it.Fields, &it.ItemSeq, &it.ContentSeq,
 		&it.CreatedBy, &it.CreatedOnBehalfOf)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return lockedItem{}, ErrNotFound
@@ -205,18 +206,26 @@ func checkAttribution(a item.Attribution) error {
 }
 
 // checkOptions validates the optional parts shared by Update and Transition.
-func checkOptions(expectedItemSeq int64, a item.Attribution) error {
+func checkOptions(expectedItemSeq, expectedContentSeq int64, a item.Attribution) error {
 	if expectedItemSeq < 0 {
 		return fmt.Errorf("%w: expected item_seq cannot be negative", ErrInvalid)
+	}
+	if expectedContentSeq < 0 {
+		return fmt.Errorf("%w: expected content_seq cannot be negative", ErrInvalid)
 	}
 	return checkAttribution(a)
 }
 
-// checkExpectedSeq is the if-match. It runs under the row lock, so the
-// item_seq it compares cannot change before the write. Zero means "no check".
-func checkExpectedSeq(it lockedItem, expected int64) error {
+// checkExpectedSeq is the two if-matches: on item_seq (every event; the
+// kernel's own writers use it) and on content_seq (what a caller could
+// overwrite; the public etag). It runs under the row lock, so neither
+// counter can change before the write. Zero means "no check".
+func checkExpectedSeq(it lockedItem, expected, expectedContent int64) error {
 	if expected != 0 && expected != it.ItemSeq {
 		return fmt.Errorf("%w: expected item_seq %d, but the Item is at %d", ErrStale, expected, it.ItemSeq)
+	}
+	if expectedContent != 0 && expectedContent != it.ContentSeq {
+		return fmt.Errorf("%w: expected content_seq %d, but the Item is at %d", ErrStale, expectedContent, it.ContentSeq)
 	}
 	return nil
 }
@@ -224,12 +233,24 @@ func checkExpectedSeq(it lockedItem, expected int64) error {
 // appendEvent records one accepted operation: it inserts the event (which
 // takes its commit_seq), the values the event set, and, when ty has
 // listeners, the outbox row. The caller has already written the Item row at
-// itemSeq.
+// itemSeq, in ONE statement that also added bump.n to content_seq
+// (decideContent, content.go): appendEvent takes the etag rule's decision
+// in place of the event's kind, so no write path can record an event
+// without having asked the rule. It does not write the Item row itself: a
+// second UPDATE of a row in one transaction makes Postgres re-check the
+// row's foreign keys, which waits on the container's row lock
+// (docs/design.md, "Writes").
 //
 // payload holds the operation's shape (states, field IDs) and never a field
 // value; values go to item_event_values so they can be erased later.
 func appendEvent(ctx context.Context, tx pgx.Tx, ty *typedef.Type, id uuid.UUID, itemSeq int64, p item.Principal,
-	a item.Attribution, op string, payload map[string]any, values map[string]any) (WriteResult, error) {
+	a item.Attribution, bump contentBump, payload map[string]any, values map[string]any) (WriteResult, error) {
+
+	// The zero value is no decision: only decideContent makes one.
+	op := bump.op
+	if op == "" {
+		return WriteResult{}, errors.New("itemservice: appendEvent without an etag decision (decideContent)")
+	}
 
 	// nullif stores an empty Go string as null: "not set".
 	// commit_seq comes from the commit_seq sequence and xid from

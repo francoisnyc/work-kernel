@@ -47,6 +47,11 @@ type Item struct {
 	State       string
 	Fields      map[string]any // keyed by stable field ID
 	ItemSeq     int64
+	// ContentSeq counts the writes that changed something a caller could
+	// overwrite (the state, a field a caller may write, a link, the
+	// readers, the container). The public etag is derived from it;
+	// ItemSeq counts every event. (The etag step.)
+	ContentSeq int64
 	// Hold is the Item's latest hold (open, or how it ended), or nil if the
 	// Item never had one. A hold is visible on the Item.
 	Hold *Hold

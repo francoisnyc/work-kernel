@@ -51,7 +51,13 @@ type LinkRequest struct {
 	TargetID       uuid.UUID
 	// ExpectedItemSeq is the optional if-match, on the source.
 	ExpectedItemSeq int64
-	Attribution     item.Attribution // optional; what caused this write
+	// ExpectedContentSeq is the if-match behind the public etag: when set,
+	// the write happens only if the source's content_seq is still this one,
+	// and fails with ErrStale otherwise. Zero means "no check". It is left
+	// out of the idempotency hash when zero (omitempty), so a request
+	// without it hashes as it did before the field existed.
+	ExpectedContentSeq int64            `json:",omitempty"`
+	Attribution        item.Attribution // optional; what caused this write
 }
 
 // LinkFilter keeps Items with a link of this name to or from ItemID, as the
@@ -86,7 +92,7 @@ func (k *Service) linkWrite(ctx context.Context, req LinkRequest, add bool) (Wri
 	if err := checkPublic(req.Principal, req.Attribution); err != nil {
 		return WriteResult{}, err
 	}
-	if err := checkOptions(req.ExpectedItemSeq, req.Attribution); err != nil {
+	if err := checkOptions(req.ExpectedItemSeq, req.ExpectedContentSeq, req.Attribution); err != nil {
 		return WriteResult{}, err
 	}
 	if req.LinkType == "" {
@@ -127,7 +133,7 @@ func (k *Service) linkWrite(ctx context.Context, req LinkRequest, add bool) (Wri
 		if err := checkInSession(ctx, tx, req.Principal, &req.TargetID); err != nil {
 			return WriteResult{}, err
 		}
-		if err := checkExpectedSeq(src, req.ExpectedItemSeq); err != nil {
+		if err := checkExpectedSeq(src, req.ExpectedItemSeq, req.ExpectedContentSeq); err != nil {
 			return WriteResult{}, err
 		}
 		ty, err := k.loadType(ctx, tx, src.TypeID, src.TypeVersion)
@@ -190,14 +196,18 @@ func (k *Service) linkWrite(ctx context.Context, req LinkRequest, add bool) (Wri
 			}
 		}
 
-		itemSeq := src.ItemSeq + 1
-		if _, err := tx.Exec(ctx, `update items set item_seq = $2, updated_at = now() where id = $1`,
-			req.SourceID, itemSeq); err != nil {
-			return WriteResult{}, fmt.Errorf("update item: %w", err)
-		}
 		// The shape only: the link's name and the target's opaque ID.
 		payload := map[string]any{"link_type": lt.Name, "target": req.TargetID.String()}
-		return appendEvent(ctx, tx, ty, req.SourceID, itemSeq, recorded, attr, op, payload, nil)
+		bump, err := decideContent(ty, op, payload)
+		if err != nil {
+			return WriteResult{}, err
+		}
+		itemSeq := src.ItemSeq + 1
+		if _, err := tx.Exec(ctx, `update items set item_seq = $2, content_seq = content_seq + $3, updated_at = now() where id = $1`,
+			req.SourceID, itemSeq, bump.n); err != nil {
+			return WriteResult{}, fmt.Errorf("update item: %w", err)
+		}
+		return appendEvent(ctx, tx, ty, req.SourceID, itemSeq, recorded, attr, bump, payload, nil)
 	})
 }
 

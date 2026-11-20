@@ -292,7 +292,7 @@ export const subscription = t({
 export const allTypes = [bug, epic, leaveBalance, sprint, story, subscription, ticket4, ticket, vacation1, vacation];
 
 export function item(init: MessageInitShape<typeof ItemSchema>): Item {
-  return create(ItemSchema, { etag: "1", ...init });
+  return create(ItemSchema, { etag: "c1", ...init });
 }
 
 export const aTicket = item({

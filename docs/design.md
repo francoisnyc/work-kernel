@@ -771,11 +771,87 @@ fields it names; JSON `null` clears one. No field masks.
   and same request returns the stored result, same key and a different request
   is `ALREADY_EXISTS` / `IDEMPOTENCY_KEY_REUSED`. A request refused before any
   work uses no key.
-- `etag` on any write: refused as `ABORTED` / `STALE` if the Item moved on.
-  Today it is `item_seq` as a string; clients treat it as opaque.
+- `etag` on any write: refused as `ABORTED` / `STALE` if something the
+  caller could have overwritten changed since they read it. It is derived
+  from the Item's `content_seq`, not from `item_seq`, and written `c7`;
+  clients treat it as opaque. See "The etag" below.
 - `TransitionItem` takes `wait` (default 0, at most 5 s) and answers `APPLIED`,
   `DENIED` (with a reason code), `ERROR` or `PENDING` with the hold's name. A
   denied held transition is a successful call, not an error.
+
+### The etag (the etag step, 2026-11-20)
+
+**The etag changes only when something a caller could overwrite changes.**
+An Item has two counters, in the same row, written by the same statement
+in the same transaction: `item_seq` counts every event, and `content_seq`
+counts the writes that changed the Item's content. The etag is
+`content_seq`. `item_seq`, `commit_seq`, `expected_item_seq` on the
+internal door (timers, holds, reactions), `min_seq` and page tokens mean
+what they meant.
+
+One function decides (`itemservice`, `content.go`), from the event's kind,
+its payload and the Type: never from a value, and never from who wrote.
+
+| Event | Changes the etag |
+| --- | --- |
+| `create` | yes (the first content: `c1`) |
+| `transition`, by anyone, a hold resolved allow and a re-entry of the same state included | yes |
+| `update` naming a field a caller may write (role-written fields included), by anyone, a set operation included | yes |
+| `update` naming only fields marked `writable_by: kernel` (a reaction's set or add, an acting timer, a hook) | no |
+| `update` of the readers, or a move to another container | yes |
+| `link_added`, `link_removed` (on the source; the target has no event) | yes |
+| `transition_requested` (a hold opens) | only if its patch names a field a caller may write |
+| `transition_denied`, `transition_failed` | no |
+| `hook_ran`, `hook_failed`, `reaction_applied`, `reaction_failed`, `reaction_skipped` | no |
+
+- **In doubt, it changes:** a field the Type version does not declare, an
+  update that names nothing. A refusal costs a refresh; a missed one loses
+  an update.
+- **It reads the event's shape, not values:** a write of the value a field
+  already had changes the etag (no-op updates are not suppressed yet).
+- **A field is judged by its declaration, not its writer:** a hook writing
+  a field that is not marked `writable_by: kernel` changes the etag. The
+  ticket's four hook-written fields are not marked (journal).
+- **Holds:** an etag read before a hold opened is still good after it is
+  denied or fails (unless the request carried a patch), and stale after it
+  is allowed. While the hold is open, `HELD` refuses the frozen fields and
+  the moves whatever the etag.
+- **A new event kind has no decision until someone writes one:** the
+  function has no default and refuses the write; a table test covers every
+  kind, and a second test holds the API's list of kinds to the decided
+  ones.
+
+**Its text** is `c` and the count, exactly as the server wrote it: no
+sign, no leading zero, no spaces. It is not a number, so that nobody
+takes it for `item_seq`. An etag this server never made is `STALE`,
+including **a decimal etag from before this step**: read the Item again.
+Existing Items started with `content_seq = item_seq` (migration 00012).
+
+**Rule for every write path: never UPDATE an Item row twice in one
+transaction.** When a transaction updates a row it has already written,
+Postgres re-checks that row's foreign keys and takes `FOR KEY SHARE` on
+the rows they point to: the container's and the scope's. The write then
+waits for any transaction that holds the container's row lock, where one
+UPDATE would not, and a reaction that writes a parent and its children can
+deadlock. Found when `content_seq` was first bumped by a second statement
+(a test that locks a container while a reaction moves its children
+stopped passing). Reproduction, in plain Postgres:
+
+```sql
+create table items (id int primary key, container_id int references items, n int default 0, c int default 0);
+insert into items values (1, null), (2, 1);
+-- session A:  begin; select 1 from items where id = 1 for update;   -- holds the parent
+-- session B:  begin; update items set n = n + 1 where id = 2; commit;          -- returns at once
+-- session B:  begin; update items set n = n + 1 where id = 2;
+--                    update items set c = c + 1 where id = 2;                  -- waits for A:
+--   SELECT 1 FROM ONLY "public"."items" x WHERE "id" = $1 FOR KEY SHARE OF x
+```
+
+So each statement that writes `item_seq` writes `content_seq` too (a
+source-reading test holds every one of them to it), and the rule's
+decision travels with the event: `appendEvent` takes it in place of the
+event's kind. (A narrowed create still writes its row twice, the insert
+and its scope: the insert already holds those key locks.)
 
 ### Reads
 
@@ -1409,7 +1485,7 @@ in the journal.
 | Jira 2.2 | Reactions that move or create, including those triggered by an Item created inside the source; multi-value fields | "A customer comment reopens the request"; labels with set operations and contains filters |
 | Jira 2.3a (**done**) | The kernel pieces for goals kept as contained Items, proved with test Types: working-time arithmetic on a calendar, reactions that move children or set a field on the container, consent by reaction ID, a create reaction reading linked Items, an **acting timer at a field's instant**, creation as an entry, `not_empty` (see "Jira part 2, step 3a as built") | A job starts, pauses, resumes and stops its meters; a meter is marked late at its due instant and never before; a stopped worker changes none of the numbers |
 | Jira 2.3b (**done**) | The `sla` package (`sla_goal`, `calendar`, `sla_policy`), the incident Type with first-response and resolution goals, pli and the web UI | Scenario B runs through pli. **Done 2026-11-20**: "Jira part 2, step 3b as built" below, and the journal |
-| Etag rule (next) | The etag changes only when something a caller could overwrite changes (a caller-writable field or the state); outcome records, hook records and kernel-written field writes leave it alone | A save made with an etag read right after an incident's creation is accepted once its goals have written their due instants (measured in step 3b: refused 10 times in 10) |
+| Etag rule (**done**) | The etag changes only when something a caller could overwrite changes (the state, a field a caller may write, a link, the readers, the container); outcome records, hook records and kernel-written field writes leave it alone | A save made with an etag read right after an incident's creation is accepted once its goals have written their due instants: 10 times in 10 (measured in step 3b: refused 10 times in 10). **Done 2026-11-20**: "The etag" under "Public API (v1)", and the journal |
 | Jira 2.4 | Customers as principals and public or internal comments; the access request with N-of-M approvers | Scenario C runs through pli |
 | Bonita | The company's real Bonita processes, mapped against the BPMN pattern table, then rebuilt | Planned after Jira 2 |
 
@@ -1870,6 +1946,9 @@ is single or multiple across every Type and version, never both.
 **Set operations commute, so they need no etag.** Two people adding
 labels at the same moment both land. A client should send a set-only
 change without an etag and keep the etag when a plain field changes too.
+A set operation still **changes** the etag (the etag step): a set can also
+be replaced by a list sent with an etag, and that replace must not drop a
+member someone added meanwhile.
 
 **Reading sets.** A filter's equality on a set means *contains*; two
 equalities on one field mean *all of*; `empty: true` matches an unset
@@ -2145,10 +2224,10 @@ only the kernel writes. One ordinary cycle of an incident writes 20 events
 on it, 15 of them the kernel's own (6 due-instant writes, 9 records). A
 save made with an etag read right after an incident's creation was refused
 `ABORTED / STALE` 10 times in 10, at 100 ms, 500 ms and 2 s; the goals'
-writes land about 320 ms after the create. Not fixed in this step. **Next
-step, before Jira 2.4:** the etag changes only when something a caller
-could overwrite changes (a caller-writable field or the state); outcome
-records, hook records and kernel-written field writes leave it alone.
+writes land about 320 ms after the create. Not fixed in this step.
+**Fixed in the next one (the etag step, 2026-11-20):** the etag changes
+only when something a caller could overwrite changes; the same save is
+accepted 10 times in 10. See "The etag" under "Public API (v1)".
 
 ## Web UI as built (2026-11-18)
 
@@ -2189,6 +2268,16 @@ a save sends what changed as `{add, remove}`. A save made only of set
 operations goes **without an etag**: they commute with other people's
 changes. A save that also changes a plain field keeps the etag, and can
 be `STALE`. The history shows what was asked ("changed ...").
+
+**The form and the etag (the etag step).** The etag no longer changes
+when the kernel writes a field only it writes, so the Item page keys its
+form on the etag, the state **and the fields**: a refresh that brings a
+new due instant rebuilds the form. And a save never sends a field the
+user cannot write, whatever the form holds: a kernel-written field, or a
+field reserved to roles the acting user does not hold (the page knows the
+dev user's roles; such a field is read-only, with a hint naming the role).
+A save made on a page opened before the kernel wrote goes through without
+a refresh; a real conflict still shows `ABORTED / STALE`.
 
 **Serving.** A `web` container serves the built site and proxies `/api` to
 the item service: one origin, no CORS on the item service. Nothing updates

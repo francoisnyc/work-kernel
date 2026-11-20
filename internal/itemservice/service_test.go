@@ -379,6 +379,7 @@ func TestGet_ReturnsCreatedItem(t *testing.T) {
 		State:       "open",
 		Fields:      map[string]any{"f_title": "Printer on fire", "f_priority": float64(2)},
 		ItemSeq:     1,
+		ContentSeq:  1,
 	}
 	// Since Step 4 every Item has a scope. Which one is checked by
 	// TestCreate_PlainItem_IsInTheRootScope; here it only has to be set.

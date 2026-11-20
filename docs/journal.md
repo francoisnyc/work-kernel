@@ -6,15 +6,22 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
-- **Next, before Jira 2.4: the etag changes only when something a caller
-  could overwrite changes (a caller-writable field or the state); outcome
-  records, hook records and kernel-written field writes leave it alone.**
-  Today the etag is `item_seq`, which every event bumps. Measured in Jira
-  2.3b: a save of an incident with the etag read right after its creation
-  was `ABORTED STALE` 10 times in 10 at 100 ms, 500 ms and 2 s; one cycle of
-  an incident is 20 events, 15 of them the kernel's own (6 due-instant
-  writes by its goals, 9 reaction records). Both kinds bump it: exempting
-  kernel-written fields alone would not be enough. (Jira 2.3b)
+- ~~**Next, before Jira 2.4: the etag changes only when something a caller
+  could overwrite changes.**~~ Done in the etag step (2026-11-20): see its
+  entry, and design.md, "The etag".
+- Mark the ticket's hook-written fields `writable_by: kernel` in a new
+  ticket version (v7): `f_plan` (hook `get_plan`), `f_on_hold`
+  (`get_credit_status`), `f_cost_center` (`erp_check`), all in v3 to v6,
+  and `f_invoice_id` (`create_invoice`) in v4 to v6. Until then a hook's
+  write of one of them changes the ticket's etag, and a caller may
+  overwrite them. They are the only fields the kernel writes that are not
+  marked. (The etag step)
+- One function writes the Item row for every write path: `appendEvent`
+  would take the row's change (state, fields, scope, container) and do the
+  single UPDATE with both counters. Today 13 UPDATEs and 2 INSERTs each
+  write `item_seq` and `content_seq`, held together by a source-reading
+  test. A refactor of every write path, with no change of behaviour. (The
+  etag step, Phase C)
 - Rename the repo and Go module to Pli once the name checks pass (domains,
   GitHub organization, trademark). The CLI is already `pli`. (2026-11-15)
 - `idempotency` rows never expire. Add a retention period and a cleanup job.
@@ -26,6 +33,8 @@ Ideas noted during the spike, not built yet.
 - An `Update` that sets a field to its current value still bumps `item_seq` and
   writes an event and an outbox row. Suppress no-op updates: it is one of the
   echo-suppression layers the connector design relies on. (PR #5 review)
+  It also changes the etag: the etag rule reads the event's shape, not its
+  values. (The etag step)
 - Cache parsed Types in the process, keyed by `(id, version)`; versions are
   immutable, so it is safe. Wait for Step 5's numbers. (PR #5 review)
 - When guards need more than `is set` / `==` / `!=`, switch to `cel-go` rather
@@ -2263,3 +2272,91 @@ verifies both.
 
 **Open:** a transition fired by a field change on the same Item (N-of-M approvers), from the decisions.
 **Next session:** the etag rule (top of Later), then Jira 2.4.
+
+## 2026-11-20 — The etag step: the etag changes only when something a caller could overwrite changes (finished)
+
+**Built:** `items.content_seq`, a second counter per Item, in the same row and written by the same
+statement as `item_seq`; the public etag is derived from it and written `c7`. It moves on a state change,
+on a field a caller may write (role-written fields and set operations included, whoever writes), on a
+link of the source, on a readers change and on a move; never on a field-less record (`hook_ran`,
+`hook_failed`, the three reaction outcomes, a denied or failed hold) nor on a write that names only
+`writable_by: kernel` fields. design.md: "The etag", under "Public API (v1)". The README's known limit
+is gone.
+
+**The measurement of Jira 2.3b, again:** the save made with the etag read right after an incident's
+create is accepted **10 times in 10** (`TestE2E_Incident_TheSaveWithWhatWasReadAtTheCreate_IsAccepted_10In10`,
+a real worker; it was refused 10 times in 10). One whole cycle of an incident leaves `content_seq` at 5
+(the create and the four moves people made) whatever the kernel wrote. A real conflict is still `STALE`:
+two people on one field, a transition between the read and the save, at every level (item service, API,
+pli in scenario B11, the browser).
+
+**Kernel changes, counted** (one; migration 00012; **proto unchanged**; no new dependency; **no workflow
+code changed**, the replay tests pass untouched): the counter and its rule. The rule is one pure function
+(`changesContent`, `internal/itemservice/content.go`) over the event's kind, its payload and the Type,
+with **no default**: an event kind nobody decided fails its write. A table test covers the 13 kinds in 41
+rows; `internal/api` holds its list of kinds to the decided ones, both ways. `ExpectedContentSeq` is the
+new if-match on update, transition, link and unlink; `ExpectedItemSeq` is untouched on both doors, and
+both may be sent. A request without the new field hashes as before (omitempty; three hashes computed on
+main are pinned in a test). Existing Items start at `content_seq = item_seq`. Not the kernel: the API's
+etag text, the web UI.
+
+**Visible behaviour change:** the etag's text. A decimal etag from before this step is `STALE`, like any
+etag the server never made (`c01`, `C1`, `c1 ` too: the exact text only).
+
+**FOUND, AND THE RULE IT LEFT: never UPDATE an Item row twice in one transaction.** Phase A decided that
+`appendEvent` would bump `content_seq` itself, with a second UPDATE of the row, so that no write path
+could forget. `TestReactMove_Children_ACrashPartway_FinishesExactlyOnce` then failed: with the job's row
+locked by someone else, the reaction no longer moved its first child. *Cause:* when a transaction updates
+a row it has already written, Postgres re-checks the row's foreign keys and takes `FOR KEY SHARE` on the
+container's row and on the scope's; one UPDATE does not. Every content-changing write on a contained Item
+would have waited for any transaction holding its container's row lock: new contention, and a new way to
+deadlock where a reaction writes a parent and its children. Reproduced in plain Postgres with a two-row
+table (design.md, "The etag", has the SQL): one UPDATE of the child returns at once while the parent is
+locked `FOR UPDATE`; two UPDATEs of the child in one transaction wait on
+`SELECT 1 FROM ONLY items x WHERE id = $1 FOR KEY SHARE OF x`. *Fix (approved, option A):* each of the 13
+UPDATEs and both INSERTs that write `item_seq` writes `content_seq` in the same statement, from the
+rule's decision (`decideContent`), which `appendEvent` now requires in place of the event's kind. A
+source-reading test (`TestContentSeq_EveryStatementThatWritesItemSeqWritesItToo`) holds every statement
+to it; it was seen failing on a deliberately broken statement (`links.go:206`: "this statement writes
+items.item_seq and not content_seq"), and a second test feeds it four broken shapes. Option B (one
+function writes the row for every path) is in Later.
+
+**Numbers.** A field update, 3,000 calls after 100 warm-up, p50 / p95 in ms. With the second UPDATE:
+2.03 / 2.5 against 1.84 / 2.2 without, about +10%, the same for a top-level and a contained Item. With
+one statement, three runs each, interleaved: top-level 1.85 to 1.99 / 2.40 to 2.47 against a baseline of
+1.91 to 2.03 / 2.32 to 2.37; contained 1.92 to 1.99 / 2.29 to 2.43 against 1.93 to 1.99 / 2.29 to 2.41.
+Back at the baseline, within the noise. Scenario: twice in a row on a fresh stack, 84 s each, B11
+included. Playwright: 7 tests in 12.6 s. vitest: 453. `go test -race ./...` green (workflow suite 306 s).
+
+**The web UI.** The Item page keyed its form on the etag and the state; a kernel-written field no longer
+changes the etag, so a refreshed page would have kept an old due instant in its form and sent it with
+the next save (`FIELD_NOT_WRITABLE`). The form's key is now the etag, the state and the fields, and a
+save never includes a field the user cannot write: a kernel-written one, or one reserved to roles the
+acting user lacks. Such a role-written field is read-only for them, with a hint naming the role (when
+the roles are not known it is sent and the server decides). The four tests of that read-only input were
+written together with its code, not before it (agreed in the Phase C review).
+
+**Fields the kernel writes that are not marked `writable_by: kernel`:** the ticket's hook-written fields
+and nothing else: `f_plan`, `f_on_hold`, `f_cost_center` (ticket v3 to v6) and `f_invoice_id` (v4 to
+v6). A hook's write of one of them changes the etag (a test pins it). Every field a reaction, a
+transition's `sets` or an acting timer writes is marked. No Type was changed; Later has the new ticket
+version.
+
+**Existing tests changed, each agreed:** 21 literals in 7 files spell the etag `c1` where they said `1`
+(one commit of their own); scenario K7 compared a story's etag with the length of its history and now
+compares it with itself; `TestMeasure_Incident_StaleSaves` sends `ExpectedContentSeq`;
+`TestGet_ReturnsCreatedItem` expects `ContentSeq: 1` in the whole Item it compares.
+
+**Surprises:** the foreign-key re-check above, which no test of this step was written to find: a test of
+step 3a about a crash mid-reaction found it. The scenario already held one confusion of the etag with
+`item_seq` (K7), the very thing the new text form is for. And "one place, so no path can forget" turned
+out to be cheaper to hold with a test that reads the source than with a second statement.
+
+**Not verified here:** the images' build stages (module download fails inside the build container: the
+stack ran from host-built binaries on the real distroless and nginx bases, with a throwaway override)
+and the pinned Playwright's own browser (the tests ran on this container's Chromium). `buf lint`,
+`buf breaking` and the generate checks were not run here either: the proto is untouched. CI verifies all
+of them.
+
+**Open:** nothing from this step.
+**Next session:** Jira 2.4.

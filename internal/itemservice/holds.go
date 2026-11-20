@@ -154,16 +154,20 @@ func requestHold(ctx context.Context, tx pgx.Tx, ty *typedef.Type, id uuid.UUID,
 	if err != nil {
 		return WriteResult{}, fmt.Errorf("new hold id: %w", err)
 	}
-	itemSeq := it.ItemSeq + 1
-	if _, err := tx.Exec(ctx,
-		`update items set fields = $2, item_seq = $3, updated_at = now() where id = $1`,
-		id, merged, itemSeq); err != nil {
-		return WriteResult{}, fmt.Errorf("update item: %w", err)
-	}
 	// The target is `requested_to`, never `to`: this event enters no state.
 	payload := map[string]any{"from": it.State, "requested_to": to, "hold_id": holdID.String()}
 	addFieldIDs(payload, set, cleared)
-	res, err := appendEvent(ctx, tx, ty, id, itemSeq, recorded, attr, lifecycle.OpTransitionRequested, payload, set)
+	bump, err := decideContent(ty, lifecycle.OpTransitionRequested, payload)
+	if err != nil {
+		return WriteResult{}, err
+	}
+	itemSeq := it.ItemSeq + 1
+	if _, err := tx.Exec(ctx,
+		`update items set fields = $2, item_seq = $3, content_seq = content_seq + $4, updated_at = now() where id = $1`,
+		id, merged, itemSeq, bump.n); err != nil {
+		return WriteResult{}, fmt.Errorf("update item: %w", err)
+	}
+	res, err := appendEvent(ctx, tx, ty, id, itemSeq, recorded, attr, bump, payload, set)
 	if err != nil {
 		return WriteResult{}, err
 	}
@@ -352,12 +356,17 @@ func (in *Internal) ResolveHold(ctx context.Context, req ResolveHoldRequest) (Wr
 			op, holdStatus = lifecycle.OpTransitionFailed, item.HoldError
 			payload["requested_to"], payload["reason"] = to, reason
 		}
+		bump, err := decideContent(ty, op, payload)
+		if err != nil {
+			return WriteResult{}, err
+		}
 		if _, err := tx.Exec(ctx,
-			`update items set state = $2, fields = $3, item_seq = $4, updated_at = now() where id = $1`,
-			req.ItemID, state, merged, itemSeq); err != nil {
+			`update items set state = $2, fields = $3, item_seq = $4, content_seq = content_seq + $5, updated_at = now()
+			 where id = $1`,
+			req.ItemID, state, merged, itemSeq, bump.n); err != nil {
 			return WriteResult{}, fmt.Errorf("update item: %w", err)
 		}
-		res, err := appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, req.Attribution, op, payload, set)
+		res, err := appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, req.Attribution, bump, payload, set)
 		if err != nil {
 			return WriteResult{}, err
 		}

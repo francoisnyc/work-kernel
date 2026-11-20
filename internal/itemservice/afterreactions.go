@@ -334,12 +334,16 @@ func (k *Service) writeRecord(ctx context.Context, tg trigger, outcome, reason s
 		if err != nil {
 			return WriteResult{}, err
 		}
+		bump, err := decideContent(tg.ty, op, payload)
+		if err != nil {
+			return WriteResult{}, err
+		}
 		itemSeq := it.ItemSeq + 1
-		if _, err := tx.Exec(ctx, `update items set item_seq = $2, updated_at = now() where id = $1`,
-			tg.req.SourceID, itemSeq); err != nil {
+		if _, err := tx.Exec(ctx, `update items set item_seq = $2, content_seq = content_seq + $3, updated_at = now() where id = $1`,
+			tg.req.SourceID, itemSeq, bump.n); err != nil {
 			return WriteResult{}, fmt.Errorf("update item: %w", err)
 		}
-		return appendEvent(ctx, tx, tg.ty, tg.req.SourceID, itemSeq, tg.recorded(), attr, op, payload, nil)
+		return appendEvent(ctx, tx, tg.ty, tg.req.SourceID, itemSeq, tg.recorded(), attr, bump, payload, nil)
 	})
 	return err
 }
@@ -550,21 +554,25 @@ func (in *Internal) ReactCreate(ctx context.Context, req ReactionRunRequest) (Re
 		if err != nil {
 			return WriteResult{}, err
 		}
-		const itemSeq = 1
-		_, err = tx.Exec(ctx,
-			`insert into items (id, namespace_id, type_id, type_version, container_id, scope_id, state, fields, item_seq,
-			                    created_at, created_by, created_on_behalf_of)
-			 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, null)`,
-			id, tg.ns, created.ID, created.Version, container, scopeID, created.InitialState, fields, itemSeq,
-			at, tg.principal().Actor)
-		if err != nil {
-			return WriteResult{}, fmt.Errorf("insert item: %w", err)
-		}
 		payload := map[string]any{
 			"type_id": created.ID, "type_version": created.Version, "state": created.InitialState,
 			"field_ids": sortedKeys(fields), "container_id": container,
 		}
-		res, err := appendEvent(ctx, tx, created, id, itemSeq, tg.recorded(), attr, "create", payload, fields)
+		bump, err := decideContent(created, "create", payload)
+		if err != nil {
+			return WriteResult{}, err
+		}
+		const itemSeq = 1
+		_, err = tx.Exec(ctx,
+			`insert into items (id, namespace_id, type_id, type_version, container_id, scope_id, state, fields, item_seq,
+			                    content_seq, created_at, created_by, created_on_behalf_of)
+			 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $12, $10, $11, null)`,
+			id, tg.ns, created.ID, created.Version, container, scopeID, created.InitialState, fields, itemSeq,
+			at, tg.principal().Actor, bump.n)
+		if err != nil {
+			return WriteResult{}, fmt.Errorf("insert item: %w", err)
+		}
+		res, err := appendEvent(ctx, tx, created, id, itemSeq, tg.recorded(), attr, bump, payload, fields)
 		if err != nil {
 			return WriteResult{}, err
 		}

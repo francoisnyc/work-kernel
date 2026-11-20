@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/francoisnyc/work-kernel/internal/typedef"
 )
 
 // SetTestHook sets the write path's test hook (see testHook) and returns a
@@ -16,3 +18,11 @@ func SetTestHook(f func(ctx context.Context, tx pgx.Tx, point string) error) (re
 
 // Retryable reports whether write runs a transaction again after err.
 func Retryable(err error) bool { return retryable(err) }
+
+// ChangesContent is the etag rule (content.go).
+func ChangesContent(ty *typedef.Type, op string, payload map[string]any) (bool, error) {
+	return changesContent(ty, op, payload)
+}
+
+// RequestHash is the idempotency hash of a request.
+func RequestHash(op string, req any) (string, error) { return requestHash(op, req) }
