@@ -208,3 +208,32 @@ dt {
 .link-type {
   font-weight: 600;
 }
+
+/* A multi-value field: its members as chips. */
+.field .label {
+  font-weight: 600;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.chips li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0 0.4rem;
+  border: 1px solid currentColor;
+  border-radius: 1rem;
+}
+.chips li button {
+  border: 0;
+  background: none;
+  padding: 0;
+  font-size: 0.8em;
+  text-decoration: underline;
+  cursor: pointer;
+}

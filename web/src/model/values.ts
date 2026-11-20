@@ -16,11 +16,18 @@ export function formValues(type: Type, fields: JsonObject | undefined): FormValu
   const out: FormValues = {};
   for (const f of type.fields) {
     const v = fields?.[f.id];
-    if (f.type === FieldType.BOOL) out[f.id] = v === true;
+    if (f.multiple) out[f.id] = membersOf(v);
+    else if (f.type === FieldType.BOOL) out[f.id] = v === true;
     else if (f.type === FieldType.DATETIME) out[f.id] = typeof v === "string" ? localInput(v) : "";
     else out[f.id] = v === undefined || v === null ? "" : String(v);
   }
   return out;
+}
+
+// The members of a stored set, sorted as the server keeps them; [] for an
+// unset field.
+function membersOf(v: JsonValue | FormValue | undefined): string[] {
+  return Array.isArray(v) ? v.map(String).sort() : [];
 }
 
 // A text input's value as it is sent: a string as typed, anything else
@@ -37,7 +44,10 @@ function sent(field: Field, value: FormValue | undefined): string {
 export function createFields(type: Type, form: FormValues): JsonObject {
   const out: JsonObject = {};
   for (const f of type.fields) {
-    if (f.type === FieldType.BOOL) {
+    if (f.multiple) {
+      const members = membersOf(form[f.id]);
+      if (members.length > 0) out[f.id] = members;
+    } else if (f.type === FieldType.BOOL) {
       if (form[f.id] === true) out[f.id] = true;
     } else if (sent(f, form[f.id]) !== "") {
       out[f.id] = sent(f, form[f.id]);
@@ -47,11 +57,24 @@ export function createFields(type: Type, form: FormValues): JsonObject {
 }
 
 // UpdateItem's patch: only the fields the user changed; an emptied field
-// is null (clears it). {} when nothing changed.
+// is null (clears it). A changed set is sent as a set operation, the
+// members added and removed, never as a new list: someone else's members,
+// added meanwhile, stay. {} when nothing changed.
 export function patchFields(type: Type, original: JsonObject | undefined, form: FormValues): JsonObject {
   const before = formValues(type, original);
   const out: JsonObject = {};
   for (const f of type.fields) {
+    if (f.multiple) {
+      const was = membersOf(before[f.id]);
+      const now = membersOf(form[f.id]);
+      const op: JsonObject = {};
+      const add = now.filter((m) => !was.includes(m));
+      const remove = was.filter((m) => !now.includes(m));
+      if (add.length > 0) op.add = add;
+      if (remove.length > 0) op.remove = remove;
+      if (add.length + remove.length > 0) out[f.id] = op;
+      continue;
+    }
     if (f.type === FieldType.BOOL) {
       // A checkbox cannot say "unset": ticking sends true, unticking false.
       if (form[f.id] !== before[f.id]) out[f.id] = form[f.id] === true;

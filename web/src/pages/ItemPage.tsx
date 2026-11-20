@@ -248,6 +248,8 @@ function details(e: ItemEvent): (ReactElement | string)[] {
   if (e.inherit) out.push("readers inherited again");
   if (e.fields && Object.keys(e.fields).length > 0) out.push(`set ${JSON.stringify(e.fields)}`);
   if (e.added && Object.keys(e.added).length > 0) out.push(`added ${JSON.stringify(e.added)}`);
+  // What the writer asked of a multi-value field: members added and removed.
+  if (e.setOps && Object.keys(e.setOps).length > 0) out.push(`changed ${JSON.stringify(e.setOps)}`);
   if (e.erasedFields.length > 0) out.push(`erased ${e.erasedFields.join(", ")}`);
   return out;
 }
