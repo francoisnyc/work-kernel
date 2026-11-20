@@ -413,6 +413,17 @@ Ideas noted during the spike, not built yet.
 - The web UI's datetime input edits to the second and sends milliseconds;
   the search form takes an instant as typed text, with its offset. (Jira
   2.1)
+- **A GIN index on `items.fields` if containers grow past this size.** The
+  contains and empty filters on multi-value fields scan the candidates
+  (25 ms for one label among 35,000 Items; table in the Jira 2.2 entry).
+  Past a few hundred thousand Items in a namespace, measure a
+  `jsonb_path_ops` GIN index against its write cost. (Jira 2.2)
+- Reaction outcome reasons are lower case in the item service and upper case
+  through the API, like every event reason. Fine, but the two spellings met
+  in three tests; one spelling in test helpers would have caught it. (Jira 2.2)
+- A source-declared `on: create` reaction (the created Item moves another)
+  was decided against in Jira 2.2 in favour of the container's
+  `on: created_inside`. Revisit only if a non-contained case appears.
 
 ## 2026-11-12 — Step 1 (finished)
 
@@ -1913,3 +1924,109 @@ throwaway override; CI's `scenario` job runs the repository's own Dockerfiles.
 running) is Jira 2.3 scope, not Later: step 1's `at` only moves. A sprint@2 has a workflow for as
 long as it is active, even without an end.
 **Next session:** Jira 2.2: reactions that move or create, and multi-value fields.
+
+## 2026-11-20 — Jira proof of concept, part 2, step 2: reactions that move or create, multi-value fields (finished)
+
+**Built:** primitive 3 of "Decisions for Jira part 2" and the multi-value fields. A reaction
+may **move**: declared by the source on entering a state (`kind: move, on: enter`), or by a
+container about Items created inside it (`on: created_inside, of: [...]`): `ticket@6` goes from
+`waiting_for_customer` back to `in_progress` when its own requester adds a public `comment@2`.
+A reaction may **create**: entering `in_progress` from `open` puts a `checklist@1` inside the
+ticket. A field declared `multiple: true` holds a set: `story`, `bug` and `task` `@3` have
+`f_labels` and `f_reviewers`, with set operations and contains / empty filters. Through the API,
+pli (`--add`, `--remove`, `--empty`), the web UI's generic form (chips) and the scenario (K1 to
+K7). design.md: "Jira part 2, step 2 as built".
+
+**Kernel changes, counted** (nine; proto v1 only grew, `buf breaking` green; no migration):
+(1) **Move on enter**: a source's reaction transitions the Item one link away, with the target
+Type's consent (`accepts_reactions: {type:id: {moves: [state]}}`), which stands in for `allowed`
+and `except` only: guards, `required` and frozen fields still apply. (2) **Move on
+created_inside**: declared on the container, `when` over `child.*` only, `by: creator`; needs no
+consent, since the Type moves itself. With it, `Create` writes one outbox row for a child whose
+container's Type reacts to its Type, and the relay delivers it to the *container's* workflow as
+update `child`, starting the workflow if it has none. (3) **Create on enter**: a contained Item
+of a Type that consents (`creates: [fields]`), fields computed by CEL from the source's fields and
+`cause.at`; created by `reaction:<type>:<id>`, with no human creator. (4) **One outcome per
+(reaction, cause)**, field-less, on the declaring Item: `reaction_applied`, `reaction_failed`,
+or the new `reaction_skipped` (`condition_false`, `not_by`, `not_in_from`, `no_target`). A refused
+target is an outcome, never a retry. (5) **The workflow's reaction queue**: pending reactions,
+deduplicated, run one after another by one coroutine inside the hook budget; giving up records
+`budget_exhausted`. (6) **Cycles refused at load** across move and create reactions. (7)
+**Multi-value fields**: `multiple`, `max`, stored sorted and unique, empty is unset, set
+operations `{add, remove}` recorded as asked (`set_ops`), `too_many_values`. (8) **Filters**:
+equality on a set is contains, two are all-of, `empty: true` for any field; ranges and `order_by`
+on a set are refused. (9) **Guards and policy see a list**; `allowed: [field:x]` matches any
+member. Proto: `Reaction.trigger`, `of_types`, `when`, `by`, `to_state`, `target_from_states`,
+`create_type`, `create_fields`; kinds MOVE and CREATE; `AcceptedReaction.moves`, `creates`,
+`creates_fields`; `Field.multiple`, `max`; `FieldFilter.empty`; `ItemEvent.set_ops`;
+`ITEM_EVENT_KIND_REACTION_SKIPPED`. New refusal: `TOO_MANY_VALUES`. Not the kernel: the six
+new Type versions, pli's flags, the chips input, the scenario.
+
+**Two times in one reaction** (decision 4a). The write a reaction makes carries two instants: its
+event's own `created_at`, stamped inside that write like any other, and `cause.at`, the time of
+the event that triggered it. `sets` and `fields` read `cause.at`, so a worker stopped for ten
+seconds delays the bookkeeping and not the recorded instant
+(`TestE2E_AReactionDelayedByAStoppedWorker_KeepsTheCausesTime`).
+
+**Determinism.** No `GetVersion`: only a run whose Snapshot has the new reaction tables, or that
+receives the new `child` update, takes a new branch. The six histories recorded earlier replay
+unchanged. A seventh, `desk_woken_cold_by_a_child.json`, is the run a child's create started on
+a container with no workflow (LoadItem, RunAfterReaction, completed);
+`TestReplay_ReactionHistories` replays it. The queue is a slice run in order by one coroutine;
+nothing iterates a map.
+
+**EXPLAIN** (`go run ./cmd/bench --explain-sets`; 30,000 issues on version 3 in one space, 2%
+hidden, 5,000 tickets beside them; each issue has one of 20 area labels and one of 300 team
+labels, a tenth have none):
+
+| Read | Fresh (ms) | Analyzed (ms) | Analyzed plan |
+| --- | --- | --- | --- |
+| The space's issues labelled area-3 (1,500), newest first, page 1 | 30.9 | 1.2 | no sort |
+| The same, page 3 | 24.7 | 1.2 | no sort |
+| Search: labelled rare (30), three Types | 26.8 | 25.6 | seq scan of 35,000, sort of 30 |
+| Search: a label nobody has (0) | 27.4 | 25.5 | seq scan of 35,000 |
+| Search: two labels, all of them (100) | 15.3 | 16.3 | sort of 50 |
+| Search: I am a reviewer (600), open, by rank | 28.3 | 23.4 | top-N heapsort |
+| Search: no labels (3,000), page 1 | 12.5 | 8.0 | sort of 1,425 |
+| Words and a label: "alpha" (35,000 matches), team-63 (100) | 39.5 | 33.2 | sort of 50 |
+
+A contains filter is `fields @> {"f": ["v"]}`, evaluated on the candidates the other conditions
+leave: the same plans and cost as the existing field filters (assignee = me was 10 to 17 ms in
+Jira part 1). **No GIN index**: nothing here demands one. Later has the size at which to
+measure again.
+
+**The etag rule in the web UI.** The Item page sends the etag with a save, except a save made
+only of set operations: those commute with anyone else's, which is why they exist. The smoke
+test has sam add a label while lea's page is open; with the etag her save was `ABORTED STALE`.
+A save that also changes a plain field keeps the etag.
+
+**Tests:** 67 new Go test functions in 10 new files, 20 new vitest tests (429 in all), 1 new
+Playwright test (5 in all). Changed existing tests, agreed in the Phase B review: the Type-list
+tests (23 to 29 Types). **Four fixes to my own Phase B tests, found in Phase C and applied
+after review:** `TestAcceptsReactions_ListOrMap` used a string field where accepted `fields`
+must be ints (a reaction adds); `TestReactions_API_ShowInHistory` and scenario K5 and K6
+expected lower-case reasons, and the API gives every reason in upper case (`NOT_BY`,
+`CONDITION_FALSE`, `GUARD_FAILED`; the convention stays); scenario K4's ticket was titled "VPN
+drops" and, back in progress, showed up in D1's search for active VPN work.
+
+**Numbers:** `go test -race -count=1 ./...` green, no data race (workflow package 167 s, item
+service 62 s). Scenario, two runs in a row on a fresh stack: both passed. A ticket was back in
+progress **279 ms** after its requester's comment (create, outbox, relay, a cold workflow start,
+the reaction's write). Playwright: 5 tests in 4.6 s.
+
+**Surprises:** the desk's own move, made by the reaction, is delivered to the desk's workflow
+like any event, and by then the run that made it may have completed: recording "the last run"
+saved the wrong history. A CEL list type has no `!= null`; sets are declared nullable lists. The
+field decoder had a key whitelist that rejected `multiple`. My load rule "every version of an
+`of` Type declares the child field" refused the real Types (`comment@1` has no `f_public`); it is
+now "some version does", and a missing field reads as null. A form that saves with an etag
+defeats set operations, which no unit test could see; the browser test did.
+
+**Not verified here:** the images' build stages, as before (the stack ran from host-built
+binaries with a throwaway override); CI's `scenario` job runs the repository's own Dockerfiles.
+
+**Open:** a transition fired by a field change on the same Item (N-of-M reviewers) is still
+open from the decisions. A container that reacts to children keeps getting one outbox row per
+matching child, whatever its state; the skip is recorded (`not_in_from`).
+**Next session:** Jira 2.3: the acting timer at an instant, working-time arithmetic, the
+`sla_goal` Type.

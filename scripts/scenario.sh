@@ -14,7 +14,10 @@
 # resolution on done, watching as a Subscription. Jira part 2, step 1 added
 # date-time fields, sprints that close themselves at their end instant (and
 # re-arm when it moves) and a story's resolution time, on version 2 of the
-# PLAT Types.
+# PLAT Types. Jira part 2, step 2 added multi-value fields (labels and
+# reviewers on version 3 of the PLAT issues) and reactions that move or
+# create (ticket@6: a customer's comment sets a waiting ticket back in
+# progress; starting work creates a checklist).
 #
 #   scripts/scenario.sh          (or: make scenario, which starts the stack first)
 #
@@ -1109,6 +1112,130 @@ expect "history shows both cleared on the reopening event" \
 expect "stories of this run still resolved" \
 	"$(ok lea item search "$w" --type story --where 'f_resolved_at>=2026-01-01T00:00:00Z' | names)" "$r2"
 
+# ---------------------------------------------------------------------------
+# Jira part 2, step 2: multi-value fields, and reactions that move or
+# create. Labels and reviewers are sets on version 3 of the PLAT issues.
+# ticket@6 has a waiting_for_customer state: a public comment (comment@2)
+# made inside the ticket by its creator sets it back in progress, a rule
+# the TICKET declares (the comment Type knows nothing of it); and starting
+# work on a ticket creates a checklist inside it. The worker runs the
+# reactions a moment after the write that triggers them, so the script
+# waits for each outcome (at most 30 s).
+# ---------------------------------------------------------------------------
+
+# set_of FIELD: a multi-value field of an Item answer, as "a b c" ("" if unset).
+set_of() { j ".item.fields.$1 // [] | join(\" \")"; }
+# records ITEM: the outcome records of the Item's reactions, in order, as
+# "APPLIED ticket:reopen" or "SKIPPED ticket:reopen NOT_BY", joined by ", ".
+records() {
+	ok ana item history "$1" --page-size 100 | j '[.events[]
+		| select(.kind | test("REACTION_(APPLIED|SKIPPED|FAILED)$"))
+		| "\(.kind | sub("ITEM_EVENT_KIND_REACTION_"; "")) \(.reaction)\(if (.reason // "") != "" then " " + .reason else "" end)"]
+		| join(", ")'
+}
+records_are() { [ "$(records "$1")" = "$2" ]; }
+comment_in() { # WHO ITEM PUBLIC: a comment@2 inside ITEM; prints its name
+	ok "$1" item create --type comment@2 --in "$2" --set "f_body=any news? $w" --set "f_public=$3" | j .item.name
+}
+
+step "K1: labels and reviewers are sets: a list, add and remove, sorted, no duplicates"
+k1=$(ok lea item create --type story@3 --in "$plat" --set "f_summary=Labelled one $w" \
+	--set 'f_labels=["sso","backend","sso"]' | j .item.name)
+expect "K1's labels, sorted, once each" "$(ok lea item get "$k1" | set_of f_labels)" "backend sso"
+changed=$(ok lea item update "$k1" --add f_labels=urgent --remove f_labels=sso --add f_reviewers=user:sam --add f_reviewers=user:lea)
+expect "K1's labels after add and remove" "$(set_of f_labels <<<"$changed")" "backend urgent"
+expect "K1's reviewers" "$(set_of f_reviewers <<<"$changed")" "user:lea user:sam"
+expect "history shows what was asked" \
+	"$(ok lea item history "$k1" | j '.events[-1].set_ops.f_labels | "\(.add | join(",")) \(.remove | join(","))"')" "urgent sso"
+refuse lea "INVALID_ARGUMENT INVALID_REQUEST" item update "$k1" --set f_labels=backend
+expect "story@3 says f_labels is a set" \
+	"$(ok lea type get story@3 | j '.type.fields[] | select(.id == "f_labels") | "\(.multiple) \(.max)"')" "true 20"
+
+step "K2: two people add a label at the same moment, with no etag: both land"
+k2=$(ok lea item create --type story@3 --in "$plat" --set "f_summary=Labelled two $w" --set 'f_labels=["backend"]' | j .item.name)
+"$pli_bin" --server "$server" --tokens "$tokens" --as lea item update "$k2" --add f_labels=from-lea >/dev/null 2>"$tmp/race1" &
+race1=$!
+"$pli_bin" --server "$server" --tokens "$tokens" --as sam item update "$k2" --add f_labels=from-sam >/dev/null 2>"$tmp/race2" &
+race2=$!
+wait "$race1" || fail "lea's --add failed: $(cat "$tmp/race1")"
+wait "$race2" || fail "sam's --add failed: $(cat "$tmp/race2")"
+expect "K2's labels after the race" "$(ok lea item get "$k2" | set_of f_labels)" "backend from-lea from-sam"
+
+step "K3: contains and empty filters; a set has no order and no more than its max"
+k3=$(ok lea item create --type story@3 --in "$plat" --set "f_summary=Labelled three $w" | j .item.name)
+labelled() { ok lea item search "$w" --type story --where "f_summary>=Labelled" --where "f_summary<Labelled z" "$@" | names; }
+expect "stories labelled backend" "$(labelled --where f_labels=backend)" "$(sorted "$k1" "$k2")"
+expect "stories labelled backend and urgent" "$(labelled --where f_labels=backend --where f_labels=urgent)" "$k1"
+expect "stories without a label" "$(labelled --empty f_labels)" "$k3"
+expect "stories sam reviews" "$(ok sam item search "$w" --type story --where f_reviewers=me | names)" "$k1"
+refuse lea "INVALID_ARGUMENT INVALID_REQUEST" item search "$w" --type story --order-by f_labels
+many=$(jq -cn '[range(21) | "l\(.)"]')
+refuse lea "FAILED_PRECONDITION TOO_MANY_VALUES" item update "$k3" --set "f_labels=$many"
+expect "the field" "$(meta field)" "f_labels"
+expect "its max" "$(meta max)" "20"
+
+step "K4: starting work on a ticket@6 creates a checklist inside it"
+k4=$(ok ana item create --type ticket@6 --set "f_title=Printer jams $w" --set f_assignee=user:bob \
+	--set f_customer_id=cust-good --set f_amount=100 | j .item.name)
+ok ana item transition "$k4" --to open >/dev/null
+started=$(ok ana item transition "$k4" --to in_progress)
+wait_until 30 "the checklist reaction recorded on K4" records_are "$k4" "APPLIED ticket:open_checklist"
+checklist=$(ok ana item list "$k4" --type checklist | j '.items[0].name')
+expect "one checklist in K4" "$(ok ana item list "$k4" --type checklist | j '.items | length')" "1"
+expect "the checklist's creator: the reaction, no person" "$(ok ana item get "$checklist" | j .item.creator)" "reaction:ticket:open_checklist"
+# Its time is the cause's: the event that started the work, not the moment
+# the worker got to it.
+entered_at=$(ok ana item history "$k4" --page-size 100 | j '[.events[] | select(.to_state == "in_progress")][0].create_time
+	| sub("Z$"; "") | split(".") | "\(.[0]).\(((.[1] // "") + "000000")[0:6])Z"')
+expect "the checklist's f_opened_at is K4's event time" "$(ok ana item get "$checklist" | j .item.fields.f_opened_at)" "$entered_at"
+: "$started"
+
+step "K5: K4 waits for its customer; only her own public comment sets it back in progress"
+ok bob item transition "$k4" --to waiting_for_customer >/dev/null
+refuse ana "PERMISSION_DENIED NOT_ALLOWED" item transition "$k4" --to in_progress # support only, by hand
+comment_in bob "$k4" true >/dev/null
+wait_until 30 "bob's comment recorded as skipped" records_are "$k4" "APPLIED ticket:open_checklist, SKIPPED ticket:reopen NOT_BY"
+expect "K4 after someone else's comment" "$(ok ana item get "$k4" | j .item.state)" "waiting_for_customer"
+comment_in ana "$k4" false >/dev/null
+wait_until 30 "ana's private comment recorded as skipped" records_are "$k4" \
+	"APPLIED ticket:open_checklist, SKIPPED ticket:reopen NOT_BY, SKIPPED ticket:reopen CONDITION_FALSE"
+expect "K4 after a private comment" "$(ok ana item get "$k4" | j .item.state)" "waiting_for_customer"
+mine=$(comment_in ana "$k4" true)
+began=$(now_ms)
+wait_until 30 "ana's public comment sets K4 back in progress" state_is ana "$k4" in_progress
+echo "    K4 was back in progress $(($(now_ms) - began)) ms after ana's comment"
+wait_until 30 "the move recorded on K4" records_are "$k4" \
+	"APPLIED ticket:open_checklist, SKIPPED ticket:reopen NOT_BY, SKIPPED ticket:reopen CONDITION_FALSE, APPLIED ticket:reopen"
+expect "who moved K4, and for whom" \
+	"$(ok ana item history "$k4" --page-size 100 | j '[.events[] | select(.from_state == "waiting_for_customer")][0] | "\(.actor) \(.on_behalf_of)"')" \
+	"reaction:ticket:reopen user:ana"
+expect "the comment itself: one event" "$(ok ana item history "$mine" | j '.events | length')" "1"
+expect "still one checklist: coming back is not starting" "$(ok ana item list "$k4" --type checklist | j '.items | length')" "1"
+
+step "K6: a move the ticket refuses is recorded as REACTION_FAILED, and not retried"
+k6=$(ok ana item create --type ticket@6 --set "f_title=No assignee $w" --set f_assignee=user:bob \
+	--set f_customer_id=cust-good --set f_amount=100 | j .item.name)
+ok ana item transition "$k6" --to open >/dev/null
+ok ana item transition "$k6" --to in_progress >/dev/null
+wait_until 30 "K6's checklist" records_are "$k6" "APPLIED ticket:open_checklist"
+ok bob item transition "$k6" --to waiting_for_customer >/dev/null
+ok bob item update "$k6" --set f_assignee=null >/dev/null # nobody to take it back
+comment_in ana "$k6" true >/dev/null
+wait_until 30 "the refused move recorded on K6" records_are "$k6" \
+	"APPLIED ticket:open_checklist, FAILED ticket:reopen GUARD_FAILED"
+expect "K6 after the refusal" "$(ok ana item get "$k6" | j .item.state)" "waiting_for_customer"
+kinds_seen="$kinds_seen$(ok ana item history "$k6" --page-size 100 | jqx -r '[.events[].kind] | unique | join(" ")') "
+kinds_seen="$kinds_seen$(ok ana item history "$k4" --page-size 100 | jqx -r '[.events[].kind] | unique | join(" ")') "
+case $kinds_seen in *" ITEM_EVENT_KIND_REACTION_SKIPPED "* | *" ITEM_EVENT_KIND_REACTION_SKIPPED"*) ;; *) fail "no history showed REACTION_SKIPPED" ;; esac
+
+step "K7: a comment inside a story, whose Type declares no such rule, costs the story nothing"
+before=$(ok lea item history "$k3" | j '.events | length')
+quiet=$(comment_in lea "$k3" true)
+sleep 2 # were anything to react, it would have by now
+expect "the story's events, unchanged" "$(ok lea item history "$k3" | j '.events | length')" "$before"
+expect "the story's etag, unchanged" "$(ok lea item get "$k3" | j .item.etag)" "$before"
+expect "the comment: its create, nothing else" "$(ok lea item history "$quiet" | j '.events | length')" "1"
+
 step "D1: lea searches VPN in the active category"
 vpn=$(issue lea story "VPN drops on wifi")
 issue lea task "VPN setup guide" >/dev/null
@@ -1207,7 +1334,7 @@ for reason in UNAUTHENTICATED SESSION_INVALID INVALID_REQUEST NOT_FOUND NOT_ALLO
 	NO_TRANSITION MISSING_FIELDS GUARD_FAILED WIDEN_NOT_CONFIRMED STALE HELD \
 	IDEMPOTENCY_KEY_REUSED NOT_CAUGHT_UP AUDIENCE_CHANGED \
 	LINK_CARDINALITY ALREADY_LINKED NOT_LINKED LINK_TARGET_TYPE \
-	FIELD_NOT_WRITABLE FIELD_FROZEN INVARIANT_FAILED LINK_NOT_WRITABLE; do
+	FIELD_NOT_WRITABLE FIELD_FROZEN INVARIANT_FAILED LINK_NOT_WRITABLE TOO_MANY_VALUES; do
 	case $seen in *" $reason "*) ;; *) fail "no step triggered $reason" ;; esac
 done
 cat <<'EOF'

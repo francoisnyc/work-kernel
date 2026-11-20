@@ -8,6 +8,8 @@
 //
 //   4. as lea: set a sprint's end instant through the generic form (a
 //      datetime field) and read it back, on the page and from the server.
+//   5. as lea: give a story labels through the generic form (a multi-value
+//      field, shown as chips), change them, and read them back.
 //
 // Run: docker compose up -d --build --wait, then `npm run e2e` in web/.
 import { expect, test, type Page } from "@playwright/test";
@@ -174,4 +176,46 @@ test.describe("a datetime field", () => {
     // Years away: the sprint is still running.
     expect((await api(baseURL!, "lea").getItem({ name: item })).item?.state).toBe("active");
   });
+});
+
+// A multi-value field in the generic form (Jira part 2, step 2): chips. An
+// edit is sent as a set operation, so the server's set is the old one with
+// one member removed and one added, sorted.
+test("lea labels a story and changes the labels", async ({ page, baseURL }) => {
+  const summary = `Labelled in the browser ${run}`;
+  await actAs(page, "lea");
+
+  await page.getByRole("link", { name: "New Item" }).click();
+  // The latest version of story has f_labels; nothing here knows that.
+  await page.getByLabel("Type", { exact: true }).selectOption("story");
+  await page.getByLabel("f_summary").fill(summary);
+  const labels = page.getByRole("group", { name: "f_labels" });
+  for (const label of ["sso", "backend"]) {
+    await labels.getByRole("textbox", { name: "Add to f_labels" }).fill(label);
+    await labels.getByRole("button", { name: "Add to f_labels" }).click();
+  }
+  await expect(labels.getByRole("listitem")).toHaveText([/backend/, /sso/]);
+  await page.getByRole("button", { name: "Create" }).click();
+
+  // The new Item's page shows the set as the server holds it.
+  await expect(page.getByRole("heading", { name: summary })).toBeVisible();
+  const shown = page.getByRole("group", { name: "f_labels" });
+  await expect(shown.getByRole("listitem")).toHaveText([/backend/, /sso/]);
+  const id = page.url().split("/").pop()!;
+  const item = `namespaces/acme/items/${id}`;
+  expect((await api(baseURL!, "lea").getItem({ name: item })).item?.fields?.f_labels).toEqual(["backend", "sso"]);
+
+  // Someone else adds a label meanwhile, through the API.
+  await api(baseURL!, "sam").updateItem({ name: item, requestId: `smoke-${run}-sam`, fields: { f_labels: { add: ["from-sam"] } } });
+
+  // lea, whose page does not show it yet, removes one and adds one: her
+  // save changes those two, and sam's label stays.
+  await shown.getByRole("button", { name: "Remove sso" }).click();
+  await shown.getByRole("textbox", { name: "Add to f_labels" }).fill("urgent");
+  await shown.getByRole("textbox", { name: "Add to f_labels" }).press("Enter");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect
+    .poll(async () => (await api(baseURL!, "lea").getItem({ name: item })).item?.fields?.f_labels)
+    .toEqual(["backend", "from-sam", "urgent"]);
+  await expect(page.getByRole("group", { name: "f_labels" }).getByRole("listitem")).toHaveText([/backend/, /from-sam/, /urgent/]);
 });

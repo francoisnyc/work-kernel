@@ -1,6 +1,10 @@
 package lifecycle
 
-import "github.com/francoisnyc/work-kernel/internal/typedef"
+import (
+	"slices"
+
+	"github.com/francoisnyc/work-kernel/internal/typedef"
+)
 
 // TimerFor returns the timer an Item of Type t runs while it is in the given
 // state. The second value is false when the state has no timer or is not a
@@ -38,7 +42,12 @@ func NeedsWorkflow(t *typedef.Type, state string) bool {
 	// A timer at a field's instant needs a run even while the field is
 	// unset: the run must be there to hear the field being set.
 	_, hasAt := AtTimerFor(t, state)
-	return hasTimer || hasAt || len(EnrichHooks(t, state)) > 0 || len(ActionHooks(t, state)) > 0 ||
+	// A move or create reaction run on entering the state: per state,
+	// whatever states each one's entry must come from.
+	hasReaction := slices.ContainsFunc(t.Reactions, func(r typedef.Reaction) bool {
+		return isAfterReaction(r) && r.On == typedef.OnEnter && r.State == state
+	})
+	return hasTimer || hasAt || hasReaction || len(EnrichHooks(t, state)) > 0 || len(ActionHooks(t, state)) > 0 ||
 		len(ActingTimers(t, state)) > 0
 }
 

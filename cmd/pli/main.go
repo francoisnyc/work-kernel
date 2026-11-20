@@ -4,9 +4,9 @@
 //	pli [--server URL] [--tokens FILE] --as NAME [--session ID] <command>
 //	  item create --type TYPE [--in ITEM] [--narrow P,P] [--set ID=VALUE]... [--request-id ID]
 //	  item get ITEM
-//	  item update ITEM [--set ID=VALUE]... [--readers P,P | --inherit]
+//	  item update ITEM [--set ID=VALUE]... [--add ID=VALUE]... [--remove ID=VALUE]... [--readers P,P | --inherit]
 //	                   [--move-to ITEM | --move-to-top] [--confirm-widen] [--etag E] [--request-id ID]
-//	  item transition ITEM --to STATE [--set ID=VALUE]... [--wait D] [--etag E] [--request-id ID]
+//	  item transition ITEM --to STATE [--set ID=VALUE]... [--add ID=VALUE]... [--remove ID=VALUE]... [--wait D] [--etag E] [--request-id ID]
 //	  item search [WORDS...] [--min-seq N] [FILTERS] [PAGING]
 //	  item list [ITEM] [FILTERS] [PAGING]           (no ITEM: the top level)
 //	  item history ITEM [PAGING]
@@ -17,7 +17,7 @@
 //	  agent start [--for USER] --scopes S,S --powers P,P
 //	  agent approve SESSION SCOPE [--expect-audience A] [--yes] [--request-id ID]  (run it --as the user who approves)
 //
-//	FILTERS: [--type TYPE]... [--state S]... [--category C]... [--where F=V|F>V|F>=V|F<V|F<=V]...
+//	FILTERS: [--type TYPE]... [--state S]... [--category C]... [--where F=V|F>V|F>=V|F<V|F<=V]... [--empty F]...
 //	         [--linked out:NAME=ITEM | in:NAME=ITEM]...
 //	PAGING:  [--page-size N] [--page-token T]
 //
@@ -98,7 +98,7 @@ const usage = `usage: pli [--server URL] [--tokens FILE] --as NAME [--session ID
   item get ITEM
   item update ITEM [--set ID=VALUE]... [--readers P,P | --inherit]
                    [--move-to ITEM | --move-to-top] [--confirm-widen] [--etag E] [--request-id ID]
-  item transition ITEM --to STATE [--set ID=VALUE]... [--wait D] [--etag E] [--request-id ID]
+  item transition ITEM --to STATE [--set ID=VALUE]... [--add ID=VALUE]... [--remove ID=VALUE]... [--wait D] [--etag E] [--request-id ID]
   item search [WORDS...] [--min-seq N] [FILTERS] [PAGING]
   item list [ITEM] [FILTERS] [PAGING]           (no ITEM: the top level)
   item history ITEM [PAGING]
@@ -112,7 +112,7 @@ const usage = `usage: pli [--server URL] [--tokens FILE] --as NAME [--session ID
   agent start [--for USER] --scopes S,S --powers P,P
   agent approve SESSION SCOPE [--expect-audience A] [--yes] [--request-id ID]  (run it --as the user who approves)
 
-FILTERS: [--type TYPE]... [--state S]... [--category C]... [--where F=V|F>V|F>=V|F<V|F<=V]...
+FILTERS: [--type TYPE]... [--state S]... [--category C]... [--where F=V|F>V|F>=V|F<V|F<=V]... [--empty F]...
          [--linked out:NAME=ITEM | in:NAME=ITEM]...   (on a principal field, --where F=me is the caller)
          [--order-by 'FIELD [asc|desc]']             (default: newest first)
 PAGING:  [--page-size N] [--page-token T]`
@@ -363,6 +363,47 @@ func fieldsOf(sets []string) (*structpb.Struct, error) {
 	return out, nil
 }
 
+// withSetOps adds the --add and --remove flags to a request's fields: for
+// each field named, a set operation {"add": [...], "remove": [...]}. The
+// values are text, never read as JSON: a label 2026 or true stays a label.
+// A field may not be both set (--set) and changed (--add, --remove).
+func withSetOps(fields *structpb.Struct, adds, removes listFlag) (*structpb.Struct, error) {
+	if len(adds)+len(removes) == 0 {
+		return fields, nil
+	}
+	ops := map[string]map[string][]any{}
+	for kind, list := range map[string]listFlag{"add": adds, "remove": removes} {
+		for _, s := range list {
+			id, v, ok := strings.Cut(s, "=")
+			if !ok || id == "" {
+				return nil, usagef("--%s wants ID=VALUE, not %q", kind, s)
+			}
+			if _, set := fields.GetFields()[id]; set {
+				return nil, usagef("%s: --set replaces the whole set; do not --%s to it in the same command", id, kind)
+			}
+			if ops[id] == nil {
+				ops[id] = map[string][]any{}
+			}
+			ops[id][kind] = append(ops[id][kind], v)
+		}
+	}
+	if fields == nil {
+		fields = &structpb.Struct{Fields: map[string]*structpb.Value{}}
+	}
+	for id, op := range ops {
+		m := map[string]any{}
+		for kind, members := range op {
+			m[kind] = members
+		}
+		v, err := structpb.NewValue(m)
+		if err != nil {
+			return nil, err
+		}
+		fields.Fields[id] = v
+	}
+	return fields, nil
+}
+
 // jsonValue reads raw as a JSON value, or as a string if it is not one. A
 // whole number too big for a JSON number to carry exactly is sent as a
 // numeric string, which the API accepts for an int.
@@ -471,8 +512,10 @@ func (c *cli) itemUpdate(ctx context.Context, args []string) error {
 	confirmWiden := fs.Bool("confirm-widen", false, "confirm a move that lets more people see the Item")
 	etag := fs.String("etag", "", "write only if the Item is still at this etag")
 	requestID := fs.String("request-id", newRequestID(), "idempotency key")
-	var sets listFlag
+	var sets, adds, removes listFlag
 	fs.Var(&sets, "set", "ID=VALUE, repeatable")
+	fs.Var(&adds, "add", "ID=VALUE: add VALUE to a multi-value field; repeatable")
+	fs.Var(&removes, "remove", "ID=VALUE: remove VALUE from a multi-value field; repeatable")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -489,6 +532,9 @@ func (c *cli) itemUpdate(ctx context.Context, args []string) error {
 	}
 	fields, err := fieldsOf(sets)
 	if err != nil {
+		return err
+	}
+	if fields, err = withSetOps(fields, adds, removes); err != nil {
 		return err
 	}
 	req := &kernelv1.UpdateItemRequest{Name: c.itemRef(ref), RequestId: *requestID, Etag: *etag, Fields: fields}
@@ -519,8 +565,10 @@ func (c *cli) itemTransition(ctx context.Context, args []string) error {
 	wait := fs.Duration("wait", 0, "how long to wait for a held transition's check (0 to 5s)")
 	etag := fs.String("etag", "", "move only if the Item is still at this etag")
 	requestID := fs.String("request-id", newRequestID(), "idempotency key")
-	var sets listFlag
+	var sets, adds, removes listFlag
 	fs.Var(&sets, "set", "ID=VALUE, repeatable")
+	fs.Var(&adds, "add", "ID=VALUE: add VALUE to a multi-value field; repeatable")
+	fs.Var(&removes, "remove", "ID=VALUE: remove VALUE from a multi-value field; repeatable")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -534,6 +582,9 @@ func (c *cli) itemTransition(ctx context.Context, args []string) error {
 	}
 	fields, err := fieldsOf(sets)
 	if err != nil {
+		return err
+	}
+	if fields, err = withSetOps(fields, adds, removes); err != nil {
 		return err
 	}
 	res, err := c.c.TransitionItem(ctx, connect.NewRequest(&kernelv1.TransitionItemRequest{

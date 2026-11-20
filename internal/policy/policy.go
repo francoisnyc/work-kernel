@@ -134,8 +134,17 @@ func AuthorizeTransitionOn(principal string, roles []string, tr typedef.Transiti
 		if !ok {
 			continue
 		}
-		if held, _ := fields[id].(string); held != "" && held == principal {
-			return true
+		// A principal field holds one principal; a multi-value one, a set:
+		// any member matches.
+		switch held := fields[id].(type) {
+		case string:
+			if held != "" && held == principal {
+				return true
+			}
+		case []any:
+			if slices.Contains(held, any(principal)) {
+				return true
+			}
 		}
 	}
 	return false

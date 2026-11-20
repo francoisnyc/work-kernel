@@ -50,6 +50,7 @@ func main() {
 	variants := flag.Bool("variants", false, "measure Step 7: time to an answer for variants A, D (and B on its branch)")
 	explainLinks := flag.Bool("explain-links", false, "print query plans for the link reads and the link and principal filters")
 	explainOrder := flag.Bool("explain-order", false, "print query plans for the ordered and cross-Type reads (Jira part 1)")
+	explainSets := flag.Bool("explain-sets", false, "print query plans for the contains and empty filters on multi-value fields (Jira part 2)")
 	rankBench := flag.Bool("rank", false, "measure ranking a backlog by hand: key length, move latency, a rebalance, the write path (Jira part 1)")
 	flag.Parse()
 	run := run
@@ -72,7 +73,10 @@ func main() {
 		run = func() error { return linksExplainMode(context.Background()) }
 	}
 	if *explainOrder {
-		run = func() error { return explainOrderMode(context.Background()) }
+		run = func() error { return explainOrderMode(context.Background(), false) }
+	}
+	if *explainSets {
+		run = func() error { return explainOrderMode(context.Background(), true) }
 	}
 	if *rankBench {
 		run = func() error { return rankMode(context.Background()) }

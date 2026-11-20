@@ -1776,6 +1776,100 @@ add `f_resolved_at` (kernel-written): both moves to done set it to
 `cause.at`, `done -> todo` sets it to null beside clearing `f_resolution`.
 Version 1 of each still loads, and Items stay on their version.
 
+### Jira part 2, step 2 as built (2026-11-20)
+
+Primitive 3 of the decisions above and the multi-value fields, with nine
+kernel changes (journal). Nothing in the kernel is named comment, checklist
+or label; `kernel.v1` only grew; no migration.
+
+**A reaction that moves, on enter.** Declared by the source:
+
+```yaml
+- {id: finish, kind: move, on: enter, state: done, from: [building],
+   when: 'f_ready == true', link: whole, to: done, target_from: [building]}
+```
+
+When the source enters `state` (coming from one of `from`, if given) and
+`when` holds (CEL over its own fields, a bool), the Item one `link` away
+(max one) moves to `to`, if it is in one of `target_from`. The target's
+Type consents: `accepts_reactions: {part:finish: {moves: [done]}}`. Consent
+stands in for `allowed` and `except` only: the target's guard, `required`
+and frozen fields apply as for anyone. `accepts_reactions` takes the old
+list (the fields a reaction may add to) or a map `{fields, moves, creates}`.
+
+**A reaction that moves, on created_inside.** Declared by the *container*,
+about the Items created inside it:
+
+```yaml
+- {id: reopen, kind: move, on: created_inside, of: [comment],
+   when: 'child.f_public == true', by: creator,
+   from: [waiting_for_customer], to: in_progress}
+```
+
+`of` names the child Types. `when` reads only `child.*` (a field some
+version of each `of` Type declares; a missing one is null). `by: creator`
+means the child's creator is the container's requester. `from` is the
+container's own states. No consent: the Type moves itself. A
+source-declared `on: create` was not built. Delivery: `Create` writes one
+outbox row for a child whose container's Type reacts to its Type, and the
+relay sends it to the container's workflow (update `child`, starting one if
+needed). A child in any other container costs no row and no event.
+
+**A reaction that creates.** `kind: create, on: enter` only:
+`{state, from, type, version, fields: {f: <CEL>}}`. The new Item is
+contained in the source, with the container's readers; its fields are
+computed from the source's fields and `cause.at`. Its Type consents with
+`creates: [fields]`, which also counts as the writer of a kernel-written
+field. It is created by `reaction:<type>:<id>` and has **no human creator**
+(`created_on_behalf_of` is empty); the event carries the attribution.
+
+**Two times.** A reaction's write carries two instants. Its event's
+`created_at` is the write's own stamp, like any event's. `cause.at`, which
+its `sets` and `fields` read, is the time of the event that triggered the
+reaction. A delayed worker delays the first and never the second.
+
+**Outcomes.** Exactly one field-less record on the declaring Item per
+(reaction, cause event): `reaction_applied {reaction, target}`,
+`reaction_failed {reaction, reason, target?}` or `reaction_skipped
+{reaction, reason}` with `condition_false`, `not_by`, `not_in_from` or
+`no_target`. A target that refuses (guard, required, frozen) is a failure
+with the refusal's reason, not retried. Past the hop limit: failed,
+`hop_limit`. Through the API every reason is upper case (`NOT_BY`), as all
+event reasons are.
+
+**In the workflow.** A state with enter reactions needs a workflow. The
+run keeps a queue of pending reactions (deduplicated by reaction and
+cause), run in order by one coroutine through `RunAfterReaction`, inside
+the hook budget; giving up records `budget_exhausted`. The item service is
+the judge, as for timers: the workflow carries shapes, never field values.
+
+**Cycles** among move and create reactions ("T enters s", "a K is created
+inside a C") are refused when the Types load.
+
+**Multi-value fields.** `multiple: true` on a string, enum, principal or
+date field, with an optional `max`. The value is a set: stored as a sorted
+JSON array without duplicates; empty is unset. A write sends a list
+(replaces the set), null or `[]` (unsets it), or a set operation
+`{add: [...], remove: [...]}` (not on create; a value in both is
+malformed). Over `max`: `TOO_MANY_VALUES`. The event records what was
+asked in `set_ops`, shown in the history. One field ID
+is single or multiple across every Type and version, never both.
+
+**Set operations commute, so they need no etag.** Two people adding
+labels at the same moment both land. A client should send a set-only
+change without an etag and keep the etag when a plain field changes too.
+
+**Reading sets.** A filter's equality on a set means *contains*; two
+equalities on one field mean *all of*; `empty: true` matches an unset
+field of any kind. Ranges and `order_by` on a set are refused. No index:
+the filter runs on the candidates the other conditions leave (journal,
+EXPLAIN). CEL sees a nullable list (dates: a list of timestamps).
+`allowed: [field:f_reviewers]` matches any member.
+
+**The Types.** `ticket@6` adds `waiting_for_customer`, `reopen` and
+`open_checklist`; `comment@2` adds `f_public`; `checklist@1` is new;
+`story`, `bug` and `task` `@3` add `f_labels` (max 20) and `f_reviewers`.
+
 ## Web UI as built (2026-11-18)
 
 A generic web UI for playing with the proof of concept, in `web/`. It is
@@ -1807,6 +1901,14 @@ tests write and both suites read (`internal/rank/testdata/vectors.json`).
 A drop is one write, planned against the moved card's container through
 `ListItems`, as `pli rank` does. The UI never rebalances; past
 `rank.Threshold` it says the container needs one.
+
+**Sets (Jira part 2, step 2).** A multi-value field is a row of chips
+with remove buttons and one add input (a select for an enum, a date input
+for dates); at its `max` the add is disabled. The form holds the members;
+a save sends what changed as `{add, remove}`. A save made only of set
+operations goes **without an etag**: they commute with other people's
+changes. A save that also changes a plain field keeps the etag, and can
+be `STALE`. The history shows what was asked ("changed ...").
 
 **Serving.** A `web` container serves the built site and proxies `/api` to
 the item service: one origin, no CORS on the item service. Nothing updates

@@ -9,6 +9,7 @@ import { ItemEventKind, LinkDirection, type Item, type ItemEvent, type ItemRef, 
 import { linkWrite } from "../model/links";
 import { emptySearch } from "../model/search";
 import { incomingLinkTypes, itemId, shortId } from "../model/typeinfo";
+import { onlySetOps } from "../model/values";
 import { ItemForm } from "../ui/ItemForm";
 import { ItemList, categoryName } from "../ui/ItemList";
 import { LinksPanel } from "../ui/LinksPanel";
@@ -108,8 +109,11 @@ export function ItemPage({ id }: { id: string }): ReactElement {
           principals={session.principals}
           submitLabel="Save"
           onSubmit={async (fields) => {
-            // With the etag: the user edited what they were shown.
-            const res = await session.api.updateItem({ name, requestId: crypto.randomUUID(), etag: item.etag, fields });
+            // With the etag: the user edited what they were shown. Except
+            // a save that only adds to or removes from sets: those merge
+            // with anyone else's change, so they need no etag.
+            const etag = onlySetOps(type, fields) ? "" : item.etag;
+            const res = await session.api.updateItem({ name, requestId: crypto.randomUUID(), etag, fields });
             session.wrote(res.commitSeq);
             refresh();
           }}
@@ -248,6 +252,8 @@ function details(e: ItemEvent): (ReactElement | string)[] {
   if (e.inherit) out.push("readers inherited again");
   if (e.fields && Object.keys(e.fields).length > 0) out.push(`set ${JSON.stringify(e.fields)}`);
   if (e.added && Object.keys(e.added).length > 0) out.push(`added ${JSON.stringify(e.added)}`);
+  // What the writer asked of a multi-value field: members added and removed.
+  if (e.setOps && Object.keys(e.setOps).length > 0) out.push(`changed ${JSON.stringify(e.setOps)}`);
   if (e.erasedFields.length > 0) out.push(`erased ${e.erasedFields.join(", ")}`);
   return out;
 }

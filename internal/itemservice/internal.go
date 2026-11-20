@@ -96,6 +96,10 @@ type kernelCause struct {
 	typeVersion int
 	hookID      string // the hook acting; empty for the timer and a reaction
 	reactionID  string // the reaction acting (Step 2, part 2); empty otherwise
+	// move is set for a move reaction's transition (Jira part 2, step 2):
+	// see moveCause. Its cause may be an event of another Item, and the
+	// Item moved may be of another Type: ReactMove has checked both.
+	move *moveCause
 }
 
 // decider is the hook or reaction acting: what a hold names as deciding it.
@@ -232,6 +236,9 @@ func admit(ctx context.Context, tx pgx.Tx, p item.Principal, id uuid.UUID, it lo
 			return p, err
 		}
 		return p, checkWritePower(ctx, tx, p)
+	}
+	if kc.move != nil {
+		return kc.move.recorded, nil
 	}
 	if kc.typeID != it.TypeID || kc.typeVersion != it.TypeVersion {
 		return item.Principal{}, fmt.Errorf("%w: kernel write: %s ran for %s v%d, on an Item of %s v%d",

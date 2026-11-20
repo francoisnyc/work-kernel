@@ -30,6 +30,7 @@ const (
 	CodeAudienceChanged   = "audience_changed"              // an approval's audience is not the one the approver was shown
 	CodeFieldFrozen       = string(lifecycle.FieldFrozen)   // a write names a field the Item's state freezes
 	CodeEffectFailed      = string(lifecycle.EffectFailed)  // a transition's `sets` expression failed (metadata: field)
+	CodeTooManyValues     = "too_many_values"               // a multi-value field would hold more than its max (metadata: field, max)
 )
 
 // FieldNotWritableError is an ErrForbidden naming the fields a write may not

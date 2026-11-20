@@ -63,24 +63,34 @@ func FormatDateTime(at time.Time) (string, bool) {
 func ParseDateTime(v any) (time.Time, bool) { return parseInstant(v) }
 
 // NormalizeFields returns values with every datetime value in its stored
-// form. The values must have passed CheckFields. The map is copied only
+// form, and every list of a multi-value field as its set. The values must have passed CheckFields. The map is copied only
 // when something changes: a map argument is shared with the caller, as a
 // Java Map would be.
 func (t *Type) NormalizeFields(values map[string]any) map[string]any {
 	out, copied := values, false
-	for id, v := range values {
-		f, ok := t.Field(id)
-		if !ok || f.Type != DateTime || v == nil {
-			continue
-		}
-		stored, ok := NormalizeDateTime(v)
-		if !ok || stored == v {
-			continue
-		}
+	set := func(id string, v any) {
 		if !copied {
 			out, copied = maps.Clone(values), true
 		}
-		out[id] = stored
+		out[id] = v
+	}
+	for id, v := range values {
+		f, ok := t.Field(id)
+		if !ok || v == nil {
+			continue
+		}
+		switch {
+		case f.Multiple:
+			// A list becomes the set: sorted, each member once. A set
+			// operation stays as sent: the item service applies it.
+			if _, isOp := v.(map[string]any); !isOp {
+				set(id, StoredSet(SetMembers(v)))
+			}
+		case f.Type == DateTime:
+			if stored, ok := NormalizeDateTime(v); ok && stored != v {
+				set(id, stored)
+			}
+		}
 	}
 	return out
 }
@@ -121,7 +131,7 @@ func (t *Type) checkAtTimers(fail func(string, ...any) error) error {
 		}
 		// A date has no time zone: which instant ends that day is not
 		// decided. Datetime fields only.
-		if f.Type != DateTime {
+		if f.Type != DateTime || f.Multiple {
 			return fail("state %s: at names field %q, a %s; it must be a datetime", s.ID, f.ID, f.Type)
 		}
 		tr, ok := t.Transition(s.ID, s.At.To)
@@ -144,7 +154,7 @@ func newSetsEnv(t *Type) (*cel.Env, error) {
 	opts := make([]cel.EnvOption, 0, len(t.Fields)+2)
 	opts = append(opts, cel.Variable(VarToday, cel.TimestampType), cel.Variable(VarCauseAt, cel.TimestampType))
 	for _, f := range t.Fields {
-		opts = append(opts, cel.Variable(f.ID, celType(f.Type)))
+		opts = append(opts, cel.Variable(f.ID, fieldCELType(f)))
 	}
 	return cel.NewEnv(opts...)
 }
@@ -194,6 +204,8 @@ func (t *Type) checkSets(fail func(string, ...any) error) error {
 				return fail("transition %s: sets %q, which its own allowed list names", name, id)
 			case f.Type == Principal:
 				return fail("transition %s: sets %q, a principal field; an effect may not set who", name, id)
+			case f.Multiple:
+				return fail("transition %s: sets %q, a multi-value field; an effect on a set is not built", name, id)
 			}
 			ast, iss := env.Compile(tr.Sets[id])
 			if iss.Err() != nil {

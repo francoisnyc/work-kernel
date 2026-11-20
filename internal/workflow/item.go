@@ -17,10 +17,18 @@ import (
 // that calls it. Workflows and activities are looked up by name, not by Go
 // function, so the names are part of the contract with running workflows.
 const (
-	Name              = "item"      // the workflow type; the workflow ID is the Item's ID
-	UpdateApply       = "apply"     // the update that delivers one event
-	ActivityLoadItem  = "LoadItem"  // reads a Snapshot from Postgres
-	ActivityFireTimer = "FireTimer" // asks the item service to make a timer's move
+	Name        = "item"  // the workflow type; the workflow ID is the Item's ID
+	UpdateApply = "apply" // the update that delivers one event
+	// UpdateChild delivers "an Item was created inside this one" (a
+	// ChildEvent) to a container whose Type reacts to it.
+	UpdateChild = "child"
+	// Move and create reactions (Jira part 2, step 2): one activity runs a
+	// reaction for one trigger and records its outcome; the other records
+	// that it gave up (its budget ran out).
+	ActivityRunAfterReaction    = "RunAfterReaction"
+	ActivityAfterReactionFailed = "AfterReactionFailed"
+	ActivityLoadItem            = "LoadItem"  // reads a Snapshot from Postgres
+	ActivityFireTimer           = "FireTimer" // asks the item service to make a timer's move
 	// ActivityLoadInstant reads the instant of the field the Item's state
 	// names in `at`: the one field value the workflow sees.
 	ActivityLoadInstant = "LoadInstant"
@@ -191,6 +199,62 @@ type Snapshot struct {
 	At        map[string]AtSpec
 	AtInstant *time.Time
 	AtLoaded  bool
+
+	// Move and create reactions (Jira part 2, step 2), reduced like
+	// Actions. EnterReactions maps a state to the reactions entering it
+	// runs, in the Type's order (each with the states the entry must come
+	// from; none: any). InsideReactions maps a Type ID to the reactions the
+	// creation of such an Item inside this one runs. PendingReactions are
+	// those not yet finished: LoadItem reports them, events add to them,
+	// and a run never completes with one.
+	EnterReactions   map[string][]EnterReaction
+	InsideReactions  map[string][]string
+	PendingReactions []PendingReaction
+}
+
+// EnterReaction is one move or create reaction run on entering a state.
+type EnterReaction struct {
+	ID   string
+	From []string
+}
+
+// PendingReaction is one reaction to run for one trigger: the event of
+// CauseItem (this Item, or an Item created inside it) at CauseSeq.
+type PendingReaction struct {
+	ReactionID    string
+	CauseItem     string
+	CauseSeq      int64
+	CorrelationID string
+	Hop           int // of the cause
+}
+
+// ChildEvent says an Item was created inside this one: its ID, its Type,
+// and its create event's attribution. Shape only, no field value.
+type ChildEvent struct {
+	ChildID       string
+	TypeID        string
+	Seq           int64 // the create event: 1
+	At            time.Time
+	CorrelationID string
+	Hop           int
+}
+
+// AfterReactionInput is what RunAfterReaction needs: opaque IDs only.
+type AfterReactionInput struct {
+	ItemID        string // the Item whose Type declares the reaction
+	TypeID        string
+	TypeVersion   int
+	ReactionID    string
+	CauseItem     string
+	CauseSeq      int64
+	CorrelationID string
+	Hop           int // the cause's hop + 1
+}
+
+// AfterReactionFailedInput records that a move or create reaction gave up.
+type AfterReactionFailedInput struct {
+	Reaction AfterReactionInput
+	Reason   string // budget_exhausted
 }
 
 // ActingSpec is one acting timer, reduced to what the workflow needs (its
@@ -474,6 +538,24 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 		atEpoch     int
 		atNotBefore time.Time
 	)
+	// Move and create reactions (Jira part 2, step 2). reacting says the
+	// runner coroutine is at work on s.PendingReactions; kickReactions
+	// starts it (set below, once the activities it needs are in scope).
+	var (
+		reacting      bool
+		kickReactions = func() {}
+	)
+	// addReaction queues a reaction for a trigger, unless that very one is
+	// queued already: a run that starts because of a trigger finds it in
+	// what LoadItem reported, and is then told of it too.
+	addReaction := func(pr PendingReaction) {
+		same := func(q PendingReaction) bool {
+			return q.ReactionID == pr.ReactionID && q.CauseItem == pr.CauseItem && q.CauseSeq == pr.CauseSeq
+		}
+		if !slices.ContainsFunc(s.PendingReactions, same) {
+			s.PendingReactions = append(s.PendingReactions, pr)
+		}
+	}
 	// news gets one token per applied event, so the at-timer's selector can
 	// wait for "the timer, or an event". Buffered and sent without
 	// blocking: an update handler never waits on the main loop. A channel
@@ -591,6 +673,17 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 					HookID: id, CauseSeq: ev.Seq, CorrelationID: ev.CorrelationID, Hop: ev.Hop,
 				})
 			}
+			// Its move and create reactions, in the Type's order, each only
+			// when the entry comes from one of its `from` states.
+			for _, r := range s.EnterReactions[ev.To] {
+				if len(r.From) == 0 || slices.Contains(r.From, ev.From) {
+					addReaction(PendingReaction{
+						ReactionID: r.ID, CauseItem: in.ItemID, CauseSeq: ev.Seq,
+						CorrelationID: ev.CorrelationID, Hop: ev.Hop,
+					})
+				}
+			}
+			kickReactions()
 			entries++
 		}
 		return ApplyResult{Applied: true}, nil
@@ -619,6 +712,31 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 	err := workflow.SetUpdateHandlerWithOptions(ctx, UpdateApply, apply,
 		workflow.UpdateHandlerOptions{Validator: validate})
 	if err != nil {
+		return err
+	}
+
+	// "An Item was created inside this one": no event of this Item, so it
+	// touches neither LastAppliedSeq nor the order of the Item's own events.
+	// It queues the reactions that name the child's Type; a child of any
+	// other Type is taken and ignored.
+	childCreated := func(ctx workflow.Context, ev ChildEvent) error {
+		if err := workflow.Await(ctx, func() bool { return ready }); err != nil {
+			return err
+		}
+		if gone {
+			return nil
+		}
+		for _, id := range s.InsideReactions[ev.TypeID] {
+			addReaction(PendingReaction{
+				ReactionID: id, CauseItem: ev.ChildID, CauseSeq: ev.Seq,
+				CorrelationID: ev.CorrelationID, Hop: ev.Hop,
+			})
+		}
+		wake++
+		kickReactions()
+		return nil
+	}
+	if err := workflow.SetUpdateHandler(ctx, UpdateChild, childCreated); err != nil {
 		return err
 	}
 
@@ -858,10 +976,61 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 		})
 	}
 
+	// The reactions' runner: one coroutine works through
+	// s.PendingReactions, one at a time, in order. Each is one activity,
+	// which judges the reaction, writes its target and records its outcome
+	// on the Item; a failure that may pass is retried within the hook
+	// budget. When it gives up, the reaction is recorded as failed
+	// (budget_exhausted, or reaction_failed for an error that is final) so
+	// that it is finished all the same. A reaction leaves the queue only
+	// once it is recorded, or the Item is gone: a run that continues as
+	// new, or a new run after a crash, takes up whatever is left.
+	kickReactions = func() {
+		if reacting || gone || len(s.PendingReactions) == 0 {
+			return
+		}
+		reacting = true
+		running++
+		workflow.Go(ctx, func(gctx workflow.Context) {
+			defer func() { reacting = false; running--; wake++ }()
+			for len(s.PendingReactions) > 0 && gctx.Err() == nil {
+				pr := s.PendingReactions[0]
+				rin := AfterReactionInput{
+					ItemID: in.ItemID, TypeID: s.TypeID, TypeVersion: s.TypeVersion, ReactionID: pr.ReactionID,
+					CauseItem: pr.CauseItem, CauseSeq: pr.CauseSeq, CorrelationID: pr.CorrelationID, Hop: pr.Hop + 1,
+				}
+				err := workflow.ExecuteActivity(workflow.WithActivityOptions(gctx, hookOptions(budget, s.HookAttemptTimeout)),
+					ActivityRunAfterReaction, rin).Get(gctx, nil)
+				if temporal.IsCanceledError(err) || gctx.Err() != nil {
+					return
+				}
+				var appErr *temporal.ApplicationError
+				switch {
+				case err == nil:
+				case errors.As(err, &appErr) && appErr.Type() == ErrTypeNotFound:
+					// The Item is gone: nothing to record on.
+				default:
+					reason := "budget_exhausted"
+					if errors.As(err, &appErr) && appErr.NonRetryable() {
+						reason = "reaction_failed"
+					}
+					ferr := workflow.ExecuteActivity(gctx, ActivityAfterReactionFailed,
+						AfterReactionFailedInput{Reaction: rin, Reason: reason}).Get(gctx, nil)
+					if ferr != nil {
+						log.Info("a reaction gave up and could not be recorded", "item", in.ItemID,
+							"reaction", pr.ReactionID, "error", ferr.Error())
+					}
+				}
+				s.PendingReactions = slices.DeleteFunc(s.PendingReactions, func(q PendingReaction) bool { return q == pr })
+			}
+		})
+	}
+	kickReactions() // what LoadItem reported, or the run before handed over
+
 	handlersDone := func() bool { return workflow.AllHandlersFinished(ctx) }
 	busy := func() bool {
 		return running > 0 || s.Hold != nil || len(s.PendingEnrich) > 0 || len(s.PendingActions) > 0 ||
-			len(s.PendingUndos) > 0 || actingLive > 0
+			len(s.PendingUndos) > 0 || actingLive > 0 || len(s.PendingReactions) > 0
 	}
 
 	for {

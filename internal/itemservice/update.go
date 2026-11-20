@@ -12,6 +12,7 @@ import (
 	"github.com/francoisnyc/work-kernel/internal/item"
 	"github.com/francoisnyc/work-kernel/internal/lifecycle"
 	"github.com/francoisnyc/work-kernel/internal/policy"
+	"github.com/francoisnyc/work-kernel/internal/typedef"
 )
 
 // UpdateRequest changes field values on an Item. Fields is a patch: a value
@@ -117,6 +118,12 @@ func (k *Service) update(ctx context.Context, req UpdateRequest, kc *kernelCause
 		// own copy from here on (a struct is copied on assignment).
 		req := req
 		req.Fields = ty.NormalizeFields(req.Fields)
+		// Multi-value fields: a list becomes its set, a set operation is
+		// applied to the set as it stands under the lock.
+		var setOps map[string]typedef.SetOp
+		if req.Fields, setOps, err = applySets(ty, it.Fields, req.Fields, false); err != nil {
+			return WriteResult{}, err
+		}
 		if err := checkHookWrite(ty, kc, req.Fields); err != nil {
 			return WriteResult{}, err
 		}
@@ -229,6 +236,11 @@ func (k *Service) update(ctx context.Context, req UpdateRequest, kc *kernelCause
 			payload["container_from"] = it.ContainerID
 			payload["container_to"] = req.Move.To
 		}
-		return appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, attr, "update", payload, set)
+		addSetOps(payload, setOps)
+		res, err := appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, attr, "update", payload, set)
+		if err != nil {
+			return WriteResult{}, err
+		}
+		return res, storeSetOps(ctx, tx, req.ItemID, itemSeq, setOps)
 	})
 }

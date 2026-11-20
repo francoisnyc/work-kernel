@@ -211,6 +211,11 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 	}
 	// Date-time values are stored in one form, whatever offset they came in.
 	fields := ty.NormalizeFields(req.Fields)
+	// Multi-value fields: a list is its set; a set operation is malformed
+	// here; a set over its max is refused.
+	if fields, _, err = applySets(ty, nil, fields, true); err != nil {
+		return WriteResult{}, err
+	}
 	if fields == nil {
 		fields = map[string]any{}
 	}
@@ -297,7 +302,12 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 		if req.Narrow != nil {
 			payload["readers"] = readers // opaque IDs, sorted
 		}
-		return appendEvent(ctx, tx, ty, id, itemSeq, req.Principal, attr, "create", payload, fields)
+		res, err := appendEvent(ctx, tx, ty, id, itemSeq, req.Principal, attr, "create", payload, fields)
+		if err != nil {
+			return WriteResult{}, err
+		}
+		// A container whose Type reacts to this creation is told of it.
+		return res, k.tellContainer(ctx, tx, ty, req.ContainerID, id, itemSeq)
 	})
 }
 
@@ -445,6 +455,10 @@ type StateEntry struct {
 	// PendingUndos are the undos not yet done, for any hold of the Item
 	// (Step 2, part 2): a workflow run that starts after a crash resumes them.
 	PendingUndos []PendingUndo
+	// PendingReactions are the move and create reactions not yet finished
+	// (Jira part 2, step 2): every trigger of one (an entry into its state,
+	// an Item created inside) with no outcome recorded on this Item yet.
+	PendingReactions []PendingReaction
 	// EnteredHold is the hold whose allowed resolution entered State, if
 	// the entry was a held transition: an undo on leaving State reverses
 	// that hold's reservation, never an earlier one's.
@@ -543,6 +557,9 @@ func (k *Service) StateEntry(ctx context.Context, id uuid.UUID) (StateEntry, err
 		return StateEntry{}, err
 	}
 	if se.ActingRuns, err = k.actingRuns(ctx, id, se.EnteredSeq); err != nil {
+		return StateEntry{}, err
+	}
+	if se.PendingReactions, err = k.pendingReactions(ctx, id, ty); err != nil {
 		return StateEntry{}, err
 	}
 	return se, nil

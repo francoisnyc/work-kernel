@@ -121,6 +121,13 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		// is, and CheckFields refuses it below.
 		req := req
 		req.Fields = ty.NormalizeFields(req.Fields)
+		// Multi-value fields, as in an update: under the lock.
+		// (A malformed value is left as it is: CheckFields refuses it below,
+		// in its place in the order of checks.)
+		var setOps map[string]typedef.SetOp
+		if req.Fields, setOps, err = applySets(ty, it.Fields, req.Fields, false); err != nil {
+			return WriteResult{}, err
+		}
 		// The write's time, read now that every row lock is taken: the
 		// move's event carries it, its computed effects read it as
 		// cause.at, and a timer at an instant is judged against it.
@@ -130,6 +137,17 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		}
 		if err := checkAtTimer(ty, req.Principal, it, req.ToState, at); err != nil {
 			return WriteResult{}, err
+		}
+		// A move reaction (Jira part 2, step 2): it moves the Item only
+		// from the states it names, and in its effects cause.at is the
+		// time of the event that TRIGGERED it, not of this write, which
+		// may run much later. The write's own event keeps its own stamp.
+		causeAt := at
+		if kc != nil && kc.move != nil {
+			if len(kc.move.froms) > 0 && !slices.Contains(kc.move.froms, it.State) {
+				return WriteResult{}, errNotInFrom
+			}
+			causeAt = kc.move.causeAt
 		}
 		// Not writable, then frozen (against the state the move leaves),
 		// then held.
@@ -202,7 +220,7 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		}
 		merged, set, cleared := applyPatch(it.Fields, req.Fields)
 		next, err := lifecycle.TransitionWith(ty, it.State,
-			lifecycle.Input{Fields: merged, Links: links, Today: k.today(), CauseAt: at}, req.ToState)
+			lifecycle.Input{Fields: merged, Links: links, Today: k.today(), CauseAt: causeAt}, req.ToState)
 		if err != nil {
 			return WriteResult{}, fromLifecycle(err)
 		}
@@ -247,7 +265,15 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 			return WriteResult{}, fmt.Errorf("%w: %s -> %s is checked by %s; only a requester may ask for it",
 				ErrForbidden, it.State, next.State, decider)
 		}
-		if err := authorize(ctx, tx, req.Principal, ty, it.State, next.State, facts(it)); err != nil {
+		// A move reaction stands in for `allowed` and `except`: it is the
+		// Item's own Type's rule, or the Type consents to it. Every other
+		// rule of the transition has applied above.
+		if kc != nil && kc.move != nil {
+			if kc.move.consent != "" && !ty.AcceptsMove(kc.move.consent, next.State) {
+				return WriteResult{}, rejected(CodeReactionNotAccepted, "%s v%d does not accept %s moving its Items into %s",
+					ty.ID, ty.Version, kc.move.consent, next.State)
+			}
+		} else if err := authorize(ctx, tx, req.Principal, ty, it.State, next.State, facts(it)); err != nil {
 			return WriteResult{}, err
 		}
 		if links != nil {
@@ -286,6 +312,7 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		// only when the request carried a patch.
 		payload := map[string]any{"from": it.State, "to": next.State}
 		addFieldIDs(payload, set, cleared)
+		addSetOps(payload, setOps)
 		if hold != nil { // an escape: it cancels the hold, in the same event
 			payload["canceled_hold_id"] = hold.id.String()
 		}
@@ -293,6 +320,9 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 			return WriteResult{}, err
 		}
 		res, err := appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, attr, "transition", payload, set)
+		if err == nil {
+			err = storeSetOps(ctx, tx, req.ItemID, itemSeq, setOps)
+		}
 		if err != nil || hold == nil {
 			return res, err
 		}

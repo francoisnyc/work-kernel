@@ -3,8 +3,12 @@
 import type { JsonObject, JsonValue } from "@bufbuild/protobuf";
 import { FieldType, type Field, type Type } from "../gen/kernel/v1/kernel_pb";
 
-// Field ID -> what the input holds. "" is an empty input.
-export type FormValues = Record<string, string | boolean>;
+// What one input holds: text ("" is an empty input), a boolean for a bool,
+// or the members of a multi-value field (a set, kept sorted; [] is unset).
+export type FormValue = string | boolean | string[];
+
+// Field ID -> what the input holds.
+export type FormValues = Record<string, FormValue>;
 
 // The form's starting values for an Item's fields ({} or undefined on
 // create): every declared field, unset ones as "" (false for a bool).
@@ -12,16 +16,23 @@ export function formValues(type: Type, fields: JsonObject | undefined): FormValu
   const out: FormValues = {};
   for (const f of type.fields) {
     const v = fields?.[f.id];
-    if (f.type === FieldType.BOOL) out[f.id] = v === true;
+    if (f.multiple) out[f.id] = membersOf(v);
+    else if (f.type === FieldType.BOOL) out[f.id] = v === true;
     else if (f.type === FieldType.DATETIME) out[f.id] = typeof v === "string" ? localInput(v) : "";
     else out[f.id] = v === undefined || v === null ? "" : String(v);
   }
   return out;
 }
 
+// The members of a stored set, sorted as the server keeps them; [] for an
+// unset field.
+function membersOf(v: JsonValue | FormValue | undefined): string[] {
+  return Array.isArray(v) ? v.map(String).sort() : [];
+}
+
 // A text input's value as it is sent: a string as typed, anything else
 // trimmed.
-function sent(field: Field, value: string | boolean | undefined): string {
+function sent(field: Field, value: FormValue | undefined): string {
   const text = typeof value === "string" ? value : "";
   // A datetime is edited on the browser's clock and sent in UTC.
   if (field.type === FieldType.DATETIME) return instantOf(text.trim());
@@ -33,7 +44,10 @@ function sent(field: Field, value: string | boolean | undefined): string {
 export function createFields(type: Type, form: FormValues): JsonObject {
   const out: JsonObject = {};
   for (const f of type.fields) {
-    if (f.type === FieldType.BOOL) {
+    if (f.multiple) {
+      const members = membersOf(form[f.id]);
+      if (members.length > 0) out[f.id] = members;
+    } else if (f.type === FieldType.BOOL) {
       if (form[f.id] === true) out[f.id] = true;
     } else if (sent(f, form[f.id]) !== "") {
       out[f.id] = sent(f, form[f.id]);
@@ -43,11 +57,24 @@ export function createFields(type: Type, form: FormValues): JsonObject {
 }
 
 // UpdateItem's patch: only the fields the user changed; an emptied field
-// is null (clears it). {} when nothing changed.
+// is null (clears it). A changed set is sent as a set operation, the
+// members added and removed, never as a new list: someone else's members,
+// added meanwhile, stay. {} when nothing changed.
 export function patchFields(type: Type, original: JsonObject | undefined, form: FormValues): JsonObject {
   const before = formValues(type, original);
   const out: JsonObject = {};
   for (const f of type.fields) {
+    if (f.multiple) {
+      const was = membersOf(before[f.id]);
+      const now = membersOf(form[f.id]);
+      const op: JsonObject = {};
+      const add = now.filter((m) => !was.includes(m));
+      const remove = was.filter((m) => !now.includes(m));
+      if (add.length > 0) op.add = add;
+      if (remove.length > 0) op.remove = remove;
+      if (add.length + remove.length > 0) out[f.id] = op;
+      continue;
+    }
     if (f.type === FieldType.BOOL) {
       // A checkbox cannot say "unset": ticking sends true, unticking false.
       if (form[f.id] !== before[f.id]) out[f.id] = form[f.id] === true;
@@ -60,6 +87,14 @@ export function patchFields(type: Type, original: JsonObject | undefined, form: 
     if (now !== before[f.id]) out[f.id] = now === "" ? null : now;
   }
   return out;
+}
+
+// onlySetOps reports whether a patch changes nothing but multi-value
+// fields: every entry is a set operation. Such a save merges with other
+// people's changes, so it is sent without an etag.
+export function onlySetOps(type: Type, patch: JsonObject): boolean {
+  const ids = Object.keys(patch);
+  return ids.length > 0 && ids.every((id) => type.fields.some((f) => f.id === id && f.multiple));
 }
 
 // A field filter's value from the text typed: a bool field takes true or

@@ -28,7 +28,10 @@ import (
 // Jira proof of concept, part 1: two measurements.
 //
 //   - explainOrderMode (--explain-order): the plans of the ordered and
-//     cross-Type reads, fresh and analyzed, on 30,000 issues.
+//     cross-Type reads, fresh and analyzed, on 30,000 issues. With sets
+//     (--explain-sets) the issues are on version 3 and carry labels and
+//     reviewers, and the plans are those of the contains and empty filters
+//     (Jira part 2, step 2).
 //   - rankMode (--rank): what ranking a backlog by hand costs: key length
 //     over time, move latency, a rebalance, and the write path per drag.
 
@@ -110,7 +113,7 @@ var (
 	rowsFirst = regexp.MustCompile(`\(actual time=[0-9.]+\.\.[0-9.]+ rows=(\d+)`)
 )
 
-func explainOrderMode(ctx context.Context) error {
+func explainOrderMode(ctx context.Context, sets bool) error {
 	plain, stopDB, err := testdb.Start(ctx)
 	if err != nil {
 		return err
@@ -131,6 +134,17 @@ func explainOrderMode(ctx context.Context) error {
 	}
 	if err := registerFile(ctx, pool, "ticket.v5.yaml"); err != nil {
 		return err
+	}
+	version := 1
+	if sets {
+		version = 3
+		for _, typ := range issueTypes {
+			for _, v := range []int{2, 3} {
+				if err := registerFile(ctx, pool, fmt.Sprintf("%s.v%d.yaml", typ, v)); err != nil {
+					return err
+				}
+			}
+		}
 	}
 	// "Fresh" must mean no statistics: without this, autovacuum analyzes
 	// the tables while they are being filled.
@@ -180,8 +194,23 @@ func explainOrderMode(ctx context.Context) error {
 		case i%10 != 9:
 			fields["f_assignee"] = fmt.Sprintf("user:u%d", i%97)
 		}
+		if sets {
+			// Labels: one of 20 areas (1,500 issues each) and one of 300
+			// teams (100 each); 30 issues are also "rare"; a tenth have no
+			// label. The reader reviews one issue in 50.
+			if i%10 != 9 {
+				labels := []any{fmt.Sprintf("area-%d", i%20), fmt.Sprintf("team-%d", i%300)}
+				if i%1000 == 3 {
+					labels = append(labels, "rare")
+				}
+				fields["f_labels"] = labels
+			}
+			if i%50 == 0 {
+				fields["f_reviewers"] = []any{me.Actor, fmt.Sprintf("user:u%d", i%97)}
+			}
+		}
 		req := itemservice.CreateRequest{
-			IdempotencyKey: key(), Principal: lea, TypeID: typeOf(i), TypeVersion: 1, ContainerID: &space, Fields: fields,
+			IdempotencyKey: key(), Principal: lea, TypeID: typeOf(i), TypeVersion: version, ContainerID: &space, Fields: fields,
 		}
 		if i%50 == 7 { // 2% are someone else's, hidden from the reader
 			req.Principal, req.Narrow = other, &itemservice.Narrow{Readers: []string{other.Actor}}
@@ -224,7 +253,11 @@ func explainOrderMode(ctx context.Context) error {
 		return fmt.Errorf("seed links: %w", err)
 	}
 
-	fmt.Println("# EXPLAIN (ANALYZE, BUFFERS): ordered and cross-Type reads (Jira part 1)")
+	if sets {
+		fmt.Println("# EXPLAIN (ANALYZE, BUFFERS): contains and empty filters on multi-value fields (Jira part 2, step 2)")
+	} else {
+		fmt.Println("# EXPLAIN (ANALYZE, BUFFERS): ordered and cross-Type reads (Jira part 1)")
+	}
 	fmt.Println()
 	fmt.Printf("%d issues (story, bug, task) in one space, 2%% hidden from the reader; %d linked to one sprint, %d to one epic; %d tickets beside them.\n\n",
 		issues, onBoard, inEpic, tickets)
@@ -305,6 +338,44 @@ func explainOrderMode(ctx context.Context) error {
 				}
 				return fmt.Errorf("closing the epic: %v, want the guard's refusal", err)
 			}, isGuardSet, false},
+	}
+
+	if sets {
+		has := func(field, member string) itemservice.FieldFilter {
+			return itemservice.FieldFilter{Field: field, Eq: member}
+		}
+		labelled := func(members ...string) itemservice.Filter {
+			f := itemservice.Filter{TypeIDs: issueTypes}
+			for _, m := range members {
+				f.Fields = append(f.Fields, has("f_labels", m))
+			}
+			return f
+		}
+		steps = steps[:0]
+		steps = append(steps, []struct {
+			name string
+			run  func() error
+			pick func(string) bool
+			last bool
+		}{
+			{"The space's issues labelled area-3 (1,500 of 30,000), newest first, page 1",
+				list(itemservice.ListRequest{Filter: labelled("area-3"), Limit: 50}, 1), isPage, false},
+			{"The same, page 3", list(itemservice.ListRequest{Filter: labelled("area-3"), Limit: 50}, 3), isPage, true},
+			{"Search: labelled rare (30), three Types",
+				search(itemservice.SearchRequest{Filter: labelled("rare"), Limit: 50}, 1), isPage, false},
+			{"Search: a label nobody has (0): the whole filter is read",
+				search(itemservice.SearchRequest{Filter: labelled("nobody"), Limit: 50}, 1), isPage, false},
+			{"Search: two labels, all of them: area-3 and team-63 (100)",
+				search(itemservice.SearchRequest{Filter: labelled("area-3", "team-63"), Limit: 50}, 1), isPage, false},
+			{"Search: I am a reviewer (600), open issues, by rank",
+				search(itemservice.SearchRequest{Filter: itemservice.Filter{TypeIDs: issueTypes, Categories: open,
+					Fields: []itemservice.FieldFilter{has("f_reviewers", "me")}}, OrderBy: asc("f_rank"), Limit: 50}, 1), isPage, false},
+			{"Search: no labels (3,000), page 1",
+				search(itemservice.SearchRequest{Filter: itemservice.Filter{TypeIDs: issueTypes,
+					Fields: []itemservice.FieldFilter{{Field: "f_labels", Empty: true}}}, Limit: 50}, 1), isPage, false},
+			{"Words and a label: \"alpha\" (35,000 matches) labelled team-63 (100)",
+				search(itemservice.SearchRequest{Query: "alpha", Filter: labelled("team-63"), Limit: 50}, 1), isPage, false},
+		}...)
 	}
 
 	type result struct{ ms [2]string }

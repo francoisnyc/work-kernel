@@ -248,6 +248,28 @@ export const story2 = t({
   ],
 });
 
+// Version 3 of a story (Jira part 2, step 2): multi-value fields. Not in
+// allTypes, like the other later versions.
+export const story3 = t({
+  name: typeName("story", 3),
+  typeId: "story",
+  version: 3,
+  initialState: "todo",
+  fields: [
+    { id: "f_summary", type: FieldType.STRING },
+    { id: "f_labels", type: FieldType.STRING, multiple: true, max: 3 },
+    { id: "f_colors", type: FieldType.ENUM, multiple: true, options: ["red", "green", "blue"] },
+    { id: "f_reviewers", type: FieldType.PRINCIPAL, multiple: true },
+    { id: "f_days", type: FieldType.DATE, multiple: true },
+    { id: "f_stamps", type: FieldType.STRING, multiple: true, writableBy: FieldWriter.KERNEL },
+  ],
+  states: [
+    { id: "todo", category: StateCategory.TODO },
+    { id: "done", category: StateCategory.DONE },
+  ],
+  transitions: [{ fromState: "todo", toState: "done" }],
+});
+
 export const epic = t({
   name: typeName("epic"),
   typeId: "epic",

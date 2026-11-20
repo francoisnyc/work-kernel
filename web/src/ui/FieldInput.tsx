@@ -1,14 +1,14 @@
 // One field's input, chosen by the field's declared type: never by Type.
-import { useId, type ReactElement } from "react";
+import { useId, useState, type KeyboardEvent, type ReactElement } from "react";
 import { FieldType, type Field } from "../gen/kernel/v1/kernel_pb";
 import type { FieldAccess } from "../model/typeinfo";
-import { instantOf } from "../model/values";
+import { instantOf, type FormValue } from "../model/values";
 
 export type FieldInputProps = {
   field: Field;
-  // Text, or a boolean for a bool field.
-  value: string | boolean;
-  onChange: (value: string | boolean) => void;
+  // Text, a boolean for a bool field, or the members of a multi-value field.
+  value: FormValue;
+  onChange: (value: FormValue) => void;
   access: FieldAccess;
   // The Item's state, to say where a frozen field is frozen.
   state?: string;
@@ -37,6 +37,18 @@ export function FieldInput({ field, value, onChange, access, state, principals }
     "aria-describedby": hint ? `${id}-hint` : undefined,
   };
   const text = typeof value === "string" ? value : "";
+  if (field.multiple) {
+    return (
+      <SetInput
+        field={field}
+        members={Array.isArray(value) ? value : []}
+        onChange={onChange}
+        editable={access.mode === "editable"}
+        hint={hint}
+        principals={principals}
+      />
+    );
+  }
 
   let input: ReactElement;
   switch (field.type) {
@@ -109,6 +121,106 @@ export function FieldInput({ field, value, onChange, access, state, principals }
           {hint}
         </span>
       )}
+    </div>
+  );
+}
+
+// A multi-value field: its members as chips, each with a remove button,
+// and one input that adds a member (a select for an enum, a date input for
+// dates). The form holds the members sorted, as the server stores them;
+// what is sent is a set operation (model/values.ts).
+function SetInput(props: {
+  field: Field;
+  members: string[];
+  onChange: (value: FormValue) => void;
+  editable: boolean;
+  hint: string;
+  principals?: string[];
+}): ReactElement {
+  const { field, members, onChange, editable, hint, principals } = props;
+  const id = useId();
+  const [draft, setDraft] = useState("");
+  const full = field.max > 0 && members.length >= field.max;
+  const label = `Add to ${field.id}`;
+
+  const add = () => {
+    const member = field.type === FieldType.STRING ? draft : draft.trim();
+    setDraft("");
+    if (member === "" || members.includes(member) || full) return;
+    onChange([...members, member].sort());
+  };
+  // Enter adds a member; it must not submit the form around the field.
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    add();
+  };
+  const common = {
+    "aria-label": label,
+    disabled: !editable,
+    value: draft,
+    onKeyDown,
+  };
+
+  let input: ReactElement;
+  switch (field.type) {
+    case FieldType.ENUM:
+      input = (
+        <select {...common} onChange={(e) => setDraft(e.target.value)}>
+          <option value="">(choose)</option>
+          {field.options
+            .filter((o) => !members.includes(o))
+            .map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+        </select>
+      );
+      break;
+    case FieldType.DATE:
+      input = <input {...common} type="date" onChange={(e) => setDraft(e.target.value)} />;
+      break;
+    case FieldType.PRINCIPAL:
+      input = (
+        <>
+          <input {...common} type="text" list={`${id}-principals`} placeholder="user:id" onChange={(e) => setDraft(e.target.value)} />
+          <datalist id={`${id}-principals`}>
+            {(principals ?? []).map((p) => (
+              <option key={p} value={p} />
+            ))}
+          </datalist>
+        </>
+      );
+      break;
+    default:
+      input = <input {...common} type="text" onChange={(e) => setDraft(e.target.value)} />;
+  }
+  return (
+    <div className="field" role="group" aria-label={field.id}>
+      <span className="label">{field.id}</span>
+      {members.length === 0 ? (
+        <span className="hint">(none)</span>
+      ) : (
+        <ul className="chips">
+          {members.map((m) => (
+            <li key={m}>
+              {m}
+              {editable && (
+                <button type="button" aria-label={`Remove ${m}`} onClick={() => onChange(members.filter((x) => x !== m))}>
+                  Remove
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {input}
+      <button type="button" disabled={!editable || full} onClick={add}>
+        {label}
+      </button>
+      {field.max > 0 && <span className="hint">at most {field.max}</span>}
+      {hint && <span className="hint">{hint}</span>}
     </div>
   );
 }

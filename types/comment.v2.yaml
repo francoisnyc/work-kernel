@@ -1,0 +1,9 @@
+# A comment, version 2 (Jira part 2, step 2): f_public says whether the
+# people the Item is for may see it as an answer to them. Still no
+# lifecycle, no reaction and nothing listening: what a comment does to the
+# Item it is made in is that Item's Type to say (ticket@6's `reopen`).
+id: comment
+version: 2
+fields:
+  - {id: f_body,   type: string}
+  - {id: f_public, type: bool}

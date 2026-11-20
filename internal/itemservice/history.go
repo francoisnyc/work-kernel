@@ -65,6 +65,11 @@ type Event struct {
 	Values map[string]any
 	Erased []string
 
+	// SetOps: for each multi-value field the write changed with a set
+	// operation, what it asked for ("add" and "remove"); Values holds the
+	// resulting sets.
+	SetOps map[string]map[string][]any
+
 	Readers []string // a narrowing: the new readers
 	Inherit bool     // the Item dropped its own readers
 
@@ -209,6 +214,7 @@ type eventPayload struct {
 	ResolvedTarget *uuid.UUID `json:"link_target"`
 	LinkReplaced   *uuid.UUID `json:"link_replaced"`
 	AddedIDs       []string   `json:"added_field_ids"`
+	SetOpIDs       []string   `json:"set_op_field_ids"`
 	Reaction       string     `json:"reaction"`
 	Timer          string     `json:"timer"` // hook_ran, hook_failed: an acting timer's run
 	Run            int        `json:"run"`
@@ -262,6 +268,21 @@ func (e Event) withPayload(ctx context.Context, payload, values, deltas []byte, 
 	slices.Sort(e.Erased)
 	// Added: what a reaction added, from field_deltas, for the fields whose
 	// value is still there (an erased value takes its delta with it).
+	// SetOps: what each set operation asked for, from the same column.
+	if len(pl.SetOpIDs) > 0 && deltas != nil {
+		var ds map[string]map[string][]any
+		if err := json.Unmarshal(deltas, &ds); err != nil {
+			return e, fmt.Errorf("read event set operations: %w", err)
+		}
+		for _, id := range pl.SetOpIDs {
+			if op, ok := ds[id]; ok {
+				if e.SetOps == nil {
+					e.SetOps = map[string]map[string][]any{}
+				}
+				e.SetOps[id] = op
+			}
+		}
+	}
 	if len(pl.AddedIDs) > 0 && deltas != nil {
 		var ds map[string]any
 		if err := json.Unmarshal(deltas, &ds); err != nil {
