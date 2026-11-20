@@ -409,7 +409,7 @@ refuse ana "FAILED_PRECONDITION NOT_LINKED" item unlink "$x" blocks "$y"
 ok ana item link "$x" blocks "$y" >/dev/null
 refuse ana "FAILED_PRECONDITION ALREADY_LINKED" item link "$x" blocks "$y"
 refuse ana "FAILED_PRECONDITION LINK_TARGET_TYPE" item link "$x" blocks "$board"
-refuse ana "ABORTED STALE" item link "$x" duplicate_of "$y" --etag 1
+refuse ana "ABORTED STALE" item link "$x" duplicate_of "$y" --etag c1
 
 step "LINK_CARDINALITY: a ticket is a duplicate of one ticket at most"
 d=$(link_ticket ana)

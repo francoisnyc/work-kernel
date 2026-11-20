@@ -238,8 +238,8 @@ func TestPli_Rank_Refusals(t *testing.T) {
 	refused("the other card has no rank", "no rank", "rank", a, "after", b)
 	fails(t, "ana", "NOT_FOUND NOT_FOUND", "rank", a, "before", "00000000-0000-0000-0000-000000000000")
 
-	if key, etag := rankOf(t, a); key != "V" || etag != "1" {
-		t.Errorf("after the refusals a has rank %q, etag %s; want it untouched (V, 1)", key, etag)
+	if key, etag := rankOf(t, a); key != "V" || etag != "c1" {
+		t.Errorf("after the refusals a has rank %q, etag %s; want it untouched (V, c1)", key, etag)
 	}
 }
 
@@ -304,8 +304,8 @@ func TestPli_Rank_EqualNeighboursAreRespread(t *testing.T) {
 	if _, tag := rankOf(t, bottom); tag != bottomTag {
 		t.Error("the re-spread rewrote a card outside the tied run (bottom)")
 	}
-	if _, tag := rankOf(t, moved); tag != "2" {
-		t.Errorf("the moved card's etag = %s, want 2: it is written once", tag)
+	if _, tag := rankOf(t, moved); tag != "c2" {
+		t.Errorf("the moved card's etag = %s, want c2: it is written once", tag)
 	}
 }
 
@@ -336,10 +336,10 @@ func TestPli_Rank_TiedRunCap(t *testing.T) {
 			t.Errorf("after the re-spread the key %q is invalid or used twice", key)
 		}
 		keys[key] = true
-		if outside := name == top || name == bottom; outside && etag != "1" {
+		if outside := name == top || name == bottom; outside && etag != "c1" {
 			t.Errorf("the re-spread rewrote a card outside the tied run (etag %s)", etag)
-		} else if !outside && etag != "2" {
-			t.Errorf("a card of the tied run has etag %s after the re-spread, want 2: written once", etag)
+		} else if !outside && etag != "c2" {
+			t.Errorf("a card of the tied run has etag %s after the re-spread, want c2: written once", etag)
 		}
 	}
 
@@ -352,14 +352,14 @@ func TestPli_Rank_TiedRunCap(t *testing.T) {
 		t.Fatalf("a move into a run past the cap: exit %d, stderr %q; want exit 1 saying to rebalance %s", r.code, r.stderr, bareID(space))
 	}
 	for _, name := range append(slices.Clone(run), moved) {
-		if _, etag := rankOf(t, name); etag != "1" {
+		if _, etag := rankOf(t, name); etag != "c1" {
 			t.Errorf("the refused move wrote a card (etag %s)", etag)
 		}
 	}
 	// The first card of the run still has room above it: one write.
 	ok(t, "ana", "rank", moved, "before", run[0])
 	assertBacklog(t, "a move above the whole run", space, append([]string{moved}, run...)...)
-	if _, etag := rankOf(t, run[0]); etag != "1" {
+	if _, etag := rankOf(t, run[0]); etag != "c1" {
 		t.Errorf("a move above the run rewrote its first card (etag %s)", etag)
 	}
 
@@ -413,12 +413,12 @@ func TestPli_Rank_Rebalance(t *testing.T) {
 			t.Errorf("after the rebalance a card has the key %q: want a valid, distinct key of at most 3 bytes", key)
 		}
 		keys[key] = true
-		if etag != "2" {
-			t.Errorf("a rebalanced card's etag = %s, want 2: one write each", etag)
+		if etag != "c2" {
+			t.Errorf("a rebalanced card's etag = %s, want c2: one write each", etag)
 		}
 	}
 	for what, name := range map[string]string{"the unranked card": unranked, "the epic": epic, "a card of another container": other} {
-		if _, etag := rankOf(t, name); etag != "1" {
+		if _, etag := rankOf(t, name); etag != "c1" {
 			t.Errorf("%s was written by the rebalance (etag %s)", what, etag)
 		}
 	}

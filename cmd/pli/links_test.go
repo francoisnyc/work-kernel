@@ -57,8 +57,8 @@ func TestPli_LinkAndUnlink(t *testing.T) {
 	}
 
 	fails(t, "ana", "FAILED_PRECONDITION ALREADY_LINKED", "item", "link", t1, "blocks", t2)
-	fails(t, "ana", "ABORTED STALE", "item", "unlink", t1, "blocks", t2, "--etag", "1")
-	un := ok(t, "ana", "item", "unlink", bareID(t1), "blocks", t2, "--etag", "2")
+	fails(t, "ana", "ABORTED STALE", "item", "unlink", t1, "blocks", t2, "--etag", "c1")
+	un := ok(t, "ana", "item", "unlink", bareID(t1), "blocks", t2, "--etag", "c2")
 	if got := linksOf(t, itemOf(t, un)); len(got) != 0 {
 		t.Errorf("after unlink: links %v", got)
 	}

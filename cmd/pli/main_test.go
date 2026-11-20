@@ -287,7 +287,7 @@ func TestPli_HeldAndRefusals(t *testing.T) {
 	open := itemOf(t, ok(t, "ana", "item", "create", "--type", "ticket@1"))["name"].(string)
 	fails(t, "ana", "FAILED_PRECONDITION GUARD_FAILED", "item", "transition", open, "--to", "in_progress")
 	fails(t, "ana", "INVALID_ARGUMENT INVALID_REQUEST", "item", "update", open, "--set", "f_priority=high")
-	fails(t, "ana", "ABORTED STALE", "item", "update", open, "--set", "f_priority=1", "--etag", "7")
+	fails(t, "ana", "ABORTED STALE", "item", "update", open, "--set", "f_priority=1", "--etag", "c7")
 }
 
 // --request-id makes a retry safe: the same create twice is one Item.
