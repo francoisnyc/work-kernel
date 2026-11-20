@@ -302,7 +302,12 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 		if req.Narrow != nil {
 			payload["readers"] = readers // opaque IDs, sorted
 		}
-		return appendEvent(ctx, tx, ty, id, itemSeq, req.Principal, attr, "create", payload, fields)
+		res, err := appendEvent(ctx, tx, ty, id, itemSeq, req.Principal, attr, "create", payload, fields)
+		if err != nil {
+			return WriteResult{}, err
+		}
+		// A container whose Type reacts to this creation is told of it.
+		return res, k.tellContainer(ctx, tx, ty, req.ContainerID, id, itemSeq)
 	})
 }
 
@@ -552,6 +557,9 @@ func (k *Service) StateEntry(ctx context.Context, id uuid.UUID) (StateEntry, err
 		return StateEntry{}, err
 	}
 	if se.ActingRuns, err = k.actingRuns(ctx, id, se.EnteredSeq); err != nil {
+		return StateEntry{}, err
+	}
+	if se.PendingReactions, err = k.pendingReactions(ctx, id, ty); err != nil {
 		return StateEntry{}, err
 	}
 	return se, nil
