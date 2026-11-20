@@ -283,7 +283,7 @@ func TestReactions_API_ShowInHistory(t *testing.T) {
 			}
 		}
 	}
-	want := []string{"applied ticket:open_checklist", "skipped ticket:reopen not_by", "applied ticket:reopen"}
+	want := []string{"applied ticket:open_checklist", "skipped ticket:reopen NOT_BY", "applied ticket:reopen"}
 	if !slices.Equal(kinds, want) {
 		t.Errorf("the ticket's reaction records = %v, want %v", kinds, want)
 	}

@@ -1126,7 +1126,7 @@ expect "stories of this run still resolved" \
 # set_of FIELD: a multi-value field of an Item answer, as "a b c" ("" if unset).
 set_of() { j ".item.fields.$1 // [] | join(\" \")"; }
 # records ITEM: the outcome records of the Item's reactions, in order, as
-# "APPLIED ticket:reopen" or "SKIPPED ticket:reopen not_by", joined by ", ".
+# "APPLIED ticket:reopen" or "SKIPPED ticket:reopen NOT_BY", joined by ", ".
 records() {
 	ok ana item history "$1" --page-size 100 | j '[.events[]
 		| select(.kind | test("REACTION_(APPLIED|SKIPPED|FAILED)$"))
@@ -1175,7 +1175,7 @@ expect "the field" "$(meta field)" "f_labels"
 expect "its max" "$(meta max)" "20"
 
 step "K4: starting work on a ticket@6 creates a checklist inside it"
-k4=$(ok ana item create --type ticket@6 --set "f_title=VPN drops $w" --set f_assignee=user:bob \
+k4=$(ok ana item create --type ticket@6 --set "f_title=Printer jams $w" --set f_assignee=user:bob \
 	--set f_customer_id=cust-good --set f_amount=100 | j .item.name)
 ok ana item transition "$k4" --to open >/dev/null
 started=$(ok ana item transition "$k4" --to in_progress)
@@ -1194,18 +1194,18 @@ step "K5: K4 waits for its customer; only her own public comment sets it back in
 ok bob item transition "$k4" --to waiting_for_customer >/dev/null
 refuse ana "PERMISSION_DENIED NOT_ALLOWED" item transition "$k4" --to in_progress # support only, by hand
 comment_in bob "$k4" true >/dev/null
-wait_until 30 "bob's comment recorded as skipped" records_are "$k4" "APPLIED ticket:open_checklist, SKIPPED ticket:reopen not_by"
+wait_until 30 "bob's comment recorded as skipped" records_are "$k4" "APPLIED ticket:open_checklist, SKIPPED ticket:reopen NOT_BY"
 expect "K4 after someone else's comment" "$(ok ana item get "$k4" | j .item.state)" "waiting_for_customer"
 comment_in ana "$k4" false >/dev/null
 wait_until 30 "ana's private comment recorded as skipped" records_are "$k4" \
-	"APPLIED ticket:open_checklist, SKIPPED ticket:reopen not_by, SKIPPED ticket:reopen condition_false"
+	"APPLIED ticket:open_checklist, SKIPPED ticket:reopen NOT_BY, SKIPPED ticket:reopen CONDITION_FALSE"
 expect "K4 after a private comment" "$(ok ana item get "$k4" | j .item.state)" "waiting_for_customer"
 mine=$(comment_in ana "$k4" true)
 began=$(now_ms)
 wait_until 30 "ana's public comment sets K4 back in progress" state_is ana "$k4" in_progress
 echo "    K4 was back in progress $(($(now_ms) - began)) ms after ana's comment"
 wait_until 30 "the move recorded on K4" records_are "$k4" \
-	"APPLIED ticket:open_checklist, SKIPPED ticket:reopen not_by, SKIPPED ticket:reopen condition_false, APPLIED ticket:reopen"
+	"APPLIED ticket:open_checklist, SKIPPED ticket:reopen NOT_BY, SKIPPED ticket:reopen CONDITION_FALSE, APPLIED ticket:reopen"
 expect "who moved K4, and for whom" \
 	"$(ok ana item history "$k4" --page-size 100 | j '[.events[] | select(.from_state == "waiting_for_customer")][0] | "\(.actor) \(.on_behalf_of)"')" \
 	"reaction:ticket:reopen user:ana"
@@ -1222,7 +1222,7 @@ ok bob item transition "$k6" --to waiting_for_customer >/dev/null
 ok bob item update "$k6" --set f_assignee=null >/dev/null # nobody to take it back
 comment_in ana "$k6" true >/dev/null
 wait_until 30 "the refused move recorded on K6" records_are "$k6" \
-	"APPLIED ticket:open_checklist, FAILED ticket:reopen guard_failed"
+	"APPLIED ticket:open_checklist, FAILED ticket:reopen GUARD_FAILED"
 expect "K6 after the refusal" "$(ok ana item get "$k6" | j .item.state)" "waiting_for_customer"
 kinds_seen="$kinds_seen$(ok ana item history "$k6" --page-size 100 | jqx -r '[.events[].kind] | unique | join(" ")') "
 kinds_seen="$kinds_seen$(ok ana item history "$k4" --page-size 100 | jqx -r '[.events[].kind] | unique | join(" ")') "

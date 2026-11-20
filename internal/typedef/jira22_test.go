@@ -113,6 +113,7 @@ version: 1
 initial_state: building
 fields:
   - {id: f_name, type: string}
+  - {id: f_count, type: int}
 states:
   - {id: building, category: active}
   - {id: done,     category: done}
@@ -248,13 +249,13 @@ func TestAcceptsReactions_ListOrMap(t *testing.T) {
 		jar.AcceptsCreate("pledge:take", nil) {
 		t.Errorf("the list form is the fields a reaction may write, and nothing else")
 	}
-	src := whole("part:finish: {moves: [done]}\n  part:stamp: {fields: [f_name]}\n  part:spawn: {creates: [f_name]}\n  part:blank: {creates: []}")
+	src := whole("part:finish: {moves: [done]}\n  part:stamp: {fields: [f_count]}\n  part:spawn: {creates: [f_name]}\n  part:blank: {creates: []}")
 	for _, ty := range []*typedef.Type{mustParse(t, src), roundTrip(t, mustParse(t, src))} {
 		if !ty.AcceptsMove("part:finish", "done") || ty.AcceptsMove("part:finish", "building") || ty.AcceptsMove("part:stamp", "done") {
 			t.Errorf("AcceptsMove: want part:finish into done only")
 		}
-		if !ty.Accepts("part:stamp", []string{"f_name"}) || ty.Accepts("part:finish", []string{"f_name"}) {
-			t.Errorf("Accepts: want part:stamp writing f_name only")
+		if !ty.Accepts("part:stamp", []string{"f_count"}) || ty.Accepts("part:finish", []string{"f_count"}) {
+			t.Errorf("Accepts: want part:stamp writing f_count only")
 		}
 		if !ty.AcceptsCreate("part:spawn", []string{"f_name"}) || !ty.AcceptsCreate("part:spawn", nil) ||
 			ty.AcceptsCreate("part:finish", nil) || !ty.AcceptsCreate("part:blank", nil) || ty.AcceptsCreate("part:blank", []string{"f_name"}) {
