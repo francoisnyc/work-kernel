@@ -211,6 +211,11 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 	}
 	// Date-time values are stored in one form, whatever offset they came in.
 	fields := ty.NormalizeFields(req.Fields)
+	// Multi-value fields: a list is its set; a set operation is malformed
+	// here; a set over its max is refused.
+	if fields, _, err = applySets(ty, nil, fields, true); err != nil {
+		return WriteResult{}, err
+	}
 	if fields == nil {
 		fields = map[string]any{}
 	}

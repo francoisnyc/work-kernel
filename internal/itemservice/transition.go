@@ -121,6 +121,13 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		// is, and CheckFields refuses it below.
 		req := req
 		req.Fields = ty.NormalizeFields(req.Fields)
+		// Multi-value fields, as in an update: under the lock.
+		// (A malformed value is left as it is: CheckFields refuses it below,
+		// in its place in the order of checks.)
+		var setOps map[string]typedef.SetOp
+		if req.Fields, setOps, err = applySets(ty, it.Fields, req.Fields, false); err != nil {
+			return WriteResult{}, err
+		}
 		// The write's time, read now that every row lock is taken: the
 		// move's event carries it, its computed effects read it as
 		// cause.at, and a timer at an instant is judged against it.
@@ -286,6 +293,7 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		// only when the request carried a patch.
 		payload := map[string]any{"from": it.State, "to": next.State}
 		addFieldIDs(payload, set, cleared)
+		addSetOps(payload, setOps)
 		if hold != nil { // an escape: it cancels the hold, in the same event
 			payload["canceled_hold_id"] = hold.id.String()
 		}
@@ -293,6 +301,9 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 			return WriteResult{}, err
 		}
 		res, err := appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, attr, "transition", payload, set)
+		if err == nil {
+			err = storeSetOps(ctx, tx, req.ItemID, itemSeq, setOps)
+		}
 		if err != nil || hold == nil {
 			return res, err
 		}

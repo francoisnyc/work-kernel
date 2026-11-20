@@ -184,6 +184,11 @@ func fieldTypeAcross(versions []*typedef.Type, id string) (typedef.Field, error)
 		return typedef.Field{}, err
 	}
 	f := typedef.Field{ID: id, Type: types[0], Options: options}
+	// One value in some, a set in others: two different things.
+	var mixed bool
+	if f.Multiple, mixed = multipleAcross(versions, id); mixed {
+		return typedef.Field{}, fmt.Errorf("the field holds one value in some Types and several in others")
+	}
 	if len(types) > 1 {
 		if !slices.ContainsFunc(types, func(t typedef.FieldType) bool { return !stringOrPrincipal(t) }) {
 			f.Type = typedef.Principal
@@ -192,6 +197,23 @@ func fieldTypeAcross(versions []*typedef.Type, id string) (typedef.Field, error)
 		return typedef.Field{}, fmt.Errorf("the field has different types across the Types that declare it")
 	}
 	return f, nil
+}
+
+// multipleAcross reports whether the Type versions in play that declare
+// the field declare it multiple, and whether they disagree.
+func multipleAcross(versions []*typedef.Type, id string) (multiple, mixed bool) {
+	seen := false
+	for _, t := range versions {
+		f, ok := t.Field(id)
+		if !ok {
+			continue
+		}
+		if seen && f.Multiple != multiple {
+			return false, true
+		}
+		multiple, seen = f.Multiple, true
+	}
+	return multiple, false
 }
 
 // fieldConds checks one field filter and returns its SQL conditions, adding
@@ -207,9 +229,24 @@ func fieldConds(f typedef.Field, ff FieldFilter, i int, args pgx.NamedArgs, p it
 			bounds = append(bounds, b)
 		}
 	}
+	// The field's ID is a Type's stable ID, passed as an argument, never
+	// spliced into the SQL.
+	fieldArg := fmt.Sprintf("f_field_%d", i)
+	// empty: the field has no value. An unset field is absent from
+	// fields, and an empty set is stored as unset, so one test serves
+	// single-value and multi-value fields alike.
+	if ff.Empty {
+		if ff.Eq != nil || len(bounds) > 0 {
+			return nil, fmt.Errorf("empty stands alone: not with eq or a bound")
+		}
+		args[fieldArg] = ff.Field
+		return []string{"(not jsonb_exists(m.fields, @" + fieldArg + "::text))"}, nil
+	}
 	switch {
 	case ff.Eq == nil && len(bounds) == 0:
-		return nil, fmt.Errorf("a field filter needs eq or a bound")
+		return nil, fmt.Errorf("a field filter needs eq, a bound or empty")
+	case f.Multiple && len(bounds) > 0:
+		return nil, fmt.Errorf("a multi-value field takes eq (contains) or empty, not a range")
 	case ff.Eq != nil && len(bounds) > 0:
 		return nil, fmt.Errorf("eq and a bound do not go together")
 	case ff.Gt != nil && ff.Gte != nil, ff.Lt != nil && ff.Lte != nil:
@@ -227,9 +264,6 @@ func fieldConds(f typedef.Field, ff FieldFilter, i int, args pgx.NamedArgs, p it
 		}
 	}
 
-	// The field's ID is a Type's stable ID, passed as an argument, never
-	// spliced into the SQL.
-	fieldArg := fmt.Sprintf("f_field_%d", i)
 	args[fieldArg] = ff.Field
 	value := func(v any) (any, error) {
 		switch f.Type {
@@ -290,6 +324,18 @@ func fieldConds(f typedef.Field, ff FieldFilter, i int, args pgx.NamedArgs, p it
 		cast = "::boolean"
 	}
 
+	// A multi-value field: eq means "contains". Written as containment of
+	// {field: [value]} in the whole fields document, the one shape a GIN
+	// index on items.fields can serve.
+	if f.Multiple {
+		v, err := value(ff.Eq)
+		if err != nil {
+			return nil, err
+		}
+		arg := fmt.Sprintf("f_value_%d_0", i)
+		args[arg] = fmt.Sprint(v)
+		return []string{"(m.fields @> jsonb_build_object(@" + fieldArg + "::text, jsonb_build_array(@" + arg + "::text)))"}, nil
+	}
 	if ff.Eq != nil {
 		bounds = []bound{{"=", ff.Eq}}
 	}

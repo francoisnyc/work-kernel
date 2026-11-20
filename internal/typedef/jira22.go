@@ -214,6 +214,10 @@ func checkSetValue(f Field, v any) string {
 	return ""
 }
 
+// ValidSetValue reports whether v is a well-formed patch value of the
+// multi-value field f: a list of members or a set operation.
+func ValidSetValue(f Field, v any) bool { return checkSetValue(f, v) == "" }
+
 // SetMembers returns the members of a stored or sent set: sorted in byte
 // order, each once. v is a list that passed CheckFields.
 func SetMembers(v any) []string {

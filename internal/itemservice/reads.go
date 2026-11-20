@@ -144,6 +144,9 @@ func (k *Service) resolveOrder(ctx context.Context, typeIDs []string, o *OrderBy
 	if len(types) > 1 {
 		return nil, bad("the field has different types across the Types that declare it")
 	}
+	if multiple, mixed := multipleAcross(inPlay(all, typeIDs), o.Field); multiple || mixed {
+		return nil, bad("a multi-value field is a set: it has no order")
+	}
 	out := &sqlOrder{field: o.Field, desc: o.Desc, expr: fieldRead(types[0], "o_field"), cast: "::text"}
 	switch types[0] {
 	case typedef.Int:
