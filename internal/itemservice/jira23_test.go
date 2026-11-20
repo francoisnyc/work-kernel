@@ -27,6 +27,7 @@
 package itemservice_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -1364,5 +1365,105 @@ func TestFilter_NotEmpty(t *testing.T) {
 	} {
 		_, err := find(ff)
 		assertInvalid(t, name, err)
+	}
+}
+
+// --- a crash partway through a children move ---
+
+// The worker dies partway through moving three children: after the first
+// child's write but before its record, or after the first child's record
+// but before the second child's write. (The "crash" is a call cut short
+// while a row it needs next is locked: what was committed stays, the rest
+// never happened.) Back again, the reaction finishes: each child is moved
+// exactly once, each has exactly one outcome record, in the order of
+// their IDs.
+func TestReactMove_Children_ACrashPartway_FinishesExactlyOnce(t *testing.T) {
+	for _, point := range []string{"after the first write, before its record", "after the first record, before the second write"} {
+		t.Run(point, func(t *testing.T) {
+			w := newR3World(t)
+			job := w.job(t, 600)
+			var tags []uuid.UUID
+			for i := 0; i < 3; i++ {
+				tags = append(tags, w.create(t, w.ana, "r3tag", 1, &job, nil))
+			}
+			slices.SortFunc(tags, func(a, b uuid.UUID) int { return strings.Compare(a.String(), b.String()) })
+			w.move(t, w.k, w.ana, job, "working")
+			done := w.move(t, w.k, w.ana, job, "done")
+			before := itemSeqOf(t, job)
+
+			// The row the reaction needs next is locked by someone else:
+			// the job's (where records are written), or the second tag's.
+			locked, wantRecords := job, 0
+			if strings.HasPrefix(point, "after the first record") {
+				locked, wantRecords = tags[1], 1
+			}
+			tx, err := pool.Begin(testCtx(t))
+			if err != nil {
+				t.Fatalf("begin: %v", err)
+			}
+			defer tx.Rollback(context.Background()) //nolint:errcheck // a second rollback is a no-op
+			if _, err := tx.Exec(testCtx(t), `select 1 from items where id = $1 for update`, locked); err != nil {
+				t.Fatalf("lock: %v", err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+			_, err = w.k.Internal().ReactMove(ctx, entered(job, done, "sweep"))
+			cancel()
+			if err == nil {
+				t.Fatal("ReactMove returned no error though it could not finish")
+			}
+			if err := tx.Rollback(testCtx(t)); err != nil {
+				t.Fatalf("release the lock: %v", err)
+			}
+
+			// What the crash left: the first child moved, the others not,
+			// and the reaction still pending.
+			if stateOf(t, tags[0]) != "off" || stateOf(t, tags[1]) != "on" || stateOf(t, tags[2]) != "on" {
+				t.Fatalf("after the crash the tags are %s, %s, %s; want off, on, on",
+					stateOf(t, tags[0]), stateOf(t, tags[1]), stateOf(t, tags[2]))
+			}
+			if recs := recordsOf(t, job, "r3job:sweep"); len(recs) != wantRecords {
+				t.Fatalf("after the crash: records %+v, want %d", recs, wantRecords)
+			}
+			if got := w.pendingOn(t, job); !slices.Contains(got, "sweep") {
+				t.Fatalf("after the crash: pending on the job = %v, want sweep still among them", got)
+			}
+
+			// The worker is back.
+			out := w.reactMove(t, w.k, entered(job, done, "sweep"))
+			if len(out.Each) != 3 {
+				t.Fatalf("sweep = %+v, want three outcomes", out.Each)
+			}
+			for i, tag := range tags {
+				if out.Each[i].Target != tag || out.Each[i].Outcome != itemservice.ReactionApplied {
+					t.Errorf("outcome %d = %+v, want applied on %s (the order of their IDs)", i, out.Each[i], tag)
+				}
+				// Moved exactly once: its create, and one move.
+				if stateOf(t, tag) != "off" || itemSeqOf(t, tag) != 2 {
+					t.Errorf("tag %d is %s at item_seq %d, want off at 2: moved exactly once", i, stateOf(t, tag), itemSeqOf(t, tag))
+				}
+				if n := count(t, `select count(*) from item_events where item_id = $1 and op = 'transition'`, tag); n != 1 {
+					t.Errorf("tag %d has %d transition events, want 1", i, n)
+				}
+			}
+			want := []r3Record{
+				{op: lifecycle.OpReactionApplied, target: tags[0].String(), more: true},
+				{op: lifecycle.OpReactionApplied, target: tags[1].String(), more: true},
+				{op: lifecycle.OpReactionApplied, target: tags[2].String()},
+			}
+			if recs := recordsOf(t, job, "r3job:sweep"); !slices.Equal(recs, want) {
+				t.Errorf("records = %+v, want %+v: exactly one per child, in order", recs, want)
+			}
+			if itemSeqOf(t, job) != before+3 {
+				t.Errorf("the job is at %d, want %d: three records", itemSeqOf(t, job), before+3)
+			}
+			if got := w.pendingOn(t, job); slices.Contains(got, "sweep") {
+				t.Errorf("sweep is still pending: %v", got)
+			}
+			// Once more changes nothing.
+			w.reactMove(t, w.k, entered(job, done, "sweep"))
+			if itemSeqOf(t, job) != before+3 || itemSeqOf(t, tags[0]) != 2 || itemSeqOf(t, tags[2]) != 2 {
+				t.Errorf("a further call wrote something")
+			}
+		})
 	}
 }
