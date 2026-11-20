@@ -72,8 +72,8 @@ type ActAtResult struct {
 	// Applied is false when nothing was written: the timer's `when` did
 	// not hold, or it has no `sets`.
 	Applied bool
-	// RunHook is true when the timer's hook should now run: its `when`
-	// held (whether or not it has sets).
+	// RunHook is true when the timer declares a hook and it should now
+	// run: its `when` held (whether or not it has sets).
 	RunHook bool
 }
 
