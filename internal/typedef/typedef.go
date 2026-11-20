@@ -183,6 +183,15 @@ type ActingTimer struct {
 	Max   int    `yaml:"max" json:"max"`               // the total number of runs, at least 1
 	Hook  string `yaml:"hook" json:"hook"`             // an action hook of this Type, on: timer
 
+	// At, When and Sets make an acting timer at an instant (Jira part 2,
+	// step 3; see jira23.go): it has no After, Every or Max.
+	At   string            `yaml:"at" json:"at,omitempty"`
+	When string            `yaml:"when" json:"when,omitempty"`
+	Sets map[string]string `yaml:"sets" json:"sets,omitempty"`
+	// When and Sets compiled, filled when the Type is loaded.
+	WhenProgram cel.Program            `yaml:"-" json:"-"`
+	SetPrograms map[string]cel.Program `yaml:"-" json:"-"`
+
 	// After and Every parsed, filled when the Type is loaded.
 	AfterDuration time.Duration `yaml:"-" json:"-"`
 	EveryDuration time.Duration `yaml:"-" json:"-"`
@@ -259,6 +268,9 @@ type Type struct {
 	Incoming []Incoming `yaml:"incoming" json:"incoming,omitempty"`
 	// Rollups are values computed when an Item of this Type is read.
 	Rollups []Rollup `yaml:"rollups" json:"rollups,omitempty"`
+	// ReadableByReactions are the fields a create reaction of another Type
+	// may read from an Item of this Type (Jira part 2, step 3).
+	ReadableByReactions []string `yaml:"readable_by_reactions" json:"readable_by_reactions,omitempty"`
 }
 
 // Parse reads a Type from YAML and checks it. Unknown keys are errors, so a

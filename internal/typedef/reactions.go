@@ -99,6 +99,16 @@ type Reaction struct {
 	Version int               `yaml:"version" json:"version,omitempty"`
 	Fields  map[string]string `yaml:"fields" json:"fields,omitempty"`
 
+	// Jira part 2, step 3 (see jira23.go).
+	//
+	// Children (move): the reaction moves Items contained in this one,
+	// instead of following Link or moving the Item itself.
+	Children *Children `yaml:"children" json:"children,omitempty"`
+	// Target and Set (set): the Item written (TargetContainer) and its
+	// fields, each a CEL expression over this Item's fields plus cause.at.
+	Target string            `yaml:"target" json:"target,omitempty"`
+	Set    map[string]string `yaml:"set" json:"set,omitempty"`
+
 	// Programs are Add's expressions compiled, by target field; Reads are
 	// the source fields they read, sorted (frozen while the reaction's hold
 	// is open). Filled when the Type is loaded.
@@ -111,6 +121,10 @@ type Reaction struct {
 	ChildReads    []string               `yaml:"-" json:"-"`
 	FieldPrograms map[string]cel.Program `yaml:"-" json:"-"`
 	fieldTypes    map[string]*cel.Type
+	// Step 3, filled when the Type is loaded: Set compiled; the fields of
+	// linked Items a create's Fields read, sorted.
+	SetPrograms map[string]cel.Program `yaml:"-" json:"-"`
+	LinkedReads []LinkedRead           `yaml:"-" json:"-"`
 }
 
 // Invariant is a rule over an Item's fields that every write must keep, on

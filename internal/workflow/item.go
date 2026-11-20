@@ -32,6 +32,11 @@ const (
 	// ActivityLoadInstant reads the instant of the field the Item's state
 	// names in `at`: the one field value the workflow sees.
 	ActivityLoadInstant = "LoadInstant"
+	// Acting timers at an instant (Jira part 2, step 3):
+	// ActivityLoadActingInstants reads the instants of the state's acting
+	// timers at an instant; ActivityActAt makes one act.
+	ActivityLoadActingInstants = "LoadActingInstants"
+	ActivityActAt              = "ActAt"
 
 	// Hooks (Step 6). Each hook activity reads its inputs, calls out, and
 	// writes back through the item service itself: the workflow never sees
@@ -210,6 +215,53 @@ type Snapshot struct {
 	EnterReactions   map[string][]EnterReaction
 	InsideReactions  map[string][]string
 	PendingReactions []PendingReaction
+
+	// Acting timers at an instant (Jira part 2, step 3), reduced like At.
+	// ActingAt maps a state to them; ActingInstants holds, per timer ID,
+	// the instant last read for the current state (absent: unset);
+	// ActingAtLoaded says they were read, so a run that continues as new
+	// does not read them again; ActingAtDone holds, per timer ID, the
+	// instant it last acted for (or was told to do nothing for), so the
+	// same instant never acts twice in one entry.
+	ActingAt       map[string][]ActingAtSpec
+	ActingInstants map[string]time.Time
+	ActingAtLoaded bool
+	ActingAtDone   map[string]time.Time
+}
+
+// ActingAtSpec is one acting timer at an instant, reduced to what the
+// workflow needs. Field is an ID, for the events that name it; Hook is the
+// action hook to run after it acted, "" for none.
+type ActingAtSpec struct {
+	ID    string
+	Field string
+	Hook  string
+}
+
+// ActingInstant is one entry of LoadActingInstants' answer.
+type ActingInstant struct {
+	TimerID string
+	Set     bool
+	At      time.Time
+}
+
+// ActAtInput is what the ActAt activity needs: opaque IDs and the instant.
+type ActAtInput struct {
+	ItemID        string
+	TypeID        string
+	TypeVersion   int
+	State         string
+	TimerID       string
+	EnteredSeq    int64
+	Instant       time.Time
+	CorrelationID string
+	Hop           int // the entering event's hop + 1
+}
+
+// ActAtResult is the ActAt activity's answer: whether the timer's hook
+// should now run.
+type ActAtResult struct {
+	RunHook bool
 }
 
 // EnterReaction is one move or create reaction run on entering a state.

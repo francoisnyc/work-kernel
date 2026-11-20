@@ -55,6 +55,9 @@ type Input struct {
 	// expression reads as cause.at, and its UTC date is that expression's
 	// today. Guards do not read it.
 	CauseAt time.Time
+	// Linked (Jira part 2, step 3) is what a create reaction's fields read
+	// as linked.<link>.<field> and container.linked.<link>.<field>.
+	Linked LinkedFields
 }
 
 func (r *Rejection) Error() string { return r.Reason }

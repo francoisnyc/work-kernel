@@ -42,6 +42,9 @@ type FieldFilter struct {
 	// Empty: the field has no value (a multi-value field: no member).
 	// Alone, never with Eq or a bound.
 	Empty bool
+	// NotEmpty: the field has a value (a multi-value field: a member).
+	// Alone, never with Empty, Eq or a bound.
+	NotEmpty bool
 }
 
 // empty reports whether the filter says nothing.

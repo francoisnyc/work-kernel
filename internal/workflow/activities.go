@@ -412,3 +412,15 @@ func NewWorker(c client.Client, taskQueue string, k *itemservice.Service, opts W
 	w.RegisterActivityWithOptions(a.ReactionFailed, activity.RegisterOptions{Name: ActivityReactionFailed})
 	return w
 }
+
+// LoadActingInstants reads the instants of the acting timers at an instant
+// of the Item's current state (Jira part 2, step 3). PHASE B stub.
+func (a *Activities) LoadActingInstants(ctx context.Context, itemID string) ([]ActingInstant, error) {
+	return nil, temporal.NewNonRetryableApplicationError("acting timers at an instant are not built yet", ErrTypeInvalid, nil)
+}
+
+// ActAt makes an acting timer at an instant act through the item service.
+// PHASE B stub.
+func (a *Activities) ActAt(ctx context.Context, in ActAtInput) (ActAtResult, error) {
+	return ActAtResult{}, temporal.NewNonRetryableApplicationError("acting timers at an instant are not built yet", ErrTypeInvalid, nil)
+}

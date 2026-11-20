@@ -27,6 +27,9 @@ type Accepted struct {
 	Fields  []string
 	Moves   []string
 	Creates []string
+	// Sets (Jira part 2, step 3) are the fields a set reaction may set or
+	// unset on an Item of the Type.
+	Sets []string
 	// MayCreate tells `creates: []` (it may create, setting nothing) from
 	// no `creates` at all.
 	MayCreate bool

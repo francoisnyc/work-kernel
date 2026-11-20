@@ -69,6 +69,11 @@ type ReactionOutcome struct {
 	Target uuid.UUID
 	// Record is the outcome's event on SourceID.
 	Record WriteResult
+	// Each (a reaction that moves children; Jira part 2, step 3) holds one
+	// outcome per child moved or refused, in the order of their IDs. The
+	// fields above are then the last of them, or the one record that says
+	// nothing was moved.
+	Each []ReactionOutcome
 }
 
 // PendingReaction is a move or create reaction not yet finished for one
