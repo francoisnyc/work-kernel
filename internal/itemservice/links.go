@@ -51,7 +51,13 @@ type LinkRequest struct {
 	TargetID       uuid.UUID
 	// ExpectedItemSeq is the optional if-match, on the source.
 	ExpectedItemSeq int64
-	Attribution     item.Attribution // optional; what caused this write
+	// ExpectedContentSeq is the if-match behind the public etag: when set,
+	// the write happens only if the source's content_seq is still this one,
+	// and fails with ErrStale otherwise. Zero means "no check". It is left
+	// out of the idempotency hash when zero (omitempty), so a request
+	// without it hashes as it did before the field existed.
+	ExpectedContentSeq int64            `json:",omitempty"`
+	Attribution        item.Attribution // optional; what caused this write
 }
 
 // LinkFilter keeps Items with a link of this name to or from ItemID, as the

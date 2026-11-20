@@ -27,7 +27,13 @@ type TransitionRequest struct {
 	Fields         map[string]any // optional; keyed by stable field ID
 	// ExpectedItemSeq is the same optional if-match as on UpdateRequest.
 	ExpectedItemSeq int64
-	Attribution     item.Attribution // optional; what caused this write
+	// ExpectedContentSeq is the if-match behind the public etag: when set,
+	// the write happens only if the Item's content_seq is still this one,
+	// and fails with ErrStale otherwise. Zero means "no check". It is left
+	// out of the idempotency hash when zero (omitempty), so a request
+	// without it hashes as it did before the field existed.
+	ExpectedContentSeq int64            `json:",omitempty"`
+	Attribution        item.Attribution // optional; what caused this write
 	// Wait is how long to wait for a held transition's check, up to the
 	// service's cap (MaxWait). Zero answers at once. It is not part of the
 	// request's identity (the "-" tag keeps it out of the idempotency hash):
