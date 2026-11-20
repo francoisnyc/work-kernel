@@ -40,10 +40,11 @@ type acceptedDoc struct {
 	Fields  []string  `yaml:"fields" json:"fields,omitempty"`
 	Moves   []string  `yaml:"moves" json:"moves,omitempty"`
 	Creates *[]string `yaml:"creates" json:"creates,omitempty"`
+	Sets    []string  `yaml:"sets" json:"sets,omitempty"`
 }
 
 func (a *Accepted) fromDoc(d acceptedDoc) {
-	a.Fields, a.Moves = d.Fields, d.Moves
+	a.Fields, a.Moves, a.Sets = d.Fields, d.Moves, d.Sets
 	if d.Creates != nil {
 		a.Creates, a.MayCreate = *d.Creates, true
 	}
@@ -61,8 +62,8 @@ func (a *Accepted) UnmarshalYAML(n *yaml.Node) error {
 	}
 	// Unknown keys are errors, as everywhere in a Type file.
 	for i := 0; i < len(n.Content); i += 2 {
-		if k := n.Content[i].Value; k != "fields" && k != "moves" && k != "creates" {
-			return fmt.Errorf("accepts_reactions: unknown key %q (want fields, moves or creates)", k)
+		if k := n.Content[i].Value; k != "fields" && k != "moves" && k != "creates" && k != "sets" {
+			return fmt.Errorf("accepts_reactions: unknown key %q (want fields, moves, creates or sets)", k)
 		}
 	}
 	var d acceptedDoc
@@ -76,10 +77,10 @@ func (a *Accepted) UnmarshalYAML(n *yaml.Node) error {
 // MarshalJSON writes the list form when only fields are accepted, so a Type
 // stored before this step and one stored after it look the same.
 func (a Accepted) MarshalJSON() ([]byte, error) {
-	if len(a.Moves) == 0 && !a.MayCreate {
+	if len(a.Moves) == 0 && !a.MayCreate && len(a.Sets) == 0 {
 		return json.Marshal(a.Fields)
 	}
-	d := acceptedDoc{Fields: a.Fields, Moves: a.Moves}
+	d := acceptedDoc{Fields: a.Fields, Moves: a.Moves, Sets: a.Sets}
 	if a.MayCreate {
 		creates := a.Creates
 		if creates == nil {
@@ -336,13 +337,20 @@ func (t *Type) checkAfterReaction(r *Reaction, where string, fail func(string, .
 		return nil
 	}
 
+	if r.Kind == ReactionSet {
+		return t.checkSetReaction(r, where, fail, ownWhen)
+	}
+	if r.Target != "" || len(r.Set) > 0 {
+		return fail("%s: target and set are for a set reaction", where)
+	}
+
 	switch {
 	case r.Kind == ReactionCreate:
 		if r.On != OnEnter {
 			return fail("%s: a create reaction is on: enter, not %q", where, r.On)
 		}
-		if r.To != "" || r.By != "" || len(r.Of) > 0 || len(r.TargetFrom) > 0 {
-			return fail("%s: to, by, of and target_from are not for a create reaction", where)
+		if r.To != "" || r.By != "" || len(r.Of) > 0 || len(r.TargetFrom) > 0 || r.Children != nil {
+			return fail("%s: to, by, of, target_from and children are not for a create reaction", where)
 		}
 		if _, ok := t.State(r.State); !ok {
 			return fail("%s: unknown state %q", where, r.State)
@@ -361,28 +369,52 @@ func (t *Type) checkAfterReaction(r *Reaction, where string, fail func(string, .
 		if err := ownWhen(); err != nil {
 			return err
 		}
-		env, err := newSetsEnv(t)
+		// The fields may read linked Items: one declared max-one link
+		// away from the Item, or from its container.
+		env, err := newCreateEnv(t)
 		if err != nil {
 			return fail("%s: fields: %v", where, err)
 		}
-		r.FieldPrograms, r.fieldTypes = map[string]cel.Program{}, map[string]*cel.Type{}
+		r.FieldPrograms, r.fieldTypes, r.LinkedReads = map[string]cel.Program{}, map[string]*cel.Type{}, nil
 		for _, id := range slices.Sorted(maps.Keys(r.Fields)) {
 			ast, iss := env.Compile(r.Fields[id])
 			if iss.Err() != nil {
 				return fail("%s: field %s: %q: %v", where, id, r.Fields[id], iss.Err())
 			}
+			reads, err := linkedReads(r.Fields[id])
+			if err != nil {
+				return fail("%s: field %s: %v", where, id, err)
+			}
+			for _, lr := range reads {
+				if !lr.Container {
+					if err := single(lr.Link); err != nil {
+						return err
+					}
+				}
+			}
+			r.LinkedReads = append(r.LinkedReads, reads...)
 			prg, err := env.Program(ast)
 			if err != nil {
 				return fail("%s: field %s: %v", where, id, err)
 			}
 			r.FieldPrograms[id], r.fieldTypes[id] = prg, ast.OutputType()
 		}
+		r.LinkedReads = sortLinkedReads(r.LinkedReads)
 		return nil
 
 	case r.Type != "" || r.Version != 0 || len(r.Fields) > 0:
 		return fail("%s: type, version and fields are for a create reaction", where)
 	case r.To == "":
 		return fail("%s: a move reaction names the state it moves into (to)", where)
+	}
+
+	if r.Children != nil {
+		if r.Link != "" {
+			return fail("%s: children and link: a move follows a link or moves contained Items, not both", where)
+		}
+		if err := r.checkChildren(where, fail); err != nil {
+			return err
+		}
 	}
 
 	switch r.On {
@@ -393,8 +425,11 @@ func (t *Type) checkAfterReaction(r *Reaction, where string, fail func(string, .
 		if _, ok := t.State(r.State); !ok {
 			return fail("%s: unknown state %q (on: enter needs the state entered)", where, r.State)
 		}
+		if r.Children != nil {
+			return ownWhen()
+		}
 		if r.Link == "" {
-			return fail("%s: a move on entering a state follows a link to the Item it moves (link)", where)
+			return fail("%s: a move on entering a state follows a link to the Item it moves (link), or moves contained Items (children)", where)
 		}
 		if err := single(r.Link); err != nil {
 			return err
@@ -405,11 +440,19 @@ func (t *Type) checkAfterReaction(r *Reaction, where string, fail func(string, .
 		if len(r.Of) == 0 {
 			return fail("%s: on: created_inside names the Types whose creation triggers it (of)", where)
 		}
-		if r.State != "" || r.Link != "" || len(r.TargetFrom) > 0 {
-			return fail("%s: on: created_inside takes no state, no link and no target_from: it moves the Item itself, from `from`", where)
+		if r.State != "" || r.Link != "" {
+			return fail("%s: on: created_inside takes no state and no link: it moves the Item itself, or contained Items (children)", where)
 		}
-		if r.By != "" && r.By != ByCreator {
-			return fail("%s: by %q: the only value is %s", where, r.By, ByCreator)
+		if len(r.TargetFrom) > 0 && r.Children == nil {
+			return fail("%s: on: created_inside without children takes no target_from: it moves the Item itself, from `from`", where)
+		}
+		if r.By != "" && r.By != ByCreator && r.By != ByNotCreator {
+			return fail("%s: by %q: want %s or %s", where, r.By, ByCreator, ByNotCreator)
+		}
+		if r.Children != nil {
+			// The move is the children's: `to` and target_from are states
+			// of their Types (ParseDir), `from` the Item's own.
+			return t.compileChildWhen(r, where, fail)
 		}
 		if _, ok := t.State(r.To); !ok {
 			return fail("%s: unknown state %q to move to", where, r.To)
@@ -435,33 +478,39 @@ func (t *Type) checkAfterReaction(r *Reaction, where string, fail func(string, .
 				return fail("%s: transition %s -> %s is held by the check %q; a reaction may not ask for a held move", where, from, r.To, h)
 			}
 		}
-		if r.When != "" {
-			env, err := newChildEnv()
-			if err != nil {
-				return fail("%s: when: %v", where, err)
-			}
-			ast, iss := env.Compile(r.When)
-			if iss.Err() != nil {
-				return fail("%s: when %q: %v (it reads the created Item's fields, as child.<id>)", where, r.When, iss.Err())
-			}
-			if out := ast.OutputType(); !out.IsExactType(cel.BoolType) && !out.IsExactType(cel.DynType) {
-				return fail("%s: when %q must yield a bool, not %s", where, r.When, out)
-			}
-			prg, err := env.Program(ast)
-			if err != nil {
-				return fail("%s: when: %v", where, err)
-			}
-			r.WhenProgram = prg
-			for _, m := range childRef.FindAllStringSubmatch(r.When, -1) {
-				if !slices.Contains(r.ChildReads, m[1]) {
-					r.ChildReads = append(r.ChildReads, m[1])
-				}
-			}
-			sort.Strings(r.ChildReads)
-		}
-		return nil
+		return t.compileChildWhen(r, where, fail)
 	}
 	return fail("%s: on must be enter or created_inside, not %q", where, r.On)
+}
+
+// compileChildWhen compiles a created_inside reaction's `when`, which reads
+// the created Item's fields as child.<id>.
+func (t *Type) compileChildWhen(r *Reaction, where string, fail func(string, ...any) error) error {
+	if r.When != "" {
+		env, err := newChildEnv()
+		if err != nil {
+			return fail("%s: when: %v", where, err)
+		}
+		ast, iss := env.Compile(r.When)
+		if iss.Err() != nil {
+			return fail("%s: when %q: %v (it reads the created Item's fields, as child.<id>)", where, r.When, iss.Err())
+		}
+		if out := ast.OutputType(); !out.IsExactType(cel.BoolType) && !out.IsExactType(cel.DynType) {
+			return fail("%s: when %q must yield a bool, not %s", where, r.When, out)
+		}
+		prg, err := env.Program(ast)
+		if err != nil {
+			return fail("%s: when: %v", where, err)
+		}
+		r.WhenProgram = prg
+		for _, m := range childRef.FindAllStringSubmatch(r.When, -1) {
+			if !slices.Contains(r.ChildReads, m[1]) {
+				r.ChildReads = append(r.ChildReads, m[1])
+			}
+		}
+		sort.Strings(r.ChildReads)
+	}
+	return nil
 }
 
 // transitionsInto returns the states a Type declares a transition from
@@ -502,6 +551,19 @@ func checkAfterAcross(types []*Type, byID map[string][]*Type) error {
 		for _, r := range src.Reactions {
 			key := ReactionKey(src.ID, r.ID)
 			switch {
+			case r.Kind == ReactionMove && r.Children != nil:
+				// Contained Items: checkStep3Across. The trigger's own
+				// Types are checked here.
+				for _, of := range r.Of {
+					if len(byID[of]) == 0 {
+						return fail("reaction %s is triggered by Items of %s, which is not loaded", r.ID, of)
+					}
+					for _, f := range r.ChildReads {
+						if !slices.ContainsFunc(byID[of], func(c *Type) bool { _, ok := c.Field(f); return ok }) {
+							return fail("reaction %s reads child.%s, which no version of %s declares", r.ID, f, of)
+						}
+					}
+				}
 			case r.Kind == ReactionMove && r.On == OnEnter:
 				l, _ := src.Link(r.Link)
 				for _, targetID := range l.Targets {
@@ -560,7 +622,10 @@ func checkAfterAcross(types []*Type, byID map[string][]*Type) error {
 				}
 				at := fmt.Sprintf("%s v%d", created.ID, created.Version)
 				fields := slices.Sorted(maps.Keys(r.Fields))
-				if !created.AcceptsReactions[key].MayCreate {
+				// Created inside the Item itself, it reaches the new Item
+				// through containment: a consent by reaction ID counts.
+				consent, _ := created.Consent(src.ID, r.ID, r.Link == "")
+				if !consent.MayCreate {
 					return fail("reaction %s creates Items of %s, which does not accept %s for it "+
 						"(accepts_reactions: {%s: {creates: [...]}})", r.ID, at, key, key)
 				}
@@ -569,14 +634,15 @@ func checkAfterAcross(types []*Type, byID map[string][]*Type) error {
 					if !ok {
 						return fail("reaction %s sets %s, which %s does not declare", r.ID, id, at)
 					}
-					if f.Multiple || f.Type == Principal {
+					if f.Type == Principal {
 						return fail("reaction %s sets %s of %s, a %s field a reaction may not set", r.ID, id, at, f.Type)
 					}
-					if out := r.fieldTypes[id]; out != nil && !celType(f.Type).IsAssignableType(out) {
+					// A value read from a linked Item is dynamic here: the write judges it.
+					if out := r.fieldTypes[id]; out != nil && !out.IsExactType(cel.DynType) && !fieldCELType(f).IsAssignableType(out) {
 						return fail("reaction %s: field %s: %q yields %s, not a value of a %s field of %s",
 							r.ID, id, r.Fields[id], out, f.Type, at)
 					}
-					if !created.AcceptsCreate(key, []string{id}) {
+					if !slices.Contains(consent.Creates, id) {
 						return fail("reaction %s sets %s of %s, which its consent for %s does not list (creates)", r.ID, id, at, key)
 					}
 				}
@@ -604,20 +670,44 @@ func checkReactionCycles(types []*Type) error {
 			edges[from] = append(edges[from], to)
 		}
 	}
+	// Creation enters the initial state: "a T is created" runs the enter
+	// reactions of that state that name no `from`.
+	created := func(t string) string { return "a " + t + " is created" }
 	for _, t := range types {
 		for _, r := range t.Reactions {
+			// from is the trigger's node(s); to what the reaction causes.
+			var from, to []string
 			switch {
-			case r.Kind == ReactionMove && r.On == OnEnter:
-				l, _ := t.Link(r.Link)
-				for _, target := range l.Targets {
-					add(enters(t.ID, r.State), enters(target, r.To))
-				}
 			case r.Kind == ReactionMove && r.On == OnCreatedInside:
 				for _, of := range r.Of {
-					add(inside(of, t.ID), enters(t.ID, r.To))
+					from = append(from, inside(of, t.ID))
 				}
+			case r.Kind == ReactionMove || r.Kind == ReactionCreate:
+				from = append(from, enters(t.ID, r.State))
+				if r.State == t.InitialState && len(r.From) == 0 {
+					from = append(from, created(t.ID))
+				}
+			}
+			switch {
 			case r.Kind == ReactionCreate:
-				add(enters(t.ID, r.State), inside(r.Type, t.ID))
+				to = append(to, inside(r.Type, t.ID))
+				add(inside(r.Type, t.ID), created(r.Type))
+			case r.Kind == ReactionMove && r.Children != nil:
+				for _, of := range r.Children.Of {
+					to = append(to, enters(of, r.To))
+				}
+			case r.Kind == ReactionMove && r.On == OnCreatedInside:
+				to = append(to, enters(t.ID, r.To))
+			case r.Kind == ReactionMove:
+				l, _ := t.Link(r.Link)
+				for _, target := range l.Targets {
+					to = append(to, enters(target, r.To))
+				}
+			}
+			for _, f := range from {
+				for _, n := range to {
+					add(f, n)
+				}
 			}
 		}
 	}

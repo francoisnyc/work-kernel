@@ -232,6 +232,9 @@ func storedValue(f typedef.Field, v any) (any, bool) {
 	if _, null := v.(structpb.NullValue); null || v == nil {
 		return nil, true
 	}
+	if f.Multiple {
+		return storedSet(f, v)
+	}
 	switch f.Type {
 	case typedef.DateTime:
 		at, ok := v.(time.Time)

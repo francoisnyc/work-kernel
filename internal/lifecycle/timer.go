@@ -48,7 +48,7 @@ func NeedsWorkflow(t *typedef.Type, state string) bool {
 		return isAfterReaction(r) && r.On == typedef.OnEnter && r.State == state
 	})
 	return hasTimer || hasAt || hasReaction || len(EnrichHooks(t, state)) > 0 || len(ActionHooks(t, state)) > 0 ||
-		len(ActingTimers(t, state)) > 0
+		len(ActingTimers(t, state)) > 0 || len(ActingAtTimers(t, state)) > 0
 }
 
 // HasListeners reports whether anything listens to the events of Items of

@@ -570,6 +570,9 @@ func (t *Type) check() error {
 	if err := t.checkMultiUses(fail); err != nil {
 		return err
 	}
+	if err := t.checkReadable(fail); err != nil {
+		return err
+	}
 	// Clears name fields, and may not sit on a held transition.
 	if err := t.checkClears(fail); err != nil {
 		return err
@@ -588,7 +591,15 @@ func (t *Type) check() error {
 		written := slices.ContainsFunc(t.Hooks, func(h Hook) bool { return slices.Contains(h.Writes, f.ID) })
 		for _, a := range t.AcceptsReactions {
 			// A reaction that may write it, or set it on the Items it creates.
-			written = written || slices.Contains(a.Fields, f.ID) || slices.Contains(a.Creates, f.ID)
+			// Or a set reaction of a contained Item may set it.
+			written = written || slices.Contains(a.Fields, f.ID) || slices.Contains(a.Creates, f.ID) || slices.Contains(a.Sets, f.ID)
+		}
+		// Or an acting timer at an instant sets it.
+		for _, s := range t.States {
+			for _, a := range s.Acting {
+				_, set := a.Sets[f.ID]
+				written = written || set
+			}
 		}
 		// Or a transition computes it (`sets`): the Type itself writes it.
 		for _, tr := range t.Transitions {

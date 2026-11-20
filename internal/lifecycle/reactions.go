@@ -16,21 +16,22 @@ import (
 
 // isAfterReaction reports whether r is a move or a create reaction.
 func isAfterReaction(r typedef.Reaction) bool {
-	return r.Kind == typedef.ReactionMove || r.Kind == typedef.ReactionCreate
+	return r.Kind == typedef.ReactionMove || r.Kind == typedef.ReactionCreate || r.Kind == typedef.ReactionSet
 }
 
-// EnterReactions returns the move and create reactions an Item of Type t
-// runs on entering `to` from `from`, in the Type's order. One that names
-// `from` states runs only when the entry comes from one of them; a create
-// (from "") enters the initial state and runs none.
+// EnterReactions returns the move, create and set reactions an Item of
+// Type t runs on entering `to` from `from`, in the Type's order. One that
+// names `from` states runs only when the entry comes from one of them.
+// Creation (from "") enters the initial state: it runs the reactions of
+// that state that name no `from`.
 func EnterReactions(t *typedef.Type, from, to string) []typedef.Reaction {
-	if from == "" {
+	if from == "" && to != t.InitialState {
 		return nil
 	}
 	var out []typedef.Reaction
 	for _, r := range t.Reactions {
 		if isAfterReaction(r) && r.On == typedef.OnEnter && r.State == to &&
-			(len(r.From) == 0 || slices.Contains(r.From, from)) {
+			(len(r.From) == 0 || (from != "" && slices.Contains(r.From, from))) {
 			out = append(out, r)
 		}
 	}
@@ -104,10 +105,12 @@ func CreateFields(t *typedef.Type, r typedef.Reaction, created *typedef.Type, in
 		return &Rejection{Code: EffectFailed, Field: field,
 			Reason: fmt.Sprintf("reaction %s: field %s of the created %s could not be computed", r.ID, field, created.ID)}
 	}
-	vars := make(map[string]any, len(t.Fields)+2)
+	vars := make(map[string]any, len(t.Fields)+4)
 	vars[typedef.VarCauseAt] = in.CauseAt.UTC()
 	vars[typedef.VarToday] = dateOf(in.CauseAt)
 	addFieldVars(vars, t, in.Fields)
+	vars["linked"] = linkedVars(in.Linked.Own, in.Linked.OwnTypes)
+	vars["container"] = map[string]any{"linked": linkedVars(in.Linked.Container, in.Linked.ContainerTypes)}
 	out := map[string]any{}
 	for _, id := range slices.Sorted(maps.Keys(r.Fields)) {
 		prg := r.FieldPrograms[id]
