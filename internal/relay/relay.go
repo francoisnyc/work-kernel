@@ -297,7 +297,10 @@ func (r *Relay) delivery(ctx context.Context, id uuid.UUID, ev pendingEvent) (d 
 	// Still a shape: IDs the Type itself declares, no value. Every other
 	// Type, and every other field, adds nothing to what is sent.
 	var atFields []string
-	for _, f := range ty.AtFields() { // sorted
+	// (And the fields its acting timers at an instant wait for.)
+	named := slices.Concat(ty.AtFields(), ty.ActingAtFields())
+	slices.Sort(named)
+	for _, f := range slices.Compact(named) {
 		if slices.Contains(shape.FieldIDs, f) || slices.Contains(shape.ClearedFieldIDs, f) {
 			atFields = append(atFields, f)
 		}

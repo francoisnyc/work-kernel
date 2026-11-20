@@ -87,7 +87,7 @@ func (s *server) filterIn(ctx context.Context, p item.Principal, f *kernelv1.Ite
 		if ff.Field == "" {
 			return out, badField(path+".field", "required")
 		}
-		kf := itemservice.FieldFilter{Field: ff.Field, Empty: ff.Empty}
+		kf := itemservice.FieldFilter{Field: ff.Field, Empty: ff.Empty, NotEmpty: ff.NotEmpty}
 		for _, b := range []struct {
 			in  *structpb.Value
 			out *any

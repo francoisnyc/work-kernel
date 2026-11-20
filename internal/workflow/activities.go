@@ -165,10 +165,23 @@ func (a *Activities) LoadItem(ctx context.Context, itemID string) (Snapshot, err
 	if len(se.ActingRuns) > 0 {
 		snap.ActingRuns = se.ActingRuns
 	}
+	// Acting timers at an instant (Jira part 2, step 3): the timer, its
+	// field's ID and its hook. Never scaled: an instant is not a duration.
+	// The instants are LoadActingInstants' to read; which already acted is
+	// the item service's to know (ActAt's key), so nothing is rebuilt here.
+	for _, st := range ty.States {
+		for _, at := range lifecycle.ActingAtTimers(ty, st.ID) {
+			if snap.ActingAt == nil {
+				snap.ActingAt = map[string][]ActingAtSpec{}
+			}
+			snap.ActingAt[st.ID] = append(snap.ActingAt[st.ID], ActingAtSpec{ID: at.ID, Field: at.At, Hook: at.Hook})
+		}
+	}
 	// Move and create reactions (Jira part 2, step 2): which a state's
 	// entry runs, which a child's creation runs, and those not yet done.
+	// (And set reactions, Jira part 2, step 3: run like the other two.)
 	for _, r := range ty.Reactions {
-		if r.Kind != typedef.ReactionMove && r.Kind != typedef.ReactionCreate {
+		if r.Kind != typedef.ReactionMove && r.Kind != typedef.ReactionCreate && r.Kind != typedef.ReactionSet {
 			continue
 		}
 		if r.On == typedef.OnCreatedInside {
@@ -341,9 +354,12 @@ func (a *Activities) RunAfterReaction(ctx context.Context, in AfterReactionInput
 		err := fmt.Errorf("%s v%d declares no reaction %s", in.TypeID, in.TypeVersion, in.ReactionID)
 		return temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeInvalid, err)
 	}
-	if r.Kind == typedef.ReactionCreate {
+	switch r.Kind {
+	case typedef.ReactionCreate:
 		_, err = a.Items.Internal().ReactCreate(ctx, req)
-	} else {
+	case typedef.ReactionSet:
+		_, err = a.Items.Internal().ReactSet(ctx, req)
+	default:
 		_, err = a.Items.Internal().ReactMove(ctx, req)
 	}
 	return reactionError(err)
@@ -398,6 +414,8 @@ func NewWorker(c client.Client, taskQueue string, k *itemservice.Service, opts W
 	w.RegisterActivityWithOptions(a.LoadItem, activity.RegisterOptions{Name: ActivityLoadItem})
 	w.RegisterActivityWithOptions(a.FireTimer, activity.RegisterOptions{Name: ActivityFireTimer})
 	w.RegisterActivityWithOptions(a.LoadInstant, activity.RegisterOptions{Name: ActivityLoadInstant})
+	w.RegisterActivityWithOptions(a.LoadActingInstants, activity.RegisterOptions{Name: ActivityLoadActingInstants})
+	w.RegisterActivityWithOptions(a.ActAt, activity.RegisterOptions{Name: ActivityActAt})
 	w.RegisterActivityWithOptions(a.RunAfterReaction, activity.RegisterOptions{Name: ActivityRunAfterReaction})
 	w.RegisterActivityWithOptions(a.AfterReactionFailed, activity.RegisterOptions{Name: ActivityAfterReactionFailed})
 	w.RegisterActivityWithOptions(a.RunEnrich, activity.RegisterOptions{Name: ActivityRunEnrich})
@@ -414,13 +432,59 @@ func NewWorker(c client.Client, taskQueue string, k *itemservice.Service, opts W
 }
 
 // LoadActingInstants reads the instants of the acting timers at an instant
-// of the Item's current state (Jira part 2, step 3). PHASE B stub.
+// of the Item's current state (Jira part 2, step 3): like LoadInstant, the
+// declared exception to "the workflow never sees a field value". The item
+// service chooses the fields; the workflow names none.
 func (a *Activities) LoadActingInstants(ctx context.Context, itemID string) ([]ActingInstant, error) {
-	return nil, temporal.NewNonRetryableApplicationError("acting timers at an instant are not built yet", ErrTypeInvalid, nil)
+	id, err := uuid.Parse(itemID)
+	if err != nil {
+		return nil, fmt.Errorf("item id %q: %w", itemID, err)
+	}
+	got, err := a.Items.ActingInstants(ctx, id)
+	if errors.Is(err, itemservice.ErrNotFound) {
+		return nil, temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeNotFound, err)
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ActingInstant, 0, len(got))
+	for _, g := range got {
+		out = append(out, ActingInstant{TimerID: g.Timer, Set: g.Set, At: g.At})
+	}
+	return out, nil
 }
 
-// ActAt makes an acting timer at an instant act through the item service.
-// PHASE B stub.
+// ActAt makes an acting timer at an instant act through the item service,
+// which judges it: never before the instant, never for an entry or an
+// instant that is gone. Its final answers are non-retryable errors the
+// workflow tells apart by type, as for FireTimer.
 func (a *Activities) ActAt(ctx context.Context, in ActAtInput) (ActAtResult, error) {
-	return ActAtResult{}, temporal.NewNonRetryableApplicationError("acting timers at an instant are not built yet", ErrTypeInvalid, nil)
+	id, err := uuid.Parse(in.ItemID)
+	if err != nil {
+		return ActAtResult{}, temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeInvalid, err)
+	}
+	res, err := a.Items.Internal().ActAt(ctx, itemservice.ActAtRequest{
+		ItemID: id, Timer: in.TimerID, EnteredSeq: in.EnteredSeq, Instant: in.Instant,
+		Attribution: item.Attribution{CorrelationID: in.CorrelationID, Hop: in.Hop},
+	})
+	var notYet *itemservice.NotYetError
+	switch {
+	case err == nil:
+		return ActAtResult{RunHook: res.RunHook}, nil
+	case errors.As(err, &notYet):
+		return ActAtResult{}, temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeNotYet, err, notYet.Remaining)
+	case errors.Is(err, itemservice.ErrNotFound):
+		return ActAtResult{}, temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeNotFound, err)
+	case errors.Is(err, itemservice.ErrHeld):
+		return ActAtResult{}, temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeHeld, err)
+	case errors.Is(err, itemservice.ErrStale):
+		return ActAtResult{}, temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeStale, err)
+	case errors.Is(err, itemservice.ErrRejected):
+		activity.GetLogger(ctx).Info("the item service refused an acting timer",
+			"item", in.ItemID, "timer", in.TimerID, "reason", err.Error())
+		return ActAtResult{}, temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeRejected, err)
+	case errors.Is(err, itemservice.ErrInvalid):
+		return ActAtResult{}, temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeInvalid, err)
+	}
+	return ActAtResult{}, err
 }
