@@ -2215,16 +2215,20 @@ requester's comment, the resume, the stop, the scaled close timer) and `sla_goal
 earlier ones they replay (`TestReplay_*`).
 
 **Numbers.** `go run ./cmd/bench -sla`, 5,000 incidents and 10,000 goals, analyzed: the queue by
-`f_due_resolution` (3,003 of 5,000 with a due instant) 9.3 ms; open incidents by due instant 6.3 ms;
-overdue now 6.4 ms; ever breached (`f_breached_at` not empty, latest first) 5.5 ms. All four are one
+`f_due_resolution` (3,003 of 5,000 with a due instant) 8.9 ms; open incidents by due instant 5.3 ms;
+overdue now 4.3 ms; ever breached (`f_breached_at` not empty, latest first) 4.0 ms (a first run gave
+9.3, 6.3, 6.4 and 5.5). All four are one
 shape: a sequential scan of `items` filtered by Type and by the field's presence, a hash join to the
 readable scopes, a top-N heapsort (52 to 128 kB); no index serves the field. A goal's row: 783 bytes
 with no days off, 1,111 with 10, 4,279 with 366. Scenario: twice in a row on a fresh stack, 84 s each
 (both goals exist 293 ms after an incident). Playwright: 6 tests in 10.9 s. vitest: 438.
 
 **Surprises:** YAML's merge key (`<<: *pause`) lets the stop reuse the pause's three effects, so the
-correction is written once. The existing guard `TestClockSkew_NoProductionCodeSetsIt` caught the bench
-borrowing a skewed clock to breach goals: it now uses a one-second policy and waits. A count of an Item's
+correction is written once. Two existing source-reading guards caught the new bench mode: it
+borrowed a skewed clock to breach goals (`TestClockSkew_NoProductionCodeSetsIt`; it now uses a
+one-second policy and waits) and called the internal door itself
+(`TestInternalDoor_OnlyTheWorkerAndHookRunnerCallIt`; it now runs the reactions through the worker's
+activities). The second was found only by the full rerun, after the PR was open. A count of an Item's
 events is a brittle assertion wherever reactions record their outcomes on it.
 
 **Not verified here:** the images' build stages (module download fails inside the build container: the

@@ -2135,7 +2135,7 @@ state, read through visibility on load and on Refresh; a reaction record
 links to its target.
 
 **Measured** (journal). The queue and the breached search sort every match
-after a sequential scan (5,000 incidents: 6 to 9 ms). A goal's row is 0.8
+after a sequential scan (5,000 incidents: 4 to 9 ms). A goal's row is 0.8
 kB, and 4.3 kB when its calendar has 366 days off.
 
 **Found: the etag changes too often.** A save sends the etag, and the etag

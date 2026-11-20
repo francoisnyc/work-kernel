@@ -9,8 +9,8 @@ package main
 //   - The size of a goal's row with the calendar it copies: an empty one,
 //     and one with 366 days off.
 //
-// The incidents' goals are made by the reactions themselves, run by hand
-// through the internal door (no worker here).
+// The incidents' goals are made by the reactions themselves, run through
+// the worker's activities (no Temporal here).
 
 import (
 	"context"
@@ -26,6 +26,7 @@ import (
 	"github.com/francoisnyc/work-kernel/internal/itemservice"
 	"github.com/francoisnyc/work-kernel/internal/testdb"
 	"github.com/francoisnyc/work-kernel/internal/typedef"
+	"github.com/francoisnyc/work-kernel/internal/workflow"
 )
 
 func slaMode(ctx context.Context) error {
@@ -114,14 +115,41 @@ func slaMode(ctx context.Context) error {
 		}
 		return d, nil
 	}
-	run := func(source uuid.UUID, reaction string, cause uuid.UUID, seq int64) itemservice.ReactionRunRequest {
-		return itemservice.ReactionRunRequest{SourceID: source, Reaction: reaction, CauseItem: cause, CauseSeq: seq, Hop: 1}
+	// The reactions and the breach mark are run through the worker's own
+	// activities (only the worker and the hook runner may use the item
+	// service's internal door).
+	act := &workflow.Activities{Items: k}
+	react := func(source uuid.UUID, typeID, reaction string, cause uuid.UUID, seq int64) error {
+		return act.RunAfterReaction(ctx, workflow.AfterReactionInput{
+			ItemID: source.String(), TypeID: typeID, TypeVersion: 1, ReactionID: reaction,
+			CauseItem: cause.String(), CauseSeq: seq, Hop: 1,
+		})
 	}
 	goalType, err := k.Type(ctx, "sla_goal", 1)
 	if err != nil {
 		return err
 	}
 	running, _ := goalType.State("running")
+	// goalsOf lists an incident's goals: first response, then resolution.
+	goalsOf := func(inc uuid.UUID) ([]uuid.UUID, error) {
+		rows, err := plain.Query(ctx, `select id from items where container_id = $1 and type_id = 'sla_goal' order by fields->>'f_metric'`, inc)
+		if err != nil {
+			return nil, err
+		}
+		return pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+	}
+	// shows runs the goal's own set reactions for the event that entered
+	// its state: the one of its metric writes the incident.
+	shows := func(goal uuid.UUID, state string, seq int64) error {
+		for _, set := range goalType.Reactions {
+			if set.State == state {
+				if err := react(goal, "sla_goal", set.ID, goal, seq); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
 	// incident makes an incident with both goals shown on it; it returns
 	// the resolution goal.
 	incident := func(d uuid.UUID, i int) (inc, res uuid.UUID, err error) {
@@ -130,20 +158,20 @@ func slaMode(ctx context.Context) error {
 			return
 		}
 		for _, r := range []string{"sla_start_first_response", "sla_start_resolution"} {
-			out, rerr := k.Internal().ReactCreate(ctx, run(inc, r, inc, 1))
-			if rerr != nil || out.Outcome != itemservice.ReactionApplied {
-				return inc, res, fmt.Errorf("%s: %+v, %v", r, out, rerr)
-			}
-			res = out.Target
-			for _, set := range goalType.Reactions {
-				if set.State == "running" {
-					if _, rerr := k.Internal().ReactSet(ctx, run(out.Target, set.ID, out.Target, 1)); rerr != nil {
-						return inc, res, rerr
-					}
-				}
+			if err = react(inc, "incident", r, inc, 1); err != nil {
+				return
 			}
 		}
-		return
+		goals, gerr := goalsOf(inc)
+		if gerr != nil || len(goals) != 2 {
+			return inc, res, fmt.Errorf("the incident has %d goals, want 2: %v", len(goals), gerr)
+		}
+		for _, g := range goals {
+			if err = shows(g, "running", 1); err != nil {
+				return
+			}
+		}
+		return inc, goals[1], nil
 	}
 
 	// --- row size ---
@@ -207,21 +235,20 @@ func slaMode(ctx context.Context) error {
 				Fields: map[string]any{"f_resolution": "fixed"}}); err != nil {
 				return err
 			}
-			var out itemservice.ReactionOutcome
-			if out, err = k.Internal().ReactMove(ctx, run(inc, "sla_stop", inc, res.ItemSeq)); err != nil {
+			if err = react(inc, "incident", "sla_stop", inc, res.ItemSeq); err != nil {
 				return err
 			}
-			for _, each := range out.Each {
-				for _, set := range goalType.Reactions {
-					if set.State == "completed" {
-						var seq int64
-						if err = plain.QueryRow(ctx, `select item_seq from item_events where item_id = $1 and op = 'transition' order by item_seq desc limit 1`, each.Target).Scan(&seq); err != nil {
-							return err
-						}
-						if _, err = k.Internal().ReactSet(ctx, run(each.Target, set.ID, each.Target, seq)); err != nil {
-							return err
-						}
-					}
+			goals, gerr := goalsOf(inc)
+			if gerr != nil {
+				return gerr
+			}
+			for _, g := range goals {
+				var seq int64
+				if err = plain.QueryRow(ctx, `select item_seq from item_events where item_id = $1 and op = 'transition' order by item_seq desc limit 1`, g).Scan(&seq); err != nil {
+					return err
+				}
+				if err = shows(g, "completed", seq); err != nil {
+					return err
 				}
 			}
 		}
@@ -235,8 +262,8 @@ func slaMode(ctx context.Context) error {
 			continue
 		}
 		due, _ := typedef.ParseDateTime(mustFields(ctx, k, admin, goal)["f_due_at"])
-		if _, err := k.Internal().ActAt(ctx, itemservice.ActAtRequest{ItemID: goal, Timer: running.Acting[0].ID, EnteredSeq: 1, Instant: due,
-			Attribution: item.Attribution{Hop: 2}}); err != nil {
+		if _, err := act.ActAt(ctx, workflow.ActAtInput{ItemID: goal.String(), TypeID: "sla_goal", TypeVersion: 1, State: "running",
+			TimerID: running.Acting[0].ID, EnteredSeq: 1, Instant: due, Hop: 2}); err != nil {
 			return fmt.Errorf("mark a goal breached: %w", err)
 		}
 	}
