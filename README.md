@@ -259,15 +259,6 @@ all work with the same pages. It calls the public API only.
   history links to the Item the reaction wrote.
 - Nothing updates by itself (the API has no Watch yet): pages reload after
   an action, and each has a Refresh button.
-- **Known limit: a save right after a move can be refused as stale.** A
-  save sends the Item's etag, and today the etag changes with every event
-  of the Item, including the ones the kernel writes a moment after a move:
-  a reaction's outcome record, a hook's record, a field only the kernel
-  writes. An incident gets several within half a second of being created
-  or moved (its goals write their due instants on it), so saving its form
-  in that window answers `ABORTED / STALE`: press Refresh and save again.
-  The fix is the next step (the etag will change only when something a
-  caller could overwrite changes); see `docs/journal.md`, Later.
 
 ### What is dev-only
 
