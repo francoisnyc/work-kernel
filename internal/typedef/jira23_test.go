@@ -379,7 +379,6 @@ func TestConsent_WildcardOnlyThroughContainment(t *testing.T) {
 	}
 }
 
-
 func TestConsent_WildcardKeys_RefusedAtLoad(t *testing.T) {
 	for name, accepts := range map[string]string{
 		"any reaction of any Type": "'*:*': {moves: [paused]}",
