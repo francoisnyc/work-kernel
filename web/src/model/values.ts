@@ -3,8 +3,12 @@
 import type { JsonObject, JsonValue } from "@bufbuild/protobuf";
 import { FieldType, type Field, type Type } from "../gen/kernel/v1/kernel_pb";
 
-// Field ID -> what the input holds. "" is an empty input.
-export type FormValues = Record<string, string | boolean>;
+// What one input holds: text ("" is an empty input), a boolean for a bool,
+// or the members of a multi-value field (a set, kept sorted; [] is unset).
+export type FormValue = string | boolean | string[];
+
+// Field ID -> what the input holds.
+export type FormValues = Record<string, FormValue>;
 
 // The form's starting values for an Item's fields ({} or undefined on
 // create): every declared field, unset ones as "" (false for a bool).
@@ -21,7 +25,7 @@ export function formValues(type: Type, fields: JsonObject | undefined): FormValu
 
 // A text input's value as it is sent: a string as typed, anything else
 // trimmed.
-function sent(field: Field, value: string | boolean | undefined): string {
+function sent(field: Field, value: FormValue | undefined): string {
   const text = typeof value === "string" ? value : "";
   // A datetime is edited on the browser's clock and sent in UTC.
   if (field.type === FieldType.DATETIME) return instantOf(text.trim());

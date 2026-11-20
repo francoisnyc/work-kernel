@@ -2,13 +2,13 @@
 import { useId, type ReactElement } from "react";
 import { FieldType, type Field } from "../gen/kernel/v1/kernel_pb";
 import type { FieldAccess } from "../model/typeinfo";
-import { instantOf } from "../model/values";
+import { instantOf, type FormValue } from "../model/values";
 
 export type FieldInputProps = {
   field: Field;
-  // Text, or a boolean for a bool field.
-  value: string | boolean;
-  onChange: (value: string | boolean) => void;
+  // Text, a boolean for a bool field, or the members of a multi-value field.
+  value: FormValue;
+  onChange: (value: FormValue) => void;
   access: FieldAccess;
   // The Item's state, to say where a frozen field is frozen.
   state?: string;

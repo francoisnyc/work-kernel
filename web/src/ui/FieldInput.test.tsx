@@ -5,7 +5,8 @@ import { useState } from "react";
 import { describe, expect, test, vi } from "vitest";
 import type { Type } from "../gen/kernel/v1/kernel_pb";
 import type { FieldAccess } from "../model/typeinfo";
-import { leaveBalance, sprint2, story2, ticket, vacation } from "../test/fixtures";
+import type { FormValue } from "../model/values";
+import { leaveBalance, sprint2, story2, story3, ticket, vacation } from "../test/fixtures";
 import { FieldInput } from "./FieldInput";
 
 const editable: FieldAccess = { mode: "editable", roles: [] };
@@ -14,11 +15,11 @@ const editable: FieldAccess = { mode: "editable", roles: [] };
 function Harness(props: {
   type: Type;
   id: string;
-  initial: string | boolean;
+  initial: FormValue;
   access?: FieldAccess;
   state?: string;
   principals?: string[];
-  onChange?: (v: string | boolean) => void;
+  onChange?: (v: FormValue) => void;
 }) {
   const [value, setValue] = useState(props.initial);
   const field = props.type.fields.find((f) => f.id === props.id)!;
@@ -183,5 +184,107 @@ describe("by who may write", () => {
   test("an ordinary field has no hint", () => {
     render(<Harness type={ticket} id="f_title" initial="" />);
     expect(screen.getByLabelText("f_title")).toHaveAccessibleDescription("");
+  });
+});
+
+// Jira part 2, step 2: a multi-value field is a set. Its members are chips;
+// one more input adds a member. The form holds the members, sorted; what is
+// sent is worked out in model/values.ts.
+describe("a multi-value field", () => {
+  const chips = (id: string) =>
+    within(screen.getByRole("group", { name: id }))
+      .queryAllByRole("listitem")
+      .map((li) => li.textContent?.replace(/Remove.*/, "").trim());
+
+  test("its members are chips, each with a remove button; a text box adds one", async () => {
+    const onChange = vi.fn();
+    render(<Harness type={story3} id="f_labels" initial={["backend", "sso"]} onChange={onChange} />);
+    expect(chips("f_labels")).toEqual(["backend", "sso"]);
+    const group = within(screen.getByRole("group", { name: "f_labels" }));
+
+    await userEvent.type(group.getByRole("textbox", { name: "Add to f_labels" }), "api");
+    await userEvent.click(group.getByRole("button", { name: "Add to f_labels" }));
+    // Kept sorted, as the server stores it.
+    expect(onChange).toHaveBeenLastCalledWith(["api", "backend", "sso"]);
+    expect(chips("f_labels")).toEqual(["api", "backend", "sso"]);
+    // The box is ready for the next one.
+    expect(group.getByRole("textbox", { name: "Add to f_labels" })).toHaveValue("");
+
+    await userEvent.click(group.getByRole("button", { name: "Remove backend" }));
+    expect(onChange).toHaveBeenLastCalledWith(["api", "sso"]);
+    expect(chips("f_labels")).toEqual(["api", "sso"]);
+  });
+
+  test("Enter adds too, without submitting the form around it", async () => {
+    const onSubmit = vi.fn((e: { preventDefault: () => void }) => e.preventDefault());
+    const onChange = vi.fn();
+    render(
+      <form onSubmit={onSubmit}>
+        <Harness type={story3} id="f_labels" initial={[]} onChange={onChange} />
+      </form>,
+    );
+    await userEvent.type(screen.getByRole("textbox", { name: "Add to f_labels" }), "urgent{Enter}");
+    expect(onChange).toHaveBeenLastCalledWith(["urgent"]);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  test("a member already there is not added twice; an empty box adds nothing", async () => {
+    const onChange = vi.fn();
+    render(<Harness type={story3} id="f_labels" initial={["sso"]} onChange={onChange} />);
+    const box = screen.getByRole("textbox", { name: "Add to f_labels" });
+    await userEvent.type(box, "sso{Enter}");
+    await userEvent.type(box, "{Enter}");
+    expect(onChange).not.toHaveBeenCalled();
+    expect(chips("f_labels")).toEqual(["sso"]);
+  });
+
+  test("at its max, nothing more can be added, and it says so", async () => {
+    render(<Harness type={story3} id="f_labels" initial={["a", "b", "c"]} />);
+    const group = within(screen.getByRole("group", { name: "f_labels" }));
+    expect(group.getByRole("button", { name: "Add to f_labels" })).toBeDisabled();
+    expect(screen.getByRole("group", { name: "f_labels" })).toHaveTextContent("at most 3");
+    // Removing one makes room.
+    await userEvent.click(group.getByRole("button", { name: "Remove a" }));
+    expect(group.getByRole("button", { name: "Add to f_labels" })).toBeEnabled();
+  });
+
+  test("an enum set: the options not yet chosen, in a select", async () => {
+    const onChange = vi.fn();
+    render(<Harness type={story3} id="f_colors" initial={["green"]} onChange={onChange} />);
+    const group = within(screen.getByRole("group", { name: "f_colors" }));
+    const select = group.getByRole("combobox", { name: "Add to f_colors" });
+    expect(within(select).getAllByRole("option").map((o) => o.getAttribute("value"))).toEqual(["", "red", "blue"]);
+    await userEvent.selectOptions(select, "blue");
+    await userEvent.click(group.getByRole("button", { name: "Add to f_colors" }));
+    expect(onChange).toHaveBeenLastCalledWith(["blue", "green"]);
+  });
+
+  test("a set of principals suggests the known ones; a set of dates takes a date", async () => {
+    const onChange = vi.fn();
+    render(<Harness type={story3} id="f_reviewers" initial={[]} principals={["user:ana", "user:bob"]} onChange={onChange} />);
+    const box = screen.getByRole("combobox", { name: "Add to f_reviewers" });
+    const list = document.getElementById(box.getAttribute("list") ?? "");
+    expect([...list!.querySelectorAll("option")].map((o) => o.value)).toEqual(["user:ana", "user:bob"]);
+    await userEvent.type(box, "user:sam{Enter}");
+    expect(onChange).toHaveBeenLastCalledWith(["user:sam"]);
+
+    render(<Harness type={story3} id="f_days" initial={["2026-12-04"]} />);
+    expect(within(screen.getByRole("group", { name: "f_days" })).getByLabelText("Add to f_days")).toHaveAttribute("type", "date");
+    expect(chips("f_days")).toEqual(["2026-12-04"]);
+  });
+
+  test("a set only the kernel writes is shown, and nothing in it can change", () => {
+    render(<Harness type={story3} id="f_stamps" initial={["x", "y"]} access={{ mode: "kernel", roles: [] }} />);
+    expect(chips("f_stamps")).toEqual(["x", "y"]);
+    const group = within(screen.getByRole("group", { name: "f_stamps" }));
+    expect(group.queryByRole("button", { name: /Remove/ })).not.toBeInTheDocument();
+    expect(group.getByRole("button", { name: "Add to f_stamps" })).toBeDisabled();
+    expect(screen.getByRole("group", { name: "f_stamps" })).toHaveTextContent("written by the kernel");
+  });
+
+  test("an empty set says so", () => {
+    render(<Harness type={story3} id="f_labels" initial={[]} />);
+    expect(chips("f_labels")).toEqual([]);
+    expect(screen.getByRole("group", { name: "f_labels" })).toHaveTextContent("(none)");
   });
 });
