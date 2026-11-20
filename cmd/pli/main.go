@@ -6,7 +6,7 @@
 //	  item get ITEM
 //	  item update ITEM [--set ID=VALUE]... [--add ID=VALUE]... [--remove ID=VALUE]... [--readers P,P | --inherit]
 //	                   [--move-to ITEM | --move-to-top] [--confirm-widen] [--etag E] [--request-id ID]
-//	  item transition ITEM --to STATE [--set ID=VALUE]... [--wait D] [--etag E] [--request-id ID]
+//	  item transition ITEM --to STATE [--set ID=VALUE]... [--add ID=VALUE]... [--remove ID=VALUE]... [--wait D] [--etag E] [--request-id ID]
 //	  item search [WORDS...] [--min-seq N] [FILTERS] [PAGING]
 //	  item list [ITEM] [FILTERS] [PAGING]           (no ITEM: the top level)
 //	  item history ITEM [PAGING]
@@ -17,7 +17,7 @@
 //	  agent start [--for USER] --scopes S,S --powers P,P
 //	  agent approve SESSION SCOPE [--expect-audience A] [--yes] [--request-id ID]  (run it --as the user who approves)
 //
-//	FILTERS: [--type TYPE]... [--state S]... [--category C]... [--where F=V|F>V|F>=V|F<V|F<=V]...
+//	FILTERS: [--type TYPE]... [--state S]... [--category C]... [--where F=V|F>V|F>=V|F<V|F<=V]... [--empty F]...
 //	         [--linked out:NAME=ITEM | in:NAME=ITEM]...
 //	PAGING:  [--page-size N] [--page-token T]
 //
@@ -98,7 +98,7 @@ const usage = `usage: pli [--server URL] [--tokens FILE] --as NAME [--session ID
   item get ITEM
   item update ITEM [--set ID=VALUE]... [--readers P,P | --inherit]
                    [--move-to ITEM | --move-to-top] [--confirm-widen] [--etag E] [--request-id ID]
-  item transition ITEM --to STATE [--set ID=VALUE]... [--wait D] [--etag E] [--request-id ID]
+  item transition ITEM --to STATE [--set ID=VALUE]... [--add ID=VALUE]... [--remove ID=VALUE]... [--wait D] [--etag E] [--request-id ID]
   item search [WORDS...] [--min-seq N] [FILTERS] [PAGING]
   item list [ITEM] [FILTERS] [PAGING]           (no ITEM: the top level)
   item history ITEM [PAGING]
@@ -112,7 +112,7 @@ const usage = `usage: pli [--server URL] [--tokens FILE] --as NAME [--session ID
   agent start [--for USER] --scopes S,S --powers P,P
   agent approve SESSION SCOPE [--expect-audience A] [--yes] [--request-id ID]  (run it --as the user who approves)
 
-FILTERS: [--type TYPE]... [--state S]... [--category C]... [--where F=V|F>V|F>=V|F<V|F<=V]...
+FILTERS: [--type TYPE]... [--state S]... [--category C]... [--where F=V|F>V|F>=V|F<V|F<=V]... [--empty F]...
          [--linked out:NAME=ITEM | in:NAME=ITEM]...   (on a principal field, --where F=me is the caller)
          [--order-by 'FIELD [asc|desc]']             (default: newest first)
 PAGING:  [--page-size N] [--page-token T]`
