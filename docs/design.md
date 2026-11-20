@@ -1408,7 +1408,8 @@ in the journal.
 | Jira 2.1 (**done**) | Date-time fields, a timer at a field's instant (proved by a sprint closing on its end instant), computed field effects | The sprint closes itself when its end instant passes, and moving the end re-arms it; effects computed at the cause's time; through the API, pli, the web UI and the scenario. **Done 2026-11-19**: "Jira part 2, step 1 as built" below, and the journal |
 | Jira 2.2 | Reactions that move or create, including those triggered by an Item created inside the source; multi-value fields | "A customer comment reopens the request"; labels with set operations and contains filters |
 | Jira 2.3a (**done**) | The kernel pieces for goals kept as contained Items, proved with test Types: working-time arithmetic on a calendar, reactions that move children or set a field on the container, consent by reaction ID, a create reaction reading linked Items, an **acting timer at a field's instant**, creation as an entry, `not_empty` (see "Jira part 2, step 3a as built") | A job starts, pauses, resumes and stops its meters; a meter is marked late at its due instant and never before; a stopped worker changes none of the numbers |
-| Jira 2.3b | The `sla` package (`sla_goal`, `calendar`), the incident Type with first-response and resolution goals, pli and the web UI | Scenario B runs through pli |
+| Jira 2.3b (**done**) | The `sla` package (`sla_goal`, `calendar`, `sla_policy`), the incident Type with first-response and resolution goals, pli and the web UI | Scenario B runs through pli. **Done 2026-11-20**: "Jira part 2, step 3b as built" below, and the journal |
+| Etag rule (next) | The etag changes only when something a caller could overwrite changes (a caller-writable field or the state); outcome records, hook records and kernel-written field writes leave it alone | A save made with an etag read right after an incident's creation is accepted once its goals have written their due instants (measured in step 3b: refused 10 times in 10) |
 | Jira 2.4 | Customers as principals and public or internal comments; the access request with N-of-M approvers | Scenario C runs through pli |
 | Bonita | The company's real Bonita processes, mapped against the BPMN pattern table, then rebuilt | Planned after Jira 2 |
 
@@ -1623,10 +1624,20 @@ readers; narrowing hides it from customers. This is ServiceNow's
 `task_sla` record, and it keeps the 2026-11-13 membership decision: nothing
 in the kernel is named SLA.
 
-- **States:** running (active), paused (waiting), met, missed (done),
-  canceled. The request's events drive them through reactions: start,
+- **States:** running (active), paused (waiting), completed (done),
+  canceled; a completed goal says how it ended in `f_outcome`, met or
+  missed. (Amended in step 3b: the decision first had met and missed as two
+  end states. One end state with an outcome field keeps "is it over" and
+  "how did it go" apart, and lets one reaction end a goal without knowing
+  the result.) The request's events drive them through reactions: start,
   pause, resume, stop, cancel, declared on the request Type and checked at
   load so a pause can never overlap a start.
+- **Met or missed is decided on instants** (amended in steps 3a and 3b):
+  completed while running, a goal is missed if `cause.at > f_due_at`, so
+  exactly at the instant it is met; completed while paused, it is missed if
+  its breach mark is still set. A met goal never carries a mark: a stop or
+  a pause caused at or before the due instant clears one a timer wrote in
+  the meantime (the mail already sent is accepted).
 - **Time comes from the cause, never from the reaction.** Reactions run
   after commit, so a goal learns of a pause slightly late. Every elapsed
   time and due instant is computed from the timestamp of the request event
@@ -2008,6 +2019,136 @@ down is an error; dot-folders are skipped.
 `children_when`, `target`, `set_fields` and kind `SET`; a consent's `sets`;
 an acting timer's `at_field`, `when`, `sets`, `hook`; and
 `readable_by_reactions`.
+
+### Scenario B: the IT service desk
+
+lea runs the desk (role `sla_admin`), ana opens incidents, sam works on
+them. Targets are seconds for P1 and hours for P3, on a calendar that is
+always open, so a P1 breaches while the script watches.
+
+1. lea creates a calendar, an SLA policy (a target per metric and priority)
+   and the IT desk, and links both to the desk. Nobody else can: not sam,
+   not ana, who can neither link nor edit a target.
+2. ana opens a P3 incident in the desk. Two goals start from its creation,
+   first response and resolution, with the policy's P3 targets, timed from
+   the incident's own create event. Each shows its due instant on the
+   incident. Without a priority the incident is refused.
+3. sam is assigned and answers with a public comment: first response is
+   met. ana's own comment and sam's private note answered nothing.
+4. sam sets the incident waiting for the customer: resolution pauses and
+   its due instant leaves the incident. sam's comment does not bring it
+   back; ana's public comment does, and resolution resumes with a later
+   due instant.
+5. ana opens a P1 assigned to sam. Each goal is marked breached at its due
+   instant, never before, and goes on running; sam is emailed once per goal.
+6. The breach of a P1 nobody is assigned to tells nobody: one
+   `HOOK_FAILED` / `NO_RECIPIENT`, no email, nothing retried when someone
+   is assigned later.
+7. The queue: lea sorts incidents by resolution due instant; "overdue now"
+   is a range on it; "ever breached" is a search for goals whose
+   `f_breached_at` is not empty.
+8. sam links the bug that caused the P1 (`caused_by`) and resolves it,
+   late: both goals are missed. Resolving needs a resolution; closing by
+   hand is refused. Fixing the bug changes nothing on the incident.
+9. The P3 is resolved in time (met), then reopened by ana: a second
+   resolution goal starts, and only that.
+10. An incident canceled at once ends its goals with no outcome; nothing
+    breaches and nobody is told.
+
+### Jira part 2, step 3b as built (2026-11-20)
+
+The `sla` package (`types/sla/`: `sla_goal@1`, `calendar@1`,
+`sla_policy@1` and a README that states the contract), its first host
+(`desk@1`, `incident@1`), scenario B, pli and the web UI. **Three kernel
+changes**; nothing in the kernel is named SLA, goal, incident or desk;
+`kernel.v1` only grew; no migration; no workflow code changed.
+
+**Offers.** `offers: {breach_contact: f_assignee}` on a Type: a named
+principal field (one value) offered to the hooks of the Items contained in
+its Items. An **action** hook there reads `container:<name>` and gets the
+field's value from its container **when the hook runs**, read as that
+principal sees the container (visibility, then `policy.Project`). So a
+package tells "whoever the host says" without naming a host or a field.
+- Nobody to tell (no container, no such offer, the field unset, or a
+  principal who cannot see the container) is `ErrNoRecipient`: the action
+  activity records `hook_failed` / `no_recipient` once, under the hook's own
+  key, and succeeds. Nothing is sent, nothing is retried, and nobody is
+  told after the fact. The record names no principal.
+- Load rules: an offer names a declared, single-value principal field; only
+  an action hook reads one (a check's reads are what its hold freezes); no
+  hook writes one. Across Types, a Type that creates Items inside its own
+  must offer what those Items' hooks read; any other container is judged
+  when the hook runs.
+
+**A link only a role writes.** `writable_by: ['role:sla_admin']` on a link,
+as on a field: `LinkItems` and `UnlinkItems` by anyone else are
+`PERMISSION_DENIED / LINK_NOT_WRITABLE` (an agent and its user must both
+hold a role). Its fixed message is now "the caller may not set links of
+this type".
+
+**A reaction's record names its target.** `ItemEvent.reaction_target` (an
+`ItemRef`: the name, or restricted) on `REACTION_APPLIED`, `FAILED` and
+`SKIPPED`: the Item the reaction wrote, created or was refused by; unset
+when it names none. The per-child records of a children move are now told
+apart. A reaction record no longer fills `link_target` (it did, with an
+empty link type).
+
+**What a Type shows.** `GetType` gives `offers` and a link's
+`writable_by_roles`. pli gains one flag, `--not-empty FIELD` (the API's
+`not_empty`, since step 3a); `--empty` and `--not-empty` of one field are
+sent as one filter, which the server refuses.
+
+**The package** (its README is the contract). A goal is an Item contained
+in its host; every field is the kernel's.
+- The host declares reactions with fixed IDs, which `sla_goal` accepts
+  from any Type through containment (`*:<id>`): `sla_start_first_response`,
+  `sla_start_resolution`, `sla_restart_resolution` (create), `sla_pause`,
+  `sla_resume`, `sla_stop`, `sla_answered`, `sla_cancel` (move children).
+  When each runs is the host's business.
+- The target and the calendar come from the host's container: it links to
+  one `calendar` and one `sla_policy` (seconds per metric and priority,
+  written by `sla_admin`), both links written by `sla_admin` only. They
+  are **copied** onto the goal at creation: a running goal keeps what it
+  started with (recomputing is Later).
+- The host declares `f_due_first_response` and `f_due_resolution`
+  (kernel-written) and consents to the goal's eight set reactions: a goal
+  sets its field while it runs and unsets it when it pauses, completes or
+  is canceled. A queue sorts by them.
+- At `f_due_at` an acting timer sets `f_breached_at` and the breach hook
+  emails `container:breach_contact`. Resumed after its breach, a goal keeps
+  the instant it missed; resumed with no time left, it is due at the
+  resume instant.
+
+**The host.** `incident@1`: new -> in_progress <-> waiting_for_customer ->
+resolved -> closed (a timer, 120 h, and nobody else), reopening from
+resolved (clears `f_resolution`), cancel from new and in_progress;
+priority P1 to P4 required from creation; resolving requires
+`f_resolution`. Only resolution pauses, only while waiting for the
+customer; someone else's public comment stops first response; the
+requester's public comment brings a waiting incident back; reopening
+starts a new resolution goal only. `caused_by` links bugs, with no
+reaction: the page shows the bug's state by reading it.
+
+**Web UI.** Still no screen that knows a Type. A date-time value says how
+far away it is, labelled "(wall clock)"; a link shows the linked Item's
+state, read through visibility on load and on Refresh; a reaction record
+links to its target.
+
+**Measured** (journal). The queue and the breached search sort every match
+after a sequential scan (5,000 incidents: 6 to 9 ms). A goal's row is 0.8
+kB, and 4.3 kB when its calendar has 366 days off.
+
+**Found: the etag changes too often.** A save sends the etag, and the etag
+is the Item's `item_seq`, which every event bumps: a caller's write, but
+also a reaction's outcome record, a hook's record and a write of a field
+only the kernel writes. One ordinary cycle of an incident writes 20 events
+on it, 15 of them the kernel's own (6 due-instant writes, 9 records). A
+save made with an etag read right after an incident's creation was refused
+`ABORTED / STALE` 10 times in 10, at 100 ms, 500 ms and 2 s; the goals'
+writes land about 320 ms after the create. Not fixed in this step. **Next
+step, before Jira 2.4:** the etag changes only when something a caller
+could overwrite changes (a caller-writable field or the state); outcome
+records, hook records and kernel-written field writes leave it alone.
 
 ## Web UI as built (2026-11-18)
 
