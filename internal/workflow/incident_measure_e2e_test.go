@@ -2,7 +2,10 @@
 // incident is ABORTED STALE because a goal's reaction wrote a due instant
 // on it in between (Later, from step 3a: "a kernel-written field set by a
 // reaction bumps its Item's etag"). It prints numbers for the journal and
-// asserts nothing about them.
+// asserts nothing about them. Since the etag step the save carries
+// ExpectedContentSeq, what the etag is derived from (it carried
+// ExpectedItemSeq, the etag of Jira 2.3b: 10 of 10 STALE); the regression
+// test is incident_etag_e2e_test.go.
 package workflow_test
 
 import (
@@ -28,13 +31,13 @@ func TestMeasure_Incident_StaleSaves(t *testing.T) {
 	var lags []time.Duration
 	for i := range n {
 		// The person opens the incident's page as soon as it exists (its
-		// etag is its item_seq), thinks for a while, and saves.
+		// etag is its content_seq), thinks for a while, and saves.
 		inc := s.makeIn(s.ana, "incident", &s.desk, map[string]any{"f_title": "measure", "f_priority": "P4"})
-		_, read := s.state(inc)
+		_, read := s.seqs(s.ana, inc)
 		d := delays[i%len(delays)]
 		time.Sleep(d)
 		_, err := s.k.Update(serverCtx(t), itemservice.UpdateRequest{
-			IdempotencyKey: "key-" + uuid.NewString(), Principal: s.ana, ItemID: inc, ExpectedItemSeq: read,
+			IdempotencyKey: "key-" + uuid.NewString(), Principal: s.ana, ItemID: inc, ExpectedContentSeq: read,
 			Fields: map[string]any{"f_impact": "minor"},
 		})
 		if errors.Is(err, itemservice.ErrStale) {
@@ -84,6 +87,6 @@ func TestMeasure_Incident_StaleSaves(t *testing.T) {
 			writes++
 		}
 	}
-	t.Logf("one cycle (create, answer, wait, customer reply, resolve): %d events on the incident, of which %d are due-instant writes by its goals (each bumps the etag); by op: %v",
+	t.Logf("one cycle (create, answer, wait, customer reply, resolve): %d events on the incident, of which %d are due-instant writes by its goals (each bumps item_seq, none the etag); by op: %v",
 		len(allEvents(t, inc)), writes, byOp)
 }
