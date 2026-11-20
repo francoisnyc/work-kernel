@@ -93,7 +93,13 @@ type moveCause struct {
 	recorded item.Principal // the reaction, on behalf of the cause's human
 	causeAt  time.Time      // the triggering event's time: cause.at in the target's effects
 	froms    []string       // the target is moved only from these states; empty: any
-	consent  string         // the reaction key the target's Type must accept; "" when it moves itself
+	// consent: the target's Type must accept the reaction (of Type
+	// consentType, ID consentID); false when the Item moves itself.
+	// contained says the reaction reaches the target through containment
+	// (it moves a contained Item): a consent by reaction ID then counts.
+	consent                bool
+	consentType, consentID string
+	contained              bool
 }
 
 // errNotInFrom is the transition code's way of saying "the target is not in
@@ -103,13 +109,16 @@ var errNotInFrom = errors.New("itemservice: the target is not in a state the rea
 // trigger is a reaction's checked trigger: the reaction, the Types
 // involved, and the triggering event.
 type trigger struct {
-	req     ReactionRunRequest
-	ns      string
-	ty      *typedef.Type // the source's
-	r       typedef.Reaction
-	source  item.Item // as read now, outside any lock: created_by, fields
-	fields  map[string]any
-	causeAt time.Time
+	req    ReactionRunRequest
+	ns     string
+	ty     *typedef.Type // the source's
+	r      typedef.Reaction
+	source item.Item // as read now, outside any lock: created_by, fields
+	// The source's state and container, as read now.
+	state     string
+	container *uuid.UUID
+	fields    map[string]any
+	causeAt   time.Time
 	// The cause's actor and the human at its root.
 	actor, onBehalfOf string
 	// created_inside: the Item created inside, and its Type.
@@ -146,7 +155,7 @@ func (tg trigger) attribution(hop int) item.Attribution {
 // loadTrigger checks that the request names a real trigger of a reaction
 // of the given kind, and reads what judging it needs. Anything else is
 // ErrInvalid: the caller is broken, and nothing is written.
-func (k *Service) loadTrigger(ctx context.Context, req ReactionRunRequest, kind typedef.ReactionKind) (trigger, error) {
+func (k *Service) loadTrigger(ctx context.Context, req ReactionRunRequest, kinds ...typedef.ReactionKind) (trigger, error) {
 	tg := trigger{req: req}
 	invalid := func(format string, args ...any) (trigger, error) {
 		return tg, fmt.Errorf("%w: reaction: "+format, append([]any{ErrInvalid}, args...)...)
@@ -158,9 +167,10 @@ func (k *Service) loadTrigger(ctx context.Context, req ReactionRunRequest, kind 
 	var version int
 	var createdBy, createdFor string
 	err := k.pool.QueryRow(ctx,
-		`select namespace_id, type_id, type_version, fields, created_by, coalesce(created_on_behalf_of, '')
+		`select namespace_id, type_id, type_version, fields, created_by, coalesce(created_on_behalf_of, ''),
+		        state, container_id
 		 from items where id = $1`, req.SourceID,
-	).Scan(&tg.ns, &typeID, &version, &tg.fields, &createdBy, &createdFor)
+	).Scan(&tg.ns, &typeID, &version, &tg.fields, &createdBy, &createdFor, &tg.state, &tg.container)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return tg, ErrNotFound
 	}
@@ -172,8 +182,8 @@ func (k *Service) loadTrigger(ctx context.Context, req ReactionRunRequest, kind 
 		return tg, err
 	}
 	var ok bool
-	if tg.r, ok = tg.ty.Reaction(req.Reaction); !ok || tg.r.Kind != kind {
-		return invalid("%s v%d declares no %s reaction %q", typeID, version, kind, req.Reaction)
+	if tg.r, ok = tg.ty.Reaction(req.Reaction); !ok || !slices.Contains(kinds, tg.r.Kind) {
+		return invalid("%s v%d declares no %v reaction %q", typeID, version, kinds, req.Reaction)
 	}
 
 	// The triggering event.
@@ -239,6 +249,7 @@ func (k *Service) outcomeOf(ctx context.Context, tg trigger) (ReactionOutcome, b
 	err := k.pool.QueryRow(ctx,
 		`select item_seq, commit_seq, op, payload from item_events
 		 where item_id = $1 and causation_id = $2 and op in ($3, $4, $5) and payload ->> 'reaction' = $6
+		   and coalesce(payload ->> 'more', '') <> 'true'
 		 order by item_seq limit 1`,
 		tg.req.SourceID, tg.causation(), lifecycle.OpReactionApplied, lifecycle.OpReactionFailed, lifecycle.OpReactionSkipped,
 		tg.key(),
@@ -271,6 +282,24 @@ func (k *Service) outcomeOf(ctx context.Context, tg trigger) (ReactionOutcome, b
 // record already exists (a retry, or two runs at once) it is left as it
 // is, and what it says is returned: the first outcome stands.
 func (k *Service) record(ctx context.Context, tg trigger, outcome, reason string, target uuid.UUID) (ReactionOutcome, error) {
+	if err := k.writeRecord(ctx, tg, outcome, reason, target, "", false); err != nil {
+		return ReactionOutcome{}, err
+	}
+	out, found, err := k.outcomeOf(ctx, tg)
+	if err != nil {
+		return ReactionOutcome{}, err
+	}
+	if !found {
+		return ReactionOutcome{}, fmt.Errorf("the reaction's record was written but cannot be read")
+	}
+	return out, nil
+}
+
+// writeRecord writes one outcome record. part is "" for the reaction's one
+// record; for a reaction that moves children it is the child the record is
+// about, and more says other children's records follow: such a record does
+// not finish the reaction.
+func (k *Service) writeRecord(ctx context.Context, tg trigger, outcome, reason string, target uuid.UUID, part string, more bool) error {
 	op := map[string]string{
 		ReactionApplied: lifecycle.OpReactionApplied, ReactionFailed: lifecycle.OpReactionFailed,
 		ReactionSkipped: lifecycle.OpReactionSkipped,
@@ -284,10 +313,18 @@ func (k *Service) record(ctx context.Context, tg trigger, outcome, reason string
 	}
 	// The key and the hash name the trigger, not the outcome: one record
 	// per reaction and trigger, whatever a later attempt would conclude.
+	if more {
+		payload["more"] = true
+	}
 	key := fmt.Sprintf("%s:%s:%s:done", tg.key(), tg.req.SourceID, tg.causation())
-	hash, err := requestHash("reaction_record", []string{tg.key(), tg.req.SourceID.String(), tg.causation()})
+	parts := []string{tg.key(), tg.req.SourceID.String(), tg.causation()}
+	if part != "" {
+		key = fmt.Sprintf("%s:%s:%s:%s:done", tg.key(), tg.req.SourceID, tg.causation(), part)
+		parts = append(parts, part)
+	}
+	hash, err := requestHash("reaction_record", parts)
 	if err != nil {
-		return ReactionOutcome{}, err
+		return err
 	}
 	// A reaction one hop too deep still gets its record (hop_limit): the
 	// record itself sits at the limit.
@@ -304,17 +341,7 @@ func (k *Service) record(ctx context.Context, tg trigger, outcome, reason string
 		}
 		return appendEvent(ctx, tx, tg.ty, tg.req.SourceID, itemSeq, tg.recorded(), attr, op, payload, nil)
 	})
-	if err != nil {
-		return ReactionOutcome{}, err
-	}
-	out, found, err := k.outcomeOf(ctx, tg)
-	if err != nil {
-		return ReactionOutcome{}, err
-	}
-	if !found {
-		return ReactionOutcome{}, fmt.Errorf("the reaction's record was written but cannot be read")
-	}
-	return out, nil
+	return err
 }
 
 // refusal turns a target's refusal into the reaction's failure reason: an
@@ -350,6 +377,17 @@ func (in *Internal) ReactMove(ctx context.Context, req ReactionRunRequest) (Reac
 		return ReactionOutcome{}, err
 	}
 	if out, done, err := k.outcomeOf(ctx, tg); err != nil || done {
+		// Finished: for a reaction that moved children, each child's
+		// outcome again, as its records say.
+		if err == nil && tg.r.Children != nil {
+			recs, err := k.childRecords(ctx, tg)
+			if err != nil {
+				return ReactionOutcome{}, err
+			}
+			if len(recs) > 0 {
+				return childrenOutcome(recs), nil
+			}
+		}
 		return out, err
 	}
 	if req.Hop > MaxHop {
@@ -364,14 +402,26 @@ func (in *Internal) ReactMove(ctx context.Context, req ReactionRunRequest) (Reac
 		if !lifecycle.ChildWhen(tg.r, tg.childType, tg.childFields) {
 			return k.record(ctx, tg, ReactionSkipped, SkipConditionFalse, uuid.Nil)
 		}
-		if tg.r.By == typedef.ByCreator &&
-			!policy.IsRequester(tg.actor, tg.onBehalfOf, tg.source.CreatedBy, tg.source.CreatedOnBehalfOf) {
+		by := map[string]func(actor, onBehalfOf, createdBy, createdFor string) bool{
+			typedef.ByCreator: policy.IsRequester, typedef.ByNotCreator: policy.IsNotRequester,
+		}[tg.r.By]
+		if by != nil && !by(tg.actor, tg.onBehalfOf, tg.source.CreatedBy, tg.source.CreatedOnBehalfOf) {
 			return k.record(ctx, tg, ReactionSkipped, SkipNotBy, uuid.Nil)
+		}
+		if tg.r.Children != nil {
+			// `from` is the container's own states; the move is its children's.
+			if len(tg.r.From) > 0 && !slices.Contains(tg.r.From, tg.state) {
+				return k.record(ctx, tg, ReactionSkipped, SkipNotInFrom, uuid.Nil)
+			}
+			return k.moveChildren(ctx, tg, mc)
 		}
 		mc.froms = tg.r.From
 	} else {
 		if !lifecycle.ReactionWhen(tg.ty, tg.r, tg.fields) {
 			return k.record(ctx, tg, ReactionSkipped, SkipConditionFalse, uuid.Nil)
+		}
+		if tg.r.Children != nil {
+			return k.moveChildren(ctx, tg, mc)
 		}
 		err := k.pool.QueryRow(ctx, `select target_id from links where source_id = $1 and link_type = $2`,
 			req.SourceID, tg.r.Link).Scan(&target)
@@ -381,7 +431,7 @@ func (in *Internal) ReactMove(ctx context.Context, req ReactionRunRequest) (Reac
 		if err != nil {
 			return ReactionOutcome{}, fmt.Errorf("read link: %w", err)
 		}
-		mc.froms, mc.consent = tg.r.TargetFrom, tg.key()
+		mc.froms, mc.consent, mc.consentType, mc.consentID = tg.r.TargetFrom, true, tg.ty.ID, tg.r.ID
 	}
 
 	_, _, err = k.transition(ctx, TransitionRequest{
@@ -440,23 +490,34 @@ func (in *Internal) ReactCreate(ctx context.Context, req ReactionRunRequest) (Re
 		return ReactionOutcome{}, err
 	}
 	// Consent, at write time: the created Type accepts this reaction, for
-	// the fields it sets.
-	if !created.AcceptsCreate(tg.key(), slices.Sorted(maps.Keys(tg.r.Fields))) {
+	// the fields it sets. Created inside the source itself, the reaction
+	// reaches the new Item through containment: a consent by reaction ID
+	// counts.
+	consent, _ := created.Consent(tg.ty.ID, tg.r.ID, tg.r.Link == "")
+	if !consent.MayCreate || slices.ContainsFunc(slices.Collect(maps.Keys(tg.r.Fields)),
+		func(f string) bool { return !slices.Contains(consent.Creates, f) }) {
 		return k.record(ctx, tg, ReactionFailed, CodeReactionNotAccepted, uuid.Nil)
 	}
-	// The fields, from the source's and the cause's time.
-	fields, err := lifecycle.CreateFields(tg.ty, tg.r, created, lifecycle.Input{Fields: tg.fields, CauseAt: tg.causeAt})
-	if err != nil {
-		if reason, refused := refusal(fromLifecycle(err)); refused {
-			return k.record(ctx, tg, ReactionFailed, reason, uuid.Nil)
+	// The fields, from the source's and the cause's time, and from the
+	// linked Items the expressions read (linked).
+	compute := func(linked lifecycle.LinkedFields) (map[string]any, error) {
+		fields, err := lifecycle.CreateFields(tg.ty, tg.r, created,
+			lifecycle.Input{Fields: tg.fields, CauseAt: tg.causeAt, Linked: linked})
+		if err != nil {
+			return nil, fromLifecycle(err)
 		}
-		return ReactionOutcome{}, err
+		return fields, checkInvariants(created, fields)
 	}
-	if err := checkInvariants(created, fields); err != nil {
-		if reason, refused := refusal(err); refused {
-			return k.record(ctx, tg, ReactionFailed, reason, uuid.Nil)
+	var fields map[string]any
+	// With nothing linked to read they are computed here, before the
+	// write; else inside it, under the locks that pin what was read.
+	if len(tg.r.LinkedReads) == 0 {
+		if fields, err = compute(lifecycle.LinkedFields{}); err != nil {
+			if reason, refused := refusal(err); refused {
+				return k.record(ctx, tg, ReactionFailed, reason, uuid.Nil)
+			}
+			return ReactionOutcome{}, err
 		}
-		return ReactionOutcome{}, err
 	}
 
 	key := fmt.Sprintf("%s:%s:%s:create", tg.key(), req.SourceID, tg.causation())
@@ -466,6 +527,16 @@ func (in *Internal) ReactCreate(ctx context.Context, req ReactionRunRequest) (Re
 	}
 	attr := tg.attribution(req.Hop)
 	res, err := k.write(ctx, tg.principal(), key, hash, func(tx pgx.Tx) (WriteResult, error) {
+		fields := fields // this attempt's own (a retried transaction computes again)
+		if len(tg.r.LinkedReads) > 0 {
+			linked, err := k.linkedFor(ctx, tx, tg)
+			if err != nil {
+				return WriteResult{}, err
+			}
+			if fields, err = compute(linked); err != nil {
+				return WriteResult{}, err
+			}
+		}
 		id, err := uuid.NewV7()
 		if err != nil {
 			return WriteResult{}, fmt.Errorf("new item id: %w", err)
@@ -500,6 +571,12 @@ func (in *Internal) ReactCreate(ctx context.Context, req ReactionRunRequest) (Re
 		return res, k.tellContainer(ctx, tx, created, &container, id, itemSeq)
 	})
 	if err != nil {
+		// A linked read that cannot be made: errors.As finds the typed
+		// error wherever it is wrapped, like catching a subclass.
+		var refused *errRefused
+		if errors.As(err, &refused) {
+			return k.record(ctx, tg, ReactionFailed, refused.reason, uuid.Nil)
+		}
 		if reason, refused := refusal(err); refused {
 			return k.record(ctx, tg, ReactionFailed, reason, uuid.Nil)
 		}
@@ -528,11 +605,7 @@ func (in *Internal) ReactionGaveUp(ctx context.Context, req ReactionRunRequest, 
 
 // loadAnyTrigger is loadTrigger for a reaction of either kind.
 func (k *Service) loadAnyTrigger(ctx context.Context, req ReactionRunRequest) (trigger, error) {
-	tg, err := k.loadTrigger(ctx, req, typedef.ReactionMove)
-	if err != nil && errors.Is(err, ErrInvalid) {
-		return k.loadTrigger(ctx, req, typedef.ReactionCreate)
-	}
-	return tg, err
+	return k.loadTrigger(ctx, req, typedef.ReactionMove, typedef.ReactionCreate, typedef.ReactionSet)
 }
 
 // tellContainer gives a newly created Item an outbox row when its
@@ -584,7 +657,7 @@ func (k *Service) pendingReactions(ctx context.Context, id uuid.UUID, ty *typede
 	var enters, insides bool
 	var of []string
 	for _, r := range ty.Reactions {
-		if r.Kind != typedef.ReactionMove && r.Kind != typedef.ReactionCreate {
+		if r.Kind != typedef.ReactionMove && r.Kind != typedef.ReactionCreate && r.Kind != typedef.ReactionSet {
 			continue
 		}
 		if r.On == typedef.OnCreatedInside {
@@ -598,8 +671,11 @@ func (k *Service) pendingReactions(ctx context.Context, id uuid.UUID, ty *typede
 	}
 	// The outcome records there are: "<reaction key>|<cause>".
 	rows, err := k.pool.Query(ctx,
+		// (A record that says more follow does not finish its reaction:
+		// one child of several was dealt with.)
 		`select payload ->> 'reaction' || '|' || causation_id from item_events
-		 where item_id = $1 and op in ($2, $3, $4) and causation_id is not null`,
+		 where item_id = $1 and op in ($2, $3, $4) and causation_id is not null
+		   and coalesce(payload ->> 'more', '') <> 'true'`,
 		id, lifecycle.OpReactionApplied, lifecycle.OpReactionFailed, lifecycle.OpReactionSkipped)
 	if err != nil {
 		return nil, fmt.Errorf("read reaction records: %w", err)
@@ -624,9 +700,10 @@ func (k *Service) pendingReactions(ctx context.Context, id uuid.UUID, ty *typede
 	var causes []cause
 	if enters {
 		rows, err := k.pool.Query(ctx,
-			`select created_at, item_seq, coalesce(payload ->> 'from', ''), coalesce(payload ->> 'to', ''),
-			        coalesce(correlation_id, ''), hop
-			 from item_events where item_id = $1 and op = 'transition' order by item_seq`, id)
+			// A create enters the initial state: from nothing.
+			`select created_at, item_seq, coalesce(payload ->> 'from', ''),
+			        coalesce(payload ->> 'to', payload ->> 'state', ''), coalesce(correlation_id, ''), hop
+			 from item_events where item_id = $1 and op in ('transition', 'create') order by item_seq`, id)
 		if err != nil {
 			return nil, fmt.Errorf("read state entries: %w", err)
 		}

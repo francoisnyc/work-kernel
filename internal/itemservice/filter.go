@@ -238,16 +238,21 @@ func fieldConds(f typedef.Field, ff FieldFilter, i int, args pgx.NamedArgs, p it
 	// empty: the field has no value. An unset field is absent from
 	// fields, and an empty set is stored as unset, so one test serves
 	// single-value and multi-value fields alike.
-	if ff.Empty {
-		if ff.Eq != nil || len(bounds) > 0 {
-			return nil, fmt.Errorf("empty stands alone: not with eq or a bound")
+	if ff.Empty || ff.NotEmpty {
+		if ff.Eq != nil || len(bounds) > 0 || (ff.Empty && ff.NotEmpty) {
+			return nil, fmt.Errorf("empty and not_empty stand alone: not together, nor with eq or a bound")
 		}
 		args[fieldArg] = ff.Field
+		// not_empty: the field has a value. An Item whose Type does not
+		// declare the field has none.
+		if ff.NotEmpty {
+			return []string{"jsonb_exists(m.fields, @" + fieldArg + "::text)"}, nil
+		}
 		return []string{"(not jsonb_exists(m.fields, @" + fieldArg + "::text))"}, nil
 	}
 	switch {
 	case ff.Eq == nil && len(bounds) == 0:
-		return nil, fmt.Errorf("a field filter needs eq, a bound or empty")
+		return nil, fmt.Errorf("a field filter needs eq, a bound, empty or not_empty")
 	case f.Multiple && len(bounds) > 0:
 		return nil, fmt.Errorf("a multi-value field takes eq (contains) or empty, not a range")
 	case ff.Eq != nil && len(bounds) > 0:

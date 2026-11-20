@@ -114,6 +114,14 @@ func checkRun(ty *typedef.Type, h typedef.Hook, timer string, run int) error {
 			if a.ID != timer || a.Hook != h.ID {
 				continue
 			}
+			// At an instant there are no numbered runs: the key names
+			// the instant.
+			if a.At != "" {
+				if run != 0 {
+					return fmt.Errorf("%w: acting timer %s acts at an instant: it has no run %d", ErrInvalid, timer, run)
+				}
+				return nil
+			}
 			if run < 1 || run > a.Max {
 				return fmt.Errorf("%w: acting timer %s runs 1 to %d times, not run %d", ErrInvalid, timer, a.Max, run)
 			}

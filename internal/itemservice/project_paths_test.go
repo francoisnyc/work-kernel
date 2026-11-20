@@ -23,8 +23,9 @@ var projectExempt = map[string]string{
 	"StateEntry": "feeds the workflow, not a principal: state names and opaque IDs only",
 	// Jira part 2, step 1: the one declared exception to "the workflow never
 	// sees a field value" (docs/design.md, "Decisions for Jira part 2").
-	"AtInstant": "feeds the workflow, not a principal: the instant of the datetime field the Item's current state names in `at`, and nothing else; a timer's length is in the workflow's history anyway",
-	"Type":      "feeds the workflow and the relay, and GetType: Types are readable by anyone in the namespace; a Type definition holds no Item data",
+	"AtInstant":      "feeds the workflow, not a principal: the instant of the datetime field the Item's current state names in `at`, and nothing else; a timer's length is in the workflow's history anyway",
+	"ActingInstants": "feeds the workflow, not a principal: the instants of the datetime fields the acting timers of the Item's current state name in `at`, and nothing else; as AtInstant",
+	"Type":           "feeds the workflow and the relay, and GetType: Types are readable by anyone in the namespace; a Type definition holds no Item data",
 	// Step A2: returns a new session ID only.
 	"StartAgentSession": "returns the minted session ID, no Item data",
 	// Step 6: the kernel's write door.
