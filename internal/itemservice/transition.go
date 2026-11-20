@@ -269,9 +269,12 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		// Item's own Type's rule, or the Type consents to it. Every other
 		// rule of the transition has applied above.
 		if kc != nil && kc.move != nil {
-			if kc.move.consent != "" && !ty.AcceptsMove(kc.move.consent, next.State) {
-				return WriteResult{}, rejected(CodeReactionNotAccepted, "%s v%d does not accept %s moving its Items into %s",
-					ty.ID, ty.Version, kc.move.consent, next.State)
+			if kc.move.consent {
+				a, _ := ty.Consent(kc.move.consentType, kc.move.consentID, kc.move.contained)
+				if !slices.Contains(a.Moves, next.State) {
+					return WriteResult{}, rejected(CodeReactionNotAccepted, "%s v%d does not accept %s moving its Items into %s",
+						ty.ID, ty.Version, typedef.ReactionKey(kc.move.consentType, kc.move.consentID), next.State)
+				}
 			}
 		} else if err := authorize(ctx, tx, req.Principal, ty, it.State, next.State, facts(it)); err != nil {
 			return WriteResult{}, err

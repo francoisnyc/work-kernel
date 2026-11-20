@@ -32,6 +32,11 @@ const (
 	// ActivityLoadInstant reads the instant of the field the Item's state
 	// names in `at`: the one field value the workflow sees.
 	ActivityLoadInstant = "LoadInstant"
+	// Acting timers at an instant (Jira part 2, step 3):
+	// ActivityLoadActingInstants reads the instants of the state's acting
+	// timers at an instant; ActivityActAt makes one act.
+	ActivityLoadActingInstants = "LoadActingInstants"
+	ActivityActAt              = "ActAt"
 
 	// Hooks (Step 6). Each hook activity reads its inputs, calls out, and
 	// writes back through the item service itself: the workflow never sees
@@ -210,7 +215,58 @@ type Snapshot struct {
 	EnterReactions   map[string][]EnterReaction
 	InsideReactions  map[string][]string
 	PendingReactions []PendingReaction
+
+	// Acting timers at an instant (Jira part 2, step 3), reduced like At.
+	// ActingAt maps a state to them; ActingInstants holds, per timer ID,
+	// the instant last read for the current state (absent: unset);
+	// ActingAtLoaded says they were read, so a run that continues as new
+	// does not read them again; ActingAtDone holds, per timer ID, the
+	// instant it last acted for (or was told to do nothing for), so the
+	// same instant never acts twice in one entry.
+	ActingAt       map[string][]ActingAtSpec
+	ActingInstants map[string]time.Time
+	ActingAtLoaded bool
+	ActingAtDone   map[string]time.Time
 }
+
+// ActingAtSpec is one acting timer at an instant, reduced to what the
+// workflow needs. Field is an ID, for the events that name it; Hook is the
+// action hook to run after it acted, "" for none.
+type ActingAtSpec struct {
+	ID    string
+	Field string
+	Hook  string
+}
+
+// ActingInstant is one entry of LoadActingInstants' answer.
+type ActingInstant struct {
+	TimerID string
+	Set     bool
+	At      time.Time
+}
+
+// ActAtInput is what the ActAt activity needs: opaque IDs and the instant.
+type ActAtInput struct {
+	ItemID        string
+	TypeID        string
+	TypeVersion   int
+	State         string
+	TimerID       string
+	EnteredSeq    int64
+	Instant       time.Time
+	CorrelationID string
+	Hop           int // the entering event's hop + 1
+}
+
+// ActAtResult is the ActAt activity's answer: whether the timer's hook
+// should now run.
+type ActAtResult struct {
+	RunHook bool
+}
+
+// instantLayout is how an instant is written in a key: the stored form of
+// a datetime field (UTC, microseconds).
+const instantLayout = "2006-01-02T15:04:05.000000Z"
 
 // EnterReaction is one move or create reaction run on entering a state.
 type EnterReaction struct {
@@ -537,6 +593,17 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 		// service answered NotYet: no firing before that moment.
 		atEpoch     int
 		atNotBefore time.Time
+
+		// Acting timers at an instant (Jira part 2, step 3). The current
+		// entry has one reader coroutine and one coroutine per timer, all
+		// canceled by leaving the state (cancelActingAt); actingAtStarted
+		// says they were started. actingAtEpoch counts the reasons to read
+		// the instants again; actingAtTick counts the reads that landed,
+		// which is what the timers' waits watch.
+		cancelActingAt  workflow.CancelFunc
+		actingAtStarted bool
+		actingAtEpoch   int
+		actingAtTick    int
 	)
 	// Move and create reactions (Jira part 2, step 2). reacting says the
 	// runner coroutine is at work on s.PendingReactions; kickReactions
@@ -586,6 +653,17 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 			s.AtLoaded, s.AtInstant, s.TimerDone = false, nil, false
 			atNotBefore = time.Time{}
 			atEpoch++
+		}
+		// The same for the state's acting timers at an instant: an event
+		// that names one of their fields has them read again.
+		if ev.To == "" && len(ev.FieldIDs) > 0 {
+			for _, spec := range s.ActingAt[s.State] {
+				if slices.Contains(ev.FieldIDs, spec.Field) {
+					s.ActingAtLoaded = false
+					actingAtEpoch++
+					break
+				}
+			}
 		}
 		enteredBy := "" // the hold whose allowed resolution this event is
 		switch {
@@ -642,6 +720,17 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 				cancelActing = nil
 			}
 			s.ActingRuns, actingStarted = nil, false
+			// Its acting timers at an instant are disarmed; the new
+			// state's, if it has any, read their instants afresh.
+			if cancelActingAt != nil {
+				cancelActingAt()
+				cancelActingAt = nil
+			}
+			if s.ActingAtLoaded || s.ActingInstants != nil || s.ActingAtDone != nil {
+				s.ActingAtLoaded, s.ActingInstants, s.ActingAtDone = false, nil, nil
+			}
+			actingAtStarted = false
+			actingAtEpoch++
 			// Leaving the state by an undo's trigger gives back what the
 			// hold that entered it took.
 			if undo := s.UndoOnEntry[ev.From+"->"+ev.To]; undo != "" && s.EnteredHold != "" {
@@ -976,6 +1065,167 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 		})
 	}
 
+	// startActingAt runs the current entry's acting timers at an instant
+	// (Jira part 2, step 3), in coroutines that leaving the state cancels.
+	//
+	// One coroutine reads the instants (LoadActingInstants): once for the
+	// entry, and again after an event that names one of their fields. If
+	// an event overtook a read (actingAtEpoch moved), the answer may be
+	// old and is read again.
+	//
+	// One coroutine per timer waits for its instant, on workflow.Now, and
+	// asks the item service to act (ActAt), which judges everything: the
+	// timer never acts before its instant (NotYet: armed again for the
+	// remainder), nor for an entry or an instant that is gone (Stale:
+	// looked at again after the next event). An instant acts once per
+	// entry (s.ActingAtDone); a new instant acts again. The timer's hook
+	// then runs as an action, which leaving the state does not cancel.
+	// Like every acting timer, none of this waits for a hold.
+	startActingAt := func(actx workflow.Context, specs []ActingAtSpec) {
+		entered, corr, hop, state := s.EnteredSeq, s.CorrelationID, s.Hop, s.State
+		actingLive++
+		workflow.Go(actx, func(gctx workflow.Context) {
+			defer func() { actingLive--; wake++ }()
+			for gctx.Err() == nil {
+				if s.ActingAtLoaded {
+					epoch := actingAtEpoch
+					if err := workflow.Await(gctx, func() bool { return actingAtEpoch != epoch || !s.ActingAtLoaded }); err != nil {
+						return
+					}
+					continue
+				}
+				epoch := actingAtEpoch
+				var read []ActingInstant
+				err := workflow.ExecuteActivity(gctx, ActivityLoadActingInstants, in.ItemID).Get(gctx, &read)
+				var appErr *temporal.ApplicationError
+				switch {
+				case gctx.Err() != nil:
+					return
+				case errors.As(err, &appErr) && appErr.Type() == ErrTypeNotFound:
+					// The Item is gone: nothing to wait for. The timers
+					// of this entry stop with it.
+					gone = true
+					if cancelActingAt != nil {
+						cancelActingAt()
+					}
+					return
+				case err != nil:
+					return // only a canceled workflow gets here
+				case epoch != actingAtEpoch:
+					continue // an event overtook the read
+				}
+				s.ActingInstants = nil
+				for _, r := range read {
+					if r.Set {
+						if s.ActingInstants == nil {
+							s.ActingInstants = map[string]time.Time{}
+						}
+						s.ActingInstants[r.TimerID] = r.At
+					}
+				}
+				s.ActingAtLoaded = true
+				actingAtTick++
+			}
+		})
+		for _, spec := range specs {
+			actingLive++
+			workflow.Go(actx, func(gctx workflow.Context) {
+				defer func() { actingLive--; wake++ }()
+				var notBefore time.Time // set by NotYet, for the instant it was said of
+				var notBeforeFor time.Time
+				for gctx.Err() == nil {
+					tick := actingAtTick
+					moved := func() bool { return actingAtTick != tick || !s.ActingAtLoaded }
+					instant, set := s.ActingInstants[spec.ID]
+					done, acted := s.ActingAtDone[spec.ID]
+					if !s.ActingAtLoaded || !set || (acted && done.Equal(instant)) {
+						// Not read yet, nothing armed, or this instant has
+						// had its turn: wait for the next read.
+						if err := workflow.Await(gctx, func() bool { return actingAtTick != tick }); err != nil {
+							return
+						}
+						continue
+					}
+					due := instant
+					if notBeforeFor.Equal(instant) && notBefore.After(due) {
+						due = notBefore
+					}
+					if wait := due.Sub(workflow.Now(gctx)); wait > 0 {
+						woken, err := workflow.AwaitWithTimeout(gctx, wait, moved)
+						if err != nil {
+							return // the state was left
+						}
+						if woken {
+							continue
+						}
+					}
+					if gctx.Err() != nil {
+						return
+					}
+					// The write is not cut short by leaving the state: it
+					// runs on a context cut loose from the state's (a
+					// coroutine may only block on a context of its own),
+					// and counts as work in progress.
+					dctx, _ := workflow.NewDisconnectedContext(gctx)
+					req := ActAtInput{
+						ItemID: in.ItemID, TypeID: s.TypeID, TypeVersion: s.TypeVersion, State: state, TimerID: spec.ID,
+						EnteredSeq: entered, Instant: instant, CorrelationID: corr, Hop: hop + 1,
+					}
+					seen := changes
+					running++
+					var res ActAtResult
+					err := workflow.ExecuteActivity(dctx, ActivityActAt, req).Get(dctx, &res)
+					running--
+					wake++
+					spent := func() {
+						if s.ActingAtDone == nil {
+							s.ActingAtDone = map[string]time.Time{}
+						}
+						s.ActingAtDone[spec.ID] = instant
+					}
+					var appErr *temporal.ApplicationError
+					switch {
+					case err == nil:
+						spent()
+						if res.RunHook && spec.Hook != "" {
+							hin := hookInput(spec.Hook, entered, corr, hop+1)
+							hin.Timer = spec.ID
+							hin.IdempotencyKey = fmt.Sprintf("timer:%s:%s:%d:%s:hook", in.ItemID, spec.ID, entered,
+								instant.UTC().Format(instantLayout))
+							runAction(hin)
+						}
+					case errors.As(err, &appErr) && appErr.Type() == ErrTypeNotYet:
+						// The item service's clock has not reached the
+						// instant: nothing was written. Arm again for the
+						// remainder it names.
+						var remaining time.Duration
+						if appErr.Details(&remaining) != nil || remaining <= 0 {
+							remaining = time.Second
+						}
+						notBefore, notBeforeFor = workflow.Now(gctx).Add(remaining), instant
+					case errors.As(err, &appErr) && (appErr.Type() == ErrTypeStale || appErr.Type() == ErrTypeHeld):
+						// The item service is ahead of this run (an event
+						// is on its way): after the next event, read again.
+						if err := workflow.Await(gctx, func() bool { return changes != seen }); err != nil {
+							return
+						}
+						if gctx.Err() == nil && !moved() {
+							s.ActingAtLoaded = false
+							actingAtEpoch++
+						}
+					case errors.As(err, &appErr) && (appErr.Type() == ErrTypeRejected || appErr.Type() == ErrTypeNotFound ||
+						appErr.Type() == ErrTypeInvalid):
+						// Final: spent for this instant; a new one arms again.
+						log.Info("the item service refused an acting timer", "item", in.ItemID, "timer", spec.ID, "reason", appErr.Message())
+						spent()
+					default:
+						return // only a canceled workflow gets here
+					}
+				}
+			})
+		}
+	}
+
 	// The reactions' runner: one coroutine works through
 	// s.PendingReactions, one at a time, in order. Each is one activity,
 	// which judges the reaction, writes its target and records its outcome
@@ -1070,6 +1320,16 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 					for _, spec := range specs {
 						startActing(actx, spec)
 					}
+				}
+			}
+			// Only a Type that declares an acting timer at an instant has
+			// an ActingAt table: every other run starts nothing here.
+			if !actingAtStarted {
+				actingAtStarted = true
+				if specs := s.ActingAt[s.State]; len(specs) > 0 {
+					actx, cancel := workflow.WithCancel(ctx)
+					cancelActingAt = cancel
+					startActingAt(actx, specs)
 				}
 			}
 		}

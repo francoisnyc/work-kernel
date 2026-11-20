@@ -51,6 +51,8 @@
 package main
 
 import (
+	_ "time/tzdata" // pli shows instants in a zone; its image has no zone database
+
 	"bytes"
 	"context"
 	"encoding/json"

@@ -52,7 +52,7 @@ var linkedItems = cel.ListType(cel.MapType(cel.StringType, cel.StringType))
 // declared as it is written; CEL resolves links.blocks to it, and links
 // alone is no variable at all.
 func newGuardEnv(t *Type) (*cel.Env, error) {
-	opts := make([]cel.EnvOption, 0, len(t.Fields)+1)
+	opts := calendarFunctions()
 	// today is a date (00:00 UTC), set by the caller; never null.
 	opts = append(opts, cel.Variable(VarToday, cel.TimestampType))
 	for _, f := range t.Fields {

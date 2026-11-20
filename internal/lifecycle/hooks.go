@@ -290,7 +290,14 @@ func ActingTimers(t *typedef.Type, state string) []typedef.ActingTimer {
 	if !ok {
 		return nil
 	}
-	return s.Acting
+	// Those at an instant have no schedule: ActingAtTimers.
+	var out []typedef.ActingTimer
+	for _, a := range s.Acting {
+		if a.At == "" {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // ReactionHooks returns the action hooks that run when the Item records

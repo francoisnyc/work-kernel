@@ -55,6 +55,9 @@ type Input struct {
 	// expression reads as cause.at, and its UTC date is that expression's
 	// today. Guards do not read it.
 	CauseAt time.Time
+	// Linked (Jira part 2, step 3) is what a create reaction's fields read
+	// as linked.<link>.<field> and container.linked.<link>.<field>.
+	Linked LinkedFields
 }
 
 func (r *Rejection) Error() string { return r.Reason }
@@ -228,6 +231,9 @@ func evalSets(t *typedef.Type, tr typedef.Transition, in Input) (map[string]any,
 func storedValue(f typedef.Field, v any) (any, bool) {
 	if _, null := v.(structpb.NullValue); null || v == nil {
 		return nil, true
+	}
+	if f.Multiple {
+		return storedSet(f, v)
 	}
 	switch f.Type {
 	case typedef.DateTime:

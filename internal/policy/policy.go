@@ -192,6 +192,14 @@ func IsRequester(actor, onBehalfOf, createdBy, createdOnBehalfOf string) bool {
 	return user != "" && user == creator
 }
 
+// IsNotRequester reports whether the principal is a person (or an agent
+// acting for one) other than the requester: what `by: not_creator` asks.
+// The kernel's own actors are neither the requester nor someone else: an
+// Item a reaction created answers for nobody.
+func IsNotRequester(actor, onBehalfOf, createdBy, createdOnBehalfOf string) bool {
+	return !item.IsKernelActor(actor) && !IsRequester(actor, onBehalfOf, createdBy, createdOnBehalfOf)
+}
+
 // TookPartInCreation reports whether the principal took part in creating
 // the Item: its actor or its effective user is created_by or
 // created_on_behalf_of.

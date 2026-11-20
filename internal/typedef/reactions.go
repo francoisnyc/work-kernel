@@ -99,6 +99,16 @@ type Reaction struct {
 	Version int               `yaml:"version" json:"version,omitempty"`
 	Fields  map[string]string `yaml:"fields" json:"fields,omitempty"`
 
+	// Jira part 2, step 3 (see jira23.go).
+	//
+	// Children (move): the reaction moves Items contained in this one,
+	// instead of following Link or moving the Item itself.
+	Children *Children `yaml:"children" json:"children,omitempty"`
+	// Target and Set (set): the Item written (TargetContainer) and its
+	// fields, each a CEL expression over this Item's fields plus cause.at.
+	Target string            `yaml:"target" json:"target,omitempty"`
+	Set    map[string]string `yaml:"set" json:"set,omitempty"`
+
 	// Programs are Add's expressions compiled, by target field; Reads are
 	// the source fields they read, sorted (frozen while the reaction's hold
 	// is open). Filled when the Type is loaded.
@@ -111,6 +121,11 @@ type Reaction struct {
 	ChildReads    []string               `yaml:"-" json:"-"`
 	FieldPrograms map[string]cel.Program `yaml:"-" json:"-"`
 	fieldTypes    map[string]*cel.Type
+	// Step 3, filled when the Type is loaded: Set compiled; the fields of
+	// linked Items a create's Fields read, sorted.
+	SetPrograms map[string]cel.Program `yaml:"-" json:"-"`
+	LinkedReads []LinkedRead           `yaml:"-" json:"-"`
+	setTypes    map[string]*cel.Type
 }
 
 // Invariant is a rule over an Item's fields that every write must keep, on
@@ -200,7 +215,7 @@ func CheckReactions(types []*Type) error {
 			}
 		}
 		for _, r := range src.Reactions {
-			if r.Kind == ReactionMove || r.Kind == ReactionCreate {
+			if r.Kind == ReactionMove || r.Kind == ReactionCreate || r.Kind == ReactionSet {
 				continue // checked by checkAfterAcross, below
 			}
 			held := r
@@ -232,6 +247,9 @@ func CheckReactions(types []*Type) error {
 	if err := checkAfterAcross(types, byID); err != nil {
 		return err
 	}
+	if err := checkStep3Across(types, byID); err != nil {
+		return err
+	}
 	if err := checkReactionCycles(types); err != nil {
 		return err
 	}
@@ -239,11 +257,21 @@ func CheckReactions(types []*Type) error {
 	for _, tgt := range types {
 		for _, key := range slices.Sorted(maps.Keys(tgt.AcceptsReactions)) {
 			typeID, reactionID, _ := strings.Cut(key, ":")
+			// A consent by reaction ID names no Type: nothing has to use
+			// it for the Types to load.
+			if typeID == WildcardType {
+				continue
+			}
 			found := false
 			for _, src := range byID[typeID] {
 				r, ok := src.Reaction(reactionID)
 				if !ok {
 					continue
+				}
+				// Children it moves, or a field it sets on its container
+				// (which the Type that accepts it may be).
+				if r.Children != nil && slices.Contains(r.Children.Of, tgt.ID) || r.Kind == ReactionSet {
+					found = true
 				}
 				if r.Kind == ReactionAfter {
 					r, _ = src.Reaction(r.Undoes)
@@ -346,7 +374,7 @@ func (t *Type) checkKernelLinks(fail func(string, ...any) error) error {
 // today and no links. Invariants and reaction expressions are rules over
 // an Item's own fields, true at any time and whatever other Items say.
 func newFieldEnv(t *Type) (*cel.Env, error) {
-	opts := make([]cel.EnvOption, 0, len(t.Fields))
+	opts := calendarFunctions()
 	for _, f := range t.Fields {
 		opts = append(opts, cel.Variable(f.ID, fieldCELType(f)))
 	}
@@ -411,12 +439,25 @@ func (t *Type) checkInvariants(fail func(string, ...any) error) error {
 // shape, and the fields (declared ints: reactions only add).
 func (t *Type) checkAccepts(fail func(string, ...any) error) error {
 	for _, key := range slices.Sorted(maps.Keys(t.AcceptsReactions)) {
-		if _, _, ok := item.ReactionParts(item.KindReaction + ":" + key); !ok {
-			return fail("accepts_reactions key %q must be <type>:<reaction>, without a version", key)
+		typeID, id, ok := item.ReactionParts(item.KindReaction + ":" + key)
+		// A star stands for any Type, whole, and only there: *:<id>.
+		if !ok || !reactionID.MatchString(id) || (typeID != WildcardType && strings.Contains(typeID, "*")) {
+			return fail("accepts_reactions key %q must be <type>:<reaction> or *:<reaction>, without a version", key)
 		}
 		acc := t.AcceptsReactions[key]
-		if len(acc.Fields) == 0 && len(acc.Moves) == 0 && !acc.MayCreate {
-			return fail("accepts_reactions %s accepts nothing: name fields, moves or creates", key)
+		if len(acc.Fields) == 0 && len(acc.Moves) == 0 && !acc.MayCreate && len(acc.Sets) == 0 {
+			return fail("accepts_reactions %s accepts nothing: name fields, moves, creates or sets", key)
+		}
+		// A reaction adds to a field over a link only, and there consent
+		// names the Type.
+		if typeID == WildcardType && len(acc.Fields) > 0 {
+			return fail("accepts_reactions %s: fields are added over a link, where consent names the Type; "+
+				"*:<reaction> is for moves, creates and sets from the container or a contained Item", key)
+		}
+		for _, id := range acc.Sets {
+			if _, ok := t.Field(id); !ok {
+				return fail("accepts_reactions %s: sets %s, which is not declared", key, id)
+			}
 		}
 		for _, id := range acc.Fields {
 			f, ok := t.Field(id)
@@ -461,7 +502,7 @@ func (t *Type) checkReactions(fail func(string, ...any) error) error {
 		if _, ok := t.Hook(r.ID); ok {
 			return fail("%s: a hook has the same ID; holds name either, so the IDs are shared", where)
 		}
-		if r.Kind == ReactionMove || r.Kind == ReactionCreate {
+		if r.Kind == ReactionMove || r.Kind == ReactionCreate || r.Kind == ReactionSet {
 			if err := t.checkAfterReaction(r, where, fail); err != nil {
 				return err
 			}
@@ -469,6 +510,9 @@ func (t *Type) checkReactions(fail func(string, ...any) error) error {
 		}
 		if len(r.Of) > 0 || r.When != "" || r.By != "" || r.To != "" || len(r.TargetFrom) > 0 || r.Type != "" || len(r.Fields) > 0 {
 			return fail("%s: of, when, by, to, target_from, type and fields are for move and create reactions", where)
+		}
+		if r.Children != nil || r.Target != "" || len(r.Set) > 0 {
+			return fail("%s: children, target and set are for move and set reactions", where)
 		}
 		if r.On != OnEnter {
 			return fail("%s: on must be enter, not %q", where, r.On)
@@ -546,7 +590,7 @@ func (t *Type) checkReactions(fail func(string, ...any) error) error {
 				return fail("%s: an after reaction names the held reaction it undoes (undoes)", where)
 			}
 		default:
-			return fail("%s: unknown kind %q: want held, after, move or create", where, r.Kind)
+			return fail("%s: unknown kind %q: want held, after, move, create or set", where, r.Kind)
 		}
 	}
 	// Undos: each names a held reaction, and each held reaction has one.

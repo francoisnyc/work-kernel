@@ -266,25 +266,37 @@ func (t *Type) checkActing() error {
 				return fail("duplicate acting timer ID in the state")
 			}
 			ids[a.ID] = true
-			if a.Max < 1 {
+			if a.At != "" {
+				// At an instant: no schedule; sets, a hook, or both.
+				if err := t.checkActingAt(s, a, fail); err != nil {
+					return err
+				}
+				if a.Hook == "" {
+					continue
+				}
+			} else if a.When != "" || len(a.Sets) > 0 {
+				return fail("when and sets are for a timer at an instant (at)")
+			} else if a.Max < 1 {
 				return fail("needs `max`, the total number of runs, at least 1")
 			}
-			if a.After == "" {
-				return fail("needs `after`, such as 48h")
+			if a.At == "" {
+				if a.After == "" {
+					return fail("needs `after`, such as 48h")
+				}
+				d, err := time.ParseDuration(a.After)
+				if err != nil {
+					return fail("`after`: %v", err)
+				}
+				if d <= 0 {
+					return fail("`after` must be more than zero")
+				}
+				a.AfterDuration = d
+				a.EveryDuration = 0
+				if a.Max > 1 && a.Every == "" {
+					return fail("runs %d times, so it needs `every`, the interval between runs", a.Max)
+				}
 			}
-			d, err := time.ParseDuration(a.After)
-			if err != nil {
-				return fail("`after`: %v", err)
-			}
-			if d <= 0 {
-				return fail("`after` must be more than zero")
-			}
-			a.AfterDuration = d
-			a.EveryDuration = 0
-			if a.Max > 1 && a.Every == "" {
-				return fail("runs %d times, so it needs `every`, the interval between runs", a.Max)
-			}
-			if a.Every != "" {
+			if a.At == "" && a.Every != "" {
 				e, err := time.ParseDuration(a.Every)
 				if err != nil {
 					return fail("`every`: %v", err)

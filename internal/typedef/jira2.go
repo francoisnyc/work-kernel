@@ -151,7 +151,7 @@ func (t *Type) checkAtTimers(fail func(string, ...any) error) error {
 // cause.at (the time of the event being written) and today. No links, and
 // nobody's identity.
 func newSetsEnv(t *Type) (*cel.Env, error) {
-	opts := make([]cel.EnvOption, 0, len(t.Fields)+2)
+	opts := calendarFunctions()
 	opts = append(opts, cel.Variable(VarToday, cel.TimestampType), cel.Variable(VarCauseAt, cel.TimestampType))
 	for _, f := range t.Fields {
 		opts = append(opts, cel.Variable(f.ID, fieldCELType(f)))

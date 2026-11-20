@@ -66,7 +66,8 @@ func typeOut(ns string, t *typedef.Type) *kernelv1.Type {
 			st.At = &kernelv1.AtTimer{Field: s.At.Field, ToState: s.At.To}
 		}
 		for _, a := range s.Acting {
-			st.Acting = append(st.Acting, &kernelv1.ActingTimer{Id: a.ID, After: a.After, Every: a.Every, Max: int32(a.Max)})
+			st.Acting = append(st.Acting, &kernelv1.ActingTimer{Id: a.ID, After: a.After, Every: a.Every, Max: int32(a.Max),
+				AtField: a.At, When: a.When, Sets: a.Sets, Hook: a.Hook})
 		}
 		out.States = append(out.States, st)
 	}
@@ -117,6 +118,13 @@ func typeOut(ns string, t *typedef.Type) *kernelv1.Type {
 			LinkType: r.Link, Add: r.Add, Undoes: r.Undoes,
 			Trigger: kernelv1.ReactionTrigger_REACTION_TRIGGER_ENTER,
 			When:    r.When, By: r.By, ToState: r.To, TargetFromStates: r.TargetFrom, CreateFields: r.Fields,
+			Target: r.Target, SetFields: r.Set,
+		}
+		if c := r.Children; c != nil {
+			pr.ChildrenWhen = c.When
+			for _, of := range c.Of {
+				pr.ChildrenOfTypes = append(pr.ChildrenOfTypes, namespaceName(ns)+"/types/"+of)
+			}
 		}
 		if r.On == typedef.OnCreatedInside {
 			pr.Trigger = kernelv1.ReactionTrigger_REACTION_TRIGGER_CREATED_INSIDE
@@ -132,8 +140,10 @@ func typeOut(ns string, t *typedef.Type) *kernelv1.Type {
 	for _, key := range slices.Sorted(maps.Keys(t.AcceptsReactions)) {
 		acc := t.AcceptsReactions[key]
 		out.AcceptsReactions = append(out.AcceptsReactions, &kernelv1.AcceptedReaction{
-			Reaction: key, Fields: acc.Fields, Moves: acc.Moves, Creates: acc.MayCreate, CreatesFields: acc.Creates})
+			Reaction: key, Fields: acc.Fields, Moves: acc.Moves, Creates: acc.MayCreate, CreatesFields: acc.Creates,
+			Sets: acc.Sets})
 	}
+	out.ReadableByReactions = t.ReadableByReactions
 	return out
 }
 
@@ -142,6 +152,7 @@ var reactionKinds = map[typedef.ReactionKind]kernelv1.ReactionKind{
 	typedef.ReactionMove:   kernelv1.ReactionKind_REACTION_KIND_MOVE,
 	typedef.ReactionCreate: kernelv1.ReactionKind_REACTION_KIND_CREATE,
 	typedef.ReactionAfter:  kernelv1.ReactionKind_REACTION_KIND_AFTER,
+	typedef.ReactionSet:    kernelv1.ReactionKind_REACTION_KIND_SET,
 }
 
 func (s *server) GetType(ctx context.Context, req *connect.Request[kernelv1.GetTypeRequest]) (*connect.Response[kernelv1.GetTypeResponse], error) {
