@@ -87,7 +87,7 @@ func (s *server) filterIn(ctx context.Context, p item.Principal, f *kernelv1.Ite
 		if ff.Field == "" {
 			return out, badField(path+".field", "required")
 		}
-		kf := itemservice.FieldFilter{Field: ff.Field}
+		kf := itemservice.FieldFilter{Field: ff.Field, Empty: ff.Empty}
 		for _, b := range []struct {
 			in  *structpb.Value
 			out *any
@@ -232,6 +232,7 @@ var eventKinds = map[string]kernelv1.ItemEventKind{
 	"reaction_failed":      kernelv1.ItemEventKind_ITEM_EVENT_KIND_REACTION_FAILED,
 	"hook_ran":             kernelv1.ItemEventKind_ITEM_EVENT_KIND_HOOK_RAN,
 	"reaction_applied":     kernelv1.ItemEventKind_ITEM_EVENT_KIND_REACTION_APPLIED,
+	"reaction_skipped":     kernelv1.ItemEventKind_ITEM_EVENT_KIND_REACTION_SKIPPED,
 }
 
 func (s *server) ListItemEvents(ctx context.Context, req *connect.Request[kernelv1.ListItemEventsRequest]) (*connect.Response[kernelv1.ListItemEventsResponse], error) {
@@ -295,6 +296,21 @@ func eventOut(ns, item string, ty *typedef.Type, e itemservice.Event) (*kernelv1
 			return nil, err
 		}
 		out.Added = a
+	}
+	if len(e.SetOps) > 0 {
+		ops := map[string]any{}
+		for field, op := range e.SetOps {
+			o := map[string]any{}
+			for kind, members := range op {
+				o[kind] = members
+			}
+			ops[field] = o
+		}
+		s, err := structpb.NewStruct(ops)
+		if err != nil {
+			return nil, err
+		}
+		out.SetOps = s
 	}
 	if e.Readers != nil {
 		out.Readers = &kernelv1.Readers{Principals: e.Readers}

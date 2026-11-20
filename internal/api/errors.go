@@ -51,6 +51,7 @@ var messages = map[string]string{
 	"FIELD_NOT_WRITABLE":  "the caller may not write these fields",
 	"FIELD_FROZEN":        "these fields are frozen in the Item's state",
 	"EFFECT_FAILED":       "one of the transition's computed effects could not be computed",
+	"TOO_MANY_VALUES":     "the field would hold more values than its max",
 	"INVARIANT_FAILED":    "the write would break one of the Type's invariants",
 	"LINK_NOT_WRITABLE":   "only the kernel sets links of this type",
 	"LINK_UNRESOLVED":     "entering the state sets a link, and no single target was found",
