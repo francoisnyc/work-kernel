@@ -360,6 +360,10 @@ message FieldFilter {
   // True: the field has no value (for a multi-value field, no member).
   // Alone: not with eq or a bound.
   bool empty = 7;
+  // True: the field has a value (for a multi-value field, a member): the
+  // opposite of empty. Alone: not with empty, eq or a bound. An Item whose
+  // Type does not declare the field has no value.
+  bool not_empty = 8;
 }
 
 message ListItemsRequest {
@@ -585,6 +589,11 @@ message Type {
   repeated IncomingLink incoming = 12;
   // Values computed when an Item of this version is read (Item.rollups).
   repeated Rollup rollups = 13;
+  // The fields a create reaction of another Type may read from an Item of
+  // this version one declared link away from its source, or from its
+  // source's container (linked.<link>.<field>,
+  // container.linked.<link>.<field>). Any other field is refused.
+  repeated string readable_by_reactions = 14;
 }
 
 // Links declared by other Types that point to Items of this Type: the
@@ -656,7 +665,27 @@ message Reaction {
   string create_type = 14;
   // CREATE: field ID of the created Item -> a CEL expression over this
   // Item's fields, plus cause.at (the time of the triggering event).
+  // An expression may also read the fields of the Item one declared
+  // max-one link away from this Item (linked.<link>.<field>) or from its
+  // container (container.linked.<link>.<field>), when that Item's Type
+  // lists them in readable_by_reactions.
   map<string, string> create_fields = 15;
+  // MOVE: instead of following link_type, or of moving this Item itself,
+  // the reaction moves Items contained in this Item: those of one of these
+  // Types (namespaces/{ns}/types/{type}, no version) for which
+  // children_when holds. At most 8 per trigger, each in a write of its own
+  // with an outcome of its own; more is one REACTION_FAILED /
+  // TOO_MANY_TARGETS and nothing moves.
+  repeated string children_of_types = 16;
+  // A CEL condition over a contained Item's fields, as child.<id>; empty
+  // when there is none.
+  string children_when = 17;
+  // SET: the Item written. "container": the Item this one is contained in.
+  string target = 18;
+  // SET: field ID of the target -> a CEL expression over this Item's
+  // fields, plus cause.at. Its value is set on the target; null unsets it.
+  // The target's Type must accept it (AcceptedReaction.sets).
+  map<string, string> set_fields = 19;
 }
 
 enum ReactionTrigger {
@@ -685,11 +714,19 @@ enum ReactionKind {
   // Runs after its trigger has committed and creates an Item of
   // create_type contained in this Item. Outcomes as for MOVE.
   REACTION_KIND_CREATE = 4;
+  // Runs after its trigger (entering a state) has committed and sets
+  // fields on its target, each to the value of a CEL expression. No undo.
+  // Outcomes as for MOVE.
+  REACTION_KIND_SET = 5;
 }
 
 // A reaction another Type may run on Items of this Type.
 message AcceptedReaction {
-  // <type>:<reaction id>, no version.
+  // <type>:<reaction id>, no version. Or *:<reaction id>: a reaction with
+  // that ID declared by any Type, honoured only when it reaches the Item
+  // through containment (the Item's container creating it, moving it as
+  // one of its children, or a contained Item setting a field on it), never
+  // over a declared link. An exact key wins over the wildcard.
   string reaction = 1;
   // The fields it may write.
   repeated string fields = 2;
@@ -701,6 +738,9 @@ message AcceptedReaction {
   // fields it may set on them.
   bool creates = 4;
   repeated string creates_fields = 5;
+  // The fields a SET reaction may set or unset on an Item of this Type.
+  // The consent counts as the writer of a kernel-written field.
+  repeated string sets = 6;
 }
 
 // A link type a Type declares: links from its Items to Items of the target
@@ -832,6 +872,21 @@ message ActingTimer {
   string every = 3;
   // The total number of runs per entry into the state.
   int32 max = 4;
+  // Set for an acting timer at an instant, which has no after, every or
+  // max: it acts once when the instant this datetime field holds passes
+  // while an Item is in the state, never before it. Changing the field
+  // arms it again for the new instant; an unset field arms nothing.
+  string at_field = 5;
+  // At an instant: a CEL condition over the Item's fields; when it does
+  // not hold at the instant the timer does nothing. Empty: none.
+  string when = 6;
+  // At an instant: field ID -> a CEL expression over the Item's fields,
+  // plus cause.at, which here is the instant itself. The values are set in
+  // one write by principal system:timer, without a transition.
+  map<string, string> sets = 7;
+  // The action hook the timer runs (after its sets, when it has any);
+  // empty when it has none.
+  string hook = 8;
 }
 
 enum StateCategory {
