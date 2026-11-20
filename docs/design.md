@@ -1407,7 +1407,8 @@ in the journal.
 | SLA design (**done**) | A design pass on paper for SLAs and multi-value fields | Decided 2026-11-18: "Decisions for Jira part 2" below |
 | Jira 2.1 (**done**) | Date-time fields, a timer at a field's instant (proved by a sprint closing on its end instant), computed field effects | The sprint closes itself when its end instant passes, and moving the end re-arms it; effects computed at the cause's time; through the API, pli, the web UI and the scenario. **Done 2026-11-19**: "Jira part 2, step 1 as built" below, and the journal |
 | Jira 2.2 | Reactions that move or create, including those triggered by an Item created inside the source; multi-value fields | "A customer comment reopens the request"; labels with set operations and contains filters |
-| Jira 2.3 | Calendar Items and working-time arithmetic; an **acting timer at a field's instant** (the SLA breach records `breached_at` and the goal keeps running: step 1's `at` only moves); the `sla_goal` Type; the incident Type with first-response and resolution goals | Scenario B runs through pli |
+| Jira 2.3a (**done**) | The kernel pieces for goals kept as contained Items, proved with test Types: working-time arithmetic on a calendar, reactions that move children or set a field on the container, consent by reaction ID, a create reaction reading linked Items, an **acting timer at a field's instant**, creation as an entry, `not_empty` (see "Jira part 2, step 3a as built") | A job starts, pauses, resumes and stops its meters; a meter is marked late at its due instant and never before; a stopped worker changes none of the numbers |
+| Jira 2.3b | The `sla` package (`sla_goal`, `calendar`), the incident Type with first-response and resolution goals, pli and the web UI | Scenario B runs through pli |
 | Jira 2.4 | Customers as principals and public or internal comments; the access request with N-of-M approvers | Scenario C runs through pli |
 | Bonita | The company's real Bonita processes, mapped against the BPMN pattern table, then rebuilt | Planned after Jira 2 |
 
@@ -1869,6 +1870,144 @@ EXPLAIN). CEL sees a nullable list (dates: a list of timestamps).
 **The Types.** `ticket@6` adds `waiting_for_customer`, `reopen` and
 `open_checklist`; `comment@2` adds `f_public`; `checklist@1` is new;
 `story`, `bug` and `task` `@3` add `f_labels` (max 20) and `f_reviewers`.
+
+### Jira part 2, step 3a as built (2026-11-20)
+
+Primitive 5 of the decisions above, the acting timer at an instant, and
+what reactions lacked to keep goals as contained Items: ten kernel changes
+(journal), proved with test Types (a job in a yard that has hours contains
+meters). Nothing in the kernel is named SLA, goal or calendar Item;
+`kernel.v1` only grew; no migration. The `sla` package and the incident
+are step 3b.
+
+**Working time.** Package `worktime` is pure: a week of local wall-clock
+intervals (`mon 09:00-17:00`, several a day, `00:00-24:00` allowed, at most
+21), holidays (local dates, at most 366) and an IANA zone. `After(t, d)`
+is the earliest instant at which `d` of working time has passed (eight
+hours after Monday's opening is Monday's closing); `Between(t1, t2)` the
+working time between two instants. A local time skipped by a clock change
+does not exist (the interval is shorter); a repeated hour is worked twice.
+The zone database is compiled in (`time/tzdata`): the images have none.
+Three CEL functions expose it in every expression:
+
+- `calendar(week, holidays, zone)`: an opaque value, built from fields; no
+  field holds one. A calendar that is none is an error, so an invariant
+  `calendar(f_week, f_days_off, f_zone) != null` holds an Item to being one.
+- `working_after(t, seconds, cal)`: an instant. Seconds must be positive
+  (a Type that resumes past its due instant keeps the missed instant
+  itself); an answer more than five years away is an error.
+- `working_between(t1, t2, cal)`: whole seconds, truncated.
+
+An error in a `sets` is `effect_failed`, naming the field and no value.
+
+**Creation enters the initial state.** An enter reaction without `from`,
+on the initial state, runs when the Item is created (its cause is the
+create event); one with `from` never does. Hooks already worked so.
+
+**A reaction that moves children.** `children: {of: [meter], when:
+'child.f_kind == "main"'}` on a move reaction, instead of `link`: on
+entering a state, or on `created_inside` (the Item created is the trigger,
+the Items moved are its siblings; `from` is then the container's own
+states and `target_from` the children's).
+- The children are the contained Items of the `of` Types for which `when`
+  holds, in a state the reaction moves from; any other is passed over.
+- At most 8 (`MaxReactionTargets`): one more and nothing moves, one
+  `reaction_failed too_many_targets`.
+- One write per child, in the order of their IDs, under the key
+  `<reaction>:<source>:<cause>:<child>`, then **one outcome record per
+  child** on the source, naming it. Every record but the last carries
+  `more`: the one that does not finishes the reaction, so a crash between
+  two children leaves it pending, and running it again moves no child
+  twice and records none twice. A child that refuses is a failure for that
+  child; the others still move. A child that left its state between the
+  read and its move is recorded `reaction_skipped not_in_from`; if the
+  children changed between two runs so that no record lacks `more`, one
+  closing `reaction_skipped not_in_from` finishes the reaction. None to
+  move: one `reaction_skipped no_target`.
+
+**`by: not_creator`** (`policy.IsNotRequester`): the Item created inside
+was made by a person other than the container's requester. An agent acting
+for the requester is the requester; the kernel's own actors are neither
+`creator` nor `not_creator`.
+
+**A reaction that sets.** `{kind: set, on: enter, state, from, when,
+target: container, set: {f: <CEL>}}`: entering the state sets fields on
+the Item's container, each from the source's fields and `cause.at`; `null`
+unsets. One write (an `update` event by the reaction, caused by the
+source's event), then one record on the source. The container's Type
+consents with `sets: [fields]`, which counts as the writer of a
+kernel-written field; frozen fields and invariants apply. No container:
+`reaction_skipped no_target`. No consent: `reaction_failed
+reaction_not_accepted`. No undo. A set enters no state, so it closes no
+cycle; cycles now count "a K is created" as running K's from-less enter
+reactions.
+
+**Consent by reaction ID.** An `accepts_reactions` key may be `*:<id>`: a
+reaction with that ID of any Type. It is honoured **only through
+containment**: the Item's container creating it or moving it as a child,
+or a contained Item setting a field on it. Over a declared link consent
+stays exact, at load and at the write. An exact key wins over the
+wildcard, whole. A wildcard for added fields is refused at load. So a
+package of Types names no host, and loads without one.
+
+**A create reaction reads linked Items.** Its `fields` may read
+`linked.<link>.<field>` (one declared max-one link away from the source)
+and `container.linked.<link>.<field>` (from the source's container), and
+nothing else of either. The Type read from lists the fields in
+`readable_by_reactions` (never a principal field), checked at load across
+the Types and at the write against the linked Item's own version. The
+read is made inside the reaction's write, with the source, its container
+and the linked Items locked FOR SHARE in the order of their IDs. **It is
+not subject to the requester's visibility**: the list is the consent. No
+container, no link, or no consent: `reaction_failed` with `no_container`,
+`not_linked` or `read_not_accepted`. A create reaction may now set a
+multi-value field (a set copied whole); principal fields stay refused.
+What is copied is pinned: the new Item never reads the linked one again.
+
+**An acting timer at an instant.** `acting: [{id, at: <datetime field>,
+when, sets, hook}]` on a state (no `after`, `every` or `max`): when the
+instant passes while the Item is in the state, the item service sets the
+timer's `sets` in one `update` event by `system:timer`, **without a
+transition**, then the timer's action hook runs. `sets`, a hook, or both.
+- *cause.at is the instant itself*, whenever the write is made: a mark
+  written seconds late by a worker that was down holds the instant.
+- *Never early.* `ActAt` refuses while the write's own time is before the
+  instant (`ErrNotYet` with the remainder; nothing written, the key not
+  used up), and the workflow arms again.
+- *Once per instant.* The key is `timer:<item>:<timer>:<entry
+  seq>:<instant>`; the hook's adds `:hook` (`hook_ran` names the timer, run
+  0). A new instant acts again; a new entry arms again, and `when` (over
+  the fields, judged in the write) says whether it then does anything.
+- *Stale.* The Item left the state, entered it again, or the field holds
+  another instant or none: `ErrStale`, nothing written; the workflow reads
+  again after the next event.
+- *In the workflow*, each entry has one coroutine that reads the instants
+  (`LoadActingInstants`: with `LoadInstant`, the declared exceptions to
+  "the workflow never sees a field value") and one per timer that waits on
+  `workflow.Now`; leaving the state cancels them, an event naming one of
+  the fields (`Event.FieldIDs`) has them read again. What already acted is
+  in the Snapshot (`ActingAtDone`), carried across continue-as-new; a cold
+  start rebuilds nothing: `ActAt`'s key answers again. It does not wait
+  for a hold. No `GetVersion`: only a run whose Snapshot has an `ActingAt`
+  table starts these coroutines (a recorded history,
+  `meter_late_at_an_instant.json`, is replayed).
+- *The race with a late reaction.* A timer can fire before a pause that
+  was caused before the instant is heard of. The pause's `sets` take the
+  mark back (`cause.at >= f_due_at ? f_late_at : null`); a hook that
+  already ran is accepted.
+
+**`not_empty`** in filters: the field has a value (a member, for a set).
+Alone, like `empty`; a separate field because a proto3 bool cannot tell
+false from unset.
+
+**Types in subfolders.** `ParseDir` reads one level of subfolders (a
+package of Types with its README); IDs stay global; a folder two levels
+down is an error; dot-folders are skipped.
+
+**What a Type shows.** `GetType` gives a reaction's `children_of_types`,
+`children_when`, `target`, `set_fields` and kind `SET`; a consent's `sets`;
+an acting timer's `at_field`, `when`, `sets`, `hook`; and
+`readable_by_reactions`.
 
 ## Web UI as built (2026-11-18)
 

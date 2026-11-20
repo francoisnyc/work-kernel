@@ -424,6 +424,23 @@ Ideas noted during the spike, not built yet.
 - A source-declared `on: create` reaction (the created Item moves another)
   was decided against in Jira 2.2 in favour of the container's
   `on: created_inside`. Revisit only if a non-contained case appears.
+- Elapsed working time is kept in whole seconds, truncated
+  (`working_between`): a clock that is paused and resumed loses up to a second
+  per pause, in the agent's favour. Keep finer time if that ever matters.
+  (Jira 2.3a)
+- A Type that copies a calendar onto each Item it creates (pinned at creation)
+  carries the holiday list on every such Item. Measure the row size with the
+  real `sla_goal` (Jira 2.3b), and share or reference the calendar if it hurts.
+- A kernel-written field set by a reaction bumps its Item's etag, so a
+  person's save made in that window is `ABORTED STALE`. Measure the count in
+  scenario B (Jira 2.3b); the fix would be that such fields do not bump the etag.
+- `CreateItem` with links in the same write (an Item that needs a link from
+  its first moment). (Jira 2.3 Phase A)
+- A reaction's outcome record does not show its target through the API, so
+  the records of a children move look alike there. Expose it through the
+  visibility filter. (Jira 2.3b Phase A)
+- A hook on an Item a reaction created has no recipient to read: no human
+  creator, and a create reaction sets no principal field. (Jira 2.3b Phase A)
 
 ## 2026-11-12 — Step 1 (finished)
 
@@ -2030,3 +2047,96 @@ open from the decisions. A container that reacts to children keeps getting one o
 matching child, whatever its state; the skip is recorded (`not_in_from`).
 **Next session:** Jira 2.3: the acting timer at an instant, working-time arithmetic, the
 `sla_goal` Type.
+
+## 2026-11-20 — Jira proof of concept, part 2, step 3a: working time, children, set, an acting timer at an instant (finished)
+
+**Built:** the kernel pieces of Jira 2.3, proved with test Types (a job in a yard with hours
+contains meters); the `sla` package, the incident and scenario B are step 3b, a second PR. A job
+starts its meters when it is created, on its container's hours; pauses, resumes and stops them as
+it moves; another person's public remark stops the reply meter; each meter shows its due instant
+on its job and is marked late at that instant, never before, and goes on. design.md: "Jira part
+2, step 3a as built".
+
+**Kernel changes, counted** (ten; proto v1 only grew, `buf breaking` green; no migration; no new
+direct dependency: `time/tzdata` is the standard library's):
+(1) **Working time**: package `worktime` and the CEL functions `calendar`, `working_after`,
+`working_between`, in every expression. (2) **Creation enters the initial state**: a from-less
+enter reaction runs at creation. (3) **A reaction that moves children** (`children: {of,
+when}`), on enter and on `created_inside`: at most 8, one write and one record per child, `more`
+on all but the last. (4) **`by: not_creator`**. (5) **A reaction that sets** fields on the
+container (`kind: set`), with consent `sets`. (6) **Consent by reaction ID** (`*:<id>`), through
+containment only. (7) **A create reaction reads linked Items** (`linked.`, `container.linked.`),
+with `readable_by_reactions`, FOR SHARE; and may set multi-value fields. (8) **An acting timer at
+an instant** (`at`, `when`, `sets`, `hook`): `ActingInstants`, `ActAt`, the relay naming its
+fields, the workflow's coroutines. (9) **`not_empty`** in filters. (10) **Types in subfolders**.
+Proto: `Reaction.children_of_types`, `children_when`, `target`, `set_fields`, kind SET;
+`AcceptedReaction.sets`; `ActingTimer.at_field`, `when`, `sets`, `hook`;
+`Type.readable_by_reactions`; `FieldFilter.not_empty`. New reasons: `too_many_targets`,
+`no_container`, `read_not_accepted`. Not the kernel: nothing; no Type in `types/` changed.
+
+**Ten choices the tests pin** (all confirmed in the Phase C review): (1) "empty: false" is
+`not_empty: true`; (2) per-child records carry `more` except the last, which finishes the
+reaction; (3) create reactions may set multi-value fields, never principal ones; (4) a linked
+read ignores the requester's visibility, `readable_by_reactions` is the consent and refuses
+principal fields; (5) `working_between` returns whole seconds, truncated (Later); (6) a set with
+no container is `skipped no_target`, without consent `failed reaction_not_accepted`; (7) a Type
+two folders down is a load error, dot-folders are skipped; (8) a wildcard consent for added
+fields is refused at load; (9) the timer's hook is keyed `timer:<item>:<timer>:<entry>:<instant>:hook`;
+(10) `working_after` refuses a non-positive duration. Decided while implementing, also confirmed:
+a child that left its state gets its own `skipped not_in_from`; a closing record when no record
+lacks `more`; the bound of 8 counts the children that would move; a hook-only timer writes
+nothing and uses no key; `hook_ran` run 0; the calendar functions in guards too.
+
+**The crash test** (asked for in the Phase B review, written before the item service's code):
+`TestReactMove_Children_ACrashPartway_FinishesExactlyOnce`. Three children; the call is cut short
+while the row it needs next is locked by another transaction: the job's (after the first child's
+write, before its record) or the second child's (after the first record). Back again, each child
+is moved exactly once (its key), each has exactly one record, in the order of their IDs, and the
+reaction stays pending until the record without `more`.
+
+**Met or missed is decided on instants** (decision in the Phase C review, replacing G4's "from
+the elapsed time", for 2.3b): stopped while running, missed if `cause.at > f_due_at`; stopped
+while paused, missed if the breach mark is set after the pause's own correction. Found by a test:
+with whole seconds, a meter stopped 50 ms after a 3 s due instant had "3 s elapsed" and said met
+while marked late.
+
+**Determinism.** No `GetVersion`: only a run whose Snapshot has an `ActingAt` table starts the new
+coroutines, and a set reaction goes through the existing queue. The seven histories recorded
+earlier replay unchanged; an eighth, `meter_late_at_an_instant.json` (LoadItem, a set reaction,
+LoadActingInstants, a timer, ActAt, four events, a second set reaction, completed), is replayed
+by `TestReplay_ActingAtHistories`. Waits are on `workflow.Now`; leaving the state cancels the
+entry's coroutines; instants and what already acted are in the Snapshot; a cold start rebuilds
+from `StateEntry` and `ActAt`'s key.
+
+**Tests:** 102 new Go test functions in 11 new files, no web change (429 vitest, 5 Playwright,
+as before). Changed existing tests, agreed: `TestEveryExportedReadCallsProject` gains the
+exemption of `ActingInstants`, with `AtInstant`'s justification. **Five fixes to my own Phase B
+tests, found in Phase C and applied after review:** a fixture timer without its hook
+(typedef); a "quiet" fixture that left a reaction on the initial state (lifecycle); the test
+meter's outcome decided on truncated seconds (e2e; now on instants); the three API tests that
+register test Types moved to their own package, `internal/api/apistep3`, because Types are global
+and `TestListTypes_EveryVersionInOrder` lists exactly the repository's; an assertion on a second
+workflow's record without waiting for it (e2e, seen only under `-race`).
+
+**Numbers:** `go test -race -count=1 ./...` green, no data race (workflow package about 200 s,
+item service about 80 s). Scenario, two runs in a row on a fresh stack: both passed (47 s, 46 s).
+Playwright: 5 tests in 9.9 s.
+
+**Surprises:** a coroutine may only block on a context of its own, so the timer's write, which
+must not be cut short by leaving the state, runs on `workflow.NewDisconnectedContext`, not on
+the workflow's root context. CEL's type guards refuse a null argument before the function sees
+it; they are off for the three functions, which say themselves what they lack. `cond ? null : x`
+types as null in CEL; written `cond ? x : null` it keeps x's type. A fixture mistake in a test
+that only asserts refusals hides itself: three Phase B tests passed before anything was built.
+
+**Not verified here:** the images' build stages (Docker Hub answered 429: the stack ran from
+host-built binaries on the real distroless base, with a throwaway override), and the pinned
+Playwright's own browser build (the smoke test ran on this container's Chromium). CI's `scenario`
+job verifies both.
+
+**Open, for 2.3b's Phase A:** who a breach notification goes to (the goal has no human creator;
+probably the host's assignee, declared by the host); the target of per-child outcome records
+through the visibility filter. From the decisions, still open: a transition fired by a field
+change on the same Item.
+**Next session:** Jira 2.3b: `types/sla/` (`sla_goal@1`, `calendar@1`, README), `incident@1`,
+scenario B, pli and the web UI; EXPLAIN for the queue sort and the breached search.
