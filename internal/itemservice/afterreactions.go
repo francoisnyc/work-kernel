@@ -503,6 +503,33 @@ func (in *Internal) ReactCreate(ctx context.Context, req ReactionRunRequest) (Re
 	return k.record(ctx, tg, ReactionApplied, "", res.ItemID)
 }
 
+// ReactionGaveUp records that a move or create reaction could not be
+// finished: the workflow's budget for it ran out, or it failed for good.
+// It writes the reaction's outcome record as failed, with the reason (a
+// code), unless an outcome is already recorded, which then stands.
+func (in *Internal) ReactionGaveUp(ctx context.Context, req ReactionRunRequest, reason string) (ReactionOutcome, error) {
+	if !reasonCode.MatchString(reason) {
+		return ReactionOutcome{}, fmt.Errorf("%w: a reaction's failure needs a reason code, not free text", ErrInvalid)
+	}
+	tg, err := in.k.loadAnyTrigger(ctx, req)
+	if err != nil {
+		return ReactionOutcome{}, err
+	}
+	if out, done, err := in.k.outcomeOf(ctx, tg); err != nil || done {
+		return out, err
+	}
+	return in.k.record(ctx, tg, ReactionFailed, reason, uuid.Nil)
+}
+
+// loadAnyTrigger is loadTrigger for a reaction of either kind.
+func (k *Service) loadAnyTrigger(ctx context.Context, req ReactionRunRequest) (trigger, error) {
+	tg, err := k.loadTrigger(ctx, req, typedef.ReactionMove)
+	if err != nil && errors.Is(err, ErrInvalid) {
+		return k.loadTrigger(ctx, req, typedef.ReactionCreate)
+	}
+	return tg, err
+}
+
 // tellContainer gives a newly created Item an outbox row when its
 // container's Type reacts to Items of its Type being created inside it
 // (on: created_inside), and the Item's own Type has no listeners (else

@@ -202,11 +202,27 @@ func (r *Relay) deliverItem(ctx context.Context, id uuid.UUID) error {
 	}
 
 	for _, ev := range events {
-		d, err := r.delivery(ctx, id, ev)
+		d, own, err := r.delivery(ctx, id, ev)
 		if err != nil {
 			return err
 		}
-		err = r.workflows.Deliver(ctx, d)
+		// A create inside a container whose Type reacts to it goes to the
+		// CONTAINER's workflow first (starting one if none runs). The row
+		// is marked delivered only once that workflow has taken it.
+		child, err := r.childDelivery(ctx, id, ev)
+		if err != nil {
+			return err
+		}
+		if child != nil {
+			if err := r.workflows.Deliver(ctx, *child); err != nil {
+				return fmt.Errorf("deliver %s: %w", child.UpdateID, err)
+			}
+		}
+		// Then the Item's own workflow, if its Type has anything listening
+		// (a row written only to tell the container has not).
+		if own {
+			err = r.workflows.Deliver(ctx, d)
+		}
 		switch {
 		case err == nil:
 		case errors.Is(err, ErrNothingListening) && !d.Start:
@@ -227,7 +243,10 @@ func (r *Relay) deliverItem(ctx context.Context, id uuid.UUID) error {
 
 // delivery turns an event row into what is sent: its shape, never a field
 // value, plus the Type's answer to "does this start a workflow?".
-func (r *Relay) delivery(ctx context.Context, id uuid.UUID, ev pendingEvent) (Delivery, error) {
+//
+// own is false when nothing of the Item's own Type listens: its row is
+// there only for its container (childDelivery).
+func (r *Relay) delivery(ctx context.Context, id uuid.UUID, ev pendingEvent) (d Delivery, own bool, err error) {
 	// Only the keys that say which state the event enters, and which hold
 	// it opens or closes, are read: opaque IDs and state names.
 	var shape struct {
@@ -243,7 +262,7 @@ func (r *Relay) delivery(ctx context.Context, id uuid.UUID, ev pendingEvent) (De
 		ClearedFieldIDs []string `json:"cleared_field_ids"`
 	}
 	if err := json.Unmarshal(ev.Payload, &shape); err != nil {
-		return Delivery{}, fmt.Errorf("decode payload of event %d: %w", ev.Seq, err)
+		return Delivery{}, false, fmt.Errorf("decode payload of event %d: %w", ev.Seq, err)
 	}
 	// Belt and braces: only a create or a transition enters a state, whatever
 	// keys another event's payload carries.
@@ -271,7 +290,7 @@ func (r *Relay) delivery(ctx context.Context, id uuid.UUID, ev pendingEvent) (De
 		return r.loadType(ctx, ev.TypeID, ev.TypeVersion)
 	})
 	if err != nil {
-		return Delivery{}, err
+		return Delivery{}, false, err
 	}
 	// For a Type with a timer at a field's instant: which of those fields
 	// the event set or cleared, so the workflow reads the instant again.
@@ -297,6 +316,52 @@ func (r *Relay) delivery(ctx context.Context, id uuid.UUID, ev pendingEvent) (De
 		Start: lifecycle.StartsWorkflow(ty, lifecycle.Event{Op: ev.Op, Entered: entered, From: shape.From,
 			ClosesHold: holdID != "" && ev.Op != lifecycle.OpTransitionRequested,
 			Allowed:    ev.Op == "transition" && holdID != "" && !canceled}),
+	}, lifecycle.HasListeners(ty), nil
+}
+
+// childDelivery returns, for the create event of an Item made inside a
+// container whose Type reacts to it (a reaction on: created_inside), the
+// delivery that tells the container's workflow: the child's ID, Type and
+// create event, a shape with no field value. nil for every other event.
+// It costs one read of the container per create event in the outbox.
+func (r *Relay) childDelivery(ctx context.Context, id uuid.UUID, ev pendingEvent) (*Delivery, error) {
+	if ev.Op != "create" {
+		return nil, nil
+	}
+	var shape struct {
+		Container string `json:"container_id"`
+	}
+	if err := json.Unmarshal(ev.Payload, &shape); err != nil {
+		return nil, fmt.Errorf("decode payload of event %d: %w", ev.Seq, err)
+	}
+	container, err := uuid.Parse(shape.Container)
+	if err != nil {
+		return nil, nil // created at the top level
+	}
+	var typeID string
+	var version int
+	err = r.pool.QueryRow(ctx, `select type_id, type_version from items where id = $1`, container).Scan(&typeID, &version)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read the container of %s: %w", id, err)
+	}
+	ty, err := r.types.Load(typeID, version, func() (*typedef.Type, error) { return r.loadType(ctx, typeID, version) })
+	if err != nil {
+		return nil, err
+	}
+	if !lifecycle.ReactsToChildren(ty, ev.TypeID) {
+		return nil, nil
+	}
+	return &Delivery{
+		ItemID:   container.String(),
+		UpdateID: fmt.Sprintf("%s:%d:inside", id, ev.Seq),
+		Child: &workflow.ChildEvent{
+			ChildID: id.String(), TypeID: ev.TypeID, Seq: ev.Seq, At: ev.At,
+			CorrelationID: ev.CorrelationID, Hop: ev.Hop,
+		},
+		Start: true,
 	}, nil
 }
 

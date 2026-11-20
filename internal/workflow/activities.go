@@ -18,6 +18,7 @@ import (
 	"github.com/francoisnyc/work-kernel/internal/item"
 	"github.com/francoisnyc/work-kernel/internal/itemservice"
 	"github.com/francoisnyc/work-kernel/internal/lifecycle"
+	"github.com/francoisnyc/work-kernel/internal/typedef"
 )
 
 // timerActor is the principal a timer's write is checked and recorded as.
@@ -164,6 +165,32 @@ func (a *Activities) LoadItem(ctx context.Context, itemID string) (Snapshot, err
 	if len(se.ActingRuns) > 0 {
 		snap.ActingRuns = se.ActingRuns
 	}
+	// Move and create reactions (Jira part 2, step 2): which a state's
+	// entry runs, which a child's creation runs, and those not yet done.
+	for _, r := range ty.Reactions {
+		if r.Kind != typedef.ReactionMove && r.Kind != typedef.ReactionCreate {
+			continue
+		}
+		if r.On == typedef.OnCreatedInside {
+			if snap.InsideReactions == nil {
+				snap.InsideReactions = map[string][]string{}
+			}
+			for _, of := range r.Of {
+				snap.InsideReactions[of] = append(snap.InsideReactions[of], r.ID)
+			}
+			continue
+		}
+		if snap.EnterReactions == nil {
+			snap.EnterReactions = map[string][]EnterReaction{}
+		}
+		snap.EnterReactions[r.State] = append(snap.EnterReactions[r.State], EnterReaction{ID: r.ID, From: r.From})
+	}
+	for _, pr := range se.PendingReactions {
+		snap.PendingReactions = append(snap.PendingReactions, PendingReaction{
+			ReactionID: pr.Reaction, CauseItem: pr.CauseItem.String(), CauseSeq: pr.CauseSeq,
+			CorrelationID: pr.CorrelationID, Hop: pr.Hop,
+		})
+	}
 	for _, r := range ty.Reactions {
 		for _, h := range lifecycle.ReactionHooks(ty, r.ID) {
 			if snap.ReactionHooks == nil {
@@ -265,19 +292,72 @@ func (a *Activities) LoadInstant(ctx context.Context, itemID string) (Instant, e
 	return Instant{Set: got.Set, At: got.At}, nil
 }
 
-// RunAfterReaction runs one move or create reaction for one trigger and
-// records its outcome on the Item.
-//
-// Phase B stub: not implemented.
-func (a *Activities) RunAfterReaction(ctx context.Context, in AfterReactionInput) error {
-	return temporal.NewNonRetryableApplicationError("RunAfterReaction is not implemented", "NotImplemented", nil)
+// afterRequest is the item service's request for a reaction's trigger.
+func afterRequest(in AfterReactionInput) (itemservice.ReactionRunRequest, error) {
+	source, err := uuid.Parse(in.ItemID)
+	if err != nil {
+		return itemservice.ReactionRunRequest{}, fmt.Errorf("item id %q: %w", in.ItemID, err)
+	}
+	cause, err := uuid.Parse(in.CauseItem)
+	if err != nil {
+		return itemservice.ReactionRunRequest{}, fmt.Errorf("cause item id %q: %w", in.CauseItem, err)
+	}
+	return itemservice.ReactionRunRequest{
+		SourceID: source, Reaction: in.ReactionID, CauseItem: cause, CauseSeq: in.CauseSeq,
+		CorrelationID: in.CorrelationID, Hop: in.Hop,
+	}, nil
 }
 
-// AfterReactionFailed records that a move or create reaction gave up.
-//
-// Phase B stub: not implemented.
+// reactionError marks the item service's final answers as non-retryable:
+// the Item is gone, or the request is malformed (a bug). Anything else
+// (the database is away, the target is held or has moved on) is returned
+// as it is, and Temporal retries it within the budget.
+func reactionError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, itemservice.ErrNotFound):
+		return temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeNotFound, err)
+	case errors.Is(err, itemservice.ErrInvalid):
+		return temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeInvalid, err)
+	}
+	return err
+}
+
+// RunAfterReaction runs one move or create reaction for one trigger: the
+// item service judges it, writes its target and records its outcome on the
+// Item. A target that refuses is an outcome, recorded, not an error here.
+func (a *Activities) RunAfterReaction(ctx context.Context, in AfterReactionInput) error {
+	req, err := afterRequest(in)
+	if err != nil {
+		return temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeInvalid, err)
+	}
+	ty, err := a.Items.Type(ctx, in.TypeID, in.TypeVersion)
+	if err != nil {
+		return err
+	}
+	r, ok := ty.Reaction(in.ReactionID)
+	if !ok {
+		err := fmt.Errorf("%s v%d declares no reaction %s", in.TypeID, in.TypeVersion, in.ReactionID)
+		return temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeInvalid, err)
+	}
+	if r.Kind == typedef.ReactionCreate {
+		_, err = a.Items.Internal().ReactCreate(ctx, req)
+	} else {
+		_, err = a.Items.Internal().ReactMove(ctx, req)
+	}
+	return reactionError(err)
+}
+
+// AfterReactionFailed records that a move or create reaction gave up (its
+// budget ran out, or it failed for good), so that it is finished.
 func (a *Activities) AfterReactionFailed(ctx context.Context, in AfterReactionFailedInput) error {
-	return temporal.NewNonRetryableApplicationError("AfterReactionFailed is not implemented", "NotImplemented", nil)
+	req, err := afterRequest(in.Reaction)
+	if err != nil {
+		return temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeInvalid, err)
+	}
+	_, err = a.Items.Internal().ReactionGaveUp(ctx, req, in.Reason)
+	return reactionError(err)
 }
 
 // WorkerOptions tune a worker. The zero value is what production uses.

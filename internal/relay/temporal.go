@@ -41,6 +41,12 @@ func (t *temporalWorkflows) Deliver(ctx context.Context, d Delivery) error {
 		// was accepted: an accepted update can still fail.
 		WaitForStage: client.WorkflowUpdateStageCompleted,
 	}
+	// "An Item was created inside this one" is another update of the same
+	// workflow: it is no event of the container, and does not touch the
+	// order of the container's own events.
+	if d.Child != nil {
+		update.UpdateName, update.Args = workflow.UpdateChild, []any{*d.Child}
+	}
 
 	var (
 		handle client.WorkflowUpdateHandle
