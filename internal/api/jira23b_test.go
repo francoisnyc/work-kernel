@@ -155,7 +155,7 @@ func TestLinkItems_ARoleWrittenLink(t *testing.T) {
 	// ana made the desk: it is still not hers to give a calendar or a policy.
 	_, err := linkItems("ana", other, "calendar", cal, "")
 	apiError(t, "ana links a calendar", err, connect.CodePermissionDenied, "LINK_NOT_WRITABLE")
-	_, err = as("ana").UnlinkItems(testCtx(t), connect.NewRequest(&kernelv1.UnlinkItemsRequest{Name: desk, LinkType: "calendar", Target: cal}))
+	_, err = as("ana").UnlinkItems(testCtx(t), connect.NewRequest(&kernelv1.UnlinkItemsRequest{Name: desk, RequestId: newID(), LinkType: "calendar", Target: cal}))
 	apiError(t, "ana unlinks the desk's calendar", err, connect.CodePermissionDenied, "LINK_NOT_WRITABLE")
 	if n := countEvents(t, other); n != 1 {
 		t.Errorf("the refused link left %d events on the desk, want its create only", n)

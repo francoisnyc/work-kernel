@@ -315,6 +315,7 @@ func TestIncident_AGoalKeepsWhatItStartedWith(t *testing.T) {
 	w := newSLAWorld(t)
 	inc, _, res := w.started(t, "P2", nil)
 	before := w.fields(t, res)
+	seqBefore := itemSeqOf(t, res)
 	// The priority changes, the policy changes, the desk gets another
 	// calendar: the running goal is as it was (recomputing is Later).
 	if _, err := w.k.Update(testCtx(t), itemservice.UpdateRequest{IdempotencyKey: newKey(), Principal: w.sam, ItemID: inc,
@@ -332,8 +333,8 @@ func TestIncident_AGoalKeepsWhatItStartedWith(t *testing.T) {
 	if after := w.fields(t, res); fmt.Sprint(after) != fmt.Sprint(before) {
 		t.Errorf("the running goal changed:\n got %v\nwant %v", after, before)
 	}
-	if itemSeqOf(t, res) != 1 {
-		t.Errorf("the goal has %d events, want its create only", itemSeqOf(t, res))
+	if n := itemSeqOf(t, res); n != seqBefore {
+		t.Errorf("the goal went from item_seq %d to %d: nothing may write it", seqBefore, n)
 	}
 }
 
@@ -663,6 +664,7 @@ func TestHookInput_ContainerOffer_IsReadWhenTheHookRuns(t *testing.T) {
 	w := newSLAWorld(t)
 	inc, _, res := w.started(t, "P1", map[string]any{"f_assignee": w.sam.Actor})
 	w.breach(t, res)
+	goalSeq, incSeq := itemSeqOf(t, res), itemSeqOf(t, inc)
 	in, err := w.breachInput(t, res)
 	if err != nil || len(in) != 1 || in["container:breach_contact"] != w.sam.Actor {
 		t.Fatalf("the breach hook's input = %v, %v; want only container:breach_contact = %s", in, err, w.sam.Actor)
@@ -676,8 +678,11 @@ func TestHookInput_ContainerOffer_IsReadWhenTheHookRuns(t *testing.T) {
 		t.Errorf("after the reassignment = %v, %v; want %s", in, err, w.eve.Actor)
 	}
 	// Reading the offer wrote nothing, on the goal or on the incident.
-	if n := itemSeqOf(t, res); n != 2 {
-		t.Errorf("the goal is at item_seq %d, want 2 (create, breach mark)", n)
+	if n := itemSeqOf(t, res); n != goalSeq {
+		t.Errorf("the goal went from item_seq %d to %d by reading the offer", goalSeq, n)
+	}
+	if n := itemSeqOf(t, inc); n != incSeq+1 {
+		t.Errorf("the incident went from item_seq %d to %d; want one more, the reassignment", incSeq, n)
 	}
 }
 
