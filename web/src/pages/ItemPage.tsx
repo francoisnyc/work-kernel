@@ -9,7 +9,7 @@ import { ItemEventKind, LinkDirection, type Item, type ItemEvent, type ItemRef, 
 import { linkWrite } from "../model/links";
 import { emptySearch } from "../model/search";
 import { incomingLinkTypes, itemId, shortId } from "../model/typeinfo";
-import { onlySetOps } from "../model/values";
+import { formKey, onlySetOps } from "../model/values";
 import { ItemForm } from "../ui/ItemForm";
 import { ItemList, categoryName } from "../ui/ItemList";
 import { LinksPanel } from "../ui/LinksPanel";
@@ -109,11 +109,14 @@ export function ItemPage({ id }: { id: string }): ReactElement {
       <section aria-labelledby="h-fields">
         <h2 id="h-fields">Fields</h2>
         <ItemForm
-          // A new form when the Item changed: its values and what is frozen.
-          key={`${item.etag}/${item.state}`}
+          // A new form when what it shows changed: its values and what is
+          // frozen. Not the etag alone, which a kernel-written field
+          // leaves as it is.
+          key={formKey(item)}
           type={type}
           item={item}
           principals={session.principals}
+          roles={session.user.roles}
           submitLabel="Save"
           onSubmit={async (fields) => {
             // With the etag: the user edited what they were shown. Except

@@ -8,6 +8,7 @@
 // would be refused FIELD_NOT_WRITABLE.
 import { describe, expect, test } from "vitest";
 import { item, itemName, leaveBalance, story2, story3 } from "../test/fixtures";
+import { fieldAccess } from "./typeinfo";
 import { formKey, formValues, patchFields } from "./values";
 
 describe("patchFields never sends a field the caller cannot write", () => {
@@ -77,5 +78,25 @@ describe("formKey", () => {
     const a = shown({ f_summary: "Log in", f_resolution: "fixed" });
     const b = shown({ f_resolution: "fixed", f_summary: "Log in" });
     expect(formKey(a)).toBe(formKey(b));
+  });
+});
+
+// Phase B review, point 2: when the acting user's roles are known and none
+// of them is one the field is reserved to, the form does not offer the
+// field for editing, and says which role writes it.
+describe("fieldAccess with the acting user's roles", () => {
+  test("a role the user holds: editable, as when the roles are not known", () => {
+    expect(fieldAccess(leaveBalance, "f_allowance", "open", ["hr_admin"])).toEqual({ mode: "editable", roles: ["hr_admin"] });
+    expect(fieldAccess(leaveBalance, "f_allowance", "open")).toEqual({ mode: "editable", roles: ["hr_admin"] });
+  });
+
+  test("a role the user lacks: reserved, naming the role", () => {
+    expect(fieldAccess(leaveBalance, "f_allowance", "open", [])).toEqual({ mode: "reserved", roles: ["hr_admin"] });
+    expect(fieldAccess(leaveBalance, "f_allowance", "open", ["approver"])).toEqual({ mode: "reserved", roles: ["hr_admin"] });
+  });
+
+  test("a field anyone writes, and one only the kernel writes, do not depend on the roles", () => {
+    expect(fieldAccess(story2, "f_summary", "todo", [])).toEqual({ mode: "editable", roles: [] });
+    expect(fieldAccess(leaveBalance, "f_used", "open", ["hr_admin"])).toEqual({ mode: "kernel", roles: [] });
   });
 });

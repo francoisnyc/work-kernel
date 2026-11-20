@@ -22,6 +22,7 @@ export type FieldInputProps = {
 function hintOf(access: FieldAccess, state: string | undefined): string {
   if (access.mode === "kernel") return "written by the kernel";
   if (access.mode === "frozen") return `frozen in state ${state ?? ""}`;
+  if (access.mode === "reserved") return `written by role ${access.roles.join(", ")} only`;
   if (access.roles.length > 0) return `written by role ${access.roles.join(", ")}`;
   return "";
 }

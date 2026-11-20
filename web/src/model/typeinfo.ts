@@ -38,14 +38,32 @@ export function latestVersions(types: Type[]): Type[] {
 //   editable: anyone who may write the Item; `roles` names the roles the
 //             field is reserved to, if any (shown as a hint: the server,
 //             not the UI, refuses a user without the role).
-export type FieldAccess = { mode: "editable" | "kernel" | "frozen"; roles: string[] };
+//   reserved: the field is reserved to `roles` and the acting user is
+//             known to hold none of them; read-only for them.
+export type FieldAccess = { mode: "editable" | "kernel" | "frozen" | "reserved"; roles: string[] };
 
-export function fieldAccess(type: Type, fieldId: string, state: string): FieldAccess {
+// userRoles: the roles the acting user holds; left out when not known.
+export function fieldAccess(type: Type, fieldId: string, state: string, userRoles?: readonly string[]): FieldAccess {
   const field = type.fields.find((f) => f.id === fieldId);
   if (field?.writableBy === FieldWriter.KERNEL) return { mode: "kernel", roles: [] };
   const frozen = type.states.find((s) => s.id === state)?.frozen.includes(fieldId);
   if (frozen) return { mode: "frozen", roles: [] };
-  return { mode: "editable", roles: [...(field?.writableByRoles ?? [])] };
+  const roles = [...(field?.writableByRoles ?? [])];
+  return { mode: mayWrite(field, userRoles) ? "editable" : "reserved", roles };
+}
+
+// Whether the acting user may write a field, as far as the Type says:
+// never a field only the kernel writes; a field reserved to roles only
+// when they hold one (or when their roles are not known: the server
+// decides). The state's frozen fields are another question (fieldAccess).
+export function mayWrite(
+  field: { writableBy: FieldWriter; writableByRoles: string[] } | undefined,
+  userRoles?: readonly string[],
+): boolean {
+  if (!field) return true;
+  if (field.writableBy === FieldWriter.KERNEL) return false;
+  if (field.writableByRoles.length === 0 || userRoles === undefined) return true;
+  return field.writableByRoles.some((r) => userRoles.includes(r));
 }
 
 // A transition leaving a state. systemOnly: its `allowed` names only

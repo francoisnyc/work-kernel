@@ -15,7 +15,7 @@ export type ItemFormProps = {
   principals?: string[];
   // The roles the acting user holds, when known: an edit's patch leaves
   // out a field reserved to roles they do not hold (values.patchFields).
-  // PHASE B STUB (the etag step): accepted and not used yet.
+  // Such a field is read-only for them (typeinfo.fieldAccess).
   roles?: readonly string[];
   // The submit button's text: Create, Save.
   submitLabel: string;
@@ -25,12 +25,12 @@ export type ItemFormProps = {
   onSubmit: (fields: JsonObject) => Promise<void>;
 };
 
-export function ItemForm({ type, item, principals, submitLabel, onSubmit }: ItemFormProps): ReactElement {
+export function ItemForm({ type, item, principals, roles, submitLabel, onSubmit }: ItemFormProps): ReactElement {
   const [form, setForm] = useState(() => formValues(type, item?.fields));
   const [error, setError] = useState<unknown>();
   const [busy, setBusy] = useState(false);
 
-  const fields = item ? patchFields(type, item.fields, form) : createFields(type, form);
+  const fields = item ? patchFields(type, item.fields, form, roles) : createFields(type, form);
   // An edit with nothing changed has nothing to save; a create may be empty.
   const nothingToSave = item !== undefined && Object.keys(fields).length === 0;
 
@@ -54,7 +54,7 @@ export function ItemForm({ type, item, principals, submitLabel, onSubmit }: Item
           key={f.id}
           field={f}
           value={form[f.id] ?? ""}
-          access={fieldAccess(type, f.id, item?.state ?? "")}
+          access={fieldAccess(type, f.id, item?.state ?? "", roles)}
           state={item?.state}
           principals={principals}
           onChange={(v) => setForm((old) => ({ ...old, [f.id]: v }))}

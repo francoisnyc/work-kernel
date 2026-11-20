@@ -46,3 +46,13 @@ test("a role-written field typed by a user without the role is not sent", async 
   await userEvent.click(screen.getByRole("button", { name: "Save" }));
   expect(onSubmit).toHaveBeenCalledWith({ f_allowance: "250" });
 });
+
+test("a role-written field is read-only for a user without the role, and says which role writes it", () => {
+  const balance = item({ name: itemName(43), type: leaveBalance.name, state: "open", etag: "c1", fields: { f_allowance: "25" } });
+  const { unmount } = render(<ItemForm type={leaveBalance} item={balance} roles={["approver"]} submitLabel="Save" onSubmit={ok()} />);
+  expect(screen.getByLabelText("f_allowance")).toBeDisabled();
+  expect(screen.getByLabelText("f_allowance")).toHaveAccessibleDescription(/written by role hr_admin only/i);
+  unmount();
+  render(<ItemForm type={leaveBalance} item={balance} roles={["hr_admin"]} submitLabel="Save" onSubmit={ok()} />);
+  expect(screen.getByLabelText("f_allowance")).toBeEnabled();
+});

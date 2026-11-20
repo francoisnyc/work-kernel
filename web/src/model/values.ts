@@ -2,6 +2,7 @@
 // (or a boolean for a bool); the wire holds plain JSON, an int as a string.
 import type { JsonObject, JsonValue } from "@bufbuild/protobuf";
 import { FieldType, type Field, type Type } from "../gen/kernel/v1/kernel_pb";
+import { mayWrite } from "./typeinfo";
 
 // What one input holds: text ("" is an empty input), a boolean for a bool,
 // or the members of a multi-value field (a set, kept sorted; [] is unset).
@@ -65,18 +66,16 @@ export function createFields(type: Type, form: FormValues): JsonObject {
 // holds: a field only the kernel writes, or one reserved to roles of which
 // the acting user holds none (`roles`: the roles the user holds; left out
 // when they are not known, and then the server decides).
-//
-// PHASE B STUB (the etag step): `roles` is accepted and not used yet.
 export function patchFields(
   type: Type,
   original: JsonObject | undefined,
   form: FormValues,
   roles?: readonly string[],
 ): JsonObject {
-  void roles;
   const before = formValues(type, original);
   const out: JsonObject = {};
   for (const f of type.fields) {
+    if (!mayWrite(f, roles)) continue;
     if (f.multiple) {
       const was = membersOf(before[f.id]);
       const now = membersOf(form[f.id]);
@@ -106,10 +105,11 @@ export function patchFields(
 // is frozen) whenever what it shows changed. The etag alone does not say
 // so: it changes only with what a caller could overwrite, and the form
 // also shows the fields only the kernel writes.
-//
-// PHASE B STUB (the etag step): still the key the Item page used.
+// The fields are read in the order of their IDs, so the order they arrive
+// in does not matter.
 export function formKey(item: { etag: string; state: string; fields?: JsonObject }): string {
-  return `${item.etag}/${item.state}`;
+  const fields = Object.entries(item.fields ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return `${item.etag}/${item.state}/${JSON.stringify(fields)}`;
 }
 
 // onlySetOps reports whether a patch changes nothing but multi-value
