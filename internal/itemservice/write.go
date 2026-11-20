@@ -133,6 +133,7 @@ type lockedItem struct {
 	State       string
 	Fields      map[string]any
 	ItemSeq     int64
+	ContentSeq  int64 // what the public etag is derived from (content.go)
 	// Who created it: set at create, never changed. `allowed` and `except`
 	// read them for creator.
 	CreatedBy, CreatedOnBehalfOf string
@@ -144,11 +145,11 @@ type lockedItem struct {
 func lockItem(ctx context.Context, tx pgx.Tx, ns string, id uuid.UUID) (lockedItem, error) {
 	var it lockedItem
 	err := tx.QueryRow(ctx,
-		`select type_id, type_version, container_id, scope_id, state, fields, item_seq,
+		`select type_id, type_version, container_id, scope_id, state, fields, item_seq, content_seq,
 		        created_by, coalesce(created_on_behalf_of, '')
 		 from items where id = $1 and namespace_id = $2 for update`,
 		id, ns,
-	).Scan(&it.TypeID, &it.TypeVersion, &it.ContainerID, &it.ScopeID, &it.State, &it.Fields, &it.ItemSeq,
+	).Scan(&it.TypeID, &it.TypeVersion, &it.ContainerID, &it.ScopeID, &it.State, &it.Fields, &it.ItemSeq, &it.ContentSeq,
 		&it.CreatedBy, &it.CreatedOnBehalfOf)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return lockedItem{}, ErrNotFound
@@ -205,18 +206,26 @@ func checkAttribution(a item.Attribution) error {
 }
 
 // checkOptions validates the optional parts shared by Update and Transition.
-func checkOptions(expectedItemSeq int64, a item.Attribution) error {
+func checkOptions(expectedItemSeq, expectedContentSeq int64, a item.Attribution) error {
 	if expectedItemSeq < 0 {
 		return fmt.Errorf("%w: expected item_seq cannot be negative", ErrInvalid)
+	}
+	if expectedContentSeq < 0 {
+		return fmt.Errorf("%w: expected content_seq cannot be negative", ErrInvalid)
 	}
 	return checkAttribution(a)
 }
 
-// checkExpectedSeq is the if-match. It runs under the row lock, so the
-// item_seq it compares cannot change before the write. Zero means "no check".
-func checkExpectedSeq(it lockedItem, expected int64) error {
+// checkExpectedSeq is the two if-matches: on item_seq (every event; the
+// kernel's own writers use it) and on content_seq (what a caller could
+// overwrite; the public etag). It runs under the row lock, so neither
+// counter can change before the write. Zero means "no check".
+func checkExpectedSeq(it lockedItem, expected, expectedContent int64) error {
 	if expected != 0 && expected != it.ItemSeq {
 		return fmt.Errorf("%w: expected item_seq %d, but the Item is at %d", ErrStale, expected, it.ItemSeq)
+	}
+	if expectedContent != 0 && expectedContent != it.ContentSeq {
+		return fmt.Errorf("%w: expected content_seq %d, but the Item is at %d", ErrStale, expectedContent, it.ContentSeq)
 	}
 	return nil
 }
@@ -224,12 +233,27 @@ func checkExpectedSeq(it lockedItem, expected int64) error {
 // appendEvent records one accepted operation: it inserts the event (which
 // takes its commit_seq), the values the event set, and, when ty has
 // listeners, the outbox row. The caller has already written the Item row at
-// itemSeq.
+// itemSeq. It also asks the etag rule (content.go) whether the event
+// changes something a caller could overwrite, and if so bumps the Item's
+// content_seq, here, so that no write path can forget to. The row is
+// locked by the caller, so content_seq has no gaps either.
 //
 // payload holds the operation's shape (states, field IDs) and never a field
 // value; values go to item_event_values so they can be erased later.
 func appendEvent(ctx context.Context, tx pgx.Tx, ty *typedef.Type, id uuid.UUID, itemSeq int64, p item.Principal,
 	a item.Attribution, op string, payload map[string]any, values map[string]any) (WriteResult, error) {
+
+	// Asked first: an event kind nobody decided is refused before anything
+	// is written.
+	changes, err := changesContent(ty, op, payload)
+	if err != nil {
+		return WriteResult{}, err
+	}
+	if changes {
+		if _, err := tx.Exec(ctx, `update items set content_seq = content_seq + 1 where id = $1`, id); err != nil {
+			return WriteResult{}, fmt.Errorf("bump content_seq: %w", err)
+		}
+	}
 
 	// nullif stores an empty Go string as null: "not set".
 	// commit_seq comes from the commit_seq sequence and xid from
@@ -245,7 +269,7 @@ func appendEvent(ctx context.Context, tx pgx.Tx, ty *typedef.Type, id uuid.UUID,
 	// write that waited for the lock started before the one it waited for.)
 	at, skew := writeTimeOf(tx)
 	var commitSeq int64
-	err := tx.QueryRow(ctx,
+	err = tx.QueryRow(ctx,
 		`insert into item_events (item_id, item_seq, actor, on_behalf_of,
 		                          agent_session, originating_hook, causation_id, correlation_id, hop,
 		                          op, payload, created_at)

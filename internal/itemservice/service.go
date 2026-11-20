@@ -35,8 +35,8 @@ var (
 	// it: an unknown or mistyped field, or an illegal transition. The error
 	// text carries the reason.
 	ErrRejected = errors.New("itemservice: rejected")
-	// ErrStale means the request named an expected item_seq and the Item has
-	// moved since. Unlike ErrRejected, the write may well be fine: the caller
+	// ErrStale means the request named an expected item_seq or content_seq
+	// and the Item has moved since. Unlike ErrRejected, the write may well be fine: the caller
 	// should re-read the Item and try again.
 	ErrStale = errors.New("itemservice: stale")
 	// ErrForbidden means the principal can see the Item and the move is legal,
@@ -390,7 +390,7 @@ func (k *Service) visibleItem(ctx context.Context, p item.Principal, id uuid.UUI
 		}
 	)
 	err = k.pool.QueryRow(ctx,
-		`select i.type_id, i.type_version, i.container_id, i.scope_id, i.state, i.fields, i.item_seq,
+		`select i.type_id, i.type_version, i.container_id, i.scope_id, i.state, i.fields, i.item_seq, i.content_seq,
 		        i.created_at, i.created_by, coalesce(i.created_on_behalf_of, ''),
 		        s.policy_scope_id, `+policy.VisibleCondition+`,
 		        h.id, h.hook, h.from_state, h.to_state, h.status, coalesce(h.reason, '')
@@ -400,7 +400,7 @@ func (k *Service) visibleItem(ctx context.Context, p item.Principal, id uuid.UUI
 		     where item_id = i.id order by requested_seq desc limit 1
 		 ) h on true
 		 where i.id = @id and i.namespace_id = @ns`, args,
-	).Scan(&it.TypeID, &it.TypeVersion, &it.ContainerID, &it.ScopeID, &it.State, &it.Fields, &it.ItemSeq,
+	).Scan(&it.TypeID, &it.TypeVersion, &it.ContainerID, &it.ScopeID, &it.State, &it.Fields, &it.ItemSeq, &it.ContentSeq,
 		&it.CreatedAt, &it.CreatedBy, &it.CreatedOnBehalfOf,
 		&policyScope, &visible, &hold.id, &hold.hook, &hold.from, &hold.to, &hold.status, &hold.reason)
 	if errors.Is(err, pgx.ErrNoRows) {

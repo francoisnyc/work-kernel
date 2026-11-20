@@ -92,7 +92,7 @@ func (k *Service) linkWrite(ctx context.Context, req LinkRequest, add bool) (Wri
 	if err := checkPublic(req.Principal, req.Attribution); err != nil {
 		return WriteResult{}, err
 	}
-	if err := checkOptions(req.ExpectedItemSeq, req.Attribution); err != nil {
+	if err := checkOptions(req.ExpectedItemSeq, req.ExpectedContentSeq, req.Attribution); err != nil {
 		return WriteResult{}, err
 	}
 	if req.LinkType == "" {
@@ -133,7 +133,7 @@ func (k *Service) linkWrite(ctx context.Context, req LinkRequest, add bool) (Wri
 		if err := checkInSession(ctx, tx, req.Principal, &req.TargetID); err != nil {
 			return WriteResult{}, err
 		}
-		if err := checkExpectedSeq(src, req.ExpectedItemSeq); err != nil {
+		if err := checkExpectedSeq(src, req.ExpectedItemSeq, req.ExpectedContentSeq); err != nil {
 			return WriteResult{}, err
 		}
 		ty, err := k.loadType(ctx, tx, src.TypeID, src.TypeVersion)

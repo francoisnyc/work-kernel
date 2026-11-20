@@ -71,7 +71,7 @@ func (k *Service) update(ctx context.Context, req UpdateRequest, kc *kernelCause
 	if err := checkPrincipal(req.Principal); err != nil {
 		return WriteResult{}, err
 	}
-	if err := checkOptions(req.ExpectedItemSeq, req.Attribution); err != nil {
+	if err := checkOptions(req.ExpectedItemSeq, req.ExpectedContentSeq, req.Attribution); err != nil {
 		return WriteResult{}, err
 	}
 	attr, err := sessionAttribution(req.Principal, req.Attribution)
@@ -110,7 +110,7 @@ func (k *Service) update(ctx context.Context, req UpdateRequest, kc *kernelCause
 		if err != nil {
 			return WriteResult{}, err
 		}
-		if err := checkExpectedSeq(it, req.ExpectedItemSeq); err != nil {
+		if err := checkExpectedSeq(it, req.ExpectedItemSeq, req.ExpectedContentSeq); err != nil {
 			return WriteResult{}, err
 		}
 		ty, err := k.loadType(ctx, tx, it.TypeID, it.TypeVersion)

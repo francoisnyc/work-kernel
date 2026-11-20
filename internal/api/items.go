@@ -77,7 +77,7 @@ func (s *server) view(ctx context.Context, p item.Principal, it item.Item) (*ker
 		Type:              typeName(p.Namespace, it.TypeID, it.TypeVersion),
 		State:             it.State,
 		Fields:            fields,
-		Etag:              strconv.FormatInt(it.ItemSeq, 10),
+		Etag:              etagOf(it),
 		Creator:           it.CreatedBy,
 		CreatorOnBehalfOf: it.CreatedOnBehalfOf,
 	}
@@ -151,14 +151,27 @@ func (s *server) itemType(ctx context.Context, p item.Principal, id uuid.UUID) (
 	return ty, nil
 }
 
+// The etag is the Item's content_seq, which moves only when something a
+// caller could overwrite changes (itemservice, content.go), written as
+// "c7": opaque to clients, and not a number, so that nobody takes it for
+// item_seq.
+const etagPrefix = "c"
+
+func etagOf(it item.Item) string {
+	return etagPrefix + strconv.FormatInt(it.ContentSeq, 10)
+}
+
 // etagSeq reads an etag: empty is no check (0). An etag this server never
-// made cannot match the Item: STALE, like any other mismatch.
+// made cannot match the Item: STALE, like any other mismatch. Only the
+// exact text etagOf writes is read: no sign, no leading zero, no spaces; a
+// decimal etag from before the etag step is STALE too.
 func etagSeq(etag string) (int64, *connect.Error) {
 	if etag == "" {
 		return 0, nil
 	}
-	n, err := strconv.ParseInt(etag, 10, 64)
-	if err != nil || n < 1 {
+	digits, ok := strings.CutPrefix(etag, etagPrefix)
+	n, err := strconv.ParseInt(digits, 10, 64)
+	if !ok || err != nil || n < 1 || etagPrefix+strconv.FormatInt(n, 10) != etag {
 		return 0, errorFor(fmt.Errorf("%w: etag %q does not match the Item", itemservice.ErrStale, etag), "")
 	}
 	return n, nil
@@ -271,7 +284,7 @@ func (s *server) UpdateItem(ctx context.Context, req *connect.Request[kernelv1.U
 	if err != nil {
 		return nil, err
 	}
-	if kreq.ExpectedItemSeq, cerr = etagSeq(m.Etag); cerr != nil {
+	if kreq.ExpectedContentSeq, cerr = etagSeq(m.Etag); cerr != nil {
 		return nil, cerr
 	}
 	if kreq.Fields, cerr = fieldsIn(ty, m.Fields); cerr != nil {
@@ -321,7 +334,7 @@ func (s *server) TransitionItem(ctx context.Context, req *connect.Request[kernel
 	kreq := itemservice.TransitionRequest{
 		IdempotencyKey: m.RequestId, Principal: p, ItemID: id, ToState: m.ToState, Wait: wait,
 	}
-	if kreq.ExpectedItemSeq, cerr = etagSeq(m.Etag); cerr != nil {
+	if kreq.ExpectedContentSeq, cerr = etagSeq(m.Etag); cerr != nil {
 		return nil, cerr
 	}
 	if kreq.Fields, cerr = fieldsIn(ty, m.Fields); cerr != nil {

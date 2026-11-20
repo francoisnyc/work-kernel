@@ -74,7 +74,7 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 	if err := checkPrincipal(req.Principal); err != nil {
 		return WriteResult{}, holdUnknown, err
 	}
-	if err := checkOptions(req.ExpectedItemSeq, req.Attribution); err != nil {
+	if err := checkOptions(req.ExpectedItemSeq, req.ExpectedContentSeq, req.Attribution); err != nil {
 		return WriteResult{}, holdUnknown, err
 	}
 	attr, err := sessionAttribution(req.Principal, req.Attribution)
@@ -107,7 +107,7 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		if err != nil {
 			return WriteResult{}, err
 		}
-		if err := checkExpectedSeq(it, req.ExpectedItemSeq); err != nil {
+		if err := checkExpectedSeq(it, req.ExpectedItemSeq, req.ExpectedContentSeq); err != nil {
 			return WriteResult{}, err
 		}
 		// A transition with fields puts content into the Item's scope; a

@@ -46,7 +46,7 @@ func linkIn(p item.Principal, m linkRequest) (itemservice.LinkRequest, *connect.
 	}
 	return itemservice.LinkRequest{
 		IdempotencyKey: m.GetRequestId(), Principal: p, SourceID: src, LinkType: m.GetLinkType(),
-		TargetID: dst, ExpectedItemSeq: seq,
+		TargetID: dst, ExpectedContentSeq: seq,
 	}, nil
 }
 
