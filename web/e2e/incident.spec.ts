@@ -85,3 +85,62 @@ test("sam reads an incident: its goals, its due instants, what the reactions did
   await expect(hers).toContainText(/restricted/i);
   await expect(hers).not.toContainText("in_progress");
 });
+
+// The etag step. ana's page of an incident is open; the kernel then writes
+// on the incident (sam answers, so the first-response goal completes: an
+// outcome record, and the due instant only the kernel writes is cleared).
+// Nothing ana could have overwritten changed: her save, made WITHOUT
+// refreshing, is accepted. (With the etag of Jira 2.3b it was refused
+// ABORTED / STALE: the README's "known limit".) A real conflict is still
+// refused: sam changes a field, and her next save without a refresh is
+// STALE.
+test("ana saves an incident's form after the kernel wrote on it, without refreshing; a real conflict is still STALE", async ({ page, baseURL }) => {
+  const seeded = await seedIncident(baseURL!, `${run}e`);
+  const ana = api(baseURL!, "ana");
+  const sam = api(baseURL!, "sam");
+  const name = seeded.incident.name;
+
+  await actAs(page, "ana");
+  await page.goto(`/#/items/${idOf(seeded.incident)}`);
+  const fields = page.getByRole("region", { name: "Fields" });
+  await expect(page.getByRole("heading", { name: `VPN down ${run}e` })).toBeVisible();
+  await expect(fields.getByText(/in (2|3) h \(wall clock\)/)).toBeVisible(); // the first-response due instant is shown
+  const opened = (await ana.getItem({ name })).item!;
+  const eventsBefore = (await ana.listItemEvents({ parent: name, pageSize: 100 })).events.length;
+
+  // sam answers in public: the kernel completes the first-response goal
+  // and clears its due instant on the incident.
+  await sam.createItem({
+    parent: "namespaces/acme",
+    requestId: randomUUID(),
+    type: "namespaces/acme/types/comment/versions/2",
+    container: name,
+    fields: { f_body: "Looking into it", f_public: true },
+  });
+  await expect
+    .poll(async () => (await ana.getItem({ name })).item?.fields?.f_due_first_response ?? null, { timeout: 30_000 })
+    .toBeNull();
+  const written = (await ana.getItem({ name })).item!;
+  const eventsAfter = (await ana.listItemEvents({ parent: name, pageSize: 100 })).events.length;
+  expect(eventsAfter).toBeGreaterThan(eventsBefore); // the kernel wrote on the incident
+  expect(written.etag).toBe(opened.etag); // and its etag did not move
+
+  // ana saves what she was shown, with no refresh.
+  await page.getByLabel("f_impact").selectOption("minor");
+  await fields.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByLabel("f_impact")).toHaveValue("minor");
+  await expect(fields.getByRole("alert")).toHaveCount(0);
+  await expect.poll(async () => (await ana.getItem({ name })).item?.fields?.f_impact).toBe("minor");
+  // The page reloaded after the save: the cleared due instant is gone.
+  await expect(page.getByLabel("f_due_first_response")).toHaveValue("");
+
+  // A real conflict: sam changes the impact; ana, who has not refreshed,
+  // saves another field.
+  await sam.updateItem({ name, requestId: randomUUID(), fields: { f_impact: "extensive" } });
+  await page.getByLabel("f_title").fill(`VPN down ${run}e, Paris`);
+  await fields.getByRole("button", { name: "Save" }).click();
+  const alert = fields.getByRole("alert");
+  await expect(alert).toContainText("ABORTED");
+  await expect(alert).toContainText("STALE");
+  expect((await ana.getItem({ name })).item?.fields?.f_title).toBe(`VPN down ${run}e`);
+});

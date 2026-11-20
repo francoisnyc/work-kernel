@@ -60,7 +60,20 @@ export function createFields(type: Type, form: FormValues): JsonObject {
 // is null (clears it). A changed set is sent as a set operation, the
 // members added and removed, never as a new list: someone else's members,
 // added meanwhile, stay. {} when nothing changed.
-export function patchFields(type: Type, original: JsonObject | undefined, form: FormValues): JsonObject {
+//
+// A save never includes a field the caller cannot write, whatever the form
+// holds: a field only the kernel writes, or one reserved to roles of which
+// the acting user holds none (`roles`: the roles the user holds; left out
+// when they are not known, and then the server decides).
+//
+// PHASE B STUB (the etag step): `roles` is accepted and not used yet.
+export function patchFields(
+  type: Type,
+  original: JsonObject | undefined,
+  form: FormValues,
+  roles?: readonly string[],
+): JsonObject {
+  void roles;
   const before = formValues(type, original);
   const out: JsonObject = {};
   for (const f of type.fields) {
@@ -87,6 +100,16 @@ export function patchFields(type: Type, original: JsonObject | undefined, form: 
     if (now !== before[f.id]) out[f.id] = now === "" ? null : now;
   }
   return out;
+}
+
+// formKey is the React key of an Item's form: a new form (its values, what
+// is frozen) whenever what it shows changed. The etag alone does not say
+// so: it changes only with what a caller could overwrite, and the form
+// also shows the fields only the kernel writes.
+//
+// PHASE B STUB (the etag step): still the key the Item page used.
+export function formKey(item: { etag: string; state: string; fields?: JsonObject }): string {
+  return `${item.etag}/${item.state}`;
 }
 
 // onlySetOps reports whether a patch changes nothing but multi-value

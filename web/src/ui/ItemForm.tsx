@@ -13,6 +13,10 @@ export type ItemFormProps = {
   // Absent on create.
   item?: Item;
   principals?: string[];
+  // The roles the acting user holds, when known: an edit's patch leaves
+  // out a field reserved to roles they do not hold (values.patchFields).
+  // PHASE B STUB (the etag step): accepted and not used yet.
+  roles?: readonly string[];
   // The submit button's text: Create, Save.
   submitLabel: string;
   // Create: the filled fields (values.createFields). Edit: the changed
