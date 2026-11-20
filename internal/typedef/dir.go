@@ -92,6 +92,11 @@ func ParseDir(dir string) ([]*Type, error) {
 	if err := CheckReactions(types); err != nil {
 		return nil, err
 	}
+	// So do offers: a host offers what the hooks of the Items it creates
+	// inside itself read from their container.
+	if err := CheckOffers(types); err != nil {
+		return nil, err
+	}
 	// cmp.Or picks the first non-zero comparison: by ID, then by version.
 	slices.SortFunc(types, func(a, b *Type) int {
 		return cmp.Or(strings.Compare(a.ID, b.ID), cmp.Compare(a.Version, b.Version))

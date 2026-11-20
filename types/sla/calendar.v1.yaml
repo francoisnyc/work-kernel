@@ -1,0 +1,25 @@
+# A working calendar (the `sla` package; see README.md): the hours of a
+# week, the days off and the time zone that working time is counted on.
+#
+#   - f_week: local intervals, one per line of the week ("mon 09:00-17:00";
+#     several a day and 00:00-24:00 are allowed; at most 21).
+#   - f_days_off: local dates on which nothing counts (at most 366).
+#   - f_zone: an IANA zone (Europe/Paris). Clock changes are followed.
+#   - An Item of this Type is a calendar or does not exist: the invariant
+#     refuses anything the kernel's calendar() cannot read.
+#   - Reactions of other Types may read the three fields (and only them):
+#     a goal copies its calendar when it is created and never reads this
+#     Item again, so changing a calendar changes no running goal.
+id: calendar
+version: 1
+
+fields:
+  - {id: f_name,     type: string}
+  - {id: f_week,     type: string, multiple: true, max: 21}
+  - {id: f_days_off, type: date,   multiple: true, max: 366}
+  - {id: f_zone,     type: string}
+
+readable_by_reactions: [f_week, f_days_off, f_zone]
+
+invariants:
+  - {id: calendar_invalid, rule: 'calendar(f_week, f_days_off, f_zone) != null'}

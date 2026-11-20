@@ -271,7 +271,7 @@ type Type struct {
 	// ReadableByReactions are the fields a create reaction of another Type
 	// may read from an Item of this Type (Jira part 2, step 3).
 	ReadableByReactions []string `yaml:"readable_by_reactions" json:"readable_by_reactions,omitempty"`
-	// Offers (Jira part 2, step 3b; a contract stub, not checked yet): what
+	// Offers (Jira part 2, step 3b; see jira23b.go): what
 	// this Type offers to the hooks of the Items contained in its Items,
 	// offer name -> one of its principal fields. A hook there reads
 	// container:<name> (ContainerOfferPrefix).
@@ -563,6 +563,9 @@ func (t *Type) check() error {
 	}
 
 	// Hooks last: they name states, transitions and fields checked above.
+	if err := t.checkOffers(); err != nil {
+		return err
+	}
 	if err := t.checkHooks(); err != nil {
 		return err
 	}
