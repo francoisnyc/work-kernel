@@ -357,6 +357,9 @@ message FieldFilter {
   google.protobuf.Value gte = 4;
   google.protobuf.Value lt = 5;
   google.protobuf.Value lte = 6;
+  // True: the field has no value (for a multi-value field, no member).
+  // Alone: not with eq or a bound.
+  bool empty = 7;
 }
 
 message ListItemsRequest {
@@ -458,6 +461,10 @@ message ItemEvent {
   // run, from 1.
   string timer = 32;
   int32 run = 33;
+  // UPDATED and TRANSITIONED: for each multi-value field the write changed
+  // with a set operation, what it asked for: {"f": {"add": [...],
+  // "remove": [...]}} (fields holds the resulting sets).
+  google.protobuf.Struct set_ops = 34;
 }
 
 enum ItemEventKind {
@@ -474,15 +481,21 @@ enum ItemEventKind {
   // A link from this Item was added or removed.
   ITEM_EVENT_KIND_LINK_ADDED = 8;
   ITEM_EVENT_KIND_LINK_REMOVED = 9;
-  // A link reaction could not be applied (an undo its target refused). It
-  // is not retried.
+  // A reaction could not be applied (its target refused an undo, a move
+  // or a create: reason holds the refusal's code). It is not retried.
   ITEM_EVENT_KIND_REACTION_FAILED = 10;
   // An action hook that writes no field ran (an email sent): hook names
   // it, and timer and run an acting timer's run. No field or state change.
   ITEM_EVENT_KIND_HOOK_RAN = 11;
-  // An undo committed on another Item: reaction names it. No field or
-  // state change; action hooks may run on it (the refund email).
+  // A reaction committed on another Item (an undo, a move, a create), or
+  // on this one (a move triggered by an Item created inside): reaction
+  // names it. No field or state change of its own; action hooks may run on
+  // an undo's (the refund email).
   ITEM_EVENT_KIND_REACTION_APPLIED = 12;
+  // A move or create reaction rightly did nothing for one trigger:
+  // reaction names it, reason says why (condition_false, not_by,
+  // not_in_from, no_target). No field or state change.
+  ITEM_EVENT_KIND_REACTION_SKIPPED = 13;
 }
 
 message StartAgentSessionRequest {
@@ -618,6 +631,40 @@ message Reaction {
   map<string, string> add = 6;
   // AFTER: the held reaction whose committed write this one reverses.
   string undoes = 7;
+  // What triggers it. UNSPECIFIED is ENTER (every reaction before Jira
+  // part 2, step 2).
+  ReactionTrigger trigger = 8;
+  // CREATED_INSIDE: the Types (namespaces/{ns}/types/{type}, no version)
+  // whose creation inside an Item of this Type triggers the reaction.
+  repeated string of_types = 9;
+  // A CEL condition, empty when there is none. ENTER: over this Item's
+  // fields. CREATED_INSIDE: over the created Item's fields, as child.<id>.
+  string when = 10;
+  // CREATED_INSIDE: who must have created the Item inside. "creator": this
+  // Item's creator (or an agent acting for them). Empty: anyone.
+  string by = 11;
+  // MOVE: the state the reaction moves its target into. The target is the
+  // Item link_type points to (ENTER), which must accept the move, or this
+  // Item itself (CREATED_INSIDE).
+  string to_state = 12;
+  // MOVE: the target is moved only from one of these states (empty: from
+  // any state it has such a transition from). In another state the
+  // reaction does nothing.
+  repeated string target_from_states = 13;
+  // CREATE: the Type version of the Item the reaction creates inside this
+  // Item, namespaces/{ns}/types/{type}/versions/{n}.
+  string create_type = 14;
+  // CREATE: field ID of the created Item -> a CEL expression over this
+  // Item's fields, plus cause.at (the time of the triggering event).
+  map<string, string> create_fields = 15;
+}
+
+enum ReactionTrigger {
+  REACTION_TRIGGER_UNSPECIFIED = 0;
+  // The Item enters a state.
+  REACTION_TRIGGER_ENTER = 1;
+  // An Item of one of of_types is created inside the Item.
+  REACTION_TRIGGER_CREATED_INSIDE = 2;
 }
 
 enum ReactionKind {
@@ -629,6 +676,15 @@ enum ReactionKind {
   REACTION_KIND_HELD = 1;
   // Runs after the transition has committed, without holding it.
   REACTION_KIND_AFTER = 2;
+  // Runs after its trigger has committed and moves its target into
+  // to_state, by the target's own transition rules (guards, required
+  // fields, invariants). One outcome is recorded on this Item per trigger:
+  // REACTION_APPLIED, REACTION_FAILED (the target refused) or
+  // REACTION_SKIPPED.
+  REACTION_KIND_MOVE = 3;
+  // Runs after its trigger has committed and creates an Item of
+  // create_type contained in this Item. Outcomes as for MOVE.
+  REACTION_KIND_CREATE = 4;
 }
 
 // A reaction another Type may run on Items of this Type.
@@ -637,6 +693,14 @@ message AcceptedReaction {
   string reaction = 1;
   // The fields it may write.
   repeated string fields = 2;
+  // The states it may move an Item of this Type into. For such a move the
+  // consent stands in for the transition's allowed and except lists; every
+  // other rule of the transition applies.
+  repeated string moves = 3;
+  // Set when it may create Items of this Type: creates_fields are the
+  // fields it may set on them.
+  bool creates = 4;
+  repeated string creates_fields = 5;
 }
 
 // A link type a Type declares: links from its Items to Items of the target
@@ -684,6 +748,15 @@ message Field {
   // through the public API (an agent and the user it acts for must both
   // hold one): PERMISSION_DENIED / FIELD_NOT_WRITABLE otherwise.
   repeated string writable_by_roles = 5;
+  // The field holds a set of values of its type (string, enum, principal
+  // or date): unordered, no duplicates, returned sorted as a JSON array;
+  // an empty set is an unset field. A patch replaces the set (an array),
+  // clears it (null or []), or changes it: {"add": [...], "remove": [...]}.
+  // A filter's eq means "contains"; ranges and order_by are refused.
+  bool multiple = 6;
+  // Multi-value fields: the most members the set may have; 0 is no limit.
+  // More is FAILED_PRECONDITION / TOO_MANY_VALUES.
+  int32 max = 7;
 }
 
 // Who may write a field.
