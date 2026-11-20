@@ -209,20 +209,6 @@ func (k *Service) update(ctx context.Context, req UpdateRequest, kc *kernelCause
 			}
 		}
 
-		itemSeq := it.ItemSeq + 1
-		_, err = tx.Exec(ctx,
-			`update items set fields = $2, item_seq = $3, scope_id = $4, container_id = $5, updated_at = now()
-			 where id = $1`,
-			req.ItemID, merged, itemSeq, scopeID, container)
-		if err != nil {
-			return WriteResult{}, fmt.Errorf("update item: %w", err)
-		}
-		if remove != uuid.Nil {
-			if err := removeNode(ctx, tx, remove); err != nil {
-				return WriteResult{}, err
-			}
-		}
-
 		payload := map[string]any{"field_ids": sortedKeys(set)}
 		if len(cleared) > 0 {
 			payload["cleared_field_ids"] = sortedKeys(cleared)
@@ -243,7 +229,25 @@ func (k *Service) update(ctx context.Context, req UpdateRequest, kc *kernelCause
 			payload["container_to"] = req.Move.To
 		}
 		addSetOps(payload, setOps)
-		res, err := appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, attr, "update", payload, set)
+		bump, err := decideContent(ty, "update", payload)
+		if err != nil {
+			return WriteResult{}, err
+		}
+		itemSeq := it.ItemSeq + 1
+		_, err = tx.Exec(ctx,
+			`update items set fields = $2, item_seq = $3, content_seq = content_seq + $6, scope_id = $4, container_id = $5,
+			                  updated_at = now()
+			 where id = $1`,
+			req.ItemID, merged, itemSeq, scopeID, container, bump.n)
+		if err != nil {
+			return WriteResult{}, fmt.Errorf("update item: %w", err)
+		}
+		if remove != uuid.Nil {
+			if err := removeNode(ctx, tx, remove); err != nil {
+				return WriteResult{}, err
+			}
+		}
+		res, err := appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, attr, bump, payload, set)
 		if err != nil {
 			return WriteResult{}, err
 		}

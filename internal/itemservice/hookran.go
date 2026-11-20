@@ -86,16 +86,21 @@ func (in *Internal) HookRan(ctx context.Context, req HookRanRequest) (WriteResul
 			return WriteResult{}, err
 		}
 		// No field and no move: no hold or frozen field can refuse it.
-		itemSeq := it.ItemSeq + 1
-		if _, err := tx.Exec(ctx,
-			`update items set item_seq = $2, updated_at = now() where id = $1`, req.ItemID, itemSeq); err != nil {
-			return WriteResult{}, fmt.Errorf("update item: %w", err)
-		}
 		payload := map[string]any{"hook": h.ID}
 		if req.Timer != "" {
 			payload["timer"], payload["run"] = req.Timer, req.Run
 		}
-		return appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, req.Attribution, lifecycle.OpHookRan, payload, nil)
+		bump, err := decideContent(ty, lifecycle.OpHookRan, payload)
+		if err != nil {
+			return WriteResult{}, err
+		}
+		itemSeq := it.ItemSeq + 1
+		if _, err := tx.Exec(ctx,
+			`update items set item_seq = $2, content_seq = content_seq + $3, updated_at = now() where id = $1`,
+			req.ItemID, itemSeq, bump.n); err != nil {
+			return WriteResult{}, fmt.Errorf("update item: %w", err)
+		}
+		return appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, req.Attribution, bump, payload, nil)
 	})
 }
 
@@ -202,16 +207,20 @@ func (in *Internal) ReactionApplied(ctx context.Context, req ReactionAppliedRequ
 		if err != nil {
 			return WriteResult{}, err
 		}
-		itemSeq := it.ItemSeq + 1
-		if _, err := tx.Exec(ctx, `update items set item_seq = $2, updated_at = now() where id = $1`,
-			req.SourceID, itemSeq); err != nil {
-			return WriteResult{}, fmt.Errorf("update item: %w", err)
-		}
 		payload := map[string]any{
 			"reaction": typedef.ReactionKey(ty.ID, r.ID),
 			"target":   fmt.Sprintf("%s:%d", refund.ItemID, refund.ItemSeq),
 		}
-		return appendEvent(ctx, tx, ty, req.SourceID, itemSeq, recorded, req.Attribution, lifecycle.OpReactionApplied, payload, nil)
+		bump, err := decideContent(ty, lifecycle.OpReactionApplied, payload)
+		if err != nil {
+			return WriteResult{}, err
+		}
+		itemSeq := it.ItemSeq + 1
+		if _, err := tx.Exec(ctx, `update items set item_seq = $2, content_seq = content_seq + $3, updated_at = now() where id = $1`,
+			req.SourceID, itemSeq, bump.n); err != nil {
+			return WriteResult{}, fmt.Errorf("update item: %w", err)
+		}
+		return appendEvent(ctx, tx, ty, req.SourceID, itemSeq, recorded, req.Attribution, bump, payload, nil)
 	})
 }
 

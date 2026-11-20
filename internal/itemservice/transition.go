@@ -309,14 +309,6 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		}
 		kind = holdNone
 
-		itemSeq := it.ItemSeq + 1
-		_, err = tx.Exec(ctx,
-			`update items set state = $2, fields = $3, item_seq = $4, updated_at = now() where id = $1`,
-			req.ItemID, next.State, merged, itemSeq)
-		if err != nil {
-			return WriteResult{}, fmt.Errorf("update item: %w", err)
-		}
-
 		// A plain transition keeps its two-key payload; the field lists appear
 		// only when the request carried a patch.
 		payload := map[string]any{"from": it.State, "to": next.State}
@@ -325,10 +317,24 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		if hold != nil { // an escape: it cancels the hold, in the same event
 			payload["canceled_hold_id"] = hold.id.String()
 		}
+		bump, err := decideContent(ty, "transition", payload)
+		if err != nil {
+			return WriteResult{}, err
+		}
+		itemSeq := it.ItemSeq + 1
+		_, err = tx.Exec(ctx,
+			`update items set state = $2, fields = $3, item_seq = $4, content_seq = content_seq + $5, updated_at = now()
+			 where id = $1`,
+			req.ItemID, next.State, merged, itemSeq, bump.n)
+		if err != nil {
+			return WriteResult{}, fmt.Errorf("update item: %w", err)
+		}
+		// The links entering the state sets: they add to the payload what
+		// the rule does not read.
 		if err := applyResolutions(ctx, tx, nsOf(req.Principal), ty, req.ItemID, resolutions, payload); err != nil {
 			return WriteResult{}, err
 		}
-		res, err := appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, attr, "transition", payload, set)
+		res, err := appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, attr, bump, payload, set)
 		if err == nil {
 			err = storeSetOps(ctx, tx, req.ItemID, itemSeq, setOps)
 		}

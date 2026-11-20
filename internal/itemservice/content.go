@@ -64,6 +64,30 @@ func changesContent(ty *typedef.Type, op string, payload map[string]any) (bool, 
 	return decide(ty, payload), nil
 }
 
+// A contentBump is the rule's decision for one event: the event's kind and
+// what its write adds to the Item's content_seq (0 or 1). Only
+// decideContent makes one; appendEvent requires it.
+type contentBump struct {
+	op string
+	n  int64
+}
+
+// decideContent asks the rule for an event about to be written. The write
+// adds bump.n to content_seq in the same statement that writes item_seq,
+// then hands bump to appendEvent. payload must already name the fields the
+// event sets and clears, the readers change and the move.
+func decideContent(ty *typedef.Type, op string, payload map[string]any) (contentBump, error) {
+	changes, err := changesContent(ty, op, payload)
+	if err != nil {
+		return contentBump{}, err
+	}
+	bump := contentBump{op: op}
+	if changes {
+		bump.n = 1
+	}
+	return bump, nil
+}
+
 // DecidedOps returns every event kind the etag rule has a decision for,
 // sorted.
 func DecidedOps() []string {

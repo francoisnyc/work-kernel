@@ -418,16 +418,21 @@ func (in *Internal) ReactSet(ctx context.Context, req ReactionRunRequest) (React
 		if err := checkInvariants(ty, merged); err != nil {
 			return WriteResult{}, err
 		}
-		itemSeq := it.ItemSeq + 1
-		if _, err := tx.Exec(ctx, `update items set fields = $2, item_seq = $3, updated_at = now() where id = $1`,
-			target, merged, itemSeq); err != nil {
-			return WriteResult{}, fmt.Errorf("update item: %w", err)
-		}
 		payload := map[string]any{"field_ids": sortedKeys(set)}
 		if len(cleared) > 0 {
 			payload["cleared_field_ids"] = sortedKeys(cleared)
 		}
-		return appendEvent(ctx, tx, ty, target, itemSeq, tg.recorded(), attr, "update", payload, set)
+		bump, err := decideContent(ty, "update", payload)
+		if err != nil {
+			return WriteResult{}, err
+		}
+		itemSeq := it.ItemSeq + 1
+		if _, err := tx.Exec(ctx,
+			`update items set fields = $2, item_seq = $3, content_seq = content_seq + $4, updated_at = now() where id = $1`,
+			target, merged, itemSeq, bump.n); err != nil {
+			return WriteResult{}, fmt.Errorf("update item: %w", err)
+		}
+		return appendEvent(ctx, tx, ty, target, itemSeq, tg.recorded(), attr, bump, payload, set)
 	})
 	if err != nil {
 		if reason, refused := refusal(err); refused {
@@ -645,16 +650,21 @@ func (in *Internal) ActAt(ctx context.Context, req ActAtRequest) (ActAtResult, e
 		if recorded.OnBehalfOf = onBehalfOf; onBehalfOf == "" && item.IsKind(actor, item.KindUser) {
 			recorded.OnBehalfOf = actor
 		}
-		itemSeq := it.ItemSeq + 1
-		if _, err := tx.Exec(ctx, `update items set fields = $2, item_seq = $3, updated_at = now() where id = $1`,
-			req.ItemID, merged, itemSeq); err != nil {
-			return WriteResult{}, fmt.Errorf("update item: %w", err)
-		}
 		payload := map[string]any{"field_ids": sortedKeys(set2), "timer": timer.ID}
 		if len(cleared) > 0 {
 			payload["cleared_field_ids"] = sortedKeys(cleared)
 		}
-		return appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, attr, "update", payload, set2)
+		bump, err := decideContent(ty, "update", payload)
+		if err != nil {
+			return WriteResult{}, err
+		}
+		itemSeq := it.ItemSeq + 1
+		if _, err := tx.Exec(ctx,
+			`update items set fields = $2, item_seq = $3, content_seq = content_seq + $4, updated_at = now() where id = $1`,
+			req.ItemID, merged, itemSeq, bump.n); err != nil {
+			return WriteResult{}, fmt.Errorf("update item: %w", err)
+		}
+		return appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, attr, bump, payload, set2)
 	})
 	switch {
 	case errors.Is(err, errNothingToWrite):

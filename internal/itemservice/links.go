@@ -196,14 +196,18 @@ func (k *Service) linkWrite(ctx context.Context, req LinkRequest, add bool) (Wri
 			}
 		}
 
-		itemSeq := src.ItemSeq + 1
-		if _, err := tx.Exec(ctx, `update items set item_seq = $2, updated_at = now() where id = $1`,
-			req.SourceID, itemSeq); err != nil {
-			return WriteResult{}, fmt.Errorf("update item: %w", err)
-		}
 		// The shape only: the link's name and the target's opaque ID.
 		payload := map[string]any{"link_type": lt.Name, "target": req.TargetID.String()}
-		return appendEvent(ctx, tx, ty, req.SourceID, itemSeq, recorded, attr, op, payload, nil)
+		bump, err := decideContent(ty, op, payload)
+		if err != nil {
+			return WriteResult{}, err
+		}
+		itemSeq := src.ItemSeq + 1
+		if _, err := tx.Exec(ctx, `update items set item_seq = $2, content_seq = content_seq + $3, updated_at = now() where id = $1`,
+			req.SourceID, itemSeq, bump.n); err != nil {
+			return WriteResult{}, fmt.Errorf("update item: %w", err)
+		}
+		return appendEvent(ctx, tx, ty, req.SourceID, itemSeq, recorded, attr, bump, payload, nil)
 	})
 }
 

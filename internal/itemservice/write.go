@@ -233,26 +233,23 @@ func checkExpectedSeq(it lockedItem, expected, expectedContent int64) error {
 // appendEvent records one accepted operation: it inserts the event (which
 // takes its commit_seq), the values the event set, and, when ty has
 // listeners, the outbox row. The caller has already written the Item row at
-// itemSeq. It also asks the etag rule (content.go) whether the event
-// changes something a caller could overwrite, and if so bumps the Item's
-// content_seq, here, so that no write path can forget to. The row is
-// locked by the caller, so content_seq has no gaps either.
+// itemSeq, in ONE statement that also added bump.n to content_seq
+// (decideContent, content.go): appendEvent takes the etag rule's decision
+// in place of the event's kind, so no write path can record an event
+// without having asked the rule. It does not write the Item row itself: a
+// second UPDATE of a row in one transaction makes Postgres re-check the
+// row's foreign keys, which waits on the container's row lock
+// (docs/design.md, "Writes").
 //
 // payload holds the operation's shape (states, field IDs) and never a field
 // value; values go to item_event_values so they can be erased later.
 func appendEvent(ctx context.Context, tx pgx.Tx, ty *typedef.Type, id uuid.UUID, itemSeq int64, p item.Principal,
-	a item.Attribution, op string, payload map[string]any, values map[string]any) (WriteResult, error) {
+	a item.Attribution, bump contentBump, payload map[string]any, values map[string]any) (WriteResult, error) {
 
-	// Asked first: an event kind nobody decided is refused before anything
-	// is written.
-	changes, err := changesContent(ty, op, payload)
-	if err != nil {
-		return WriteResult{}, err
-	}
-	if changes {
-		if _, err := tx.Exec(ctx, `update items set content_seq = content_seq + 1 where id = $1`, id); err != nil {
-			return WriteResult{}, fmt.Errorf("bump content_seq: %w", err)
-		}
+	// The zero value is no decision: only decideContent makes one.
+	op := bump.op
+	if op == "" {
+		return WriteResult{}, errors.New("itemservice: appendEvent without an etag decision (decideContent)")
 	}
 
 	// nullif stores an empty Go string as null: "not set".
@@ -269,7 +266,7 @@ func appendEvent(ctx context.Context, tx pgx.Tx, ty *typedef.Type, id uuid.UUID,
 	// write that waited for the lock started before the one it waited for.)
 	at, skew := writeTimeOf(tx)
 	var commitSeq int64
-	err = tx.QueryRow(ctx,
+	err := tx.QueryRow(ctx,
 		`insert into item_events (item_id, item_seq, actor, on_behalf_of,
 		                          agent_session, originating_hook, causation_id, correlation_id, hop,
 		                          op, payload, created_at)

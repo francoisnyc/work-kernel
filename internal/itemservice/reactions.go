@@ -311,14 +311,19 @@ func (k *Service) applyAdd(ctx context.Context, tx pgx.Tx, id uuid.UUID, tgt loc
 	if err := checkInvariants(ty, merged); err != nil {
 		return WriteResult{}, err
 	}
-	itemSeq := tgt.ItemSeq + 1
-	if _, err := tx.Exec(ctx, `update items set fields = $2, item_seq = $3, updated_at = now() where id = $1`,
-		id, merged, itemSeq); err != nil {
-		return WriteResult{}, fmt.Errorf("update item: %w", err)
-	}
 	payload := map[string]any{"field_ids": ids, "added_field_ids": ids}
 	maps.Copy(payload, extra)
-	res, err := appendEvent(ctx, tx, ty, id, itemSeq, recorded, attr, "update", payload, set)
+	bump, err := decideContent(ty, "update", payload)
+	if err != nil {
+		return WriteResult{}, err
+	}
+	itemSeq := tgt.ItemSeq + 1
+	if _, err := tx.Exec(ctx,
+		`update items set fields = $2, item_seq = $3, content_seq = content_seq + $4, updated_at = now() where id = $1`,
+		id, merged, itemSeq, bump.n); err != nil {
+		return WriteResult{}, fmt.Errorf("update item: %w", err)
+	}
+	res, err := appendEvent(ctx, tx, ty, id, itemSeq, recorded, attr, bump, payload, set)
 	if err != nil {
 		return WriteResult{}, err
 	}
@@ -544,13 +549,17 @@ func (in *Internal) ReactionFailed(ctx context.Context, req ReactionFailedReques
 		if _, ok := ty.Reaction(kc.reactionID); !ok {
 			return WriteResult{}, fmt.Errorf("%w: %s v%d declares no reaction %s", ErrInvalid, ty.ID, ty.Version, kc.reactionID)
 		}
+		payload := map[string]any{"reaction": typedef.ReactionKey(ty.ID, kc.reactionID), "reason": req.Reason}
+		bump, err := decideContent(ty, lifecycle.OpReactionFailed, payload)
+		if err != nil {
+			return WriteResult{}, err
+		}
 		itemSeq := it.ItemSeq + 1
-		if _, err := tx.Exec(ctx, `update items set item_seq = $2, updated_at = now() where id = $1`,
-			req.SourceID, itemSeq); err != nil {
+		if _, err := tx.Exec(ctx, `update items set item_seq = $2, content_seq = content_seq + $3, updated_at = now() where id = $1`,
+			req.SourceID, itemSeq, bump.n); err != nil {
 			return WriteResult{}, fmt.Errorf("update item: %w", err)
 		}
-		payload := map[string]any{"reaction": typedef.ReactionKey(ty.ID, kc.reactionID), "reason": req.Reason}
-		return appendEvent(ctx, tx, ty, req.SourceID, itemSeq, recorded, req.Attribution, lifecycle.OpReactionFailed, payload, nil)
+		return appendEvent(ctx, tx, ty, req.SourceID, itemSeq, recorded, req.Attribution, bump, payload, nil)
 	})
 }
 

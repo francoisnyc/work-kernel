@@ -264,15 +264,33 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 		if err != nil {
 			return WriteResult{}, err
 		}
+		// The payload records which fields were set, never their values:
+		// values may hold personal data, and events are permanent.
+		payload := map[string]any{
+			"type_id":      ty.ID,
+			"type_version": ty.Version,
+			"state":        ty.InitialState,
+			"field_ids":    sortedKeys(fields),
+		}
+		if req.ContainerID != nil {
+			payload["container_id"] = req.ContainerID
+		}
+		if req.Narrow != nil {
+			payload["readers"] = readers // opaque IDs, sorted
+		}
+		bump, err := decideContent(ty, "create", payload)
+		if err != nil {
+			return WriteResult{}, err
+		}
 		// A row inserted in this transaction is locked until commit, so no
 		// separate SELECT ... FOR UPDATE is needed for create.
 		const itemSeq = 1
 		_, err = tx.Exec(ctx,
 			`insert into items (id, namespace_id, type_id, type_version, container_id, scope_id, state, fields, item_seq,
-			                    created_at, created_by, created_on_behalf_of)
-			 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $12, $10, nullif($11, ''))`,
+			                    content_seq, created_at, created_by, created_on_behalf_of)
+			 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $13, $12, $10, nullif($11, ''))`,
 			id, ns, ty.ID, ty.Version, req.ContainerID, scopeID, ty.InitialState, fields, itemSeq,
-			req.Principal.Actor, req.Principal.OnBehalfOf, at)
+			req.Principal.Actor, req.Principal.OnBehalfOf, at, bump.n)
 		if err != nil {
 			return WriteResult{}, fmt.Errorf("insert item: %w", err)
 		}
@@ -288,21 +306,7 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 			}
 		}
 
-		// The payload records which fields were set, never their values:
-		// values may hold personal data, and events are permanent.
-		payload := map[string]any{
-			"type_id":      ty.ID,
-			"type_version": ty.Version,
-			"state":        ty.InitialState,
-			"field_ids":    sortedKeys(fields),
-		}
-		if req.ContainerID != nil {
-			payload["container_id"] = req.ContainerID
-		}
-		if req.Narrow != nil {
-			payload["readers"] = readers // opaque IDs, sorted
-		}
-		res, err := appendEvent(ctx, tx, ty, id, itemSeq, req.Principal, attr, "create", payload, fields)
+		res, err := appendEvent(ctx, tx, ty, id, itemSeq, req.Principal, attr, bump, payload, fields)
 		if err != nil {
 			return WriteResult{}, err
 		}
