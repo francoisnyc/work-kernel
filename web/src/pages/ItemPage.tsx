@@ -9,6 +9,7 @@ import { ItemEventKind, LinkDirection, type Item, type ItemEvent, type ItemRef, 
 import { linkWrite } from "../model/links";
 import { emptySearch } from "../model/search";
 import { incomingLinkTypes, itemId, shortId } from "../model/typeinfo";
+import { onlySetOps } from "../model/values";
 import { ItemForm } from "../ui/ItemForm";
 import { ItemList, categoryName } from "../ui/ItemList";
 import { LinksPanel } from "../ui/LinksPanel";
@@ -108,8 +109,11 @@ export function ItemPage({ id }: { id: string }): ReactElement {
           principals={session.principals}
           submitLabel="Save"
           onSubmit={async (fields) => {
-            // With the etag: the user edited what they were shown.
-            const res = await session.api.updateItem({ name, requestId: crypto.randomUUID(), etag: item.etag, fields });
+            // With the etag: the user edited what they were shown. Except
+            // a save that only adds to or removes from sets: those merge
+            // with anyone else's change, so they need no etag.
+            const etag = onlySetOps(type, fields) ? "" : item.etag;
+            const res = await session.api.updateItem({ name, requestId: crypto.randomUUID(), etag, fields });
             session.wrote(res.commitSeq);
             refresh();
           }}

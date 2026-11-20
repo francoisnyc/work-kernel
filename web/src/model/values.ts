@@ -89,6 +89,14 @@ export function patchFields(type: Type, original: JsonObject | undefined, form: 
   return out;
 }
 
+// onlySetOps reports whether a patch changes nothing but multi-value
+// fields: every entry is a set operation. Such a save merges with other
+// people's changes, so it is sent without an etag.
+export function onlySetOps(type: Type, patch: JsonObject): boolean {
+  const ids = Object.keys(patch);
+  return ids.length > 0 && ids.every((id) => type.fields.some((f) => f.id === id && f.multiple));
+}
+
 // A field filter's value from the text typed: a bool field takes true or
 // false, everything else the text (an int as a string, "me" for a
 // principal).
