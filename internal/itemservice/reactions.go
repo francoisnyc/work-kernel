@@ -45,9 +45,15 @@ const (
 // remove a link of a type only the kernel writes (writable_by: kernel).
 type LinkNotWritableError struct {
 	LinkType string
+	// Roles, when set, are the roles whose holders write the link (Jira
+	// part 2, step 3b); empty for a link only the kernel sets.
+	Roles []string
 }
 
 func (e *LinkNotWritableError) Error() string {
+	if len(e.Roles) > 0 {
+		return fmt.Sprintf("%v: links %s are set by holders of a role only", ErrForbidden, e.LinkType)
+	}
 	return fmt.Sprintf("%v: links %s are set by the kernel only", ErrForbidden, e.LinkType)
 }
 func (e *LinkNotWritableError) Unwrap() error { return ErrForbidden }

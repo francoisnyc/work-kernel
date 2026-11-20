@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/francoisnyc/work-kernel/internal/item"
+	"github.com/francoisnyc/work-kernel/internal/lifecycle"
 	"github.com/francoisnyc/work-kernel/internal/policy"
 )
 
@@ -90,9 +91,9 @@ type Event struct {
 	// Reaction: reaction_failed's reaction (<type>:<id>); Reason its code.
 	// Also reaction_applied's.
 	Reaction string
-	// ReactionTarget (Jira part 2, step 3b; a contract stub, not filled
-	// yet): the Item a reaction record names, through visibility; nil when
-	// it names none.
+	// ReactionTarget (Jira part 2, step 3b): the Item a reaction's outcome
+	// record names (the Item it wrote, created or was refused by), through
+	// visibility; nil when the record names none.
 	ReactionTarget *ItemRef
 	// Timer and Run: hook_ran and hook_failed of an acting timer's run
 	// (Step 2, part 3).
@@ -211,8 +212,9 @@ type eventPayload struct {
 	ContainerFrom  json.RawMessage `json:"container_from"`
 	ContainerTo    json.RawMessage `json:"container_to"`
 	LinkType       string          `json:"link_type"`
-	// target: a link's target (an Item ID), or reaction_applied's target
-	// event (<item>:<seq>), which history does not show.
+	// target: a link's target (an Item ID); a reaction record's target (an
+	// Item ID, or an undo's target event <item>:<seq>, whose seq history
+	// does not show).
 	Target string `json:"target"`
 	// A transition that set a kernel-resolved link; a reaction's write.
 	ResolvedTarget *uuid.UUID `json:"link_target"`
@@ -306,10 +308,26 @@ func (e Event) withPayload(ctx context.Context, payload, values, deltas []byte, 
 	}
 
 	var linkTarget *uuid.UUID
-	if id, err := uuid.Parse(pl.Target); err == nil {
-		linkTarget = &id
-	}
 	var err error
+	switch e.Op {
+	case lifecycle.OpReactionApplied, lifecycle.OpReactionFailed, lifecycle.OpReactionSkipped:
+		// A reaction's outcome record names the Item the reaction wrote,
+		// created or was refused by: an Item ID, or (an undo's record) the
+		// event it wrote, <item>:<seq>. Through visibility, like every
+		// other Item an event names; the seq is not shown.
+		idPart, _, _ := strings.Cut(pl.Target, ":")
+		if id, perr := uuid.Parse(idPart); perr == nil {
+			ref, rerr := refs.ref(ctx, id)
+			if rerr != nil {
+				return e, rerr
+			}
+			e.ReactionTarget = ref
+		}
+	default:
+		if id, perr := uuid.Parse(pl.Target); perr == nil {
+			linkTarget = &id
+		}
+	}
 	if pl.ContainerID != nil {
 		if e.Container, err = refs.ref(ctx, *pl.ContainerID); err != nil {
 			return e, err

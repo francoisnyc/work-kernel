@@ -86,7 +86,7 @@ func typeOut(ns string, t *typedef.Type) *kernelv1.Type {
 	}
 	for _, l := range t.Links {
 		lt := &kernelv1.LinkType{Name: l.Name, Inverse: l.Inverse, MaxOne: l.SourceSingle(), InverseMaxOne: l.TargetSingle(),
-			WritableBy: fieldWriters[l.WritableBy]}
+			WritableBy: fieldWriters[l.WritableBy], WritableByRoles: l.WritableByRoles}
 		if r := l.Resolve; r != nil {
 			lt.Resolve = &kernelv1.LinkResolve{OnEnter: r.OnEnter, Field: r.Field, Equals: r.Equals, State: r.State}
 		}
@@ -144,6 +144,10 @@ func typeOut(ns string, t *typedef.Type) *kernelv1.Type {
 			Sets: acc.Sets})
 	}
 	out.ReadableByReactions = t.ReadableByReactions
+	// Offers, by name: a map has no order of its own.
+	for _, name := range slices.Sorted(maps.Keys(t.Offers)) {
+		out.Offers = append(out.Offers, &kernelv1.Offer{Name: name, Field: t.Offers[name]})
+	}
 	return out
 }
 

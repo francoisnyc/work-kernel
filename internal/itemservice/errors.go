@@ -148,8 +148,7 @@ func (e *HeldError) Unwrap() error { return ErrHeld }
 // ErrRejected, ErrStale or ErrInvalid.
 var ErrNotYet = errors.New("not yet")
 
-// ErrNoRecipient (Jira part 2, step 3b; a contract stub, returned by
-// nothing yet) answers HookInput for a hook that reads an offer of its
+// ErrNoRecipient (Jira part 2, step 3b) answers HookInput for a hook that reads an offer of its
 // container (container:<offer>) when there is nobody to tell: no
 // container, no such offer, the offered field unset, or a principal who
 // cannot see the container. The hook then fails with ReasonNoRecipient.

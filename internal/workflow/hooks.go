@@ -65,6 +65,9 @@ func (a *Activities) run(ctx context.Context, c hookCall, key string) (hooks.Res
 	values, err := a.Items.Internal().HookInput(ctx, itemservice.HookInputRequest{
 		Principal: c.principal, ItemID: c.id, Attribution: c.attr,
 	})
+	if errors.Is(err, itemservice.ErrNoRecipient) {
+		return hooks.Result{}, err // RunAction's to record: an answer, not a failure to retry
+	}
 	if err != nil {
 		return hooks.Result{}, kernelError(err)
 	}
@@ -144,6 +147,21 @@ func (a *Activities) RunAction(ctx context.Context, in HookInput) error {
 		return err
 	}
 	res, err := a.run(ctx, c, in.IdempotencyKey)
+	if errors.Is(err, itemservice.ErrNoRecipient) {
+		// The hook reads an offer of its Item's container and there is
+		// nobody to tell (Jira part 2, step 3b): nothing is sent, and the
+		// Item says so once, under the hook's own key, which is thereby
+		// used up: nothing is retried, and nobody is told after the fact.
+		// The activity succeeds: the workflow has nothing to give up on.
+		_, err = a.Items.Internal().HookFailed(ctx, itemservice.HookFailedRequest{
+			IdempotencyKey: in.IdempotencyKey, Principal: c.principal, ItemID: c.id,
+			Reason: itemservice.ReasonNoRecipient, Timer: in.Timer, Run: in.Run, Attribution: c.attr,
+		})
+		if errors.Is(err, itemservice.ErrIdempotencyKeyReuse) {
+			return nil // the hook already ran for this key
+		}
+		return kernelError(err)
+	}
 	if err != nil {
 		return err
 	}

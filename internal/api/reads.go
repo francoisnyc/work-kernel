@@ -326,5 +326,6 @@ func eventOut(ns, item string, ty *typedef.Type, e itemservice.Event) (*kernelv1
 	}
 	out.Container, out.ContainerFrom, out.ContainerTo = ref(e.Container), ref(e.ContainerFrom), ref(e.ContainerTo)
 	out.LinkType, out.LinkTarget, out.LinkReplaced = e.LinkType, ref(e.LinkTarget), ref(e.LinkReplaced)
+	out.ReactionTarget = ref(e.ReactionTarget)
 	return out, nil
 }

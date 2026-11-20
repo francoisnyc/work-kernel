@@ -488,6 +488,15 @@ func (in *Internal) HookInput(ctx context.Context, req HookInputRequest) (map[st
 	}
 	out := map[string]any{}
 	for _, id := range h.Reads {
+		// container:<offer>: the container's to say, read as it is now.
+		if name, ok := typedef.OfferOf(id); ok {
+			who, err := k.offered(ctx, req.ItemID, name)
+			if err != nil {
+				return nil, err
+			}
+			out[id] = who
+			continue
+		}
 		if typedef.IsAttribute(id) {
 			if v := attrs[id]; v != "" {
 				out[id] = v
