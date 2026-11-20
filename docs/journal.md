@@ -2231,6 +2231,31 @@ one-second policy and waits) and called the internal door itself
 activities). The second was found only by the full rerun, after the PR was open. A count of an Item's
 events is a brittle assertion wherever reactions record their outcomes on it.
 
+**A flaky step 3a test, found by CI on this PR and fixed in it.**
+`TestE2E_Step3_AStoppedWorker_ComputesTheSameElapsedAndDue` failed once in CI ("not within 15s: the same
+instant on the job") and passed on the re-run. *Cause, from the failed run's log:* the test stopped the
+worker the moment the meter was paused. At 17:23:56 the meter's workflow scheduled its own `hide`
+reaction (`RunAfterReaction`, activity 34) and the worker stopped in that same second. The log has no
+"Activity error" line for it (a reported failure logs one, as another test's did at 17:23:52) and no
+completion: the attempt was handed out and never answered. The worker came back at 17:23:58, the meter
+resumed (LoadActingInstants, a new timer), and its `show` reaction, queued behind the unanswered `hide`,
+never ran before the test gave up at 17:24:13. An attempt nobody answers is retried only when its
+**StartToClose timeout (30 s)** runs out, plus the retry policy's first interval (1 s): 31 s, against a
+wait of 15 s. It is a test race, not a reaction that never resumes: nothing in the log contradicts it,
+and the new test below reproduces exactly that and sees the reaction complete at 31 s. *Fix (approved):*
+the test waits for the job's `f_due` to clear (the `hide` done) before it stops the worker again.
+*New test,* for what the old timing probed by accident:
+`TestE2E_Step3_AWorkerStoppedMidReaction_TheReactionCompletesOnce_WithinItsTimeout`. A worker with a
+connection of its own holds a reaction's activity in flight (the row it needs is locked); the connection
+is cut, then the worker stopped, as a crash would; a new worker starts. The reaction completes **exactly
+once** (one move, one record) with the times computed from the cause, and within a bound derived from
+the activity's own options: **StartToCloseTimeout 30 s + InitialInterval 1 s (+ 5 s to hand the retry
+over) = 36 s**; measured 31 s, three runs in three. (A worker that is merely stopped in-process reports
+the cancelled attempt and is retried after 1 s: the first version of the test measured 2.1 s and proved
+nothing, hence the cut connection.) So after a worker crash, whatever a reaction or a hook was doing
+comes about half a minute late: a goal's pause, the due instant on its host, a breach notice. Never the
+computed times. Under a minute, so not in Later.
+
 **Not verified here:** the images' build stages (module download fails inside the build container: the
 stack ran from host-built binaries on the real distroless and nginx bases, with a throwaway override)
 and the pinned Playwright's own browser (the tests ran on this container's Chromium). CI's `scenario` job

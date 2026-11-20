@@ -30,6 +30,10 @@ const temporalImage = "temporalio/temporal:1.10.0" // keep in step with docker-c
 // tc is the client shared by every real-server test in this package.
 var tc client.Client
 
+// temporalHostPort is the test server's address, for a test that needs a
+// connection of its own (one it can cut, as a crash would).
+var temporalHostPort string
+
 func TestMain(m *testing.M) {
 	os.Exit(runTests(m))
 }
@@ -58,6 +62,7 @@ func runTests(m *testing.M) int {
 	}
 	// The port opens a moment before the default namespace is ready, so retry.
 	for attempt := 0; ; attempt++ {
+		temporalHostPort = hostPort
 		tc, err = client.Dial(client.Options{HostPort: hostPort})
 		if err == nil {
 			break

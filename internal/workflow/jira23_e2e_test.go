@@ -422,6 +422,19 @@ func TestE2E_Step3_AStoppedWorker_ComputesTheSameElapsedAndDue(t *testing.T) {
 		t.Errorf("the meter's pause is stamped %v after the job's event; want at least the 2 s the worker was down", d)
 	}
 
+	// Before the worker stops again, wait for the meter's own reaction to
+	// its pause (hide: the job's f_due is cleared). The meter is "paused"
+	// as soon as the job's reaction has moved it, and its hide reaction is
+	// then still running: a worker stopped at that moment can take the
+	// attempt down with it unanswered, and Temporal only retries it when
+	// its StartToClose timeout (30 s) runs out, with the show reaction
+	// this test ends on queued behind it. That is 31 s, against the 15 s
+	// waited below: the test failed that way once in CI (PR #33). What it
+	// was probing by accident has its own test, with the bound asserted:
+	// TestE2E_Step3_AWorkerStoppedMidReaction_TheReactionCompletesOnce_WithinItsTimeout.
+	eventually(t, 15*time.Second, "the job's f_due cleared by the meter's pause", func() bool { return s.field(job, "f_due") == nil })
+	s.waitDelivered(main)
+
 	s.stopWorker()
 	back := s.move(job, "working")
 	staysFor(t, 2*time.Second, "paused while the worker is down", s.stateIs(main, "paused"))
