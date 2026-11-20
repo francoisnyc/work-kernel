@@ -54,7 +54,6 @@ func slaMode(ctx context.Context) error {
 		}
 	}
 	k := itemservice.New(pool)
-	late := itemservice.NewWithOptions(pool, itemservice.Options{ClockSkew: 48 * time.Hour})
 	admin := item.Principal{Actor: "user:admin", Namespace: "default"}
 	me := item.Principal{Actor: "user:me", Namespace: "default"}
 	if _, err := plain.Exec(ctx, `insert into principal_roles (namespace_id, principal, role) values ('default', $1, 'sla_admin')`, admin.Actor); err != nil {
@@ -75,8 +74,24 @@ func slaMode(ctx context.Context) error {
 		return err
 	}
 	// desk makes a desk on a calendar with n days off.
-	desk := func(daysOff int) (uuid.UUID, error) {
+	// A second policy, of one second for everything, on a calendar that is
+	// always open: its goals are past their instants a moment after they
+	// start, so they can be marked breached on the service's own clock.
+	fast := map[string]any{"f_name": "one second"}
+	for _, p := range []string{"p1", "p2", "p3", "p4"} {
+		fast["f_first_response_s_"+p], fast["f_resolution_s_"+p] = 1, 1
+	}
+	fastID, err := mk(admin, "sla_policy", nil, fast)
+	if err != nil {
+		return err
+	}
+	always := []any{"mon 00:00-24:00", "tue 00:00-24:00", "wed 00:00-24:00", "thu 00:00-24:00", "fri 00:00-24:00", "sat 00:00-24:00", "sun 00:00-24:00"}
+	desk := func(daysOff int, quick bool) (uuid.UUID, error) {
 		cal := map[string]any{"f_name": fmt.Sprintf("%d days off", daysOff), "f_week": week, "f_zone": "Europe/Paris"}
+		pol := policyID
+		if quick {
+			cal["f_week"], cal["f_zone"], pol = always, "UTC", fastID
+		}
 		if daysOff > 0 {
 			var days []any
 			for i := range daysOff {
@@ -92,7 +107,7 @@ func slaMode(ctx context.Context) error {
 		if err != nil {
 			return uuid.Nil, err
 		}
-		for link, target := range map[string]uuid.UUID{"calendar": calID, "sla_policy": policyID} {
+		for link, target := range map[string]uuid.UUID{"calendar": calID, "sla_policy": pol} {
 			if _, err := k.Link(ctx, itemservice.LinkRequest{IdempotencyKey: key(), Principal: admin, SourceID: d, LinkType: link, TargetID: target}); err != nil {
 				return uuid.Nil, err
 			}
@@ -140,7 +155,7 @@ func slaMode(ctx context.Context) error {
 	fmt.Println("| Calendar | fields (bytes) | whole row (bytes) | the goal's create event values (bytes) |")
 	fmt.Println("| --- | --- | --- | --- |")
 	for _, n := range []int{0, 10, 366} {
-		d, err := desk(n)
+		d, err := desk(n, false)
 		if err != nil {
 			return err
 		}
@@ -161,21 +176,28 @@ func slaMode(ctx context.Context) error {
 
 	// --- the plans ---
 	const incidents = 5000
-	d, err := desk(10)
+	d, err := desk(10, false)
+	if err != nil {
+		return err
+	}
+	quick, err := desk(0, true)
 	if err != nil {
 		return err
 	}
 	breached := 0
+	late := make([]uuid.UUID, incidents) // the resolution goals to mark
 	if _, _, err := timeAll(incidents, 8, func(i int) error {
-		inc, goal, err := incident(d, i)
+		in := d
+		if i%10 == 0 { // a tenth will breach, and stay running
+			in = quick
+		}
+		inc, goal, err := incident(in, i)
 		if err != nil {
 			return err
 		}
 		switch {
-		case i%10 == 0: // a tenth breached, still running
-			due, _ := typedef.ParseDateTime(mustFields(ctx, k, admin, goal)["f_due_at"])
-			_, err = late.Internal().ActAt(ctx, itemservice.ActAtRequest{ItemID: goal, Timer: running.Acting[0].ID, EnteredSeq: 1, Instant: due,
-				Attribution: item.Attribution{Hop: 2}})
+		case i%10 == 0:
+			late[i] = goal
 		case i%10 < 5: // four in ten resolved: no due instant shown any more
 			if _, err = k.Transition(ctx, itemservice.TransitionRequest{IdempotencyKey: key(), Principal: me, ItemID: inc, ToState: "in_progress"}); err != nil {
 				return err
@@ -207,10 +229,21 @@ func slaMode(ctx context.Context) error {
 	}); err != nil {
 		return fmt.Errorf("seed incidents: %w", err)
 	}
+	time.Sleep(2 * time.Second) // past the one-second targets
+	for _, goal := range late {
+		if goal == uuid.Nil {
+			continue
+		}
+		due, _ := typedef.ParseDateTime(mustFields(ctx, k, admin, goal)["f_due_at"])
+		if _, err := k.Internal().ActAt(ctx, itemservice.ActAtRequest{ItemID: goal, Timer: running.Acting[0].ID, EnteredSeq: 1, Instant: due,
+			Attribution: item.Attribution{Hop: 2}}); err != nil {
+			return fmt.Errorf("mark a goal breached: %w", err)
+		}
+	}
 	if err := plain.QueryRow(ctx, `select count(*) from items where type_id = 'sla_goal' and fields ? 'f_breached_at'`).Scan(&breached); err != nil {
 		return err
 	}
-	fmt.Printf("%d incidents in one desk, each with two goals (%d goals); a tenth breached and still running (%d goals marked), four in ten resolved.\n\n",
+	fmt.Printf("%d incidents in two desks, each with two goals (%d goals); a tenth breached and still running (%d goals marked), four in ten resolved.\n\n",
 		incidents, 2*incidents, breached)
 
 	now := time.Now().Add(6 * time.Hour).UTC().Format(typedef.DateTimeLayout)
