@@ -708,7 +708,7 @@ func TestCalendarFunctions_CompileWhereExpressionsAre(t *testing.T) {
 	mustParse(t, goodJob())
 	mustParse(t, hoursSrc)
 	// In an acting timer's sets and a set reaction's value.
-	mustParse(t, meter("{id: late, at: f_due_at, sets: {f_late_at: 'working_after(cause.at, 60, calendar(f_week, f_days_off, f_zone))'}}",
+	mustParse(t, meter("{id: late, at: f_due_at, sets: {f_late_at: 'working_after(cause.at, 60, calendar(f_week, f_days_off, f_zone))'}, hook: tell_late}",
 		"{id: show, kind: set, on: enter, state: running, target: container, set: {f_due: 'working_after(f_due_at, 1, calendar(f_week, f_days_off, f_zone))'}}",
 		meterAccepts))
 

@@ -383,7 +383,7 @@ func TestEnterReactions_CreationEntersTheInitialState(t *testing.T) {
 		t.Error("HasListeners = false")
 	}
 	// A Type with nothing on its initial state starts none, as before.
-	quiet := parseYAML(t, strings.ReplaceAll(strings.ReplaceAll(starterType, "state: open, type", "state: working, type"), "state: open, target", "state: working, target"))
+	quiet := parseYAML(t, strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(starterType, "state: open, type", "state: working, type"), "state: open, target", "state: working, target"), "state: open, from: [working]", "state: idle, from: [working]"))
 	if lifecycle.StartsWorkflow(quiet, lifecycle.Event{Op: "create", Entered: "open"}) {
 		t.Error("creating an Item whose initial state has no behavior starts a workflow")
 	}

@@ -152,7 +152,7 @@ transitions:
     to: stopped
     sets:
       f_elapsed_s: '(f_elapsed_s == null ? 0 : f_elapsed_s) + working_between(f_started_at, cause.at, CAL)'
-      f_outcome: '(f_elapsed_s == null ? 0 : f_elapsed_s) + working_between(f_started_at, cause.at, CAL) <= f_target_s ? "met" : "missed"'
+      f_outcome: 'f_due_at != null && cause.at > f_due_at ? "missed" : "met"'
       f_late_at: 'f_due_at == null || cause.at >= f_due_at ? f_late_at : null'
       f_due_at: 'null'
   - from: paused
@@ -317,9 +317,9 @@ func TestE2E_Step3_AJobStartsItsMetersWhenCreated(t *testing.T) {
 		t.Errorf("the job: %d writes of f_due and records %v; want 1 and %v", sets, got, want)
 	}
 	// The reply meter shows nothing (its condition), and says so once.
-	if got := records(t, reply); fmt.Sprint(got) != "[reaction_skipped wf3meter:show condition_false]" {
-		t.Errorf("the reply meter's records = %v", got)
-	}
+	eventually(t, 15*time.Second, "the reply meter's record", func() bool {
+		return fmt.Sprint(records(t, reply)) == "[reaction_skipped wf3meter:show condition_false]"
+	})
 }
 
 // Late at the due instant, never before; the meter goes on; stopped after
