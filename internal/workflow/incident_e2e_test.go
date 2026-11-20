@@ -293,7 +293,7 @@ func TestE2E_Incident_AnswerWaitResumeResolveReopen(t *testing.T) {
 	staysFor(t, 2*time.Second, "first response still running", s.is(first, "running"))
 	// sam's public answer stops first response: met, timed at the comment.
 	answer := s.comment(s.sam, inc, true)
-	eventually(t, 20*time.Second, "first response stopped", s.is(first, "stopped"))
+	eventually(t, 20*time.Second, "first response stopped", s.is(first, "completed"))
 	if s.f(first, "f_outcome") != "met" || s.f(first, "f_breached_at") != nil {
 		t.Errorf("first response: %v, breached %v; want met, never breached", s.f(first, "f_outcome"), s.f(first, "f_breached_at"))
 	}
@@ -340,7 +340,7 @@ func TestE2E_Incident_AnswerWaitResumeResolveReopen(t *testing.T) {
 
 	// Resolved: met. The incident shows nothing more.
 	s.act(s.sam, inc, "resolved", map[string]any{"f_resolution": "fixed"})
-	eventually(t, 20*time.Second, "resolution stopped", s.is(res, "stopped"))
+	eventually(t, 20*time.Second, "resolution stopped", s.is(res, "completed"))
 	if s.f(res, "f_outcome") != "met" {
 		t.Errorf("resolution: %v, want met", s.f(res, "f_outcome"))
 	}
@@ -362,7 +362,7 @@ func TestE2E_Incident_AnswerWaitResumeResolveReopen(t *testing.T) {
 	})
 	staysFor(t, 2*time.Second, "one first response goal, two resolution goals, the first cycle as it ended", func() bool {
 		st, _ := s.state(res)
-		return goalCount(t, inc, "first_response") == 1 && goalCount(t, inc, "resolution") == 2 && st == "stopped" &&
+		return goalCount(t, inc, "first_response") == 1 && goalCount(t, inc, "resolution") == 2 && st == "completed" &&
 			s.f(inc, "f_due_first_response") == nil
 	})
 	if got := s.told(res); len(got)+len(s.told(first))+len(s.told(second)) != 0 {
@@ -412,7 +412,7 @@ func TestE2E_Incident_Breach_TellsTheAssigneeOnce_ThenMissed(t *testing.T) {
 	// Resolved late: both goals missed, the marks kept.
 	s.act(s.sam, inc, "in_progress", nil)
 	s.act(s.sam, inc, "resolved", map[string]any{"f_resolution": "fixed"})
-	eventually(t, 20*time.Second, "both goals stopped", func() bool { return s.is(res, "stopped")() && s.is(first, "stopped")() })
+	eventually(t, 20*time.Second, "both goals stopped", func() bool { return s.is(res, "completed")() && s.is(first, "completed")() })
 	if s.f(res, "f_outcome") != "missed" || s.f(first, "f_outcome") != "missed" || s.f(res, "f_breached_at") != after(created, p1Resolution) {
 		t.Errorf("resolution %v, first response %v, mark %v; want both missed, the mark kept",
 			s.f(res, "f_outcome"), s.f(first, "f_outcome"), s.f(res, "f_breached_at"))

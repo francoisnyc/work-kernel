@@ -91,8 +91,12 @@ func TestSLAGoal_StoppedWhileRunning_OutcomeOnInstants(t *testing.T) {
 	}{
 		{"well before the due instant", "2026-11-23 11:00:00", 0, nil, "met", false},
 		{"a microsecond before", "2026-11-23 12:59:59", 999999 * time.Microsecond, nil, "met", false},
-		// Exactly at the instant is met: cause.at > f_due_at is false.
+		// Exactly at the instant is met: cause.at > f_due_at is false. And
+		// a met goal never carries a breach mark: the timer may already
+		// have written it at that same instant, and the stop clears it
+		// (cause.at <= f_due_at). The mail it sent is accepted.
 		{"exactly at the due instant", "2026-11-23 13:00:00", 0, nil, "met", false},
+		{"exactly at the due instant, the mark already written", "2026-11-23 13:00:00", 0, breached, "met", false},
 		{"a microsecond after, the timer not yet heard of", "2026-11-23 13:00:00", time.Microsecond, nil, "missed", false},
 		{"after, marked", "2026-11-23 15:00:00", 0, breached, "missed", true},
 		// A mark written by a timer that fired before this stop was heard
@@ -102,7 +106,7 @@ func TestSLAGoal_StoppedWhileRunning_OutcomeOnInstants(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			res, err := lifecycle.TransitionWith(slaGoal(t), "running",
-				lifecycle.Input{Fields: runningGoal(t, c.more), CauseAt: instant(t, c.at).Add(c.plus)}, "stopped")
+				lifecycle.Input{Fields: runningGoal(t, c.more), CauseAt: instant(t, c.at).Add(c.plus)}, "completed")
 			if err != nil {
 				t.Fatalf("stop at %s + %v: %v", c.at, c.plus, err)
 			}
@@ -113,6 +117,9 @@ func TestSLAGoal_StoppedWhileRunning_OutcomeOnInstants(t *testing.T) {
 			}
 			if _, marked := after["f_breached_at"]; marked != c.mark {
 				t.Errorf("f_breached_at after the stop = %v, want set: %v", after["f_breached_at"], c.mark)
+			}
+			if _, marked := after["f_breached_at"]; marked && after["f_outcome"] == "met" {
+				t.Errorf("a met goal carries a breach mark: %v", after["f_breached_at"])
 			}
 			if _, due := after["f_due_at"]; due {
 				t.Errorf("f_due_at = %v after the stop, want unset", after["f_due_at"])
@@ -129,7 +136,7 @@ func TestSLAGoal_StoppedWhilePaused_MissedIfBreached(t *testing.T) {
 	if _, due := paused["f_due_at"]; due || intOf(t, paused["f_elapsed_s"]) != 5400 {
 		t.Fatalf("paused in time: f_due_at %v, f_elapsed_s %v; want unset and 5400", paused["f_due_at"], paused["f_elapsed_s"])
 	}
-	if got := applied(paused, goalMove(t, "paused", "stopped", paused, "2026-11-30 09:00:00")); got["f_outcome"] != "met" {
+	if got := applied(paused, goalMove(t, "paused", "completed", paused, "2026-11-30 09:00:00")); got["f_outcome"] != "met" {
 		t.Errorf("stopped while paused, never breached, a week later: %v, want met", got["f_outcome"])
 	}
 
@@ -139,8 +146,18 @@ func TestSLAGoal_StoppedWhilePaused_MissedIfBreached(t *testing.T) {
 	if paused["f_breached_at"] != stored(t, "2026-11-23 13:00:00") {
 		t.Fatalf("paused after the breach: f_breached_at = %v, want kept", paused["f_breached_at"])
 	}
-	if got := applied(paused, goalMove(t, "paused", "stopped", paused, "2026-11-23 14:05:00")); got["f_outcome"] != "missed" {
+	if got := applied(paused, goalMove(t, "paused", "completed", paused, "2026-11-23 14:05:00")); got["f_outcome"] != "missed" {
 		t.Errorf("stopped while paused, breached before the pause: %v, want missed", got["f_outcome"])
+	}
+
+	// Paused exactly at the due instant, the mark already written: the
+	// pause was caused at or before the instant, so it clears the mark.
+	paused = applied(late, goalMove(t, "running", "paused", late, "2026-11-23 13:00:00"))
+	if _, marked := paused["f_breached_at"]; marked {
+		t.Errorf("a pause exactly at the due instant kept the mark: %v", paused["f_breached_at"])
+	}
+	if got := applied(paused, goalMove(t, "paused", "completed", paused, "2026-11-24 09:00:00")); got["f_outcome"] != "met" {
+		t.Errorf("completed while paused, paused exactly at the instant: %v, want met", got["f_outcome"])
 	}
 
 	// The race: the timer marked it, then a pause caused BEFORE the due
@@ -150,7 +167,7 @@ func TestSLAGoal_StoppedWhilePaused_MissedIfBreached(t *testing.T) {
 	if _, marked := paused["f_breached_at"]; marked {
 		t.Fatalf("a pause caused before the instant kept the mark: %v", paused["f_breached_at"])
 	}
-	if got := applied(paused, goalMove(t, "paused", "stopped", paused, "2026-11-24 09:00:00")); got["f_outcome"] != "met" {
+	if got := applied(paused, goalMove(t, "paused", "completed", paused, "2026-11-24 09:00:00")); got["f_outcome"] != "met" {
 		t.Errorf("stopped while paused after the correction: %v, want met", got["f_outcome"])
 	}
 }
@@ -196,7 +213,7 @@ func TestSLAGoal_Canceled_NoOutcome(t *testing.T) {
 		}
 	}
 	// Nothing leaves the two ends.
-	for _, mv := range [][2]string{{"stopped", "running"}, {"canceled", "running"}, {"stopped", "canceled"}} {
+	for _, mv := range [][2]string{{"completed", "running"}, {"canceled", "running"}, {"completed", "canceled"}} {
 		if _, err := lifecycle.TransitionWith(slaGoal(t), mv[0], lifecycle.Input{Fields: runningGoal(t, nil)}, mv[1]); err == nil {
 			t.Errorf("%s -> %s is allowed", mv[0], mv[1])
 		}

@@ -1341,7 +1341,7 @@ comment_in sam "$b3" false >/dev/null # nor does a private note
 sleep 2
 expect "first response after ana's comment and sam's private note" "$(ok ana item get "$fr3" | j .item.state)" "running"
 comment_in sam "$b3" true >/dev/null
-wait_until 30 "first response stopped by sam's public answer" state_is ana "$fr3" stopped
+wait_until 30 "first response stopped by sam's public answer" state_is ana "$fr3" completed
 expect "first response" "$(fld "$fr3" f_outcome)" "met"
 wait_until 30 "f_due_first_response unset" fld_is "$b3" f_due_first_response ""
 expect "resolution is still running, and shown" "$(ok ana item get "$res3" | j .item.state) $(fld "$b3" f_due_resolution)" \
@@ -1428,9 +1428,11 @@ expect "the incident's link, and the bug's from its end" \
 	"OUTGOING caused_by $cause / INCOMING causes $b1"
 expect "the linked bug's state, read from the bug" "$(ok sam item get "$cause" | j .item.state)" "todo"
 ok sam item transition "$b1" --to in_progress >/dev/null
+refuse sam "FAILED_PRECONDITION MISSING_FIELDS" item transition "$b1" --to resolved # resolving says how
 ok sam item transition "$b1" --to resolved --set f_resolution=fixed >/dev/null
-wait_until 30 "the P1's resolution goal stopped" state_is ana "$res1" stopped
-wait_until 30 "the P1's first response goal stopped" state_is ana "$fr1" stopped
+refuse sam "PERMISSION_DENIED NOT_ALLOWED" item transition "$b1" --to closed # the timer's only, 120 hours on
+wait_until 30 "the P1's resolution goal stopped" state_is ana "$res1" completed
+wait_until 30 "the P1's first response goal stopped" state_is ana "$fr1" completed
 expect "both goals, resolved after their instants" "$(fld "$fr1" f_outcome) $(fld "$res1" f_outcome)" "missed missed"
 expect "the marks are kept" "$(fld "$res1" f_breached_at)" "$due1"
 wait_until 30 "the resolved incident shows no due instant" fld_is "$b1" f_due_resolution ""
@@ -1449,7 +1451,7 @@ expect "HOOK_RAN on the breached goal" "$(ok lea item history "$res1" --page-siz
 
 step "B9: the P3 is resolved in time (met), then reopened: a second resolution goal, and only that"
 ok sam item transition "$b3" --to resolved --set f_resolution=fixed >/dev/null
-wait_until 30 "the P3's resolution goal stopped" state_is ana "$res3" stopped
+wait_until 30 "the P3's resolution goal stopped" state_is ana "$res3" completed
 expect "resolved in time" "$(fld "$res3" f_outcome) $(fld "$res3" f_breached_at)" "met "
 ok ana item transition "$b3" --to in_progress >/dev/null
 second_cycle() { [ "$(goals "$b3" resolution | wc -w | tr -d ' ')" = "2" ]; }
@@ -1457,7 +1459,7 @@ wait_until 30 "a second resolution goal" second_cycle
 res3b=$(goal "$b3" resolution)
 [ "$res3b" != "$res3" ] || fail "the current resolution goal is still the first cycle's"
 expect "the second cycle: a whole new target, running" "$(fld "$res3b" f_target_s) $(ok ana item get "$res3b" | j .item.state)" "28800 running"
-expect "the first cycle stays as it ended" "$(ok ana item get "$res3" | j .item.state) $(fld "$res3" f_outcome)" "stopped met"
+expect "the first cycle stays as it ended" "$(ok ana item get "$res3" | j .item.state) $(fld "$res3" f_outcome)" "completed met"
 expect "first response is measured once" "$(goals "$b3" first_response)" "$fr3"
 wait_until 30 "the incident shows the second cycle's due instant" fld_is "$b3" f_due_resolution "$(fld "$res3b" f_due_at)"
 

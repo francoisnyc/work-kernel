@@ -38,6 +38,7 @@ import (
 
 	"github.com/francoisnyc/work-kernel/internal/item"
 	"github.com/francoisnyc/work-kernel/internal/itemservice"
+	"github.com/francoisnyc/work-kernel/internal/lifecycle"
 	"github.com/francoisnyc/work-kernel/internal/typedef"
 )
 
@@ -414,13 +415,25 @@ func TestIncident_Resolved_StopsBothGoals_ReopenStartsANewResolutionGoalOnly(t *
 	w := newSLAWorld(t)
 	inc, first, res := w.started(t, "P1", nil)
 	w.move(t, w.sam, inc, "in_progress", nil)
+	// Resolving says how.
+	_, err := w.k.Transition(testCtx(t), itemservice.TransitionRequest{IdempotencyKey: newKey(), Principal: w.sam, ItemID: inc, ToState: "resolved"})
+	var rej *itemservice.RejectedError
+	if !errors.As(err, &rej) || rej.Code != string(lifecycle.MissingFields) || rej.Metadata["fields"] != "f_resolution" {
+		t.Errorf("resolved without a resolution: %v; want MISSING_FIELDS naming f_resolution", err)
+	}
 	resolved := w.move(t, w.sam, inc, "resolved", map[string]any{"f_resolution": "fixed"})
+	// Closing is the timer's only: not the assignee's, the requester's or the admin's.
+	for _, p := range []item.Principal{w.sam, w.ana, w.admin} {
+		if _, err := w.k.Transition(testCtx(t), itemservice.TransitionRequest{IdempotencyKey: newKey(), Principal: p, ItemID: inc, ToState: "closed"}); !errors.Is(err, itemservice.ErrForbidden) {
+			t.Errorf("%s closes the incident by hand: %v; want ErrForbidden", p.Actor, err)
+		}
+	}
 	out := w.reactMove(t, entered(inc, resolved, "sla_stop"))
 	if out.Outcome != itemservice.ReactionApplied || len(out.Each) != 2 {
 		t.Fatalf("sla_stop = %+v; want both goals stopped", out)
 	}
 	for _, g := range []uuid.UUID{first, res} {
-		if w.state(t, g) != "stopped" || w.fields(t, g)["f_outcome"] != "met" {
+		if w.state(t, g) != "completed" || w.fields(t, g)["f_outcome"] != "met" {
 			t.Errorf("goal %s: %s, outcome %v; want stopped, met", g, w.state(t, g), w.fields(t, g)["f_outcome"])
 		}
 		w.goalSets(t, g, itemSeqOf(t, g))
@@ -440,7 +453,7 @@ func TestIncident_Resolved_StopsBothGoals_ReopenStartsANewResolutionGoalOnly(t *
 		t.Errorf("the second cycle's goal = %v; want a whole new target from the reopening", g)
 	}
 	// The first cycle stays as history, as it ended.
-	if w.state(t, res) != "stopped" || w.fields(t, res)["f_outcome"] != "met" {
+	if w.state(t, res) != "completed" || w.fields(t, res)["f_outcome"] != "met" {
 		t.Errorf("the first cycle's goal changed: %s, %v", w.state(t, res), w.fields(t, res)["f_outcome"])
 	}
 	// The incident now contains three goals: one first response, two
@@ -543,7 +556,7 @@ func TestIncident_FirstResponse_StoppedBySomeoneElsesPublicComment(t *testing.T)
 		t.Fatalf("sam's public answer = %+v; want the first response goal stopped, and only it", out)
 	}
 	f := w.fields(t, first)
-	if w.state(t, first) != "stopped" || f["f_outcome"] != "met" || w.state(t, res) != "running" {
+	if w.state(t, first) != "completed" || f["f_outcome"] != "met" || w.state(t, res) != "running" {
 		t.Errorf("first response %s (%v), resolution %s; want stopped (met) and running", w.state(t, first), f["f_outcome"], w.state(t, res))
 	}
 	// Its time is the comment's: the answer was given when it was written.
@@ -639,7 +652,7 @@ func TestGoal_Breach_MarksTheInstant_AndGoesOn(t *testing.T) {
 		t.Fatalf("sla_stop: %v", err)
 	}
 	f = w.fields(t, res)
-	if w.state(t, res) != "stopped" || f["f_outcome"] != "missed" || f["f_breached_at"] != due {
+	if w.state(t, res) != "completed" || f["f_outcome"] != "missed" || f["f_breached_at"] != due {
 		t.Errorf("resolved an hour late: %s, %v; want stopped, missed, the mark kept", w.state(t, res), f)
 	}
 }

@@ -25,7 +25,7 @@ import (
 var (
 	slaCreates = []string{"sla_start_first_response", "sla_start_resolution", "sla_restart_resolution"}
 	slaMoves   = map[string]string{
-		"sla_pause": "paused", "sla_resume": "running", "sla_stop": "stopped", "sla_answered": "stopped", "sla_cancel": "canceled",
+		"sla_pause": "paused", "sla_resume": "running", "sla_stop": "completed", "sla_answered": "completed", "sla_cancel": "canceled",
 	}
 )
 
@@ -154,7 +154,7 @@ func TestSLAGoalV1(t *testing.T) {
 	if g.ID != "sla_goal" || g.Version != 1 || g.InitialState != "running" {
 		t.Fatalf("sla_goal = %s@%d starting in %q; want sla_goal@1 starting in running", g.ID, g.Version, g.InitialState)
 	}
-	for id, cat := range map[string]string{"running": "active", "paused": "waiting", "stopped": "done", "canceled": "canceled"} {
+	for id, cat := range map[string]string{"running": "active", "paused": "waiting", "completed": "done", "canceled": "canceled"} {
 		if s, ok := g.State(id); !ok || s.Category != cat {
 			t.Errorf("state %s = %+v (found %v), want category %s", id, s, ok, cat)
 		}
@@ -162,7 +162,7 @@ func TestSLAGoalV1(t *testing.T) {
 	if len(g.States) != 4 {
 		t.Errorf("sla_goal has %d states, want 4", len(g.States))
 	}
-	moves := [][2]string{{"running", "paused"}, {"paused", "running"}, {"running", "stopped"}, {"paused", "stopped"},
+	moves := [][2]string{{"running", "paused"}, {"paused", "running"}, {"running", "completed"}, {"paused", "completed"},
 		{"running", "canceled"}, {"paused", "canceled"}}
 	for _, mv := range moves {
 		if _, ok := g.Transition(mv[0], mv[1]); !ok {
@@ -270,7 +270,7 @@ func TestSLAGoalV1(t *testing.T) {
 	}
 	// Shown while running; unset on pause, stop and cancel, for each metric.
 	for _, metric := range []string{"first_response", "resolution"} {
-		for _, st := range []string{"running", "paused", "stopped", "canceled"} {
+		for _, st := range []string{"running", "paused", "completed", "canceled"} {
 			if !states[metric+" "+st] {
 				t.Errorf("no reaction writes f_due_%s on entering %s", metric, st)
 			}
@@ -330,6 +330,16 @@ func TestIncidentV1_Lifecycle(t *testing.T) {
 	}
 	if len(inc.Transitions) != len(moves) {
 		t.Errorf("incident has %d transitions, want %d", len(inc.Transitions), len(moves))
+	}
+	// Resolving says how: f_resolution is required, from either state.
+	for _, from := range []string{"in_progress", "waiting_for_customer"} {
+		if tr, _ := inc.Transition(from, "resolved"); !slices.Equal(tr.Required, []string{"f_resolution"}) {
+			t.Errorf("%s -> resolved requires %v, want [f_resolution]", from, tr.Required)
+		}
+	}
+	// Closing is the timer's only (closing by hand is Later).
+	if tr, _ := inc.Transition("resolved", "closed"); !slices.Equal(tr.Allowed, []string{"principal:system:timer"}) {
+		t.Errorf("resolved -> closed is allowed to %v, want the timer only", tr.Allowed)
 	}
 	// Closed by a timer, 120 hours after resolved.
 	res, _ := inc.State("resolved")
@@ -429,9 +439,9 @@ func TestIncidentV1_TheContractWithThePackage(t *testing.T) {
 		// Only resolution pauses, only in waiting_for_customer.
 		"sla_pause":  {state: "waiting_for_customer", childWhen: onlyResolution, to: "paused", targetFrom: []string{"running"}},
 		"sla_resume": {state: "in_progress", from: []string{"waiting_for_customer"}, childWhen: onlyResolution, to: "running", targetFrom: []string{"paused"}},
-		"sla_stop":   {state: "resolved", to: "stopped", targetFrom: []string{"running", "paused"}},
+		"sla_stop":   {state: "resolved", to: "completed", targetFrom: []string{"running", "paused"}},
 		"sla_cancel": {state: "canceled", to: "canceled", targetFrom: []string{"running", "paused"}},
-		"sla_answered": {createdSide: true, childWhen: `child.f_metric == "first_response"`, to: "stopped",
+		"sla_answered": {createdSide: true, childWhen: `child.f_metric == "first_response"`, to: "completed",
 			targetFrom: []string{"running"}},
 	}
 	for id, want := range moves {
