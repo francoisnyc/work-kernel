@@ -2,9 +2,10 @@
 #
 # Postgres, the Temporal dev server, a one-shot migration, the item service
 # (the public API), the relay, the worker, stub CRM/ERP/HR/email
-# connectors, and the web UI. Published, all on 127.0.0.1 only: the API
-# (8080) and the web UI (8090) (dev tokens are the only auth, and the web
-# container serves the dev-token file), the Temporal UI (8233, which shows
+# connectors, the web UI and the PoC apps. Published, all on 127.0.0.1
+# only: the API (8080), the web UI (8090) and the PoC apps (8091) (dev
+# tokens are the only auth, and the web and poc containers serve the
+# dev-token file), the Temporal UI (8233, which shows
 # workflow histories and can terminate and signal workflows) and, dev only,
 # the email stub's read-only port (8085) for the scenario;
 # compose.dev.yaml also publishes Postgres and Temporal's gRPC port, local
@@ -91,6 +92,32 @@ services:
       - ./dev-tokens.example.yaml:/usr/share/nginx/html/dev-tokens.yaml:ro
     ports:
       - "127.0.0.1:8090:8080" # the web UI: http://localhost:8090
+    depends_on:
+      itemservice: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  # The PoC apps (apps/poc): the tracker, the service desk and the customer
+  # portal, built on the public API like web/, which stays the admin view.
+  # Its build reads web/'s generated client and rank port, read-only, as
+  # two more build contexts. DEV ONLY parts, as for web: the build arg
+  # compiles the sign-in list in, and the dev-token file is mounted where
+  # nginx serves it, so the port hands out every dev token: it is
+  # published on 127.0.0.1 only.
+  poc:
+    build:
+      context: ./apps/poc
+      additional_contexts:
+        webgen: ./web/src/gen
+        webrank: ./web/src/rank
+      args: {VITE_DEV_USERS: "1"}
+    volumes:
+      - ./dev-tokens.example.yaml:/usr/share/nginx/html/dev-tokens.yaml:ro
+    ports:
+      - "127.0.0.1:8091:8080" # the PoC apps: http://localhost:8091
     depends_on:
       itemservice: {condition: service_healthy}
     healthcheck:

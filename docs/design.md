@@ -2464,9 +2464,122 @@ which serves it, and the picker is compiled in only by the stack's build
 stack publishes the web UI and the API on 127.0.0.1 only. Real sign-on
 replaces the picker as it replaces the API's interceptor.
 
+## PoC apps as built (2026-11-21)
+
+**PoC apps: a product-shaped client.** `apps/poc` is a third client of the
+public API, beside `pli` and the generic web UI: three apps whose screens
+know their Types, the way a product would. A service desk for agents
+(`desk@2`, `incident@2`, `reply@1`, `note@1`, `sla_goal@1`), a customer
+portal on the same Types, and a tracker for the PLAT Types (`space`,
+`story`, `bug`, `task` at any version, `sprint`, `epic`, `comment@2`). The
+generic UI stays as it is, the admin view. No kernel, proto or Type
+change, and no new call: everything it needed is a list of gaps below,
+each worked around in the app. It is not the real UI either (Out of scope).
+
+**What the apps know, and what they do not decide.** They know their
+Types' words: state names (a customer's own, "Received", "Waiting for
+you"), field and option names, move labels ("Start work", "Send to
+review"), urgency in plain words for the portal. They still read from
+`GetType` which moves exist, which fields a move requires (asked for in a
+dialog before the call) and which moves a customer may take (`allowed`
+naming `creator`); they evaluate no guard, `allowed` or invariant. A
+refusal is said in plain words chosen by its reason (a screen may add the
+sentence for a guard it knows: "An epic is done only when all its issues
+are done or canceled."), with the code, reason and metadata behind
+"Details". A drop on a board that the Type does not declare is refused in
+the app before any write: the only refusal the app makes, from the Type's
+declarations.
+
+**Service levels come from the goals.** The queue sorts by the due instant
+a goal copies onto its incident and shows a countdown on the wall clock;
+Breached is the goal's `f_breached_at`, Met or Missed its `f_outcome`, never
+worked out in the browser. The app adds one state: Overdue, between the due
+instant and the breach the goal records (the timer has not run yet). In the
+queue, Paused comes from the incident's state (waiting for the customer,
+with no resolution due instant shown): the queue reads no goal for it. The
+incident page and its timeline read every goal and its history.
+
+**A reply and a note are never confused.** The composer has two tabs; the
+tab changes the colour, the label, the hint ("kim will see this", "Only
+staff can see this"), the button and the Type written (`reply@1` or
+`note@1`). Notes are drawn amber with a lock in the conversation.
+
+**The portal is built on what a customer receives.** No etag (a customer
+transitions without one), `commit_seq` never read, `min_seq` never sent,
+filters on Types and categories only (never a field or link name, which
+the server refuses for a name the customer's version does not list). Its
+journey scans every API response kim receives: no note or `sla_goal` Item,
+no assignee or due-instant field, none of their values. Type definitions
+(`GetType`) are left out of the key and Type checks, as Types are readable
+by anyone; values are checked in every response. An Item's creator is part
+of what a customer sees: replies show "sam · Support".
+
+**The board.** Columns by state, rank order inside each. A drop inside a
+column is a rank move; across columns it is the transition first (with its
+required fields), then a rank write next to a neighbour, **only once the
+transition succeeded**: a refused move writes no rank. Ranks are web/'s
+port (`web/src/rank`, imported read-only, held to Go by the vectors)
+against the card's container, as `pli rank` does. The keyboard moves a card
+too (Space, the arrows, Space), announced in a live region.
+
+**Issue keys are a stand-in** until the kernel has its own (Later): the
+space's key and the **last** 8 characters of the Item's ID. An ID is a
+UUIDv7, whose first characters are a timestamp shared by every Item made in
+the same moment.
+
+**Serving and dev-only parts** are web/'s: a `poc` container (nginx, `/api`
+proxied to the item service) on 127.0.0.1:8091, the dev-token file mounted
+for the sign-in screen, the sign-in list compiled in only with
+`VITE_DEV_USERS=1` (CI checks a build without it holds no dev-user code).
+Light and dark colour tokens are held to WCAG AA by a test, and axe checks
+each journey's screens.
+
+### PoC apps as built: what the API lacked
+
+Each gap was worked around in the app, without a kernel change; what the
+workaround cost is the case for a call or a field later (journal, Later).
+
+1. **No "who am I", roles or display names.** People and roles come from the
+   dev-token file; a person is shown by their ID with an initials avatar.
+   *Cost:* the apps depend on a dev-only file for who may open the service
+   desk and whom to offer as an assignee; real sign-on must bring both.
+2. **Rollups come with `GetItem` only.** *Cost:* the epics list makes one
+   extra read per epic after listing them.
+3. **Search and list results carry no links.** *Cost:* a backlog row cannot
+   say its sprint or epic; the app reads each open sprint's issues with a
+   link search to know which issues they hold.
+4. **No search within a container, and no "has no link" filter.** *Cost:*
+   the backlog is the space's open issues minus those the open sprints hold,
+   worked out in the browser (a page can come back short); a word search
+   reads the whole namespace and drops other spaces' issues in the browser,
+   so its page can come back short too.
+5. **No container filter for the goals.** *Cost:* the queue's Breached state
+   is one more search per read, of every open breached goal the agent can
+   see, matched to the page's incidents by container; the incident page
+   reads its goals and one history per goal.
+6. **No `update_time` on an Item, and no sort by it.** *Cost:* no "recently
+   updated" order and no "last activity" column; only histories say when.
+7. **No issue keys.** *Cost:* a stand-in key from the Item's ID, which
+   nobody can type or search for.
+8. **No Watch.** *Cost:* each visible page reads again every 30 s (several
+   calls for an incident: the Item, its children, its history and one per
+   goal), and a change made elsewhere shows up to 30 s late.
+9. **`incident@2` has no description field.** *Cost:* a request is two
+   writes, the incident then its description as the requester's first
+   reply; if the second fails the request exists without it (the page asks
+   for it); and the reply leaves two `reaction_skipped` records staff can
+   see. A new incident version can add the field (Later).
+10. **Refusal messages are fixed and technical.** *Cost:* the app keeps its
+    own sentence per reason (18 of them) and per known guard; a reason it
+    does not know falls back to a generic sentence and the details.
+11. **No totals.** *Cost:* a view past one page says "50+", not a count.
+12. **Due instants are working time on a calendar the app does not read.**
+    *Cost:* countdowns are wall-clock time and must say so ("(wall clock)" in
+    a table's column header, on each value on a detail page).
+
 ## Out of scope for the spike
 
-The real UI (the generic web UI above is a proof-of-concept client, not
-it), email intake, multi-tenancy (the
+The real UI (the generic web UI and the PoC apps above are
+proof-of-concept clients, not it), email intake, multi-tenancy (the
 `namespace_id` column exists, with one default namespace), a dedicated search
 engine. (Business-hours calendars and SLAs moved into Jira part 2.)

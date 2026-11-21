@@ -6,6 +6,18 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
+- **API candidates from the PoC apps** (design.md, "PoC apps as built:
+  what the API lacked", says what each cost the apps): search within a
+  container; links in search and list results; `update_time` on an Item,
+  with a sort by it; totals (or at least "more than N") on lists; a
+  has-no-link filter ("issues in no sprint"); a who-am-I call with roles and
+  display names. (PoC apps)
+- A description field on the incident, in a new Type version: the portal
+  writes a request's description as its first reply (two writes, and two
+  `reaction_skipped` records staff see). (PoC apps)
+- Issue keys from the kernel: the PoC apps show the space's key and the last
+  8 characters of the Item's ID as a stand-in. (PoC apps)
+
 - ~~**Next, before Jira 2.4: the etag changes only when something a caller
   could overwrite changes.**~~ Done in the etag step (2026-11-20): see its
   entry, and design.md, "The etag".
@@ -2513,3 +2525,50 @@ before (the image build cannot download modules here); CI builds the images.
 
 **Open:** nothing. **Next session:** Jira 2.4b.
 
+## 2026-11-21 — PoC apps: a product-shaped client (finished)
+
+**Built:** `apps/poc`, a third client of the public API: a service desk (a desk's queue in five views with
+wall-clock countdowns and Breached from the goals; an incident's page with assign, moves, service levels and
+their timeline, a conversation where a reply and an internal note cannot be confused, causes, history), a
+customer portal (pick a desk, open a request, my requests, a request's public conversation and the requester's
+moves) and a tracker (the active sprint's board with pointer and keyboard moves, an issue's page, the backlog
+with quick filters, search and quick create, epics with progress). Shared: dev sign-in, a person menu (switch
+user, theme), light and dark held to WCAG AA, refusals in plain words, polling every 30 s on visible pages. The
+`poc` compose service on 127.0.0.1:8091; CI builds, unit-tests and runs the three journeys. No kernel, proto or
+Type change. design.md: "PoC apps as built", with the twelve gaps and their cost.
+
+**Tests:** 260 vitest (the logic and four components); three Playwright journeys with axe on every main screen:
+lea on the board, sam working an incident (a real first-response breach in 3 s), kim in the portal (every API
+response she receives scanned: no note, goal, assignee or due instant, nor their values).
+
+**Decided during the step, each agreed:** the queue's Paused comes from the incident's state, the incident page's
+from the goal; Type definitions are left out of kim's key and Type scan (Types are readable by anyone), values
+are checked everywhere; the portal's description is required; history lines name the actor, messages say "You".
+
+**Test changes, each agreed, each in a commit of its own:** kim's assignee is bob, not lea: lea created the desk,
+and an Item's creator is part of what a customer sees, so the scan could not tell lea the assignee from lea the
+creator; the visible-text checks match whole words and the values exact JSON strings. Issue keys use the LAST 8
+characters of the ID: UUIDv7 starts with a timestamp, the same on every card of a run.
+
+**Tooling:** the lock file starts from web/'s tree (npm 10's resolver crashed, `Cannot read properties of null
+(reading 'edgesOut')`, on a fresh install), so both apps pin the same versions. `axe-core` is pinned to 4.14.0 by
+an `overrides` entry (4.14.1 was five days old). vitest runs the logic (`.ts`) in Node and the components
+(`.tsx`) in jsdom, as two projects: `devusers.test.ts` reads the repository's dev-token file, which needs a file
+URL (web/ marks such a test `@vitest-environment node`); the test file is unchanged. The apps import
+`web/src/gen` and `web/src/rank` read-only (path aliases; the image gets them as two more build contexts).
+
+**Fixed on the way:** axe's `label-content-name-mismatch` on the person menu: its button had an `aria-label`
+that did not contain its visible text; it now shows the name, with "Signed in as" for screen readers only.
+
+**Surprises:** customers see an Item's creator, so a value check on a principal must pick someone who created
+nothing the customer sees. Item IDs are UUIDv7: their first 8 characters are no short ID. lea's journey passed
+on its first run against the stack. Rebased on main after PR #36 (customers' `commit_seq` 0, `min_seq`
+refused, unlisted names refused): nothing in the apps changed; the portal sends none of them.
+
+**Numbers.** On the rebased tree: scenario passed on a fresh stack; the journeys twice in a row, 21 to 39 s for
+the three; vitest 260; `go test ./...` green. The stack ran from host-built binaries and the poc image from a
+build that trusts this container's proxy CA for `npm ci` only (as for Go, the image build cannot download here);
+the journeys ran on this container's Chromium, against the poc container. CI builds the real images and runs
+the pinned Playwright's browser.
+
+**Open:** the twelve API gaps (Later). **Next session:** Jira 2.4b.

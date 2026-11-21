@@ -27,12 +27,15 @@ docker compose up -d --build --wait     # or: make up
 This builds the images and starts Postgres, the Temporal dev server, a one-shot
 migration, the item service (the API), the relay, the worker, stub CRM,
 ERP, HR directory and email servers (`connstub`) for the ticket's and the
-vacation request's hooks, and the web UI. `--wait` returns once every
-service is healthy. Four ports are published, all on 127.0.0.1 only:
+vacation request's hooks, the web UI and the PoC apps. `--wait` returns
+once every service is healthy. Five ports are published, all on 127.0.0.1
+only:
 
 - `http://localhost:8080`: the public API (Connect, gRPC and gRPC-Web),
   **on 127.0.0.1 only**.
 - `http://localhost:8090`: [the web UI](#the-web-ui), **on 127.0.0.1 only**.
+- `http://localhost:8091`: [the PoC apps](#the-poc-apps) (a tracker, a
+  service desk and a customer portal), **on 127.0.0.1 only**.
 - `http://localhost:8233`: the Temporal UI, **on 127.0.0.1 only** (it shows
   workflow histories with field values, and can terminate and signal workflows).
 - `http://localhost:8085`: dev only, **on 127.0.0.1 only**, the emails the stack sent, read-only
@@ -61,6 +64,8 @@ other timeouts keep real time. A production worker never gets these flags.
 - **web** serves the web UI's built site with nginx and proxies `/api` to
   the item service, so the browser talks to one origin. It is a client of
   the public API like `pli`: nothing else.
+- **poc** serves the PoC apps the same way: another client of the public
+  API, nothing else.
 - **postgres** holds everything; **temporal** is the dev server, in memory.
 
 ## Build pli
@@ -279,6 +284,57 @@ reachable from this machine.
   sign-on yet.
 - Agents are not in the picker: an agent needs a session, which the UI does
   not start. Use `pli` for those.
+- **The PoC apps' sign-in screen is the same thing**, on port 8091: the
+  stack mounts the dev-token file into the poc container too, its sign-in
+  list is compiled in only with `VITE_DEV_USERS=1`, and 8091 is published on
+  `127.0.0.1` only. CI checks that a build without the flag holds no
+  dev-user code.
+
+## The PoC apps
+
+```sh
+docker compose up -d --build --wait     # then open http://localhost:8091
+```
+
+A product-shaped client of the proof of concept, in `apps/poc`: three apps
+whose screens know their Types, the way a product would, built on the
+public API only (no kernel, proto or Type change). The generic UI on 8090
+stays as it is, the admin view. Sign in as one of the dev users (staff and
+customers are listed apart; the choice is kept per browser tab); the person
+menu switches users and the theme (light, dark, or the system's).
+
+- **Service desk** (lea and sam, who hold `desk_agent`): a desk's queue of
+  open incidents in five views (all open, unassigned, mine, waiting for the
+  customer, breached), soonest due first, with countdowns and
+  Breached as the goals record it. An incident's page: assign, moves (the
+  resolution is asked for first), service levels and their timeline from
+  the goals, the conversation where a reply to the customer and an internal
+  note can never be confused, the bugs that caused it, the history in
+  sentences.
+- **Customer portal** (kim and lee): pick a desk, open a request (its
+  description becomes the first reply: `incident@2` has no description
+  field), my requests, and a request's page with the public conversation
+  only, the status changes in between, and the requester's own moves
+  (cancel a new request, reopen a resolved one). It is built on what the
+  API returns to a customer: no note, goal, assignee or due instant ever
+  reaches the browser.
+- **Tracker** (everyone else on staff, and lea and sam): spaces; the active
+  sprint's board, where a drag (or Space, the arrow keys and Space again)
+  ranks a card in its column or moves it to another, the transition first
+  and the rank only once it succeeded; an issue's page with fields edited in
+  place, moves, links both ways, comments and history; the backlog with
+  quick filters, a word search held to the space and a quick create; epics
+  with their progress.
+- Times due are shown **on the wall clock** ("in 2 h"): tables say "(wall
+  clock)" in the column header, detail pages on each value. A due instant
+  was computed in working time on a calendar the app does not know.
+- Nothing updates by itself (no Watch): a visible page reads again every
+  30 s, never while the tab is hidden or an editor is open, and has a
+  Refresh button.
+- Issue keys (`PLAT · 3f9a1c2b`) are a stand-in until the kernel has its
+  own: the space's key and the last 8 characters of the Item's ID.
+- What the API lacked, and what each workaround cost the app, is in
+  `docs/design.md`, "PoC apps as built".
 
 ## The scenario
 
@@ -327,6 +383,15 @@ only Postgres or only Temporal leaves the two out of step.
   (once: `npx playwright install chromium`). `make gen-web` regenerates the
   TypeScript client in `web/src/gen/` (committed; CI checks it is current;
   it needs `npm ci` first).
+- The PoC apps are in `apps/poc` (the same stack as `web/`). In
+  `apps/poc`: `npm ci`, then `npm test` (vitest: the logic in Node, the
+  components in jsdom), `npm run typecheck`, and `npm run dev` (a dev server
+  on 5174 against the running stack's API; `VITE_DEV_USERS=1 npm run dev`
+  for the sign-in list). `npm run e2e` runs the three journeys (lea on the
+  board, sam working an incident, kim in the portal) against the stack on
+  8091; they seed their own data, so they run after `make scenario` or not,
+  any number of times. The apps import `web/src/gen` and `web/src/rank`
+  read-only; they never edit `web/`.
 - `internal/rank/testdata/vectors.json` holds the rank package's answers,
   which the TypeScript port must match. After a change to `internal/rank`:
   `go test ./internal/rank -run TestVectors -update`, then make
