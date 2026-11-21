@@ -9,6 +9,19 @@ Ideas noted during the spike, not built yet.
 - ~~**Next, before Jira 2.4: the etag changes only when something a caller
   could overwrite changes.**~~ Done in the etag step (2026-11-20): see its
   entry, and design.md, "The etag".
+- `group:` readers, so a narrowed portal can admit a whole set of
+  customers (an organization) without naming each one. Until then a
+  narrowed portal admits only the customers among its readers. (Jira 2.4a)
+- A customer's word search reads their own rows and recomputes the text of
+  the fields they see on each (`policy.CustomerWords`): fine for a few
+  requests each, linear for a customer with thousands. A stored tsvector of
+  the customer fields, or a search index, when one appears. (Jira 2.4a)
+- An agent filing for a customer: `requester` is refused from an agent
+  session, because the row has one `created_on_behalf_of` and the agent's
+  user would be lost from `except: [creator]`. (Jira 2.4a, Q6)
+- A customer's history pages by `item_seq` with the hidden events left out
+  in SQL; reading deep histories may want an index on `(item_id, op)`.
+  (Jira 2.4a)
 - Mark the ticket's hook-written fields `writable_by: kernel` in a new
   ticket version (v7): `f_plan` (hook `get_plan`), `f_on_hold`
   (`get_credit_status`), `f_cost_center` (`erp_check`), all in v3 to v6,
@@ -2360,3 +2373,80 @@ of them.
 
 **Open:** nothing from this step.
 **Next session:** Jira 2.4.
+
+## 2026-11-21 — Jira proof of concept, part 2, step 4a: customers (finished)
+
+**Built:** `customer:<id>` principals with fixed permissions; `own`, `shared` and `customer_fields` on Types; the
+customer rule in SQL in two forms (a predicate and a relation) beside `VisibleCondition`, applied on Get, Search,
+List, links, rollups, history and writes; `policy.Project` with the Item's Type (customer fields only, no etag);
+`requester` on create; customers and a portal bot in the dev-token file; desk@2, incident@2, reply@1, note@1;
+scenario C1; pli `--requester`; the web UI's customers. design.md: "Jira part 2, step 4a as built", the Public API's
+Writes (no etag for a customer, `requester`, the idempotency key), the principals bullet, the Web UI.
+
+**Kernel changes, counted** (six; migration 00013; proto v1 only grew, `buf breaking` green against main: 
+`CreateItemRequest.requester`, `Type.own`, `Type.shared`, `Type.customer_fields`; no new dependency; no workflow
+code changed, the replay tests pass untouched):
+1. **The `customer:` kind and its fixed permissions**: a valid actor, and `on_behalf_of` of an agent; no role is
+   ever read for one; a customer creates only what a container admits, takes only `creator` moves as the
+   requester (also through an empty `allowed`, which the authorize shortcut used to let through), never updates,
+   moves, narrows or links; a session for one holds a customer's powers only.
+2. **`own`, `shared`, `customer_fields`** and their load rules (per version, and across the set in `ParseDir`).
+3. **The read rule with field projection**: `policy.CustomerCondition`, `policy.CustomerRelation`,
+   `policy.CustomerWords` and `Project`'s Type; Search and List build their query in one function each
+   (`pageSQL`), which the plan test explains.
+4. **`requester`** on create.
+5. **The index** `items_requester` (partial: Items made by or for a customer).
+6. **The idempotency key** is `(namespace, actor, effective user, key)`. Existing rows keep their answers: an
+   agent's row takes the person its stored result's event was written for, any other row its actor. It also
+   fixes an agent acting for two staff users (the second write was refused as a reuse).
+
+**Not the kernel:** the four Types, pli's flag, the dev-token file's checks, the API's mapping, the web UI.
+
+**Postgres 17 (postgres:17-alpine), the queries Search and List actually build** (`pageSQL`), for one customer
+among 10,000 with 5 incidents each, on 500,000 Items (2 portals, 50,000 incidents, 100,000 goals, 100,000 notes,
+150,000 replies, 100,000 stories, 500 incidents narrowed to staff), analyzed. EXPLAIN (ANALYZE, BUFFERS):
+
+| Read | Rows | Time | Buffers |
+| --- | --- | --- | --- |
+| Search incidents | 5 | 0.39 ms | 74 |
+| Search in_progress | 0 | 0.27 ms | 54 |
+| Search words "vpn" | 20 | 0.91 ms | 139 |
+| Search every Type | 22 | 0.36 ms | 147 |
+| List the portal | 5 | 0.27 ms | 58 |
+| List the top level | 2 | 0.27 ms | 46 |
+| List her incident | 3 | 0.31 ms | 55 |
+| Get a reply (the predicate) | 1 | 0.15 ms | 16 |
+| The predicate as the driver (not used) | 22 | 1,086 ms | ~2,015,000 |
+
+No plan of a real read scans `items`: `items_requester`, then `items_container`, `items_namespace_type_state`
+for the portals, and primary keys. The plan test holds it on a 25,000-Item set.
+
+**Visible behaviour changes:** a reader may be `customer:`; `acting_for` may be a customer; `#/items` alone is
+the top level in the web UI; a create with a bad `requester` is refused for it before its fields are checked.
+
+**Existing tests changed, each agreed:** the three Type-list tests gain the four Types (38); the web's dev-user
+list gains kim and lee; the API test server gains customer tokens and a portal bot in lists of their own;
+`TestContentSeq_MigrationBackfillsFromItemSeq` steps down to version 11 by number (one step down undid 00013).
+
+**Tests that failed on their own logic** (Phase B tests, fixed after review, one commit): six mistakes in seven
+tests. `anyType` named two test Types registered only by a later test (a filter on an unknown Type is refused);
+`bug@3`'s field is `f_summary`; `sla_resume` was run for the reaction's outcome record instead of its transition;
+the API's Type filter wants the full name; the end-to-end customer had no namespace, which List refuses. Every
+other new test passed on first contact with the code, the property test (3 seeds × 60 steps, every principal ×
+every Item, Get, Search and List) and the plan test included.
+
+**Surprises:** the kernel's own actors carry `on_behalf_of` for attribution, now possibly a customer: the rule
+asks only who the actor is or which customer an agent acts for, or a customer's reply would have stopped the
+reactions it triggers. `authorize` skipped `allowed` when empty, which would have let a customer start work on
+their own incident. A Type version never changes once registered, so a changed Type file needs a fresh database
+(the stack refused to start). The scenario's variables are global: C1's loop reused `$hidden`, which D3 reads.
+
+**Not verified here:** the images' build stages (`go mod download` fails inside the build container: the stack ran
+from host-built binaries and a host-built site on the real distroless and nginx bases, with a throwaway override)
+and the pinned Playwright's own browser (the tests ran on this container's Chromium). CI builds the images.
+
+**Numbers.** Scenario: twice in a row on a fresh stack, 95 s each, C1 included. Playwright: 8 tests in 7.2 s.
+vitest: 458. `go test -race ./...`: every package green and no race found, except one end-to-end test whose expected count was wrong (four replies, it said three); its fix awaits review.
+
+**Open:** nothing from this step. **Next session:** Jira 2.4b, the access request with N-of-M approvers.
+
