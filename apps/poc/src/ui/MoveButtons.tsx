@@ -68,7 +68,8 @@ export function MoveButtons({ moves, options, onMove, ctx }: MoveButtonsProps): 
   );
 }
 
-function RequiredDialog({
+// Asks for a move's required fields (also used by the board's drops).
+export function RequiredDialog({
   move,
   options,
   onCancel,
