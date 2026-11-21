@@ -90,7 +90,9 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: |
+            web/package-lock.json
+            apps/poc/package-lock.json
 
       - name: Install dependencies
         working-directory: web
@@ -120,6 +122,31 @@ jobs:
       - name: Build
         working-directory: web
         run: npm run build
+
+      # The PoC apps (apps/poc): they read web/'s generated client and rank
+      # port (just checked above) read-only.
+      - name: PoC apps, install
+        working-directory: apps/poc
+        run: npm ci
+
+      - name: PoC apps, typecheck
+        working-directory: apps/poc
+        run: npm run typecheck
+
+      - name: PoC apps, unit tests
+        working-directory: apps/poc
+        run: npm test
+
+      # A build without VITE_DEV_USERS has no sign-in list: no dev-token
+      # fetch and no YAML parser in the bundle.
+      - name: PoC apps, build (no dev users in it)
+        working-directory: apps/poc
+        run: |
+          npm run build
+          if grep -l -E 'dev-tokens|YAMLParseError|Sign in as' dist/assets/*.js; then
+            echo "the build without VITE_DEV_USERS contains dev-user code"
+            exit 1
+          fi
 
   # The Step 0 scenario against the whole compose stack, through pli only;
   # then the web UI's browser smoke test against the same stack.
@@ -152,7 +179,9 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: |
+            web/package-lock.json
+            apps/poc/package-lock.json
 
       - name: Install the browser test and its browser
         working-directory: web
@@ -165,12 +194,27 @@ jobs:
         working-directory: web
         run: npm run e2e
 
+      # The PoC apps' journeys (lea on the board, sam working an incident,
+      # kim in the portal) against the same stack: http://localhost:8091.
+      # The same Playwright version as web/, so its browser is already here.
+      - name: PoC apps, install the journeys and their browser
+        working-directory: apps/poc
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: PoC apps, journeys
+        working-directory: apps/poc
+        run: npm run e2e
+
       - name: Upload the browser test's traces
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-traces
-          path: web/test-results/
+          path: |
+            web/test-results/
+            apps/poc/test-results/
           if-no-files-found: ignore
           retention-days: 7
 
