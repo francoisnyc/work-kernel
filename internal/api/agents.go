@@ -65,8 +65,8 @@ func (s *server) StartAgentSession(ctx context.Context, req *connect.Request[ker
 	if cerr := parentNamespace(p, m.Parent); cerr != nil {
 		return nil, cerr
 	}
-	if m.ActingFor != "" && !item.IsKind(m.ActingFor, item.KindUser) {
-		return nil, badField("acting_for", "want a user, or empty for the agent itself")
+	if m.ActingFor != "" && !item.IsKind(m.ActingFor, item.KindUser, item.KindCustomer) {
+		return nil, badField("acting_for", "want a user or a customer, or empty for the agent itself")
 	}
 	if len(m.Scopes) == 0 {
 		return nil, badField("scopes", "required: at least one")

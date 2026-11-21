@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 
 	"go.yaml.in/yaml/v3"
 
@@ -77,8 +78,8 @@ func ParseGrants(data []byte) ([]Grant, error) {
 		switch {
 		case !item.IsKind(g.Agent, item.KindAgent):
 			return nil, fail("agent %q must be agent:<id>", g.Agent)
-		case g.User != "" && !item.IsKind(g.User, item.KindUser):
-			return nil, fail("user %q must be user:<id>, or empty for the agent itself", g.User)
+		case g.User != "" && !item.IsKind(g.User, item.KindUser, item.KindCustomer):
+			return nil, fail("user %q must be user:<id>, customer:<id>, or empty for the agent itself", g.User)
 		case !namespaceName.MatchString(g.Namespace):
 			return nil, fail("namespace %q must be lower-case letters, digits and dashes", g.Namespace)
 		case len(g.Scopes) == 0:
@@ -94,6 +95,11 @@ func ParseGrants(data []byte) ([]Grant, error) {
 		for _, p := range g.Powers {
 			if !item.KnownPower(p) {
 				return nil, fail("unknown power %q", p)
+			}
+			// Acting for a customer, an agent gets a customer's fixed
+			// powers at most: the kernel refuses any other in a session.
+			if item.IsKind(g.User, item.KindCustomer) && !customerPower(p) {
+				return nil, fail("power %q is not a customer's (read, create, comment, transition:*)", p)
 			}
 		}
 		key := [3]string{g.Agent, g.User, g.Namespace}
@@ -162,10 +168,14 @@ func Parse(data []byte) ([]Token, error) {
 			return nil, fail("no token")
 		case !namespaceName.MatchString(t.Namespace):
 			return nil, fail("namespace %q must be lower-case letters, digits and dashes", t.Namespace)
-		// Only people and agents call the public API. The kernel's own actors
-		// (system:, hook:) never hold a token, and groups are not readers yet.
-		case !item.IsKind(t.Principal, item.KindUser, item.KindAgent):
-			return nil, fail("principal %q must be user:<id> or agent:<id>", t.Principal)
+		// Only people, customers and agents call the public API. The
+		// kernel's own actors (system:, hook:) never hold a token, and
+		// groups are not readers yet.
+		case !item.IsKind(t.Principal, item.KindUser, item.KindAgent, item.KindCustomer):
+			return nil, fail("principal %q must be user:<id>, agent:<id> or customer:<id>", t.Principal)
+		// A customer never holds a role (Jira part 2, step 4a).
+		case item.IsKind(t.Principal, item.KindCustomer) && len(t.Roles) > 0:
+			return nil, fail("principal %s is a customer: a customer never holds a role", t.Principal)
 		case tokens[t.Token]:
 			return nil, fail("token %q is used twice", t.Token)
 		case names[t.Name]:
@@ -179,4 +189,15 @@ func Parse(data []byte) ([]Token, error) {
 		tokens[t.Token], names[t.Name] = true, true
 	}
 	return f.Tokens, nil
+}
+
+// customerPower is the kernel's fixed set for a customer (itemservice):
+// read, create, comment and moves. Repeated here so pli does not import the
+// item service.
+func customerPower(p string) bool {
+	switch p {
+	case item.PowerRead, item.PowerCreate, item.PowerComment, item.PowerTransitionAll:
+		return true
+	}
+	return strings.HasPrefix(p, item.PowerTransitionPrefix)
 }

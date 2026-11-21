@@ -157,7 +157,13 @@ func (s *server) itemType(ctx context.Context, p item.Principal, id uuid.UUID) (
 // item_seq.
 const etagPrefix = "c"
 
+// A customer gets no etag (Jira part 2, step 4a): they never update, and
+// the etag would tell them that something they cannot see changed. The
+// kernel projects their Items with content_seq zero, which no Item has.
 func etagOf(it item.Item) string {
+	if it.ContentSeq == 0 {
+		return ""
+	}
 	return etagPrefix + strconv.FormatInt(it.ContentSeq, 10)
 }
 
@@ -211,6 +217,7 @@ func (s *server) CreateItem(ctx context.Context, req *connect.Request[kernelv1.C
 		IdempotencyKey: m.RequestId, Principal: p, TypeID: typeID, TypeVersion: version,
 		Fields: fields, ContainerID: container,
 	}
+	kreq.Requester = m.Requester
 	if m.Narrow != nil {
 		kreq.Narrow = &itemservice.Narrow{Readers: m.Narrow.Principals}
 	}
