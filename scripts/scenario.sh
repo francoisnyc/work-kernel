@@ -1641,6 +1641,22 @@ wait_until 30 "sam told of both breaches" sent_is "$fr11" "$breach_hook" "user:s
 expect "kim's search finds her P1 and nothing of the SLA" \
 	"$(ok kim item search "$w" --type incident --where f_priority=P1 | names)" "$c11"
 
+step "C12: what a customer client gets since the review: no commit_seq, no min_seq, a hidden link name as an unknown one, APPROVAL_UNAVAILABLE"
+c12=$(ok kim item create --type reply@1 --in "$c1" --set "f_body=one more $w")
+expect "kim's create answers no commit_seq" "$(j '.commit_seq // 0 | tostring' <<<"$c12")" "0"
+expect "kim's history carries no commit_seq" "$(ok kim item history "$c1" --page-size 100 | j '[.events[] | .commit_seq // 0 | tostring] | unique | join(",")')" "0"
+refuse kim "INVALID_ARGUMENT INVALID_REQUEST" item search "$w" --min-seq 1
+run kim item search "$w" --linked "out:caused_by=$c1"
+hidden_name=$(cat "$tmp/err")
+run kim item search "$w" --linked "out:no_such_link=$c1"
+expect "a link name hidden from kim, and one nobody declares" "$hidden_name" "$(cat "$tmp/err")"
+[ -n "$hidden_name" ] || fail "kim's search on caused_by was not refused"
+c12n=$(cincident kim P4 "Narrowed for the bot")
+ok lea item update "$c12n" --readers user:lea,user:sam,customer:kim,agent:portal-bot >/dev/null
+ok portal-bot --session "$s_kim" item get "$c12n" >/dev/null
+refuse portal-bot "PERMISSION_DENIED APPROVAL_UNAVAILABLE" --session "$s_kim" item create --type reply@1 --in "$c1" --set "f_body=wider $w"
+err_has "an agent acting for a customer cannot be approved"
+
 step "D1: lea searches VPN in the active category"
 vpn=$(issue lea story "VPN drops on wifi")
 issue lea task "VPN setup guide" >/dev/null
@@ -1739,7 +1755,7 @@ for reason in UNAUTHENTICATED SESSION_INVALID INVALID_REQUEST NOT_FOUND NOT_ALLO
 	NO_TRANSITION MISSING_FIELDS GUARD_FAILED WIDEN_NOT_CONFIRMED STALE HELD \
 	IDEMPOTENCY_KEY_REUSED NOT_CAUGHT_UP AUDIENCE_CHANGED \
 	LINK_CARDINALITY ALREADY_LINKED NOT_LINKED LINK_TARGET_TYPE \
-	FIELD_NOT_WRITABLE FIELD_FROZEN INVARIANT_FAILED LINK_NOT_WRITABLE TOO_MANY_VALUES; do
+	FIELD_NOT_WRITABLE FIELD_FROZEN INVARIANT_FAILED LINK_NOT_WRITABLE TOO_MANY_VALUES APPROVAL_UNAVAILABLE; do
 	case $seen in *" $reason "*) ;; *) fail "no step triggered $reason" ;; esac
 done
 cat <<'EOF'
