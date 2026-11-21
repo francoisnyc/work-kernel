@@ -174,10 +174,14 @@ type Who struct {
 }
 
 // ItemFacts is what `allowed` and `except` read of the Item: its fields
-// (for field:<id>) and who created it (for creator).
+// (for field:<id>), who created it (for creator), and who created its
+// container (for except: [container_creator], Jira 2.4b; empty at the top
+// level).
 type ItemFacts struct {
 	Fields                       map[string]any
 	CreatedBy, CreatedOnBehalfOf string
+
+	ContainerCreatedBy, ContainerCreatedOnBehalfOf string
 }
 
 // creator means two things, on purpose; these two functions are the only
@@ -233,7 +237,11 @@ func TookPartInCreation(actor, onBehalfOf, createdBy, createdOnBehalfOf string) 
 // lifecycle's question, asked before.
 //
 //   - except: [creator] refuses anyone who took part in creating the Item
-//     (TookPartInCreation), whatever `allowed` says.
+//     (TookPartInCreation), whatever `allowed` says; except:
+//     [container_creator] anyone who took part in creating its container.
+//   - allowed: [nobody] lets no one in: no person, agent, customer, nor the
+//     kernel's own actors (Jira 2.4b). Only a reaction, which stands in for
+//     `allowed` by consent, makes such a move.
 //   - An empty `allowed` lets anyone in.
 //   - creator in `allowed` is the requester (IsRequester), judged once for
 //     the principal as a whole: an agent acting for the requester matches.
@@ -243,6 +251,13 @@ func TookPartInCreation(actor, onBehalfOf, createdBy, createdOnBehalfOf string) 
 func MayTransition(tr typedef.Transition, who Who, it ItemFacts) bool {
 	if slices.Contains(tr.Except, typedef.AllowedCreator) &&
 		TookPartInCreation(who.Actor, who.OnBehalfOf, it.CreatedBy, it.CreatedOnBehalfOf) {
+		return false
+	}
+	if slices.Contains(tr.Except, typedef.AllowedContainerCreator) &&
+		TookPartInCreation(who.Actor, who.OnBehalfOf, it.ContainerCreatedBy, it.ContainerCreatedOnBehalfOf) {
+		return false
+	}
+	if slices.Contains(tr.Allowed, typedef.AllowedNobody) {
 		return false
 	}
 	// A customer takes only the moves whose allowed names creator: an empty

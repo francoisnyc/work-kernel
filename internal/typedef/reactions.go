@@ -133,6 +133,9 @@ type Reaction struct {
 	SetPrograms map[string]cel.Program `yaml:"-" json:"-"`
 	LinkedReads []LinkedRead           `yaml:"-" json:"-"`
 	setTypes    map[string]*cel.Type
+	// Jira 2.4b, filled when the Type is loaded: the container's own
+	// fields a create's Fields read (container.<field>), sorted.
+	ContainerReads []string `yaml:"-" json:"-"`
 }
 
 // Invariant is a rule over an Item's fields that every write must keep, on
@@ -257,6 +260,9 @@ func CheckReactions(types []*Type) error {
 	if err := checkStep3Across(types, byID); err != nil {
 		return err
 	}
+	if err := checkJira24bAcross(types, byID); err != nil {
+		return err
+	}
 	if err := checkReactionCycles(types); err != nil {
 		return err
 	}
@@ -278,6 +284,11 @@ func CheckReactions(types []*Type) error {
 				// Children it moves, or a field it sets on its container
 				// (which the Type that accepts it may be).
 				if r.Children != nil && slices.Contains(r.Children.Of, tgt.ID) || r.Kind == ReactionSet {
+					found = true
+				}
+				// A move at its container (Jira 2.4b), which the Type that
+				// accepts it may be.
+				if r.Kind == ReactionMove && r.Target == TargetContainer {
 					found = true
 				}
 				if r.Kind == ReactionAfter {

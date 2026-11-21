@@ -1,0 +1,135 @@
+# An SLA goal, version 2 (the `sla` package; see README.md; Jira 2.4b). As
+# sla_goal@1, with three changes:
+#
+#   - A third metric, approval ("decided within"), shown on its host in
+#     f_due_approval, like the other two.
+#   - No person moves a goal: every transition is allowed: [nobody]. Only
+#     its host's reactions (by consent) start, pause, resume, stop and
+#     cancel it. Under @1 anyone who sees a goal may complete it by hand,
+#     as met.
+#   - A goal names its metric: the invariant metric_missing refuses a goal
+#     without one, made by hand or otherwise.
+#
+# What @1 says, unchanged otherwise: one promise about one
+# piece of work, "answered within" (first_response), "resolved within"
+# (resolution) or "decided within" (approval). It is an Item contained in
+# the work it measures (its host),
+# so whoever reads the host reads its goals. Nothing in the kernel is named
+# SLA: this is an ordinary Type.
+#
+#   - A goal names no host. Its host's Type starts, pauses, resumes, stops
+#     and cancels it through reactions with the IDs this Type consents to
+#     (*:sla_start_first_response and the others below), whatever Type
+#     declares them, as long as the goal is contained in it.
+#   - Every field is the kernel's. The target, the start and the calendar
+#     are copied at creation and never read again.
+#   - Time comes from the cause, never from the worker: each effect is
+#     computed at cause.at, the time of the host's event that led to it.
+#   - Breach is a mark, not an end: at f_due_at the acting timer sets
+#     f_breached_at to that instant, the goal goes on running, and the
+#     host's breach contact (container:breach_contact) is told once.
+#   - completed says how it ended (f_outcome), decided on instants:
+#     completed while running, missed if cause.at > f_due_at; completed
+#     while paused, missed if the breach mark is still set. A met goal
+#     never carries a mark: a stop or a pause caused at or before the due
+#     instant clears one a timer wrote in the meantime.
+#   - Each goal shows its due instant on its host, in f_due_first_response,
+#     f_due_resolution or f_due_approval by its metric: set while it runs, unset when it
+#     pauses, completes or is canceled. That is what a queue sorts by.
+id: sla_goal
+version: 2
+initial_state: running
+
+fields:
+  - {id: f_metric,      type: enum, options: [first_response, resolution, approval], writable_by: kernel}
+  - {id: f_target_s,    type: int,      writable_by: kernel}  # seconds of working time
+  - {id: f_elapsed_s,   type: int,      writable_by: kernel}  # worked before the last pause or the end
+  - {id: f_started_at,  type: datetime, writable_by: kernel}  # the start, or the last resume
+  - {id: f_due_at,      type: datetime, writable_by: kernel}  # unset unless running
+  - {id: f_breached_at, type: datetime, writable_by: kernel}
+  - {id: f_outcome,     type: enum, options: [met, missed], writable_by: kernel}
+  # The calendar the goal was created with.
+  - {id: f_week,        type: string, multiple: true, max: 21,  writable_by: kernel}
+  - {id: f_days_off,    type: date,   multiple: true, max: 366, writable_by: kernel}
+  - {id: f_zone,        type: string, writable_by: kernel}
+
+states:
+  - id: running
+    category: active
+    acting:
+      - {id: breached, at: f_due_at, when: 'f_breached_at == null', sets: {f_breached_at: 'cause.at'}, hook: notify_breach}
+  - {id: paused,    category: waiting}
+  - {id: completed, category: done}
+  - {id: canceled,  category: canceled}
+
+transitions:
+  - from: running
+    to: paused
+    allowed: [nobody]
+    sets: &pause
+      f_elapsed_s: '(f_elapsed_s == null ? 0 : f_elapsed_s) + working_between(f_started_at, cause.at, calendar(f_week, f_days_off, f_zone))'
+      # The mark stays only if the pause was caused after the due instant.
+      f_breached_at: 'f_due_at == null || cause.at > f_due_at ? f_breached_at : null'
+      f_due_at: 'null'
+  - from: paused
+    to: running
+    allowed: [nobody]
+    sets:
+      f_started_at: 'cause.at'
+      # Resumed after its breach, a goal keeps the instant it missed; with
+      # nothing left, it is due at once.
+      f_due_at: >-
+        f_breached_at != null ? f_breached_at :
+        f_target_s - f_elapsed_s > 0 ? working_after(cause.at, f_target_s - f_elapsed_s, calendar(f_week, f_days_off, f_zone)) :
+        cause.at
+  - from: running
+    to: completed
+    allowed: [nobody]
+    sets:
+      <<: *pause
+      f_outcome: 'f_due_at != null && cause.at > f_due_at ? "missed" : "met"'
+  - from: paused
+    to: completed
+    allowed: [nobody]
+    sets:
+      f_outcome: 'f_breached_at != null ? "missed" : "met"'
+  - from: running
+    to: canceled
+    allowed: [nobody]
+    sets:
+      f_due_at: 'null'
+  - {from: paused, to: canceled, allowed: [nobody]}
+
+hooks:
+  # The email's template is the hook's ID. The recipient is whoever the
+  # container offers as breach_contact when the hook runs; with nobody to
+  # tell, the hook fails once (no_recipient) and is not retried.
+  - {id: notify_breach, on: timer, kind: action, action: email.notify, reads: ['container:breach_contact']}
+
+reactions:
+  - {id: show_first_response,   kind: set, on: enter, state: running,   when: 'f_metric == "first_response"', target: container, set: {f_due_first_response: 'f_due_at'}}
+  - {id: hide_first_response,   kind: set, on: enter, state: paused,    when: 'f_metric == "first_response"', target: container, set: {f_due_first_response: 'null'}}
+  - {id: clear_first_response,  kind: set, on: enter, state: completed, when: 'f_metric == "first_response"', target: container, set: {f_due_first_response: 'null'}}
+  - {id: cancel_first_response, kind: set, on: enter, state: canceled,  when: 'f_metric == "first_response"', target: container, set: {f_due_first_response: 'null'}}
+  - {id: show_resolution,       kind: set, on: enter, state: running,   when: 'f_metric == "resolution"', target: container, set: {f_due_resolution: 'f_due_at'}}
+  - {id: hide_resolution,       kind: set, on: enter, state: paused,    when: 'f_metric == "resolution"', target: container, set: {f_due_resolution: 'null'}}
+  - {id: clear_resolution,      kind: set, on: enter, state: completed, when: 'f_metric == "resolution"', target: container, set: {f_due_resolution: 'null'}}
+  - {id: cancel_resolution,     kind: set, on: enter, state: canceled,  when: 'f_metric == "resolution"', target: container, set: {f_due_resolution: 'null'}}
+  - {id: show_approval,         kind: set, on: enter, state: running,   when: 'f_metric == "approval"', target: container, set: {f_due_approval: 'f_due_at'}}
+  - {id: hide_approval,         kind: set, on: enter, state: paused,    when: 'f_metric == "approval"', target: container, set: {f_due_approval: 'null'}}
+  - {id: clear_approval,        kind: set, on: enter, state: completed, when: 'f_metric == "approval"', target: container, set: {f_due_approval: 'null'}}
+  - {id: cancel_approval,       kind: set, on: enter, state: canceled,  when: 'f_metric == "approval"', target: container, set: {f_due_approval: 'null'}}
+
+invariants:
+  - {id: metric_missing, rule: 'f_metric != null'}
+
+accepts_reactions:
+  '*:sla_start_first_response': &start {creates: [f_metric, f_target_s, f_started_at, f_due_at, f_week, f_days_off, f_zone]}
+  '*:sla_start_resolution':     *start
+  '*:sla_restart_resolution':   *start
+  '*:sla_start_approval':       *start
+  '*:sla_pause':    {moves: [paused]}
+  '*:sla_resume':   {moves: [running]}
+  '*:sla_stop':     {moves: [completed]}
+  '*:sla_answered': {moves: [completed]}
+  '*:sla_cancel':   {moves: [canceled]}

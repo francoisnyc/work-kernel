@@ -54,6 +54,7 @@ func typeOut(ns string, t *typedef.Type) *kernelv1.Type {
 		out.Fields = append(out.Fields, &kernelv1.Field{
 			Id: f.ID, Type: fieldTypes[f.Type], Options: f.Options, WritableBy: fieldWriters[f.WritableBy],
 			WritableByRoles: f.WritableByRoles, Multiple: f.Multiple, Max: int32(f.Max),
+			UniqueAmongSiblings: f.UniqueAmongSiblings,
 		})
 	}
 	for _, s := range t.States {
@@ -119,6 +120,7 @@ func typeOut(ns string, t *typedef.Type) *kernelv1.Type {
 			Trigger: kernelv1.ReactionTrigger_REACTION_TRIGGER_ENTER,
 			When:    r.When, By: r.By, ToState: r.To, TargetFromStates: r.TargetFrom, CreateFields: r.Fields,
 			Target: r.Target, SetFields: r.Set,
+			ForEach: r.ForEach, OnGuard: r.OnGuard,
 		}
 		if c := r.Children; c != nil {
 			pr.ChildrenWhen = c.When
@@ -145,6 +147,7 @@ func typeOut(ns string, t *typedef.Type) *kernelv1.Type {
 	}
 	out.ReadableByReactions = t.ReadableByReactions
 	out.Own, out.Shared, out.CustomerFields = t.Own, t.Shared, t.CustomerFields
+	out.PlacementWritableBy = t.PlacementWritableBy
 	// Offers, by name: a map has no order of its own.
 	for _, name := range slices.Sorted(maps.Keys(t.Offers)) {
 		out.Offers = append(out.Offers, &kernelv1.Offer{Name: name, Field: t.Offers[name]})

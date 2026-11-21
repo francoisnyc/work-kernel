@@ -363,7 +363,8 @@ func (in *Internal) ReactSet(ctx context.Context, req ReactionRunRequest) (React
 	attr := tg.attribution(req.Hop)
 	_, err = k.write(ctx, tg.principal(), key, hash, func(tx pgx.Tx) (WriteResult, error) {
 		// The source is read under a lock too, so what it shows is what
-		// it holds: both rows, in the order of their IDs.
+		// it holds (as it is now: an effect copies its fields as they are
+		// at this write, with the time of its cause).
 		var fields map[string]any
 		readSource := func() error {
 			var container *uuid.UUID
@@ -373,13 +374,11 @@ func (in *Internal) ReactSet(ctx context.Context, req ReactionRunRequest) (React
 			}
 			return err
 		}
+		// The container first, whatever the IDs' order (Jira 2.4b, the
+		// lock order): then the source, a child of it.
 		var it lockedItem
 		lockTarget := func() (err error) { it, err = lockItem(ctx, tx, tg.ns, target); return err }
-		steps := []func() error{readSource, lockTarget}
-		if strings.Compare(target.String(), req.SourceID.String()) < 0 {
-			slices.Reverse(steps)
-		}
-		for _, step := range steps {
+		for _, step := range []func() error{lockTarget, readSource} {
 			if err := step(); err != nil {
 				return WriteResult{}, err
 			}

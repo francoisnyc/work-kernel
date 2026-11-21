@@ -240,24 +240,28 @@ var (
 // fields may read beyond the source: linked.<link>.<field> and
 // container.linked.<link>.<field>. The Types read from are not known when
 // one Type loads, so the fields are dynamic here; ParseDir checks them.
-var (
-	linkedVarType    = cel.MapType(cel.StringType, cel.MapType(cel.StringType, cel.DynType))
-	containerVarType = cel.MapType(cel.StringType, linkedVarType)
-)
+var linkedVarType = cel.MapType(cel.StringType, cel.MapType(cel.StringType, cel.DynType))
 
-// newCreateEnv is the `sets` environment plus the linked Items.
-func newCreateEnv(t *Type) (*cel.Env, error) {
+// newCreateEnv is the `sets` environment plus the linked Items, the
+// container (container.<field> and container.linked.<link>.<field>; dynamic
+// here, ParseDir checks them) and, with for_each, the member (each).
+func newCreateEnv(t *Type, each *Field) (*cel.Env, error) {
 	env, err := newSetsEnv(t)
 	if err != nil {
 		return nil, err
 	}
-	return env.Extend(cel.Variable("linked", linkedVarType), cel.Variable("container", containerVarType))
+	opts := []cel.EnvOption{cel.Variable("linked", linkedVarType), cel.Variable(ContainerVar, cel.DynType)}
+	if each != nil {
+		opts = append(opts, cel.Variable(EachVar, memberCELType(*each)))
+	}
+	return env.Extend(opts...)
 }
 
-// linkedReads finds the linked fields an expression reads, and refuses any
-// other use of `linked` and `container`: a link alone, the container's own
-// fields, a read two links away.
-func linkedReads(expr string) ([]LinkedRead, error) {
+// linkedReads finds the linked fields an expression reads, and the
+// container's own fields (container.<field>, Jira 2.4b), and refuses any
+// other use of `linked` and `container`: a link alone, the container's
+// state, a read two links away.
+func linkedReads(expr string) ([]LinkedRead, []string, error) {
 	var out []LinkedRead
 	take := func(re *regexp.Regexp, container bool, s string) (string, error) {
 		for _, m := range re.FindAllStringSubmatchIndex(s, -1) {
@@ -271,15 +275,20 @@ func linkedReads(expr string) ([]LinkedRead, error) {
 	}
 	rest, err := take(containerLinkedRef, true, expr)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if rest, err = take(linkedRef, false, rest); err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	rest, fields, err := takeContainerFields(rest)
+	if err != nil {
+		return nil, nil, err
 	}
 	if linkedWord.MatchString(rest) {
-		return nil, fmt.Errorf("%q: linked and container are read as linked.<link>.<field> and container.linked.<link>.<field> only", expr)
+		return nil, nil, fmt.Errorf("%q: linked and container are read as linked.<link>.<field>, container.<field> and "+
+			"container.linked.<link>.<field> only", expr)
 	}
-	return out, nil
+	return out, fields, nil
 }
 
 func sortLinkedReads(reads []LinkedRead) []LinkedRead {
@@ -311,15 +320,15 @@ func soleLinkedRead(expr string) bool {
 func (t *Type) checkReadable(fail func(string, ...any) error) error {
 	seen := map[string]bool{}
 	for _, id := range t.ReadableByReactions {
-		f, ok := t.Field(id)
+		_, ok := t.Field(id)
 		switch {
 		case !ok:
 			return fail("readable_by_reactions: field %q is not declared", id)
 		case seen[id]:
 			return fail("readable_by_reactions names %s twice", id)
-		case f.Type == Principal:
-			return fail("readable_by_reactions: %s is a principal field; who someone is does not travel through a reaction's read", id)
 		}
+		// A principal field may be read too (Jira 2.4b): a reader copies
+		// it by plain reference only, into a principal field (ParseDir).
 		seen[id] = true
 	}
 	return nil
@@ -567,7 +576,7 @@ func checkStep3Across(types []*Type, byID map[string][]*Type) error {
 					if !soleLinkedRead(r.Fields[id]) {
 						continue
 					}
-					reads, _ := linkedReads(r.Fields[id])
+					reads, _, _ := linkedReads(r.Fields[id])
 					for _, created := range byID[r.Type] {
 						cf, ok := created.Field(id)
 						if created.Version != r.Version || !ok {

@@ -168,8 +168,7 @@ func (e *NotYetError) Unwrap() error { return ErrNotYet }
 // PlacementNotWritableError (Jira 2.4b, kernel change 10): a move or a
 // narrowing of an Item whose Type version says who may place its Items
 // (placement_writable_by), by someone else. It is an ErrForbidden; the API
-// answers PERMISSION_DENIED / PLACEMENT_NOT_WRITABLE. Phase B stub:
-// declared, never returned.
+// answers PERMISSION_DENIED / PLACEMENT_NOT_WRITABLE.
 type PlacementNotWritableError struct{ TypeID string }
 
 func (e *PlacementNotWritableError) Error() string {

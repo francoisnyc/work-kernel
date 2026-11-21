@@ -108,7 +108,7 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		// under the row lock: no other write can slip in between check and write.
 		// When the guards into ToState read links, the linked Items are locked
 		// too (FOR SHARE), so they cannot change before this commits.
-		it, links, resolutions, err := k.lockForTransition(ctx, tx, nsOf(req.Principal), req.ItemID, req.ToState)
+		it, links, resolutions, around, err := k.lockForTransition(ctx, tx, nsOf(req.Principal), req.ItemID, req.ToState)
 		if err != nil {
 			return WriteResult{}, err
 		}
@@ -247,7 +247,8 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		}
 		merged, set, cleared := applyPatch(it.Fields, req.Fields)
 		next, err := lifecycle.TransitionWith(ty, it.State,
-			lifecycle.Input{Fields: merged, Links: links, Today: k.today(), CauseAt: causeAt}, req.ToState)
+			lifecycle.Input{Fields: merged, Links: links, Today: k.today(), CauseAt: causeAt,
+				Around: around.around, Container: around.container}, req.ToState)
 		if err != nil {
 			return WriteResult{}, fromLifecycle(err)
 		}
@@ -303,7 +304,12 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 						ty.ID, ty.Version, typedef.ReactionKey(kc.move.consentType, kc.move.consentID), next.State)
 				}
 			}
-		} else if err := authorize(ctx, tx, req.Principal, ty, it.State, next.State, facts(it)); err != nil {
+		} else if err := authorize(ctx, tx, req.Principal, ty, it.State, next.State, around.facts(it)); err != nil {
+			return WriteResult{}, err
+		}
+		// No two siblings hold the same value of a unique field in its
+		// states (Jira 2.4b): judged under the container's lock.
+		if err := checkUnique(ctx, tx, ty, req.ItemID, it.ContainerID, next.State, merged); err != nil {
 			return WriteResult{}, err
 		}
 		if links != nil {

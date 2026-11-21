@@ -285,6 +285,9 @@ func CheckFieldShapes(types []*Type) error {
 
 // --- reactions that move or create ---
 
+// eachRef finds a use of each in an expression.
+var eachRef = regexp.MustCompile(`\beach\b`)
+
 // childRef finds child.<field> in a `when`: the created Item's fields a
 // created_inside condition reads.
 var childRef = regexp.MustCompile(`\bchild\.([A-Za-z_][A-Za-z0-9_]*)`)
@@ -337,11 +340,45 @@ func (t *Type) checkAfterReaction(r *Reaction, where string, fail func(string, .
 		return nil
 	}
 
+	// Jira 2.4b: for_each is a create reaction's, on_guard a move's.
+	if r.ForEach != "" && r.Kind != ReactionCreate {
+		return fail("%s: for_each is for a create reaction, not a %s reaction", where, r.Kind)
+	}
+	if r.OnGuard != "" {
+		if r.Kind != ReactionMove {
+			return fail("%s: on_guard is for a move reaction, not a %s reaction", where, r.Kind)
+		}
+		if r.OnGuard != OnGuardSkip {
+			return fail("%s: on_guard %q: the one value is %s", where, r.OnGuard, OnGuardSkip)
+		}
+	}
 	if r.Kind == ReactionSet {
 		return t.checkSetReaction(r, where, fail, ownWhen)
 	}
-	if r.Target != "" || len(r.Set) > 0 {
-		return fail("%s: target and set are for a set reaction", where)
+	if len(r.Set) > 0 {
+		return fail("%s: set is for a set reaction", where)
+	}
+	if r.Target != "" && r.Kind != ReactionMove {
+		return fail("%s: target is for a set reaction or a move reaction, not a %s reaction", where, r.Kind)
+	}
+	if r.Target != "" {
+		// A move at the container (Jira 2.4b, kernel change 5).
+		switch {
+		case r.Target != TargetContainer:
+			return fail("%s: target %q: the only value is %s", where, r.Target, TargetContainer)
+		case r.Link != "" || r.Children != nil:
+			return fail("%s: target: %s moves the container; it takes no link and no children", where, TargetContainer)
+		case r.On != OnEnter:
+			return fail("%s: a move with target: %s is on: enter, not %q", where, TargetContainer, r.On)
+		case len(r.Of) > 0 || r.By != "":
+			return fail("%s: of and by are for on: created_inside, not a move with target: %s", where, TargetContainer)
+		case r.To == "":
+			return fail("%s: a move reaction names the state it moves into (to)", where)
+		}
+		if _, ok := t.State(r.State); !ok {
+			return fail("%s: unknown state %q (on: enter needs the state entered)", where, r.State)
+		}
+		return ownWhen()
 	}
 
 	switch {
@@ -369,21 +406,55 @@ func (t *Type) checkAfterReaction(r *Reaction, where string, fail func(string, .
 		if err := ownWhen(); err != nil {
 			return err
 		}
+		// for_each (Jira 2.4b, kernel change 3): a multi-value field of
+		// the Item; one Item per member, which the fields read as each.
+		var each *Field
+		if r.ForEach != "" {
+			f, ok := t.Field(r.ForEach)
+			switch {
+			case !ok:
+				return fail("%s: for_each %q is not a declared field", where, r.ForEach)
+			case !f.Multiple:
+				return fail("%s: for_each %s: a field holding one value; for_each takes a multi-value field", where, r.ForEach)
+			}
+			each = &f
+		}
 		// The fields may read linked Items: one declared max-one link
-		// away from the Item, or from its container.
-		env, err := newCreateEnv(t)
+		// away from the Item, or from its container; and the container's
+		// own fields (container.<field>).
+		env, err := newCreateEnv(t, each)
 		if err != nil {
 			return fail("%s: fields: %v", where, err)
 		}
-		r.FieldPrograms, r.fieldTypes, r.LinkedReads = map[string]cel.Program{}, map[string]*cel.Type{}, nil
+		r.FieldPrograms, r.fieldTypes, r.LinkedReads, r.ContainerReads = map[string]cel.Program{}, map[string]*cel.Type{}, nil, nil
 		for _, id := range slices.Sorted(maps.Keys(r.Fields)) {
 			ast, iss := env.Compile(r.Fields[id])
 			if iss.Err() != nil {
 				return fail("%s: field %s: %q: %v", where, id, r.Fields[id], iss.Err())
 			}
-			reads, err := linkedReads(r.Fields[id])
+			reads, containerFields, err := linkedReads(r.Fields[id])
 			if err != nil {
 				return fail("%s: field %s: %v", where, id, err)
+			}
+			for _, c := range containerFields {
+				if !slices.Contains(r.ContainerReads, c) {
+					r.ContainerReads = append(r.ContainerReads, c)
+				}
+			}
+			// A principal member travels by plain reference only.
+			if each != nil && each.Type == Principal && eachRef.MatchString(r.Fields[id]) {
+				if ref, ok := plainRef(r.Fields[id]); !ok || !ref.Each {
+					return fail("%s: field %s: %q: each is a principal: it is copied as it is (each), never computed", where, id, r.Fields[id])
+				}
+			}
+			// An own field copied whole must not be one that holds who
+			// someone is, unless copied as it is.
+			if ref, ok := plainRef(r.Fields[id]); !ok || (!ref.Container && !ref.Each) {
+				for _, f := range t.Fields {
+					if f.Type == Principal && regexp.MustCompile(`\b`+f.ID+`\b`).MatchString(r.Fields[id]) && (!ok || ref.Field != f.ID) {
+						return fail("%s: field %s: %q reads %s, a principal field: it is copied as it is, never computed", where, id, r.Fields[id], f.ID)
+					}
+				}
 			}
 			for _, lr := range reads {
 				if !lr.Container {
@@ -400,6 +471,7 @@ func (t *Type) checkAfterReaction(r *Reaction, where string, fail func(string, .
 			r.FieldPrograms[id], r.fieldTypes[id] = prg, ast.OutputType()
 		}
 		r.LinkedReads = sortLinkedReads(r.LinkedReads)
+		slices.Sort(r.ContainerReads)
 		return nil
 
 	case r.Type != "" || r.Version != 0 || len(r.Fields) > 0:
@@ -634,8 +706,10 @@ func checkAfterAcross(types []*Type, byID map[string][]*Type) error {
 					if !ok {
 						return fail("reaction %s sets %s, which %s does not declare", r.ID, id, at)
 					}
-					if f.Type == Principal {
-						return fail("reaction %s sets %s of %s, a %s field a reaction may not set", r.ID, id, at, f.Type)
+					// A principal field (or a set) only by plain reference
+					// (Jira 2.4b); its shape is judged by checkJira24bAcross.
+					if _, err := checkCopy(f, r.Fields[id], src); err != nil {
+						return fail("reaction %s sets %s of %s: %v", r.ID, id, at, err)
 					}
 					// A value read from a linked Item is dynamic here: the write judges it.
 					if out := r.fieldTypes[id]; out != nil && !out.IsExactType(cel.DynType) && !fieldCELType(f).IsAssignableType(out) {
@@ -698,6 +772,13 @@ func checkReactionCycles(types []*Type) error {
 				}
 			case r.Kind == ReactionMove && r.On == OnCreatedInside:
 				to = append(to, enters(t.ID, r.To))
+			case r.Kind == ReactionMove && r.Target == TargetContainer:
+				// Its container: any loaded Type that accepts the move.
+				for _, c := range types {
+					if a, _ := c.Consent(t.ID, r.ID, true); slices.Contains(a.Moves, r.To) {
+						to = append(to, enters(c.ID, r.To))
+					}
+				}
 			case r.Kind == ReactionMove:
 				l, _ := t.Link(r.Link)
 				for _, target := range l.Targets {

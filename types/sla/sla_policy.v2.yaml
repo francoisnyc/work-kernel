@@ -1,0 +1,52 @@
+# An SLA policy, version 2 (the `sla` package; see README.md): as
+# sla_policy@1, plus an approval target (Jira 2.4b): f_approval_s, the
+# working time an approval may take, one value for every request (a request
+# has no priority).
+#
+# How long each kind of goal may take, in seconds of working time, for each
+# priority P1 to P4.
+#
+#   - Only holders of the role sla_admin write a target. Whoever asks for
+#     work never chooses how long it may take.
+#   - A target is a positive number of seconds, or not set.
+#   - The reaction that starts a goal reads the target of its host's
+#     priority and copies it onto the goal: changing a policy changes no
+#     running goal (recomputing is Later).
+id: sla_policy
+version: 2
+
+fields:
+  - {id: f_name,                type: string}
+  - {id: f_first_response_s_p1, type: int, writable_by: ['role:sla_admin']}
+  - {id: f_first_response_s_p2, type: int, writable_by: ['role:sla_admin']}
+  - {id: f_first_response_s_p3, type: int, writable_by: ['role:sla_admin']}
+  - {id: f_first_response_s_p4, type: int, writable_by: ['role:sla_admin']}
+  - {id: f_resolution_s_p1,     type: int, writable_by: ['role:sla_admin']}
+  - {id: f_resolution_s_p2,     type: int, writable_by: ['role:sla_admin']}
+  - {id: f_resolution_s_p3,     type: int, writable_by: ['role:sla_admin']}
+  - {id: f_resolution_s_p4,     type: int, writable_by: ['role:sla_admin']}
+  - {id: f_approval_s,          type: int, writable_by: ['role:sla_admin']}
+
+readable_by_reactions:
+  - f_first_response_s_p1
+  - f_first_response_s_p2
+  - f_first_response_s_p3
+  - f_first_response_s_p4
+  - f_resolution_s_p1
+  - f_resolution_s_p2
+  - f_resolution_s_p3
+  - f_resolution_s_p4
+  - f_approval_s
+
+invariants:
+  - id: target_not_positive
+    rule: >-
+      (f_first_response_s_p1 == null || f_first_response_s_p1 > 0) &&
+      (f_first_response_s_p2 == null || f_first_response_s_p2 > 0) &&
+      (f_first_response_s_p3 == null || f_first_response_s_p3 > 0) &&
+      (f_first_response_s_p4 == null || f_first_response_s_p4 > 0) &&
+      (f_resolution_s_p1 == null || f_resolution_s_p1 > 0) &&
+      (f_resolution_s_p2 == null || f_resolution_s_p2 > 0) &&
+      (f_resolution_s_p3 == null || f_resolution_s_p3 > 0) &&
+      (f_resolution_s_p4 == null || f_resolution_s_p4 > 0) &&
+      (f_approval_s == null || f_approval_s > 0)

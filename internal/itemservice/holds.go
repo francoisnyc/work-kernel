@@ -251,7 +251,7 @@ func (in *Internal) ResolveHold(ctx context.Context, req ResolveHoldRequest) (Wr
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return WriteResult{}, fmt.Errorf("read hold: %w", err)
 		}
-		it, links, resolutions, err := k.lockForTransition(ctx, tx, nsOf(req.Principal), req.ItemID, heldTo)
+		it, links, resolutions, around, err := k.lockForTransition(ctx, tx, nsOf(req.Principal), req.ItemID, heldTo)
 		if err != nil {
 			return WriteResult{}, err
 		}
@@ -316,7 +316,7 @@ func (in *Internal) ResolveHold(ctx context.Context, req ResolveHoldRequest) (Wr
 			// The hold applies the requester's transition, so it is the
 			// requester who is checked again: their access and roles may
 			// have changed since they asked, and the fields may have too.
-			if reason, err = recheckRequester(ctx, tx, ty, it, requester, from, to, merged, links, k.today()); err != nil {
+			if reason, err = recheckRequester(ctx, tx, ty, it, requester, from, to, merged, links, around, k.today()); err != nil {
 				return WriteResult{}, err
 			}
 			// The correction keeps the invariants, and entering the state
@@ -331,6 +331,15 @@ func (in *Internal) ResolveHold(ctx context.Context, req ResolveHoldRequest) (Wr
 			}
 			if r, bad := unresolved(resolutions); reason == "" && bad {
 				reason = r.code()
+			}
+			// A unique field still unique among siblings (Jira 2.4b).
+			if reason == "" {
+				var rej *RejectedError
+				if err := checkUnique(ctx, tx, ty, req.ItemID, it.ContainerID, to, merged); errors.As(err, &rej) {
+					reason = rej.Code
+				} else if err != nil {
+					return WriteResult{}, err
+				}
 			}
 			if reason != "" {
 				verdict, merged, set = VerdictDeny, it.Fields, nil
@@ -407,7 +416,7 @@ func checkVerdict(req ResolveHoldRequest) error {
 // recheckRequester asks again what was asked when the hold was requested.
 // It returns the reason the transition may no longer be made, or "".
 func recheckRequester(ctx context.Context, tx pgx.Tx, ty *typedef.Type, it lockedItem, requester item.Principal,
-	from, to string, fields map[string]any, links lifecycle.Links, today time.Time) (string, error) {
+	from, to string, fields map[string]any, links lifecycle.Links, around aroundView, today time.Time) (string, error) {
 	visible, err := policy.CanSee(ctx, tx, requester, it.ScopeID)
 	if err != nil {
 		return "", err
@@ -415,7 +424,8 @@ func recheckRequester(ctx context.Context, tx pgx.Tx, ty *typedef.Type, it locke
 	if !visible {
 		return "requester_lost_access", nil
 	}
-	if _, err := lifecycle.TransitionWith(ty, from, lifecycle.Input{Fields: fields, Links: links, Today: today}, to); err != nil {
+	if _, err := lifecycle.TransitionWith(ty, from, lifecycle.Input{Fields: fields, Links: links, Today: today,
+		Around: around.around, Container: around.container}, to); err != nil {
 		var rej *lifecycle.Rejection
 		if errors.As(err, &rej) {
 			return string(rej.Code), nil
@@ -424,7 +434,7 @@ func recheckRequester(ctx context.Context, tx pgx.Tx, ty *typedef.Type, it locke
 	}
 	// allowed and except judge the requester (actor and on_behalf_of),
 	// against the Item as it is now.
-	err = authorize(ctx, tx, requester, ty, from, to, facts(it))
+	err = authorize(ctx, tx, requester, ty, from, to, around.facts(it))
 	if errors.Is(err, ErrForbidden) {
 		return "forbidden", nil
 	}

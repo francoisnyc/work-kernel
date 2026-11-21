@@ -110,7 +110,12 @@ func CreateFields(t *typedef.Type, r typedef.Reaction, created *typedef.Type, in
 	vars[typedef.VarToday] = dateOf(in.CauseAt)
 	addFieldVars(vars, t, in.Fields)
 	vars["linked"] = linkedVars(in.Linked.Own, in.Linked.OwnTypes)
-	vars["container"] = map[string]any{"linked": linkedVars(in.Linked.Container, in.Linked.ContainerTypes)}
+	container := containerVars(in.Container, r.ContainerReads)
+	container["linked"] = linkedVars(in.Linked.Container, in.Linked.ContainerTypes)
+	vars[typedef.ContainerVar] = container
+	if r.ForEach != "" {
+		vars[typedef.EachVar] = eachVar(in.EachField, in.Each)
+	}
 	out := map[string]any{}
 	for _, id := range slices.Sorted(maps.Keys(r.Fields)) {
 		prg := r.FieldPrograms[id]

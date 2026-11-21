@@ -253,6 +253,13 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 		// The scope the new Item lands under, before childScope may give the
 		// container a node: the target of the agent write rule.
 		ns := nsOf(req.Principal)
+		// A field unique among siblings (Jira 2.4b): the container first,
+		// FOR NO KEY UPDATE, so that two creates in it are judged in turn.
+		if req.ContainerID != nil && len(ty.UniqueFields()) > 0 {
+			if _, err := lockContainer(ctx, tx, ns, *req.ContainerID, true); err != nil {
+				return WriteResult{}, err
+			}
+		}
 		target, err := landingScope(ctx, tx, ns, req.ContainerID)
 		if err != nil {
 			return WriteResult{}, err
@@ -263,6 +270,12 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 		}
 		if err := checkVisible(ctx, tx, req.Principal, scopeID); err != nil {
 			return WriteResult{}, err
+		}
+		// Who may narrow it (Jira 2.4b): the Type's to say.
+		if req.Narrow != nil {
+			if err := checkPlacement(ctx, tx, req.Principal, ty); err != nil {
+				return WriteResult{}, err
+			}
 		}
 		// A customer's container is checked again now that it is locked
 		// (childScope): moved out of what admits them since the check
@@ -284,6 +297,9 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 			return WriteResult{}, err
 		}
 
+		if err := checkUnique(ctx, tx, ty, uuid.Nil, req.ContainerID, ty.InitialState, fields); err != nil {
+			return WriteResult{}, err
+		}
 		// Last: the new Item keeps the Type's invariants.
 		if err := checkInvariants(ty, fields); err != nil {
 			return WriteResult{}, err

@@ -428,15 +428,25 @@ func (in *Internal) ReactMove(ctx context.Context, req ReactionRunRequest) (Reac
 		if tg.r.Children != nil {
 			return k.moveChildren(ctx, tg, mc)
 		}
-		err := k.pool.QueryRow(ctx, `select target_id from links where source_id = $1 and link_type = $2`,
-			req.SourceID, tg.r.Link).Scan(&target)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return k.record(ctx, tg, ReactionSkipped, SkipNoTarget, uuid.Nil)
+		if tg.r.Target == typedef.TargetContainer {
+			// Its container (Jira 2.4b), reached through containment: a
+			// consent by reaction ID counts. At the top level: no target.
+			if tg.container == nil {
+				return k.record(ctx, tg, ReactionSkipped, SkipNoTarget, uuid.Nil)
+			}
+			target = *tg.container
+			mc.froms, mc.consent, mc.consentType, mc.consentID, mc.contained = tg.r.TargetFrom, true, tg.ty.ID, tg.r.ID, true
+		} else {
+			err := k.pool.QueryRow(ctx, `select target_id from links where source_id = $1 and link_type = $2`,
+				req.SourceID, tg.r.Link).Scan(&target)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return k.record(ctx, tg, ReactionSkipped, SkipNoTarget, uuid.Nil)
+			}
+			if err != nil {
+				return ReactionOutcome{}, fmt.Errorf("read link: %w", err)
+			}
+			mc.froms, mc.consent, mc.consentType, mc.consentID = tg.r.TargetFrom, true, tg.ty.ID, tg.r.ID
 		}
-		if err != nil {
-			return ReactionOutcome{}, fmt.Errorf("read link: %w", err)
-		}
-		mc.froms, mc.consent, mc.consentType, mc.consentID = tg.r.TargetFrom, true, tg.ty.ID, tg.r.ID
 	}
 
 	_, _, err = k.transition(ctx, TransitionRequest{
@@ -449,11 +459,21 @@ func (in *Internal) ReactMove(ctx context.Context, req ReactionRunRequest) (Reac
 		return k.record(ctx, tg, ReactionApplied, "", target)
 	case errors.Is(err, errNotInFrom):
 		return k.record(ctx, tg, ReactionSkipped, SkipNotInFrom, uuid.Nil)
+	case tg.r.OnGuard == typedef.OnGuardSkip && rejectedWith(err, string(lifecycle.GuardFailed)):
+		// on_guard: skip (Jira 2.4b): the target's guard does not hold
+		// yet; a skip, not a failure.
+		return k.record(ctx, tg, ReactionSkipped, SkipGuardFalse, uuid.Nil)
 	}
 	if reason, refused := refusal(err); refused {
 		return k.record(ctx, tg, ReactionFailed, reason, target)
 	}
 	return ReactionOutcome{}, err
+}
+
+// rejectedWith reports whether err is a refusal with this code.
+func rejectedWith(err error, code string) bool {
+	var rej *RejectedError
+	return errors.As(err, &rej) && rej.Code == code
 }
 
 // ReactCreate runs a create reaction for one trigger, like ReactMove: it
@@ -471,6 +491,9 @@ func (in *Internal) ReactCreate(ctx context.Context, req ReactionRunRequest) (Re
 		return ReactionOutcome{}, err
 	}
 	if out, done, err := k.outcomeOf(ctx, tg); err != nil || done {
+		if err == nil && tg.r.ForEach != "" {
+			return k.forEachOutcome(ctx, tg)
+		}
 		return out, err
 	}
 	if req.Hop > MaxHop {
@@ -503,95 +526,192 @@ func (in *Internal) ReactCreate(ctx context.Context, req ReactionRunRequest) (Re
 		func(f string) bool { return !slices.Contains(consent.Creates, f) }) {
 		return k.record(ctx, tg, ReactionFailed, CodeReactionNotAccepted, uuid.Nil)
 	}
-	// The fields, from the source's and the cause's time, and from the
-	// linked Items the expressions read (linked).
-	compute := func(linked lifecycle.LinkedFields) (map[string]any, error) {
+	// The fields, from the source's and the cause's time, from the linked
+	// Items the expressions read (linked), from the source's container
+	// (container.<field>) and, with for_each, from the member (each).
+	eachField, _ := tg.ty.Field(tg.r.ForEach)
+	compute := func(linked lifecycle.LinkedFields, outer lifecycle.ContainerFields, member string) (map[string]any, error) {
 		fields, err := lifecycle.CreateFields(tg.ty, tg.r, created,
-			lifecycle.Input{Fields: tg.fields, CauseAt: tg.causeAt, Linked: linked})
+			lifecycle.Input{Fields: tg.fields, CauseAt: tg.causeAt, Linked: linked, Container: outer,
+				Each: member, EachField: eachField})
 		if err != nil {
 			return nil, fromLifecycle(err)
 		}
 		return fields, checkInvariants(created, fields)
 	}
-	var fields map[string]any
-	// With nothing linked to read they are computed here, before the
-	// write; else inside it, under the locks that pin what was read.
-	if len(tg.r.LinkedReads) == 0 {
-		if fields, err = compute(lifecycle.LinkedFields{}); err != nil {
-			if reason, refused := refusal(err); refused {
-				return k.record(ctx, tg, ReactionFailed, reason, uuid.Nil)
-			}
-			return ReactionOutcome{}, err
-		}
-	}
+	// What is read under locks, inside the write: linked Items, the
+	// source's container, siblings for a unique field. Without any, the
+	// fields are computed before the write.
+	inTx := len(tg.r.LinkedReads) > 0 || len(tg.r.ContainerReads) > 0
+	exclusive := len(created.UniqueFields()) > 0
 
-	key := fmt.Sprintf("%s:%s:%s:create", tg.key(), req.SourceID, tg.causation())
-	hash, err := requestHash("react_create", req)
-	if err != nil {
-		return ReactionOutcome{}, err
-	}
-	attr := tg.attribution(req.Hop)
-	res, err := k.write(ctx, tg.principal(), key, hash, func(tx pgx.Tx) (WriteResult, error) {
-		fields := fields // this attempt's own (a retried transaction computes again)
-		if len(tg.r.LinkedReads) > 0 {
-			linked, err := k.linkedFor(ctx, tx, tg)
+	// createOne makes one Item under key, for member ("" without for_each).
+	createOne := func(key, member string) (WriteResult, error) {
+		var fields map[string]any
+		if !inTx {
+			var err error
+			if fields, err = compute(lifecycle.LinkedFields{}, lifecycle.ContainerFields{}, member); err != nil {
+				return WriteResult{}, err
+			}
+		}
+		// A member is named in the hash by its hash, as in its key.
+		var hashed any = req
+		if member != "" {
+			hashed = struct {
+				Req    ReactionRunRequest
+				Member string
+			}{req, memberPart(member)}
+		}
+		hash, err := requestHash("react_create", hashed)
+		if err != nil {
+			return WriteResult{}, err
+		}
+		attr := tg.attribution(req.Hop)
+		return k.write(ctx, tg.principal(), key, hash, func(tx pgx.Tx) (WriteResult, error) {
+			fields := fields // this attempt's own (a retried transaction computes again)
+			// The lock order (jira24b.go): the outermost first. The
+			// source's container, read by container.<field>; then the
+			// container the Item is made in, when a field is unique there.
+			var outer lifecycle.ContainerFields
+			if len(tg.r.ContainerReads) > 0 && tg.container != nil {
+				c, err := lockContainer(ctx, tx, tg.ns, *tg.container, false)
+				if err != nil {
+					return WriteResult{}, err
+				}
+				cty, err := k.loadType(ctx, tx, c.TypeID, c.TypeVersion)
+				if err != nil {
+					return WriteResult{}, err
+				}
+				outer = lifecycle.ContainerFields{Type: cty, Fields: c.Fields}
+			}
+			if exclusive {
+				if _, err := lockContainer(ctx, tx, tg.ns, container, true); err != nil {
+					return WriteResult{}, err
+				}
+			}
+			if inTx {
+				var linked lifecycle.LinkedFields
+				if len(tg.r.LinkedReads) > 0 {
+					var err error
+					if linked, err = k.linkedFor(ctx, tx, tg); err != nil {
+						return WriteResult{}, err
+					}
+				}
+				var err error
+				if fields, err = compute(linked, outer, member); err != nil {
+					return WriteResult{}, err
+				}
+			}
+			if err := checkUnique(ctx, tx, created, uuid.Nil, &container, created.InitialState, fields); err != nil {
+				return WriteResult{}, err
+			}
+			id, err := uuid.NewV7()
+			if err != nil {
+				return WriteResult{}, fmt.Errorf("new item id: %w", err)
+			}
+			// In its container's scope: the container's readers are its own.
+			scopeID, err := childScope(ctx, tx, tg.ns, &container)
 			if err != nil {
 				return WriteResult{}, err
 			}
-			if fields, err = compute(linked); err != nil {
+			at, err := stampWrite(ctx, tx)
+			if err != nil {
 				return WriteResult{}, err
 			}
-		}
-		id, err := uuid.NewV7()
-		if err != nil {
-			return WriteResult{}, fmt.Errorf("new item id: %w", err)
-		}
-		// In its container's scope: the container's readers are its own.
-		scopeID, err := childScope(ctx, tx, tg.ns, &container)
-		if err != nil {
-			return WriteResult{}, err
-		}
-		at, err := stampWrite(ctx, tx)
-		if err != nil {
-			return WriteResult{}, err
-		}
-		payload := map[string]any{
-			"type_id": created.ID, "type_version": created.Version, "state": created.InitialState,
-			"field_ids": sortedKeys(fields), "container_id": container,
-		}
-		bump, err := decideContent(created, "create", payload)
-		if err != nil {
-			return WriteResult{}, err
-		}
-		const itemSeq = 1
-		_, err = tx.Exec(ctx,
-			`insert into items (id, namespace_id, type_id, type_version, container_id, scope_id, state, fields, item_seq,
-			                    content_seq, created_at, created_by, created_on_behalf_of)
-			 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $12, $10, $11, null)`,
-			id, tg.ns, created.ID, created.Version, container, scopeID, created.InitialState, fields, itemSeq,
-			at, tg.principal().Actor, bump.n)
-		if err != nil {
-			return WriteResult{}, fmt.Errorf("insert item: %w", err)
-		}
-		res, err := appendEvent(ctx, tx, created, id, itemSeq, tg.recorded(), attr, bump, payload, fields)
-		if err != nil {
-			return WriteResult{}, err
-		}
-		return res, k.tellContainer(ctx, tx, created, &container, id, itemSeq)
-	})
-	if err != nil {
+			payload := map[string]any{
+				"type_id": created.ID, "type_version": created.Version, "state": created.InitialState,
+				"field_ids": sortedKeys(fields), "container_id": container,
+			}
+			bump, err := decideContent(created, "create", payload)
+			if err != nil {
+				return WriteResult{}, err
+			}
+			const itemSeq = 1
+			_, err = tx.Exec(ctx,
+				`insert into items (id, namespace_id, type_id, type_version, container_id, scope_id, state, fields, item_seq,
+				                    content_seq, created_at, created_by, created_on_behalf_of)
+				 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $12, $10, $11, null)`,
+				id, tg.ns, created.ID, created.Version, container, scopeID, created.InitialState, fields, itemSeq,
+				at, tg.principal().Actor, bump.n)
+			if err != nil {
+				return WriteResult{}, fmt.Errorf("insert item: %w", err)
+			}
+			res, err := appendEvent(ctx, tx, created, id, itemSeq, tg.recorded(), attr, bump, payload, fields)
+			if err != nil {
+				return WriteResult{}, err
+			}
+			return res, k.tellContainer(ctx, tx, created, &container, id, itemSeq)
+		})
+	}
+	// failure turns a create's error into the reaction's failure reason;
+	// ok is false for an error that may pass (retry).
+	failure := func(err error) (string, bool) {
 		// A linked read that cannot be made: errors.As finds the typed
 		// error wherever it is wrapped, like catching a subclass.
 		var refused *errRefused
 		if errors.As(err, &refused) {
-			return k.record(ctx, tg, ReactionFailed, refused.reason, uuid.Nil)
+			return refused.reason, true
 		}
-		if reason, refused := refusal(err); refused {
-			return k.record(ctx, tg, ReactionFailed, reason, uuid.Nil)
+		return refusal(err)
+	}
+
+	key := fmt.Sprintf("%s:%s:%s:create", tg.key(), req.SourceID, tg.causation())
+	if tg.r.ForEach == "" {
+		res, err := createOne(key, "")
+		if err != nil {
+			if reason, refused := failure(err); refused {
+				return k.record(ctx, tg, ReactionFailed, reason, uuid.Nil)
+			}
+			return ReactionOutcome{}, err
 		}
+		return k.record(ctx, tg, ReactionApplied, "", res.ItemID)
+	}
+
+	// for_each (Jira 2.4b, kernel change 3): one Item per member, each
+	// under a key of its own and followed by a record of its own on the
+	// source, as a children move does: every record but the last says
+	// `more`, so a crash between two leaves the reaction pending, and
+	// running it again makes no Item twice (the keys) and records none
+	// twice.
+	members := lifecycle.ForEachMembers(tg.ty, tg.r, tg.fields)
+	switch {
+	case len(members) == 0:
+		return k.record(ctx, tg, ReactionSkipped, SkipNoTarget, uuid.Nil)
+	case len(members) > MaxReactionTargets:
+		return k.record(ctx, tg, ReactionFailed, CodeTooManyTargets, uuid.Nil)
+	}
+	for i, m := range members {
+		part := memberPart(m)
+		outcome, reason, target := ReactionApplied, "", uuid.Nil
+		res, err := createOne(key+":"+part, m)
+		if err == nil {
+			target = res.ItemID
+		} else {
+			r, refused := failure(err)
+			if !refused {
+				return ReactionOutcome{}, err // may pass: the caller retries
+			}
+			outcome, reason = ReactionFailed, r
+		}
+		if err := k.writeRecord(ctx, tg, outcome, reason, target, part, i < len(members)-1); err != nil {
+			return ReactionOutcome{}, err
+		}
+	}
+	return k.forEachOutcome(ctx, tg)
+}
+
+// forEachOutcome is a finished for_each reaction's outcome: one entry per
+// Item it made, in the order of their IDs (as a children move's).
+func (k *Service) forEachOutcome(ctx context.Context, tg trigger) (ReactionOutcome, error) {
+	recs, err := k.childRecords(ctx, tg)
+	if err != nil {
 		return ReactionOutcome{}, err
 	}
-	return k.record(ctx, tg, ReactionApplied, "", res.ItemID)
+	if len(recs) == 0 {
+		out, _, err := k.outcomeOf(ctx, tg)
+		return out, err
+	}
+	return childrenOutcome(recs), nil
 }
 
 // ReactionGaveUp records that a move or create reaction could not be

@@ -93,6 +93,15 @@ func (k *Service) update(ctx context.Context, req UpdateRequest, kc *kernelCause
 	}
 
 	return k.write(ctx, req.Principal, req.IdempotencyKey, hash, func(tx pgx.Tx) (WriteResult, error) {
+		// A field unique among siblings (Jira 2.4b) is judged under its
+		// container's lock, taken first (the lock order, jira24b.go).
+		uniqueCheck := func(lockedItem) error { return nil }
+		if req.Move == nil && len(req.Fields) > 0 {
+			var err error
+			if uniqueCheck, err = k.lockUniqueContainer(ctx, tx, nsOf(req.Principal), req.ItemID); err != nil {
+				return WriteResult{}, err
+			}
+		}
 		if req.Move != nil {
 			// Moves take one namespace-wide lock: row locks alone cannot stop
 			// moves on disjoint pairs from closing a cycle between them. Then
@@ -116,9 +125,18 @@ func (k *Service) update(ctx context.Context, req UpdateRequest, kc *kernelCause
 		if err := checkExpectedSeq(it, req.ExpectedItemSeq, req.ExpectedContentSeq); err != nil {
 			return WriteResult{}, err
 		}
+		if err := uniqueCheck(it); err != nil {
+			return WriteResult{}, err
+		}
 		ty, err := k.loadType(ctx, tx, it.TypeID, it.TypeVersion)
 		if err != nil {
 			return WriteResult{}, err
+		}
+		// Who may move or narrow it (Jira 2.4b): the Type's to say.
+		if kc == nil && (req.Policy != nil || req.Move != nil) {
+			if err := checkPlacement(ctx, tx, req.Principal, ty); err != nil {
+				return WriteResult{}, err
+			}
 		}
 		if err := ty.CheckFields(req.Fields, true); err != nil {
 			return WriteResult{}, fieldsInvalid(err)
@@ -205,6 +223,12 @@ func (k *Service) update(ctx context.Context, req UpdateRequest, kc *kernelCause
 			}
 		}
 
+		// No two siblings hold the same value of a unique field.
+		if len(req.Fields) > 0 || req.Move != nil {
+			if err := checkUnique(ctx, tx, ty, req.ItemID, container, it.State, merged); err != nil {
+				return WriteResult{}, err
+			}
+		}
 		// Last: the fields as the write leaves them keep the invariants.
 		if len(req.Fields) > 0 {
 			if err := checkInvariants(ty, merged); err != nil {
