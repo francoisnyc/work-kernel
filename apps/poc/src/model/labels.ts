@@ -124,9 +124,11 @@ export function categoryTone(category: StateCategory): Tone {
   }
 }
 
-// An issue's key until the kernel has one: "PLAT · 3f9a1c2b" (the space's
-// key and the first 8 characters of the Item's ID).
+// An issue's key until the kernel has one (Later): "PLAT · 3f9a1c2b", the
+// space's key and the LAST 8 characters of the Item's ID. An ID is a
+// UUIDv7: its first characters are a timestamp, the same for every Item
+// made in the same moment; its last are random.
 export function issueKey(spaceKey: string, itemName: string): string {
-  const id = itemName.slice(itemName.lastIndexOf("/") + 1).slice(0, 8);
+  const id = itemName.slice(itemName.lastIndexOf("/") + 1).slice(-8);
   return spaceKey === "" ? id : `${spaceKey} · ${id}`;
 }

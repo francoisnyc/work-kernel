@@ -119,6 +119,9 @@ test.each([
   expect(categoryTone(category)).toBe(tone);
 });
 
-test("an issue's key is its space's key and a short ID", () => {
-  expect(issueKey("PLAT", "namespaces/acme/items/3f9a1c2b-0000-4000-8000-000000000000")).toBe("PLAT · 3f9a1c2b");
+// The LAST 8 characters: an Item ID is a UUIDv7, whose first ones are a
+// timestamp, the same for every Item made in the same moment.
+test("an issue's key is its space's key and the end of its ID", () => {
+  expect(issueKey("PLAT", "namespaces/acme/items/01a1ff8c-0000-7000-8000-00003f9a1c2b")).toBe("PLAT · 3f9a1c2b");
+  expect(issueKey("PLAT", "namespaces/acme/items/01a1ff8c-0000-7000-8000-0000aa11bb22")).toBe("PLAT · aa11bb22");
 });
