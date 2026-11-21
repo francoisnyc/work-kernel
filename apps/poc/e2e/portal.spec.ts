@@ -4,8 +4,9 @@
 //   - she signs in and gets the portal only; she picks a desk and opens a
 //     request (title, urgency, description); it shows as Received, and in
 //     My requests;
-//   - staff work it through the API: a note, a reply, an assignee (lea,
-//     who writes nothing kim can see), waiting for the customer;
+//   - staff work it through the API: a note, a reply, an assignee (bob,
+//     who created nothing kim sees: an Item's creator is part of what a
+//     customer sees, and lea created the desk), waiting for the customer;
 //   - she sees the reply from "sam · Support" and "Waiting for you", never
 //     the note; her reply brings the request back to In progress;
 //   - every API response she received is scanned: no note or sla_goal Item,
@@ -94,7 +95,7 @@ test("kim opens a request and sees only the public conversation", async ({ page,
   await transition(sam, incident.name, "in_progress");
   await createItem(sam, type("note", 1), { f_body: note }, incident.name);
   await createItem(sam, type("reply", 1), { f_body: reply }, incident.name);
-  await update(sam, incident.name, { f_assignee: "user:lea" });
+  await update(sam, incident.name, { f_assignee: "user:bob" });
   await transition(sam, incident.name, "waiting_for_customer");
 
   // What kim sees of it.
@@ -106,7 +107,7 @@ test("kim opens a request and sees only the public conversation", async ({ page,
   await expect(page.getByRole("article", { name: /^Reply by sam · Support/ })).toContainText(reply);
   const body = page.locator("body");
   await expect(body).not.toContainText(note);
-  for (const word of [/\bInternal\b/i, /First response/i, /Resolution due/i, /Breached/i, /wall clock/i, /\blea\b/]) {
+  for (const word of [/\bInternal\b/i, /\bFirst response\b/i, /\bResolution due\b/i, /\bBreached\b/i, /\bwall clock\b/i, /\bbob\b/]) {
     await expect(body).not.toContainText(word);
   }
   await expectAccessible(page, "her request");
@@ -124,7 +125,8 @@ test("kim opens a request and sees only the public conversation", async ({ page,
   const all = await Promise.all(bodies);
   expect(all.some((b) => b.text.includes(reply)), "the scan saw the reply").toBe(true);
   for (const { url, text } of all) {
-    for (const secret of [note, ...dues, "user:lea"]) {
+    // Exact values: a JSON string, quotes included (the note is free text).
+    for (const secret of [note, ...[...dues, "user:bob"].map((v) => JSON.stringify(v))]) {
       expect(text.includes(secret), `${url} holds ${secret}`).toBe(false);
     }
     if (typeCalls.test(new URL(url).pathname) || text === "") continue;
