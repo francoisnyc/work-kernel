@@ -24,8 +24,9 @@ function devStack(): Plugin {
   };
 }
 
-// The unit tests (vitest) run in jsdom; the journeys (e2e/, Playwright)
-// have their own runner and config.
+// The unit tests (vitest): the logic (model/, theme/) in Node, where a
+// test may read the repository's files; the components and hooks (.tsx)
+// in jsdom. The journeys (e2e/, Playwright) have their own runner.
 export default defineConfig({
   plugins: [react(), devStack()],
   resolve: {
@@ -41,8 +42,9 @@ export default defineConfig({
     },
   },
   test: {
-    environment: "jsdom",
-    include: ["src/**/*.test.{ts,tsx}"],
-    setupFiles: ["src/test/setup.ts"],
+    projects: [
+      { extends: true, test: { name: "logic", environment: "node", include: ["src/**/*.test.ts"] } },
+      { extends: true, test: { name: "dom", environment: "jsdom", include: ["src/**/*.test.tsx"], setupFiles: ["src/test/setup.ts"] } },
+    ],
   },
 });
