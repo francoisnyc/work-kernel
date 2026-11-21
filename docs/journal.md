@@ -2446,7 +2446,7 @@ from host-built binaries and a host-built site on the real distroless and nginx 
 and the pinned Playwright's own browser (the tests ran on this container's Chromium). CI builds the images.
 
 **Numbers.** Scenario: twice in a row on a fresh stack, 95 s each, C1 included. Playwright: 8 tests in 7.2 s.
-vitest: 458. `go test -race ./...`: every package green and no race found, except one end-to-end test whose expected count was wrong (four replies, it said three); its fix awaits review.
+vitest: 458. `go test -race ./...` green, no race found (workflow suite 317 s). One end-to-end test of this step expected three replies where it writes four; fixed after review, in a commit of its own.
 
 **Open:** nothing from this step. **Next session:** Jira 2.4b, the access request with N-of-M approvers.
 
