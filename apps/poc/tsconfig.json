@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["vite/client", "node"],
+    // web/'s generated client and its rank port, read-only (never edited
+    // from here). Their bare imports resolve to this app's node_modules,
+    // so they work without web/node_modules (in Docker, in CI).
+    "paths": {
+      "@gen/*": ["../../web/src/gen/*"],
+      "@rank/*": ["../../web/src/rank/*"],
+      "@bufbuild/protobuf": ["./node_modules/@bufbuild/protobuf"],
+      "@bufbuild/protobuf/*": ["./node_modules/@bufbuild/protobuf/dist/esm/*"]
+    }
+  },
+  "include": ["src", "e2e", "vite.config.ts", "playwright.config.ts", "../../web/src/gen", "../../web/src/rank/rank.ts", "../../web/src/rank/move.ts"]
+}
