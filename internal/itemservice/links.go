@@ -520,7 +520,13 @@ func (k *Service) linkedItems(ctx context.Context, tx pgx.Tx, set linkSet) (life
 // scopes) is restricted; an incoming link whose source it cannot see is left
 // out, since the target has no event that could show it. Naming the other
 // end records no read: a link carries only its ID.
-func (k *Service) itemLinks(ctx context.Context, p item.Principal, id uuid.UUID) ([]item.Link, bool, error) {
+//
+// A customer's links are chosen in the SQL (review of 2026-11-21), so the
+// limit, and links_truncated, count only links they may see: outgoing ones
+// whose name the Item's own version (ty) lists and whose target they see;
+// incoming ones whose source they see and whose source's version lists the
+// name. Restricted ones are never theirs.
+func (k *Service) itemLinks(ctx context.Context, p item.Principal, ty *typedef.Type, id uuid.UUID) ([]item.Link, bool, error) {
 	c, err := loadCaps(ctx, k.pool, p)
 	if err != nil {
 		return nil, false, err
@@ -537,11 +543,39 @@ func (k *Service) itemLinks(ctx context.Context, p item.Principal, id uuid.UUID)
 	}
 	// A customer's links pass the customer rule too (Jira part 2, step 4a).
 	visible := seeCondition("o") + inSession
+	outOnly, inOnly := "", ""
+	if policy.CustomerOf(p) != "" {
+		listed := []string{}
+		for _, l := range ty.Links {
+			if ty.CustomerSees(l.Name) {
+				listed = append(listed, l.Name)
+			}
+		}
+		types, err := k.ListTypes(ctx)
+		if err != nil {
+			return nil, false, err
+		}
+		var lt, ln []string
+		var lv []int32
+		for _, t := range types {
+			for _, l := range t.Links {
+				if t.CustomerSees(l.Name) {
+					lt, lv, ln = append(lt, t.ID), append(lv, int32(t.Version)), append(ln, l.Name)
+				}
+			}
+		}
+		if lt == nil {
+			lt, lv, ln = []string{}, []int32{}, []string{}
+		}
+		args["out_listed"], args["in_t"], args["in_v"], args["in_n"] = listed, lt, lv, ln
+		outOnly = " and l.link_type = any(@out_listed::text[]) and " + visible
+		inOnly = " and (o.type_id, o.type_version, l.link_type) in (select * from unnest(@in_t::text[], @in_v::int[], @in_n::text[]))"
+	}
 
 	outRows, err := k.pool.Query(ctx, with+
 		`select l.link_type, l.target_id, `+visible+`
 		 from links l join items o on o.id = l.target_id join scopes s on s.id = o.scope_id
-		 where l.source_id = @id
+		 where l.source_id = @id`+outOnly+`
 		 order by l.created_at, l.link_type, l.target_id
 		 limit @limit`, args)
 	if err != nil {
@@ -563,7 +597,7 @@ func (k *Service) itemLinks(ctx context.Context, p item.Principal, id uuid.UUID)
 	inRows, err := k.pool.Query(ctx, with+
 		`select l.source_type_id, o.type_version, l.link_type, l.source_id
 		 from links l join items o on o.id = l.source_id join scopes s on s.id = o.scope_id
-		 where l.target_id = @id and `+visible+`
+		 where l.target_id = @id and `+visible+inOnly+`
 		 order by l.created_at, l.link_type, l.source_id
 		 limit @limit`, args)
 	if err != nil {

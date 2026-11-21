@@ -463,7 +463,8 @@ func (r *refResolver) raw(ctx context.Context, b json.RawMessage) (*ItemRef, err
 // and the values of the fields they see. Readers, containers, links,
 // holds, hooks and reaction records are never theirs to see.
 func customerEvent(e Event, ty *typedef.Type) Event {
-	out := Event{ItemID: e.ItemID, ItemSeq: e.ItemSeq, CommitSeq: e.CommitSeq, Op: e.Op, CreatedAt: e.CreatedAt,
+	// No commit_seq: it counts everybody's writes (review of 2026-11-21).
+	out := Event{ItemID: e.ItemID, ItemSeq: e.ItemSeq, Op: e.Op, CreatedAt: e.CreatedAt,
 		Actor: e.Actor, OnBehalfOf: e.OnBehalfOf, OriginatingHook: e.OriginatingHook, CausationID: e.CausationID,
 		CorrelationID: e.CorrelationID, Hop: e.Hop, TypeID: e.TypeID, TypeVersion: e.TypeVersion, From: e.From, To: e.To}
 	for f, v := range e.Values {

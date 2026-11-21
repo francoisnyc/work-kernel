@@ -53,7 +53,15 @@ func (t *Type) checkCustomers() error {
 		if _, ok := t.Link(name); ok {
 			continue
 		}
-		if slices.ContainsFunc(t.Rollups, func(r Rollup) bool { return r.ID == name }) {
+		if i := slices.IndexFunc(t.Rollups, func(r Rollup) bool { return r.ID == name }); i >= 0 {
+			// A rollup counts over a link: listed without its link, its
+			// count would tell a customer that hidden links exist (review
+			// of 2026-11-21). An incoming name is never this version's to
+			// list, so a rollup over one is never listed.
+			over := t.Rollups[i].Over
+			if _, own := t.Link(over); !own || !slices.Contains(t.CustomerFields, over) {
+				return fail("customer_fields: rollup %s counts over %s, which customer_fields does not list", name, over)
+			}
 			continue
 		}
 		return fail("customer_fields: %s is none of this version's fields, link names or rollups", name)

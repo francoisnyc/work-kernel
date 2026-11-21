@@ -118,6 +118,7 @@ type sqlOrder struct {
 	cast    string // "::numeric", or "::text" (compared under COLLATE "C")
 	numeric bool
 	desc    bool
+	vis     pgx.NamedArgs // a customer's per-row rule's arguments (rowListing); nil for staff
 }
 
 // resolveOrder checks an OrderBy against the Types in play: the selected
@@ -148,6 +149,12 @@ func (k *Service) resolveOrder(ctx context.Context, p item.Principal, typeIDs []
 		return nil, bad("a multi-value field is a set: it has no order")
 	}
 	out := &sqlOrder{field: o.Field, desc: o.Desc, expr: fieldRead(types[0], "o_field"), cast: "::text"}
+	// A customer: a row whose own version does not show them the field
+	// sorts as if it had no value, after the rest.
+	if policy.CustomerOf(p) != "" {
+		out.vis = pgx.NamedArgs{}
+		out.expr = "(case when " + rowListing(all, o.Field, "o_vis", out.vis) + " then " + out.expr + " end)"
+	}
 	switch types[0] {
 	case typedef.Int:
 		out.cast, out.numeric = "::numeric", true
@@ -300,6 +307,9 @@ func (k *Service) pageSQL(ctx context.Context, q itemQuery) (string, pgx.NamedAr
 	orderBy, sortValue := "m.created_at desc, m.id desc", "null::text"
 	if q.order != nil {
 		args["o_field"] = q.order.field
+		for name, v := range q.order.vis {
+			args[name] = v
+		}
 		direction := "asc"
 		if q.order.desc {
 			direction = "desc"

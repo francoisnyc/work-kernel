@@ -784,6 +784,14 @@ fields it names; JSON `null` clears one. No field masks.
   clients treat it as opaque. See "The etag" below. **A customer gets no
   etag** (empty): they never update, and an etag would tell them that
   something they cannot see changed. They transition without one.
+- **A customer never sees `commit_seq`** (review of 2026-11-21): a
+  customer, or an agent acting for one, gets 0 (absent in JSON) in every
+  write's answer (`CreateItem`, `UpdateItem`, `TransitionItem`,
+  `LinkItems`, `UnlinkItems`; a replay too) and in `ItemEvent.commit_seq`.
+  It counts everybody's writes. **A customer client must not send
+  `min_seq`**: a non-zero one is `INVALID_ARGUMENT` on `min_seq`, whatever
+  its value. Their read-your-writes rests on the one Postgres, where a read
+  sees a committed write at once.
 - `requester` on `CreateItem` (Jira part 2, step 4a): a person (a `user:`,
   not an agent, not a customer) opens an Item for a customer, as on the
   phone. It is stored as `creator_on_behalf_of` and on the create event,
@@ -922,6 +930,7 @@ A rule's refusal answers with its code; every kernel rejection carries one
 | `ErrNotFound` (hidden or missing) | `NOT_FOUND` | `NOT_FOUND` |
 | `ErrForbidden` | `PERMISSION_DENIED` | `NOT_ALLOWED` |
 | `ErrNeedsApproval` | `PERMISSION_DENIED` | `NEEDS_APPROVAL` (+ scope, audience) |
+| `ErrApprovalUnavailable` | `PERMISSION_DENIED` | `APPROVAL_UNAVAILABLE` (no metadata): an agent acting for a customer made a write that would need an approval, which nobody can give; refused at once, never pending |
 | `ErrRejected` | `FAILED_PRECONDITION` | the rule's code, e.g. `GUARD_FAILED` |
 | `ErrRejected`, an approval's audience changed since shown | `FAILED_PRECONDITION` | `AUDIENCE_CHANGED` (+ audience, expected_audience) |
 | `ErrRejected`, a max-one side of a link type already has its link | `FAILED_PRECONDITION` | `LINK_CARDINALITY` (+ link_type, side) |
@@ -2329,7 +2338,7 @@ see. Every path, and its rule:
 | --- | --- |
 | Get, List, Search | the rule in SQL before the limit; page tokens and counts from visible rows only |
 | Fields | `customer_fields` only, on every read |
-| Filters, `order_by` | a field they do not see is refused exactly as an unknown field |
+| Filters, `order_by`, link conditions | the per-row rule below; a name no version lists for them is refused exactly as an unknown one |
 | Words | matched over the fields they see, on their own rows |
 | History | the create, the moves and the updates that set or cleared a field they see, with those values only; reader changes, moves, links, holds, hooks and reaction records left out; a cause naming an Item they cannot see is dropped |
 | Links, rollups | as above |
@@ -2337,8 +2346,28 @@ see. Every path, and its rule:
 | Refusals | `NOT_ALLOWED` with no metadata |
 | Types | readable, as for anyone |
 
+**The per-row rule** (review of 2026-11-21). For a customer, a field or a
+link name counts on a row only when **that row's own Type version** lists
+it in `customer_fields`. A field filter or a link condition (outgoing: the
+row's version; incoming: the condition's source Item's version) never
+matches a row whose version does not list it; in `order_by` such a row
+**sorts as empty, after the rest**. A name that no version lists for them
+is refused in the same bytes as one nobody declares. Words already match
+each row's own customer fields only. So a field or link a later version
+shows them reveals nothing of the earlier versions' rows.
+
 `updated_at`, `item_seq` and gaps in a customer's history show that
-something hidden changed, never what.
+something hidden changed, never what: **gaps in `item_seq` on their own
+Items are by design.** `commit_seq`, which counts other people's writes,
+is never shown to them (Public API, Writes).
+
+**Writes, checked again under the lock.** A customer's create (in a
+container) and transition apply the customer rule a second time inside
+the write's transaction, after the row lock: an Item moved out of what
+admits them since the first check is hidden, and nothing is written. A
+`requester` must see the Item as written (its scope, a narrow on create
+included, and the rule), checked in the same transaction. A listed rollup
+must have its link listed too (a load rule).
 
 **Staff for a customer.** `requester` on `CreateItem` (Public API, Writes):
 sam takes kim's call and opens the incident as hers. Refused from an agent
@@ -2348,7 +2377,9 @@ session in this step (Later).
 powers (`read`, `create`, `comment`, `transition:*` or
 `transition:<state>`): more is `NOT_ALLOWED`, whatever the grant says; the
 dev-token file refuses such a grant too. The idempotency key now includes
-the person an agent acts for (Write path).
+the person an agent acts for (Write path). A write by such an agent that
+would need an approval is `APPROVAL_UNAVAILABLE` at once: a customer never
+approves (a customer approving their own bot is Later).
 
 **The Types.** desk@2 (a portal: `own: [incident]`, its name and key
 shown, never its calendar or policy), incident@2 (`shared: [reply]`; the
@@ -2416,6 +2447,8 @@ names, and only the moves whose `allowed` names `creator`; New Item offers
 the Types the container admits (`own` and `shared`), nothing at the top
 level, and no readers. Still read from the Types, never decided in the UI:
 the server refuses the rest. `#/items` alone is the top level, as `#/` is.
+A customer's view of a move keeps only the `field:X` entries whose field
+they see, so their Inbox never searches on a field hidden from them.
 A page titles an Item by its Type's **first string field**, so desk@2
 declares `f_name` before `f_key`: a portal is shown by its name.
 

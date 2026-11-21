@@ -16,6 +16,12 @@ Ideas noted during the spike, not built yet.
   the fields they see on each (`policy.CustomerWords`): fine for a few
   requests each, linear for a customer with thousands. A stored tsvector of
   the customer fields, or a search index, when one appears. (Jira 2.4a)
+- A customer approving their own portal bot: today a bot's write that would
+  need an approval is `APPROVAL_UNAVAILABLE` at once. A customer could
+  approve within what they see. (Review of Jira 2.4a)
+- The GitHub Actions `actions/checkout@v4`, `setup-go@v5` and
+  `setup-node@v4` target Node 20, which is deprecated (CI's warning on
+  PR #35). Move to versions on Node 24. (Jira 2.4a)
 - An agent filing for a customer: `requester` is refused from an agent
   session, because the row has one `created_on_behalf_of` and the agent's
   user would be lost from `except: [creator]`. (Jira 2.4a, Q6)
@@ -2449,4 +2455,61 @@ and the pinned Playwright's own browser (the tests ran on this container's Chrom
 vitest: 458. `go test -race ./...` green, no race found (workflow suite 317 s). One end-to-end test of this step expected three replies where it writes four; fixed after review, in a commit of its own.
 
 **Open:** nothing from this step. **Next session:** Jira 2.4b, the access request with N-of-M approvers.
+
+## 2026-11-21 — Jira part 2, step 4a: the review's fixes (finished)
+
+**Built:** the fixes of docs/reviews/2026-11-21-customers.md (five findings, four unproven points) and one
+more finding of the same kind met while fixing them. design.md: "The per-row rule", the Writes section
+(`commit_seq` 0 and `min_seq` refused for a customer), `APPROVAL_UNAVAILABLE` in the error table, the Agents
+and Web UI notes. The review report marks each finding fixed.
+
+**Kernel changes, counted** (seven; no migration; proto unchanged, `buf breaking` green; no new dependency; no
+workflow code changed, the replay tests pass untouched):
+1. **The per-row rule**: for a customer, a field or link name counts on a row only when that row's own Type
+   version lists it: field filters and link conditions match nothing else, `order_by` sorts the rest as empty,
+   after; a name no version lists is refused in the same bytes as an unknown one (`typesFor` drops unlisted link
+   names too; `rowListing`). Found while fixing finding 1: field filters and `order_by` read the field on every
+   row, whatever its version, so a field a later version shows a customer would have revealed the earlier
+   versions' values. No Type in types/ triggered it.
+2. **A customer's links are chosen in the SQL**, so the 200-link limit and `links_truncated` count only theirs.
+3. **`commit_seq` 0 for a customer** (and an agent acting for one) in every write's answer, replays too, and in
+   history; **`min_seq` refused** from them.
+4. **The requester must see the Item as written**, checked in the create's transaction.
+5. **A listed rollup needs its link listed** (load rule).
+6. **The customer rule again under the lock** on a customer's create (the container) and transition: the
+   check before the transaction left a window in which a move made the write land outside what admits them.
+7. **`ErrApprovalUnavailable`** (`PERMISSION_DENIED / APPROVAL_UNAVAILABLE`, no metadata) for a write by an agent
+   acting for a customer that would need an approval: refused at once, never pending.
+
+**Not the kernel:** the web's `customerView` drops `field:X` entries a customer cannot see (the Inbox), scenario
+C12.
+
+**Word search was already per version** (`policy.CustomerWords` reads each row's own customer fields):
+`TestFix_Words_HoldPerVersion` passed before the fixes, and stays.
+
+**The property test** (`TestProperty_CustomerRule_AgentsLinksAndWords`, new): portal bots as actors and
+readers, linked tickets (a listed and an unlisted link name), words in visible and hidden fields, and vtickets
+at v1 and v2 with `f_code` and `rel` set on both. 3 seeds × 70 steps, 2.9 s (fails above a minute). Its Search
+count over every Item uses the step's `anyType` filter, which names the step's Types and not the test's
+vtickets (a filter naming an unregistered Type is refused, and the vtickets are registered by this test only);
+so that count covers anyType's Types, and the vtickets are covered by the per-version checks instead (field
+filters, `order_by`, link conditions and words, for every principal). I corrected that count in this test
+before Phase C, where I had first compared it with every Item.
+
+**Unproven points of the review, settled:** the check-then-write window was real for a move (fixed, 6); a
+narrowing in that window was already refused by the scope check in the transaction
+(`TestFix_CheckThenWrite_ThePortalIsNarrowedAway` passed before the fix, kept as a guard); the portal bot's
+approval (fixed, 7); the Inbox, real for a move that names both `creator` and `field:X` with X hidden (no Type in
+types/ has one; fixed in the web, vitest and Playwright). **Migration 00013's down step** restores the key
+`(namespace_id, actor, key)` and fails if an agent used one key for two people after the migration: dev only, no
+change.
+
+**Tests:** 9 new item service tests, the property test, 3 API tests, 3 vitest, 1 Playwright; the five review tests pass
+unchanged. No approved test changed.
+
+**Numbers.** `go test -race ./...` green, no race (workflow suite 314 s). Scenario: twice on a fresh stack, 96 s
+and 95 s, C12 included. Playwright: 9 tests in 8.3 s. vitest: 461. The stack ran from host-built binaries as
+before (the image build cannot download modules here); CI builds the images.
+
+**Open:** nothing. **Next session:** Jira 2.4b.
 

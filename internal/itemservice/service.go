@@ -242,7 +242,7 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 		fields = map[string]any{}
 	}
 
-	return k.write(ctx, req.Principal, req.IdempotencyKey, hash, func(tx pgx.Tx) (WriteResult, error) {
+	res, err := k.write(ctx, req.Principal, req.IdempotencyKey, hash, func(tx pgx.Tx) (WriteResult, error) {
 		id, err := uuid.NewV7()
 		if err != nil {
 			return WriteResult{}, fmt.Errorf("new item id: %w", err)
@@ -263,6 +263,14 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 		}
 		if err := checkVisible(ctx, tx, req.Principal, scopeID); err != nil {
 			return WriteResult{}, err
+		}
+		// A customer's container is checked again now that it is locked
+		// (childScope): moved out of what admits them since the check
+		// before this transaction, it is hidden.
+		if req.ContainerID != nil && policy.CustomerOf(req.Principal) != "" {
+			if err := k.checkSeesInTx(ctx, tx, req.Principal, *req.ContainerID); err != nil {
+				return WriteResult{}, err
+			}
 		}
 		// An agent session creates only inside its scopes (at the top level
 		// only if it covers the whole namespace), and only with a write power.
@@ -328,6 +336,16 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 			}
 		}
 
+		// The requester must see the Item as written: its scope (a narrow
+		// on create, a narrowed container) and the customer rule.
+		if req.Requester != "" {
+			customer := item.Principal{Actor: req.Requester, Namespace: req.Principal.Namespace}
+			if ok, err := k.seesInTx(ctx, tx, customer, id); err != nil {
+				return WriteResult{}, err
+			} else if !ok {
+				return WriteResult{}, requesterRefused
+			}
+		}
 		res, err := appendEvent(ctx, tx, ty, id, itemSeq, owner, attr, bump, payload, fields)
 		if err != nil {
 			return WriteResult{}, err
@@ -335,6 +353,7 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 		// A container whose Type reacts to this creation is told of it.
 		return res, k.tellContainer(ctx, tx, ty, req.ContainerID, id, itemSeq)
 	})
+	return forCaller(req.Principal, res), err
 }
 
 // requestHash fingerprints a request. encoding/json writes map keys in sorted
@@ -372,7 +391,7 @@ func (k *Service) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item
 	// Links both ways, each end passed through visibility. They name other
 	// Items by ID only, so they record no read. They are part of the Item
 	// that goes through Project, which chooses what a customer sees of them.
-	if it.Links, it.LinksTruncated, err = k.itemLinks(ctx, p, id); err != nil {
+	if it.Links, it.LinksTruncated, err = k.itemLinks(ctx, p, ty, id); err != nil {
 		return item.Item{}, err
 	}
 	// The scope was found readable; Project is still the one door out.

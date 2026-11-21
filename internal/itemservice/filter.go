@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/francoisnyc/work-kernel/internal/item"
+	"github.com/francoisnyc/work-kernel/internal/policy"
 	"github.com/francoisnyc/work-kernel/internal/typedef"
 )
 
@@ -125,6 +126,10 @@ func (k *Service) resolveFilter(ctx context.Context, p item.Principal, f Filter)
 			return out, &InvalidError{Path: path, Reason: err.Error()}
 		}
 		out.conds = append(out.conds, conds...)
+		// A customer: only rows whose own version shows them the field.
+		if policy.CustomerOf(p) != "" {
+			out.conds = append(out.conds, rowListing(all, ff.Field, fmt.Sprintf("f_vis_%d", i), out.args))
+		}
 	}
 	for i, lf := range f.Links {
 		cond, err := k.linkCond(ctx, p, all, lf, i, out.args)
@@ -429,15 +434,37 @@ func (k *Service) linkCond(ctx context.Context, p item.Principal, all []*typedef
 	if !known {
 		return "", &InvalidError{Path: path, Reason: "no Type declares that link name in that direction"}
 	}
-	if _, _, err := k.visibleItem(ctx, p, lf.ItemID); err != nil {
+	x, _, err := k.visibleItem(ctx, p, lf.ItemID)
+	if err != nil {
 		return "", err
 	}
+	customer := policy.CustomerOf(p) != ""
 	itemArg, nameArg := fmt.Sprintf("f_link_item_%d", i), fmt.Sprintf("f_link_name_%d", i)
 	args[itemArg] = lf.ItemID
 	if lf.Direction == item.LinkOutgoing {
 		args[nameArg] = lf.LinkType
-		return fmt.Sprintf(`m.id in (select l.source_id from links l where l.target_id = @%s and l.link_type = @%s)`,
-			itemArg, nameArg), nil
+		cond := fmt.Sprintf(`m.id in (select l.source_id from links l where l.target_id = @%s and l.link_type = @%s)`,
+			itemArg, nameArg)
+		// A customer: only sources whose own version lists the name.
+		if customer {
+			cond += " and " + rowListing(all, lf.LinkType, fmt.Sprintf("f_link_vis_%d", i), args)
+		}
+		return cond, nil
+	}
+	// Incoming, for a customer: the source is the condition's Item, whose
+	// own version must list the declared name.
+	if customer {
+		xt, err := k.loadType(ctx, k.pool, x.TypeID, x.TypeVersion)
+		if err != nil {
+			return "", err
+		}
+		lists := slices.ContainsFunc(declared, func(d string) bool {
+			t, n, _ := strings.Cut(d, "\x00")
+			return t == x.TypeID && xt.CustomerSees(n)
+		})
+		if !lists {
+			return "false", nil
+		}
 	}
 	var types, names []string
 	for _, d := range declared {

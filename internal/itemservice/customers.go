@@ -181,9 +181,11 @@ func (k *Service) checkRequester(ctx context.Context, req CreateRequest, ty *typ
 }
 
 // typesFor returns the registered Types as the principal may name their
-// fields in a filter or an order: everything, or for a customer each
-// version with only its customer fields. A field a customer cannot see is
-// then refused exactly as a field nobody declares.
+// fields and links in a filter or an order: everything, or for a customer
+// each version with only the fields and link names it lists for them. A
+// field or link name a customer cannot see in any version is then refused
+// exactly as one nobody declares. Where some versions list it and others
+// do not, the rule holds per row (rowListing).
 func (k *Service) typesFor(ctx context.Context, p item.Principal) ([]*typedef.Type, error) {
 	all, err := k.ListTypes(ctx)
 	if err != nil || policy.CustomerOf(p) == "" {
@@ -193,7 +195,75 @@ func (k *Service) typesFor(ctx context.Context, p item.Principal) ([]*typedef.Ty
 	for _, t := range all {
 		c := *t // a shallow copy: only its field list changes
 		c.Fields = slices.DeleteFunc(slices.Clone(t.Fields), func(f typedef.Field) bool { return !t.CustomerSees(f.ID) })
+		c.Links = slices.DeleteFunc(slices.Clone(t.Links), func(l typedef.LinkType) bool { return !t.CustomerSees(l.Name) })
 		out = append(out, &c)
 	}
 	return out, nil
+}
+
+// forCaller is a write's answer as the caller gets it: a customer, or an
+// agent acting for one, never sees commit_seq, a counter of everybody's
+// writes (review of 2026-11-21). The idempotency record keeps the real
+// value; a replay answers 0 to them too.
+func forCaller(p item.Principal, res WriteResult) WriteResult {
+	if policy.CustomerOf(p) != "" {
+		res.CommitSeq = 0
+	}
+	return res
+}
+
+// checkSeesInTx is ErrNotFound unless p may see the Item now, read in the
+// write's transaction after its lock: the scope test and the customer rule
+// (seeCondition). It closes the gap between a check made before the
+// transaction and the write (review of 2026-11-21).
+func (k *Service) checkSeesInTx(ctx context.Context, tx pgx.Tx, p item.Principal, id uuid.UUID) error {
+	ok, err := k.seesInTx(ctx, tx, p, id)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (k *Service) seesInTx(ctx context.Context, tx pgx.Tx, p item.Principal, id uuid.UUID) (bool, error) {
+	args, err := k.seeArgs(ctx, p)
+	if err != nil {
+		return false, err
+	}
+	args["id"] = id
+	var ok bool
+	err = tx.QueryRow(ctx, `select `+seeCondition("i")+` from items i join scopes s on s.id = i.scope_id where i.id = @id`, args).Scan(&ok)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("check visibility: %w", err)
+	}
+	return ok, nil
+}
+
+// rowListing is the one rule for a customer's field filters, order_by and
+// link conditions (review of 2026-11-21): a field or link name counts on a
+// row only when that row's own Type version lists it for the customer. It
+// returns a condition on the Items alias m, true only for such rows, with
+// its arguments named after prefix; seen are the Type versions as the
+// customer sees them (typesFor), so a version lists the name when it still
+// declares it.
+func rowListing(seen []*typedef.Type, name, prefix string, args pgx.NamedArgs) string {
+	var types []string
+	var versions []int32
+	for _, t := range seen {
+		_, field := t.Field(name)
+		_, link := t.Link(name)
+		if field || link {
+			types, versions = append(types, t.ID), append(versions, int32(t.Version))
+		}
+	}
+	if types == nil {
+		types, versions = []string{}, []int32{}
+	}
+	args[prefix+"_t"], args[prefix+"_v"] = types, versions
+	return fmt.Sprintf("(m.type_id, m.type_version) in (select * from unnest(@%s_t::text[], @%s_v::int[]))", prefix, prefix)
 }

@@ -118,6 +118,11 @@ func (k *Service) searchQuery(ctx context.Context, req SearchRequest) (itemQuery
 	if req.MinSeq < 0 || req.Wait < 0 {
 		return itemQuery{}, fmt.Errorf("%w: min_seq and wait cannot be negative", ErrInvalid)
 	}
+	// A customer never sees commit_seq, so never sends it (Jira part 2,
+	// step 4a review): refused whatever its value, so it probes nothing.
+	if req.MinSeq != 0 && policy.CustomerOf(req.Principal) != "" {
+		return itemQuery{}, &InvalidError{Path: "min_seq", Reason: "a customer does not send min_seq"}
+	}
 	limit, err := pageSize(req.Limit)
 	if err != nil {
 		return itemQuery{}, err
