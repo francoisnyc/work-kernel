@@ -1,0 +1,6 @@
+# An internal note (Jira part 2, step 4a): staff only, because no Type
+# shares it.
+id: note
+version: 1
+fields:
+  - {id: f_body, type: string}

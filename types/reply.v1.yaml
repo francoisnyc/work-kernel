@@ -1,0 +1,7 @@
+# A reply (Jira part 2, step 4a): the public conversation on a request.
+# Customers see it where the request shares it (incident@2).
+id: reply
+version: 1
+fields:
+  - {id: f_body, type: string}
+customer_fields: [f_body]
