@@ -135,3 +135,38 @@ export async function seedProject(baseURL: string, run: string): Promise<Project
   await transition(lea, issues.D.name, "in_progress");
   return { space, sprint, epic, issues };
 }
+
+// --- Requests (the vacation request and the leave balance) ---
+
+// hana (hr_admin) closes OWNER's open balances, left by earlier runs or by
+// the scenario (a request finds its balance among the open ones only),
+// then opens one with ALLOWANCE days. Its readers are the owner, hana and
+// READERS (the owner's manager, so the approver sees it: design.md,
+// "PoC apps as built", the Requests area's gaps).
+export async function seedLeave(baseURL: string, owner: string, allowance: number, readers: string[]): Promise<Item> {
+  const hana = api(baseURL, "hana");
+  const open = await hana("SearchItems", {
+    parent: NS,
+    filter: { types: [`${NS}/types/leave_balance`], states: ["open"], fields: [{ field: "f_owner", eq: owner }] },
+    pageSize: 100,
+  });
+  for (const b of (open.items ?? []) as Item[]) await transition(hana, b.name, "closed");
+  const res = await write(hana, "CreateItem", {
+    parent: NS,
+    type: type("leave_balance", 1),
+    fields: { f_owner: owner, f_allowance: String(allowance) },
+    narrow: { principals: [owner, "user:hana", ...readers] },
+  });
+  return res.item as Item;
+}
+
+// A week in the far future no other run uses (the guard wants a first day
+// that has not passed; other runs' requests would show as "in the same
+// period"): its Monday, as an ISO date, and the day N days later.
+export function futureWeek(): { monday: string; plus: (days: number) => string } {
+  const first = new Date(Date.UTC(2090, 0, 1));
+  while (first.getUTCDay() !== 1) first.setUTCDate(first.getUTCDate() + 1);
+  first.setUTCDate(first.getUTCDate() + 7 * Math.floor(Math.random() * 2000));
+  const plus = (days: number) => new Date(first.getTime() + days * 86_400_000).toISOString().slice(0, 10);
+  return { monday: plus(0), plus };
+}
