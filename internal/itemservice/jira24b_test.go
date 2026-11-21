@@ -1,8 +1,9 @@
 // Tests for Jira 2.4b, PR 1 (building blocks), in the item service, by
 // kernel change number (docs/proposals/2026-11-21-jira-2-4b-phase-a.md,
 // Part 2 wins). On test Types, as 4a did with kiosk and kticket: a rack
-// contains jars, a jar contains beans (a request, its approvals, in PR 2);
-// a crate contains peas (for the narrowed child). Reactions are run by
+// contains jars, a jar contains beans (a request, its approvals, in PR 2).
+// The jar's Type ID is urn: another test of this package registers a jar.
+// A crate contains peas (for the narrowed child). Reactions are run by
 // hand through the internal door, as the workflow would.
 package itemservice_test
 
@@ -41,7 +42,7 @@ fields:
 `
 
 const jar4b = `
-id: jar
+id: urn
 version: 1
 initial_state: draft
 fields:
@@ -90,7 +91,7 @@ reactions:
   - {id: tip,      kind: move, on: enter, state: yes, target: container, to: full, target_from: [open], on_guard: skip}
   - {id: tip_loud, kind: move, on: enter, state: yes, target: container, to: full, target_from: [open]}
 accepts_reactions:
-  'jar:make_beans': {creates: [f_holder, f_label]}
+  'urn:make_beans': {creates: [f_holder, f_label]}
 placement_writable_by: [kernel]
 `
 
@@ -187,7 +188,7 @@ func (w world4b) item(t *testing.T, id uuid.UUID) item.Item {
 // made: one per keeper. It returns the jar and its beans by holder.
 func (w world4b) openJar(t *testing.T) (uuid.UUID, map[string]uuid.UUID) {
 	t.Helper()
-	jar := w.mk(t, w.ana, "jar", &w.rack, map[string]any{"f_title": "jar " + word()})
+	jar := w.mk(t, w.ana, "urn", &w.rack, map[string]any{"f_title": "jar " + word()})
 	seq := w.mustMove(t, w.ana, jar, "open", nil)
 	out, err := w.k.Internal().ReactCreate(testCtx(t), entered(jar, seq, "make_beans"))
 	if err != nil || out.Outcome != itemservice.ReactionApplied {
@@ -227,7 +228,7 @@ func rejectedCode(err error) string {
 
 func TestJira24b_1_2_SetsReadTheContainer_PrincipalsCopiedByReference(t *testing.T) {
 	w := newWorld4b(t)
-	jar := w.mk(t, w.ana, "jar", &w.rack, map[string]any{"f_title": "x"})
+	jar := w.mk(t, w.ana, "urn", &w.rack, map[string]any{"f_title": "x"})
 	w.mustMove(t, w.ana, jar, "open", nil)
 	f := w.item(t, jar).Fields
 	if r3Int(t, f["f_needed"]) != 2 || f["f_owner"] != w.bob.Actor {
@@ -247,7 +248,7 @@ func TestJira24b_1_2_SetsReadTheContainer_PrincipalsCopiedByReference(t *testing
 	// A container that lets reactions read nothing, or none: the fields are unset.
 	shed := w.mk(t, w.lea, "shed", nil, map[string]any{"f_quota": 5})
 	for name, in := range map[string]*uuid.UUID{"in a shed": &shed, "at the top level": nil} {
-		j := w.mk(t, w.ana, "jar", in, map[string]any{"f_title": "y"})
+		j := w.mk(t, w.ana, "urn", in, map[string]any{"f_title": "y"})
 		w.mustMove(t, w.ana, j, "open", nil)
 		if f := w.item(t, j).Fields; f["f_needed"] != nil || f["f_owner"] != nil || f["f_keepers"] != nil {
 			t.Errorf("%s: %v; want the copies unset", name, f)
@@ -265,7 +266,7 @@ func sortedStrings(s ...string) []string {
 
 func TestJira24b_3_ForEach_OneItemPerMember(t *testing.T) {
 	w := newWorld4b(t)
-	jar := w.mk(t, w.ana, "jar", &w.rack, map[string]any{"f_title": "x"})
+	jar := w.mk(t, w.ana, "urn", &w.rack, map[string]any{"f_title": "x"})
 	seq := w.mustMove(t, w.ana, jar, "open", nil)
 	out, err := w.k.Internal().ReactCreate(testCtx(t), entered(jar, seq, "make_beans"))
 	if err != nil || out.Outcome != itemservice.ReactionApplied || len(out.Each) != 3 {
@@ -280,7 +281,7 @@ func TestJira24b_3_ForEach_OneItemPerMember(t *testing.T) {
 			continue
 		}
 		it := w.item(t, b)
-		if it.Fields["f_label"] != rackName || it.CreatedBy != "reaction:jar:make_beans" || it.State != "waiting" {
+		if it.Fields["f_label"] != rackName || it.CreatedBy != "reaction:urn:make_beans" || it.State != "waiting" {
 			t.Errorf("%s's bean = %+v", who.Actor, it)
 		}
 	}
@@ -290,7 +291,7 @@ func TestJira24b_3_ForEach_OneItemPerMember(t *testing.T) {
 	// One record per member, each naming its bean.
 	var targets []uuid.UUID
 	for _, e := range allEvents(t, w.k, w.lea, jar) {
-		if e.Op == "reaction_applied" && e.Reaction == "jar:make_beans" && e.ReactionTarget != nil {
+		if e.Op == "reaction_applied" && e.Reaction == "urn:make_beans" && e.ReactionTarget != nil {
 			targets = append(targets, e.ReactionTarget.ID)
 		}
 	}
@@ -499,13 +500,18 @@ func TestJira24b_10_PlacementWritableBy(t *testing.T) {
 		Fields: map[string]any{"f_name": "mine"}, Narrow: &itemservice.Narrow{Readers: []string{w.sam.Actor}}}); !placement(err) {
 		t.Errorf("sam creates a narrowed rack: %v", err)
 	}
-	if err := update(w.lea, w.rack, itemservice.UpdateRequest{Policy: &itemservice.PolicyPatch{Readers: []string{w.lea.Actor, w.ana.Actor}}}); err != nil {
-		t.Errorf("lea (rack_admin) narrows the rack: %v", err)
-	}
 	// An agent for lea without the role of its own: both must hold it.
 	agent := withSession(t, w.k, item.Principal{Actor: "agent:" + uuid.NewString()[:8], OnBehalfOf: w.lea.Actor, Namespace: w.ns})
 	if err := update(agent, w.rack, itemservice.UpdateRequest{Policy: &itemservice.PolicyPatch{Inherit: true}}); !placement(err) {
 		t.Errorf("an agent without the role, for lea: %v", err)
+	}
+	if err := update(w.lea, w.rack, itemservice.UpdateRequest{Policy: &itemservice.PolicyPatch{Readers: []string{w.lea.Actor, w.ana.Actor}}}); err != nil {
+		t.Errorf("lea (rack_admin) narrows the rack: %v", err)
+	}
+	// Narrowed to lea and ana, the rack is hidden from the agent:
+	// visibility comes first, so it learns nothing of who places it.
+	if err := update(agent, w.rack, itemservice.UpdateRequest{Policy: &itemservice.PolicyPatch{Inherit: true}}); !errors.Is(err, itemservice.ErrNotFound) {
+		t.Errorf("the agent, once the rack is narrowed away from it: %v; want ErrNotFound", err)
 	}
 	// Types that say nothing are placed by anyone who sees the Item, as before.
 	crate := w.mk(t, w.sam, "crate", nil, map[string]any{"f_name": "c"})

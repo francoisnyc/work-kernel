@@ -13,7 +13,6 @@ import (
 
 	kernelv1 "github.com/francoisnyc/work-kernel/gen/kernel/v1"
 	"github.com/francoisnyc/work-kernel/internal/itemservice"
-	"github.com/francoisnyc/work-kernel/internal/typedef"
 )
 
 const (
@@ -21,6 +20,7 @@ const (
 	slaGoalV2 = "namespaces/acme/types/sla_goal/versions/2"
 )
 
+// apijar and apibean are registered once, by TestMain (main_test.go).
 const api4bJar = `
 id: apijar
 version: 1
@@ -58,19 +58,6 @@ accepts_reactions:
 placement_writable_by: [kernel]
 `
 
-func register4b(t *testing.T) {
-	t.Helper()
-	for _, src := range []string{api4bBean, api4bJar} {
-		ty, err := typedef.Parse([]byte(src))
-		if err != nil {
-			t.Fatalf("parse: %v", err)
-		}
-		if err := k.RegisterType(testCtx(t), ty); err != nil {
-			t.Fatalf("register: %v", err)
-		}
-	}
-}
-
 func getType(t *testing.T, name string) *kernelv1.Type {
 	t.Helper()
 	res, err := as("ana").GetType(testCtx(t), connect.NewRequest(&kernelv1.GetTypeRequest{Name: name}))
@@ -81,7 +68,6 @@ func getType(t *testing.T, name string) *kernelv1.Type {
 }
 
 func TestJira24b_API_GetTypeShowsTheNewRules(t *testing.T) {
-	register4b(t)
 	jar, bean := getType(t, "namespaces/acme/types/apijar/versions/1"), getType(t, "namespaces/acme/types/apibean/versions/1")
 	if len(jar.Reactions) != 1 || jar.Reactions[0].ForEach != "f_keepers" {
 		t.Errorf("apijar's reaction: %+v; want for_each f_keepers", jar.Reactions)
@@ -112,7 +98,6 @@ func TestJira24b_API_GetTypeShowsTheNewRules(t *testing.T) {
 }
 
 func TestJira24b_API_TheNewRefusals(t *testing.T) {
-	register4b(t)
 	// PLACEMENT_NOT_WRITABLE: ana narrows a desk@3.
 	desk := mkIn(t, "hana", deskV3, "", map[string]any{"f_key": "AR", "f_name": "access " + word()})
 	_, err := as("ana").UpdateItem(testCtx(t), connect.NewRequest(&kernelv1.UpdateItemRequest{Name: desk, RequestId: newID(),

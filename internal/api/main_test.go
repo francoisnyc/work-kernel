@@ -119,6 +119,15 @@ func run(m *testing.M) int {
 		log.Printf("parse types: %v", err)
 		return 1
 	}
+	// And the test Types of jira24b_test.go (apijar, apibean), once.
+	for _, src := range []string{api4bBean, api4bJar} {
+		ty, err := typedef.Parse([]byte(src))
+		if err != nil {
+			log.Printf("parse a 2.4b test Type: %v", err)
+			return 1
+		}
+		types = append(types, ty)
+	}
 	for _, ty := range types {
 		if err := k.RegisterType(ctx, ty); err != nil {
 			log.Printf("register %s v%d: %v", ty.ID, ty.Version, err)

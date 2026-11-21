@@ -122,17 +122,25 @@ func TestJira24b_1_ContainerFieldReads(t *testing.T) {
 // --- 2. a principal copied by plain reference ---
 
 func TestJira24b_2_APrincipalByPlainReferenceOnly(t *testing.T) {
-	mustParse(t, jar4bSrc)  // f_owner from container.f_boss, f_keepers (a set) from container.f_keepers
-	mustParse(t, rack4bSrc) // readable_by_reactions now takes principal fields
+	mustParse(t, jar4bSrc)   // f_owner from container.f_boss, f_keepers (a set) from container.f_keepers
+	mustParse(t, rack4b("")) // readable_by_reactions now takes principal fields
 	cases := []struct{ name, src, mention string }{
 		{"a computed principal", strings.Replace(jar4bSrc, "f_owner: 'container.f_boss'", "f_owner: 'container.f_boss == null ? container.f_boss : container.f_boss'", 1), "f_owner"},
 		{"a literal principal", strings.Replace(jar4bSrc, "f_owner: 'container.f_boss'", `f_owner: '"user:ana"'`, 1), "f_owner"},
-		{"a set into one", strings.Replace(jar4bSrc, "f_owner: 'container.f_boss'", "f_owner: 'container.f_keepers'", 1), "f_owner"},
-		{"one into a set", strings.Replace(jar4bSrc, "f_keepers: 'container.f_keepers'", "f_keepers: 'container.f_boss'", 1), "f_keepers"},
 		{"a string into a principal", strings.Replace(jar4bSrc, "f_owner: 'container.f_boss'", "f_owner: 'f_title'", 1), "f_owner"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) { mustRefuse(t, c.name, c.src, c.mention) })
+	}
+	// One value or a set is the container's field's to say: judged across
+	// the Types loaded together.
+	for _, c := range []struct{ name, from, to, mention string }{
+		{"a set into one", "f_owner: 'container.f_boss'", "f_owner: 'container.f_keepers'", "f_owner"},
+		{"one into a set", "f_keepers: 'container.f_keepers'", "f_keepers: 'container.f_boss'", "f_keepers"},
+	} {
+		files := jar4bFamily()
+		files["jar.yaml"] = strings.Replace(jar4bSrc, c.from, c.to, 1)
+		mustRefuseSet(t, c.name, files, c.mention)
 	}
 	// A create reaction's principal is `each` or a plain reference.
 	files := jar4bFamily()
