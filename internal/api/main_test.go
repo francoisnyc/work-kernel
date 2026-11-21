@@ -75,6 +75,21 @@ var grants = []devtoken.Grant{
 		Powers: []string{"read", "edit_fields"}},
 }
 
+// Jira part 2, step 4a: two customers and a portal bot, kept apart from
+// tokens and agentTokens so the earlier tests' loops over those are
+// unchanged. kim lets the portal bot act for her, with the fixed powers of
+// a customer.
+var customerTokens = []devtoken.Token{
+	{Name: "kim", Token: "tok-kim", Principal: "customer:kim", Namespace: "acme"},
+	{Name: "lee", Token: "tok-lee", Principal: "customer:lee", Namespace: "acme"},
+	{Name: "portal-bot", Token: "tok-portal-bot", Principal: "agent:portal-bot", Namespace: "acme"},
+}
+
+var customerGrants = []devtoken.Grant{
+	{Agent: "agent:portal-bot", User: "customer:kim", Namespace: "acme", Scopes: []string{"namespaces/acme"},
+		Powers: []string{"read", "create", "comment", "transition:*"}},
+}
+
 // searchWait is the server's min_seq wait in these tests (2 s in production).
 const searchWait = 300 * time.Millisecond
 
@@ -118,8 +133,9 @@ func run(m *testing.M) int {
 	}
 
 	watched = &watchedKernel{Kernel: k}
-	all := append(slices.Clone(tokens), agentTokens...)
-	path, handler := api.NewHandler(watched, api.Options{Tokens: all, Grants: grants, SearchWait: searchWait})
+	all := append(append(slices.Clone(tokens), agentTokens...), customerTokens...)
+	path, handler := api.NewHandler(watched, api.Options{Tokens: all, Grants: append(slices.Clone(grants), customerGrants...),
+		SearchWait: searchWait})
 	mux := http.NewServeMux()
 	mux.Handle(path, handler)
 	srv = httptest.NewUnstartedServer(mux)
