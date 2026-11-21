@@ -5,6 +5,10 @@ acting for one, learn, read or change what the design says they must not, and do
 they had before this step? Each finding below has a failing test on this branch, named `TestReview_…`.
 Nothing in the code is changed.
 
+> **Fixed** on branch `claude/jira-2-4a-review-fixes` (2026-11-21): every finding, every unproven point
+> that was real, and one more finding of the same kind met during the fixes (6, below). Each section says
+> where. The five `TestReview_` tests pass unchanged.
+
 ## Summary
 
 No finding gives a customer another customer's request, an internal note, an SLA goal, a staff-only
@@ -20,10 +24,14 @@ No staff regression was found.
 | 3 | `commit_seq` in a customer's write answers counts everyone else's writes | leak (low, the counter predates the step) | `itemservice` `TestReview_CommitSeq_CountsOtherCustomersWrites` |
 | 4 | `requester` together with a narrowing that leaves the customer out is accepted | hardening | `itemservice` `TestReview_Requester_WithANarrowingThatHidesTheCustomer_IsAccepted` |
 | 5 | A listed rollup may count over an unlisted link | hardening (a leak once a Type does it) | `typedef` `TestReview_CustomerFields_ARollupOverAnUnlistedLink_IsRefusedAtLoad` |
+| 6 | Field filters and `order_by` read a field on every row, whatever its version (found during the fixes) | leak (low; no Type in types/ triggers it) | `itemservice` `TestFix_FieldFilterAndOrder_HoldPerVersion`, `TestFix_LinkCondition_HoldsPerVersion` |
 
 ## Findings
 
 ### 1. A Search link condition on an unlisted link name (leak, low)
+
+**Fixed in 8073758:** a name no version lists for the customer is refused in the same bytes as an unknown
+one, and a listed name counts on a row only when that row's own version lists it (the per-row rule, 6).
 
 **The design says** a customer sees a link only if its name is listed in `customer_fields` and the
 other end is visible to them.
@@ -44,6 +52,8 @@ field filters.
 
 ### 2. `links_truncated` counts links a customer never sees (leak, low)
 
+**Fixed in 8073758:** a customer's links are chosen in the SQL, so the limit and the flag count only theirs.
+
 **What happens:** `itemLinks` reads 201 links per direction, restricted and unlisted ones included,
 and sets `LinksTruncated` from that count. `projectForCustomer` drops those links but keeps the flag.
 
@@ -55,6 +65,8 @@ for a customer, apply the name list and drop restricted links in the SQL, so the
 only links she sees.
 
 ### 3. `commit_seq` counts other people's writes (leak, low)
+
+**Fixed in b81e23e:** a customer, or an agent acting for one, gets `commit_seq` 0 in every write's answer (replays too) and in history; a non-zero `min_seq` from them is `INVALID_ARGUMENT`.
 
 **What happens:** every write answers its `commit_seq`, taken from one sequence shared by every Item
 and namespace.
@@ -73,6 +85,8 @@ predates this step.
 
 ### 4. `requester` with a narrowing that leaves the customer out (hardening)
 
+**Fixed in 8073758:** the requester must see the Item as written, checked in the create's transaction (a narrow on create, a container narrowed meanwhile); else the requester refusal.
+
 **What happens:** sam creates an incident with `requester: customer:kim` and `narrow: [sam]`. It is
 accepted. kim is recorded as its requester, but she cannot see it, cancel it, reopen it or reply to it.
 Nothing leaks; the request just makes no sense. `checkReaders` already refuses a narrowing that would
@@ -83,6 +97,8 @@ Otherwise answer the same `InvalidError` on `requester`.
 
 ### 5. A listed rollup over an unlisted link (hardening)
 
+**Fixed in 8073758:** refused at load.
+
 **What happens:** `checkCustomers` accepts `customer_fields: [progress]` when the rollup `progress`
 counts over `blocks` and `blocks` is not listed. Such a rollup tells a customer how many hidden links
 exist, and in which states. No Type in `types/` does this today.
@@ -90,7 +106,17 @@ exist, and in which states. No Type in `types/` does this today.
 **Fix:** in `checkCustomers`, refuse a listed rollup whose link name (its `over`, or the declared name
 behind an incoming one) is not listed too.
 
+### 6. Field filters and `order_by` per version (leak, low; found during the fixes)
+
+**Fixed in 8073758.** Field filters and `order_by` read the field on every row, whatever its Type version:
+a field shown to customers in v2 only matched, and ordered, v1 rows by their hidden values. The same held
+for link conditions with a name listed in one version only. One rule now covers all three: a field or link
+name counts on a row only when that row's own version lists it; in `order_by` such a row sorts as empty,
+after the rest. Word search already read each row's own version (`TestFix_Words_HoldPerVersion`).
+
 ## Unproven (no test)
+
+Outcomes, after the fixes: the first three were real and are fixed; the fourth is noted as dev only.
 
 - **Time of check against time of use on a customer's create and transition.**
   `checkCustomerCreate` and `Transition`'s pre-check apply the customer rule with `visibleItem`
@@ -99,20 +125,25 @@ behind an incoming one) is not listed too.
   two. kim's reply, or her cancel, then lands on an Item that is no longer hers. Proving it needs a
   hook between the two reads (the write path has `SetTestHook` only inside the transaction).
   **Fix:** run `checkCustomerSees` again inside the transaction, after the row lock (container or
-  Item).
+  Item). **Real for a move, fixed in 8073758** (`TestFix_CheckThenWrite_TheIncidentLeavesThePortal`); a
+  narrowing in the window was already refused by the scope check in the transaction
+  (`TestFix_CheckThenWrite_ThePortalIsNarrowedAway`, a guard).
 - **An agent for a customer cannot be approved.** The agent write rule may need `ApproveWiden` from
   the user the agent acts for. For a customer, `ApproveWiden` refuses the approver (`user:` only).
   Suppose a portal bot reads a narrowed incident and then writes into a wider scope. That write can
   never be approved: a wrong refusal with no way out. **Fix:** let a customer approve for their own
   agent, within what they can see. Or refuse at session start the reads that would need it, and say
-  which.
+  which. **Real, fixed in b81e23e:** `PERMISSION_DENIED / APPROVAL_UNAVAILABLE` at once, no metadata
+  (`TestFix_APortalBot_ApprovalUnavailable`); a customer approving their own bot is in Later.
 - **The web UI's Inbox for a customer.** `inboxQueries` searches every `field:X` principal field with
   `me`. For a customer those fields are hidden, so the server refuses with `INVALID_ARGUMENT`, and the
   page shows a refusal instead of an empty inbox. This was not run in Playwright. **Fix:** no Inbox
-  for a customer, or skip a field the customer view does not list.
+  for a customer, or skip a field the customer view does not list. **Real for a move naming both
+  `creator` and a hidden `field:X` (no Type in types/ has one); fixed in 3a4d33b:** a customer's view of
+  a move drops such entries (vitest, Playwright).
 - **Migration 00013 down.** It restores the key `(namespace_id, actor, key)` and fails if an agent
   used one key for two people after the migration. It fails loudly, which is acceptable for a down
-  migration, but its comment should say so.
+  migration, but its comment should say so. **Noted in the journal as dev only; no change.**
 
 ## What I tried that held
 
