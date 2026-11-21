@@ -187,7 +187,7 @@ func TestCustomer_API_HiddenAndMissing_TheSameBytes(t *testing.T) {
 			t.Fatal(err)
 		}
 		res, err := kim.SearchItems(testCtx(t), connect.NewRequest(&kernelv1.SearchItemsRequest{Parent: "namespaces/acme",
-			Filter: &kernelv1.ItemFilter{Types: []string{"desk"}, Fields: []*kernelv1.FieldFilter{{Field: "f_key", Eq: v}}}}))
+			Filter: &kernelv1.ItemFilter{Types: []string{"namespaces/acme/types/desk"}, Fields: []*kernelv1.FieldFilter{{Field: "f_key", Eq: v}}}}))
 		if err != nil {
 			t.Fatalf("kim searches desks by key %v: %v", k, err)
 		}

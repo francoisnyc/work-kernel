@@ -40,7 +40,7 @@ func newPortalStack(t *testing.T) *portalStack {
 			registerTypeFile(t, f)
 		}
 	})
-	p := &portalStack{incStack: s, kim: item.Principal{Actor: "customer:kim-" + uuid.NewString()[:8]}}
+	p := &portalStack{incStack: s, kim: item.Principal{Actor: "customer:kim-" + uuid.NewString()[:8], Namespace: "default"}}
 	if _, err := pool.Exec(serverCtx(t),
 		`insert into principal_roles (namespace_id, principal, role) values ('default', $1, 'desk_agent')`, s.sam.Actor); err != nil {
 		t.Fatalf("grant desk_agent: %v", err)

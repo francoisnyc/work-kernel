@@ -86,6 +86,10 @@ func newCustWorld(t *testing.T) custWorld {
 	w.oldDesk = w.mk(t, w.lea, "desk", 1, nil, map[string]any{"f_key": "OLD", "f_name": "old " + word()})
 	w.space = w.mk(t, w.lea, "space", 1, nil, map[string]any{"f_key": "PLAT", "f_name": "PLAT " + word()})
 	w.story = w.mk(t, w.sam, "story", 3, &w.space, map[string]any{"f_summary": "vpn story " + word()})
+	// anyType names the two test Types of the links and rollups test: a
+	// filter on a Type that is not registered is refused.
+	registerSrc(t, k, kticketSrc)
+	registerSrc(t, k, kioskSrc)
 	w.sla = slaWorld{k: k, late: itemservice.NewWithOptions(pool, itemservice.Options{ClockSkew: time.Hour}), ns: ns,
 		admin: w.lea, ana: w.kim, sam: w.sam, eve: w.eve, cal: w.cal, policy: w.policy, desk: w.desk}
 	return w
@@ -305,7 +309,7 @@ func TestCustomer_SetsOnlyCustomerFields(t *testing.T) {
 func TestCustomer_NeverUpdatesMovesNarrowsOrLinks(t *testing.T) {
 	w := newCustWorld(t)
 	inc := w.incident(t, w.kim, w.desk)
-	bug := w.mk(t, w.sam, "bug", 3, nil, map[string]any{"f_title": "x"})
+	bug := w.mk(t, w.sam, "bug", 3, nil, map[string]any{"f_summary": "x"})
 	other := w.incident(t, w.kim, w.desk)
 	ctx := testCtx(t)
 	attempts := map[string]error{}
@@ -584,7 +588,13 @@ func TestCustomer_ReplyReopensAndResumes_ANoteDoesNothing(t *testing.T) {
 	if o.Outcome != itemservice.ReactionApplied || w.sla.state(t, inc) != "in_progress" {
 		t.Fatalf("kim's reply = %+v, incident %s; want it back in progress", o, w.sla.state(t, inc))
 	}
-	resume := w.sla.reactMove(t, entered(inc, itemSeqOf(t, inc), "sla_resume"))
+	// The resume runs for the event that brought it back: the reaction's
+	// transition, not its outcome record after it.
+	var back int64
+	if err := pool.QueryRow(testCtx(t), `select max(item_seq) from item_events where item_id = $1 and op = 'transition'`, inc).Scan(&back); err != nil {
+		t.Fatal(err)
+	}
+	resume := w.sla.reactMove(t, entered(inc, back, "sla_resume"))
 	if resume.Outcome != itemservice.ReactionApplied || w.sla.state(t, res) != "running" {
 		t.Errorf("resume = %+v, resolution %s; want running again", resume, w.sla.state(t, res))
 	}
@@ -770,7 +780,7 @@ func TestCustomer_History_EveryEventKind(t *testing.T) {
 	w.sla.goalSets(t, res, itemSeqOf(t, res))
 	hers := w.reply(t, w.kim, inc, "still broken")
 	w.sla.reactMove(t, itemservice.ReactionRunRequest{SourceID: inc, Reaction: "customer_replied", CauseItem: hers, CauseSeq: 1, Hop: 1})
-	bug := w.mk(t, w.sam, "bug", 3, nil, map[string]any{"f_title": "vpn bug"})
+	bug := w.mk(t, w.sam, "bug", 3, nil, map[string]any{"f_summary": "vpn bug"})
 	w.link(t, w.sam, inc, "caused_by", bug)
 	if _, err := w.k.Unlink(testCtx(t), itemservice.LinkRequest{IdempotencyKey: newKey(), Principal: w.sam, SourceID: inc, LinkType: "caused_by", TargetID: bug}); err != nil {
 		t.Fatal(err)
