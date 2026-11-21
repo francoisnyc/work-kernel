@@ -126,8 +126,8 @@ func TestE2E_Customer_ReplyAnswersReopensAndResumes(t *testing.T) {
 			t.Errorf("kim sees a %s in her incident", it.TypeID)
 		}
 	}
-	if len(seen.Items) != 3 {
-		t.Errorf("kim sees %d Items in her incident, want the 3 replies", len(seen.Items))
+	if len(seen.Items) != 4 {
+		t.Errorf("kim sees %d Items in her incident, want the 4 replies", len(seen.Items))
 	}
 }
 
