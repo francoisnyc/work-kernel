@@ -9,11 +9,7 @@ import { itemId, latestVersions } from "../model/typeinfo";
 import { ItemForm } from "../ui/ItemForm";
 import { ItemPicker } from "../ui/ItemPicker";
 
-export function NewItemPage({
-  container: initialContainer,
-}: {
-  container: string;
-}): ReactElement {
+export function NewItemPage({ container: initialContainer }: { container: string }): ReactElement {
   const session = useSession();
   const customer = isCustomer(session.user);
   const [typeId, setTypeId] = useState("");
@@ -35,13 +31,9 @@ export function NewItemPage({
       current = false;
     };
   }, [customer, container, session]);
-  const latest = customer
-    ? creatableByCustomer(session.types, containerType)
-    : latestVersions(session.types);
+  const latest = customer ? creatableByCustomer(session.types, containerType) : latestVersions(session.types);
 
-  const versions = session.types
-    .filter((t) => t.typeId === typeId)
-    .sort((a, b) => b.version - a.version);
+  const versions = session.types.filter((t) => t.typeId === typeId).sort((a, b) => b.version - a.version);
   // The latest version unless another was chosen.
   const type = versions.find((t) => t.version === version) ?? versions[0];
 
@@ -70,11 +62,7 @@ export function NewItemPage({
         {type && (
           <div className="field">
             <label htmlFor="new-version">Version</label>
-            <select
-              id="new-version"
-              value={type.version}
-              onChange={(e) => setVersion(Number(e.target.value))}
-            >
+            <select id="new-version" value={type.version} onChange={(e) => setVersion(Number(e.target.value))}>
               {versions.map((t) => (
                 <option key={t.version} value={t.version}>
                   {t.version}
@@ -86,16 +74,8 @@ export function NewItemPage({
         )}
         <div className="field">
           <label htmlFor="new-container">Container (optional)</label>
-          <ItemPicker
-            id="new-container"
-            value={container}
-            onChange={setContainer}
-            search={session.search}
-            titleOf={session.titleOf}
-          />
-          <span className="hint">
-            the Item this one is created inside; empty for the top level
-          </span>
+          <ItemPicker id="new-container" value={container} onChange={setContainer} search={session.search} titleOf={session.titleOf} />
+          <span className="hint">the Item this one is created inside; empty for the top level</span>
         </div>
         {!customer && (
           <div className="field">
@@ -107,10 +87,7 @@ export function NewItemPage({
               value={readers}
               onChange={(e) => setReaders(e.target.value)}
             />
-            <span className="hint">
-              narrow the Item to these principals, comma-separated; include
-              yourself
-            </span>
+            <span className="hint">narrow the Item to these principals, comma-separated; include yourself</span>
           </div>
         )}
       </div>

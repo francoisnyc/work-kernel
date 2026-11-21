@@ -10,9 +10,10 @@
 id: desk
 version: 2
 
+# The name first: a page shows a portal by its first string field.
 fields:
-  - {id: f_key,  type: string}
   - {id: f_name, type: string}
+  - {id: f_key,  type: string}
 
 links:
   - {name: calendar,   inverse: desks,          targets: [calendar],   max: one, writable_by: ['role:sla_admin']}

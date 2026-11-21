@@ -2,11 +2,7 @@
 // read from the principal and the Types, never from a Type's name. The
 // server decides; these only keep the UI from offering what it would refuse.
 import { clone } from "@bufbuild/protobuf";
-import {
-  TypeSchema,
-  type Transition,
-  type Type,
-} from "../gen/kernel/v1/kernel_pb";
+import { TypeSchema, type Transition, type Type } from "../gen/kernel/v1/kernel_pb";
 import type { DevUser } from "./devusers";
 import { latestVersions } from "./typeinfo";
 
@@ -23,10 +19,7 @@ export function pickerLabel(u: DevUser): string {
 // creatableByCustomer: the Types (latest version of each ID) a customer may
 // create inside an Item of the container's Type: its own and shared ones.
 // None at the top level.
-export function creatableByCustomer(
-  types: Type[],
-  container: Type | undefined,
-): Type[] {
+export function creatableByCustomer(types: Type[], container: Type | undefined): Type[] {
   if (!container) return [];
   const admitted = new Set([...container.own, ...container.shared]);
   return latestVersions(types).filter((t) => admitted.has(t.typeId));

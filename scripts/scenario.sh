@@ -1534,7 +1534,7 @@ ok kim item list --page-size 500 | j '.items[]?.name' | grep -qx "$portal" || fa
 step "C2: kim opens a P3 incident; its goals start; she sees her fields only, with no etag"
 refuse kim "PERMISSION_DENIED FIELD_NOT_WRITABLE" item create --type incident@2 --in "$portal" --set "f_title=x $w" --set f_priority=P3 --set f_assignee=user:sam
 refuse kim "PERMISSION_DENIED NOT_ALLOWED" item create --type incident@2 --set "f_title=x $w" --set f_priority=P3
-c1=$(cincident kim P3 "VPN keeps dropping")
+c1=$(cincident kim P3 "Wifi keeps dropping")
 wait_until 30 "the incident's two goals" has_goals "$c1"
 wait_until 30 "its due instants, for staff" fld_set "$c1" f_due_resolution
 ok sam item update "$c1" --set f_assignee=user:sam >/dev/null
@@ -1547,9 +1547,9 @@ expect "sam sees the assignee and the deadlines" "$(ok sam item get "$c1" | j '[
 lee1=$(cincident lee P3 "Printer offline")
 
 step "C3: what kim cannot see: the goals, a note, lee's incident, the old desk, the PLAT space"
-note1=$(ok sam item create --type note@1 --in "$c1" --set "f_body=customer is on the old VPN client $w" | j .item.name)
-for hidden in "$(goal "$c1" first_response)" "$(goal "$c1" resolution)" "$note1" "$lee1" "$desk" "$plat" "$plat1"; do
-	refuse kim "NOT_FOUND NOT_FOUND" item get "$hidden"
+note1=$(ok sam item create --type note@1 --in "$c1" --set "f_body=customer is on the old wifi driver $w" | j .item.name)
+for kim_hidden in "$(goal "$c1" first_response)" "$(goal "$c1" resolution)" "$note1" "$lee1" "$desk" "$plat" "$plat1"; do
+	refuse kim "NOT_FOUND NOT_FOUND" item get "$kim_hidden"
 done
 refuse lee "NOT_FOUND NOT_FOUND" item get "$c1"
 refuse kim "NOT_FOUND NOT_FOUND" item list "$lee1"
@@ -1557,16 +1557,16 @@ refuse kim "NOT_FOUND NOT_FOUND" item create --type reply@1 --in "$lee1" --set "
 
 step "C4: kim's history: the create and the moves, no reaction record, no assignee"
 hist=$(ok kim item history "$c1" --page-size 100)
-expect "kim's events" "$(j '[.events[].kind | sub("ITEM_EVENT_KIND_"; "")] | join(" ")' <<<"$hist")" "CREATE"
-expect "no value she cannot see" "$(j '[.events[].values // {} | keys[]] | unique | join(" ")' <<<"$hist")" "f_priority f_title"
+expect "kim's events" "$(j '[.events[].kind | sub("ITEM_EVENT_KIND_"; "")] | join(" ")' <<<"$hist")" "CREATED"
+expect "no value she cannot see" "$(j '[.events[].fields // {} | keys[]] | unique | join(" ")' <<<"$hist")" "f_priority f_title"
 
 step "C5: sam replies (first response met) and writes a note; kim sees the reply only"
 ok sam item transition "$c1" --to in_progress >/dev/null
-r1=$(ok sam item create --type reply@1 --in "$c1" --set "f_body=Which client version? $w" | j .item.name)
+c1_reply=$(ok sam item create --type reply@1 --in "$c1" --set "f_body=Which client version? $w" | j .item.name)
 wait_until 30 "first response stopped by sam's reply" state_is lea "$(goal "$c1" first_response)" completed
 expect "what kim lists in her incident" "$(kinds kim "$c1")" "reply"
 expect "what sam lists in it" "$(kinds sam "$c1")" "note reply sla_goal sla_goal"
-expect "kim's search finds the portal, her incident and the reply, not the note nor lee's" "$(ok kim item search "$w" | names)" "$(sorted "$portal" "$c1" "$r1")"
+expect "kim's search finds the portal, her incident and the reply, not the note nor lee's" "$(ok kim item search "$w" | names)" "$(sorted "$portal" "$c1" "$c1_reply")"
 expect "kim's incidents in the portal" "$(ok kim item list "$portal" | names)" "$c1"
 expect "a search on a hidden field is refused as one on an unknown field" \
 	"$(run kim item search "$w" --where f_assignee=user:sam; head -n 1 "$tmp/err")" \
@@ -1578,7 +1578,7 @@ wait_until 30 "resolution paused" state_is lea "$(goal "$c1" resolution)" paused
 ok sam item create --type note@1 --in "$c1" --set "f_body=still waiting $w" >/dev/null
 sleep 2
 expect "after sam's note" "$(ok kim item get "$c1" | j .item.state)" "waiting_for_customer"
-ok kim item create --type reply@1 --in "$c1" --set "f_body=Version 4.2, still broken $w" >/dev/null
+ok kim item create --type reply@1 --in "$c1" --set "f_body=Driver 4.2, still broken $w" >/dev/null
 wait_until 30 "kim's reply brings it back" state_is kim "$c1" in_progress
 wait_until 30 "resolution resumed" state_is lea "$(goal "$c1" resolution)" running
 
