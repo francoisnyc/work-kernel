@@ -32,12 +32,17 @@ export function customerMayTake(t: Transition): boolean {
 }
 
 // customerView: a Type as a customer meets it: only the fields and link
-// names it lists for them, and only the moves they may take.
+// names it lists for them, and only the moves they may take, whose
+// field:X entries keep only the fields they see (so the Inbox never asks
+// about a field hidden from them).
 export function customerView(t: Type): Type {
   const shown = new Set(t.customerFields);
   const v = clone(TypeSchema, t);
   v.fields = v.fields.filter((f) => shown.has(f.id));
   v.linkTypes = v.linkTypes.filter((l) => shown.has(l.name));
   v.transitions = v.transitions.filter(customerMayTake);
+  for (const tr of v.transitions) {
+    tr.allowed = tr.allowed.filter((a) => !a.startsWith("field:") || shown.has(a.slice("field:".length)));
+  }
   return v;
 }
