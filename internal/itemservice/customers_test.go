@@ -389,8 +389,8 @@ func TestCustomer_NeverHoldsARole(t *testing.T) {
 	if err := w.move(t, w.sam, inc, "in_progress", nil); err != nil {
 		t.Fatal(err)
 	}
-	// in_progress -> canceled names role:desk_agent and no creator: a
-	// customer never takes it, whatever principal_roles says.
+	// in_progress -> canceled names no creator: a customer never takes
+	// it, whatever principal_roles says.
 	if err := w.move(t, w.kim, inc, "canceled", nil); !errors.Is(err, itemservice.ErrForbidden) {
 		t.Errorf("kim with a desk_agent row cancels an incident in progress: %v; want ErrForbidden", err)
 	}
