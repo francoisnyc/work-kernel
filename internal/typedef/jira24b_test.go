@@ -122,7 +122,7 @@ func TestJira24b_1_ContainerFieldReads(t *testing.T) {
 // --- 2. a principal copied by plain reference ---
 
 func TestJira24b_2_APrincipalByPlainReferenceOnly(t *testing.T) {
-	mustParse(t, jar4bSrc) // f_owner from container.f_boss, f_keepers (a set) from container.f_keepers
+	mustParse(t, jar4bSrc)  // f_owner from container.f_boss, f_keepers (a set) from container.f_keepers
 	mustParse(t, rack4bSrc) // readable_by_reactions now takes principal fields
 	cases := []struct{ name, src, mention string }{
 		{"a computed principal", strings.Replace(jar4bSrc, "f_owner: 'container.f_boss'", "f_owner: 'container.f_boss == null ? container.f_boss : container.f_boss'", 1), "f_owner"},

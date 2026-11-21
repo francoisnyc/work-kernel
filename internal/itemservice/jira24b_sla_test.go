@@ -94,7 +94,10 @@ func newSLA4b(t *testing.T) sla4b {
 	return w
 }
 
-func (w sla4b) fields(t *testing.T, id uuid.UUID) map[string]any { t.Helper(); return fieldsOf(t, w.k, w.lea, id) }
+func (w sla4b) fields(t *testing.T, id uuid.UUID) map[string]any {
+	t.Helper()
+	return fieldsOf(t, w.k, w.lea, id)
+}
 
 func TestJira24b_Desk3_OnlySLAAdminPlacesIt(t *testing.T) {
 	w := newSLA4b(t)
