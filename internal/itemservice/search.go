@@ -147,7 +147,6 @@ func (k *Service) searchQuery(ctx context.Context, req SearchRequest) (itemQuery
 	}, nil
 }
 
-
 // waitForCommit returns once the write named by minSeq is visible and every
 // transaction older than it has finished: the write's transaction ID is below
 // the snapshot xmin, the oldest transaction still running. A commit_seq whose
