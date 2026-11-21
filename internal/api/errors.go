@@ -29,6 +29,7 @@ var messages = map[string]string{
 	"NOT_FOUND":              "not found",
 	"NOT_ALLOWED":            "the caller may not do this",
 	"NEEDS_APPROVAL":         "the agent session needs its user's approval to write there",
+	"APPROVAL_UNAVAILABLE":   "an agent acting for a customer cannot be approved",
 	"STALE":                  "the Item has changed since it was read",
 	"HELD":                   "a check is holding the Item",
 	"IDEMPOTENCY_KEY_REUSED": "the request_id was used for a different request",
@@ -171,6 +172,10 @@ func errorWith(err error, item, readersPath, ns string) *connect.Error {
 		return badField("fields."+invalid.Field, invalid.Reason)
 	case errors.Is(err, itemservice.ErrInvalid):
 		return apiError(connect.CodeInvalidArgument, "INVALID_REQUEST", nil)
+	// Before NEEDS_APPROVAL: a customer's agent is refused at once, with
+	// no metadata (a customer's refusals carry none).
+	case errors.Is(err, itemservice.ErrApprovalUnavailable):
+		return apiError(connect.CodePermissionDenied, "APPROVAL_UNAVAILABLE", nil)
 	case errors.As(err, &approval):
 		var md map[string]string
 		if ns != "" {

@@ -72,7 +72,9 @@ func (k *Service) Transition(ctx context.Context, req TransitionRequest) (Transi
 	if err != nil {
 		return TransitionResult{}, err
 	}
-	return k.outcome(ctx, res, kind, req.Wait)
+	out, err := k.outcome(ctx, res, kind, req.Wait)
+	out.WriteResult = forCaller(req.Principal, out.WriteResult)
+	return out, err
 }
 
 // transition is Transition's body for both doors; kc is as in update. It
@@ -109,6 +111,14 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		it, links, resolutions, err := k.lockForTransition(ctx, tx, nsOf(req.Principal), req.ItemID, req.ToState)
 		if err != nil {
 			return WriteResult{}, err
+		}
+		// A customer's Item is checked again under its lock: moved out of
+		// what admits them since the check before this transaction, it is
+		// hidden.
+		if policy.CustomerOf(req.Principal) != "" {
+			if err := k.checkSeesInTx(ctx, tx, req.Principal, req.ItemID); err != nil {
+				return WriteResult{}, err
+			}
 		}
 		// A kernel write (timer, hook) is internal infrastructure, not a
 		// principal reading the Item, so it is not subject to visibility

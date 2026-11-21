@@ -24,8 +24,8 @@ var ErrNeedsApproval = errors.New("itemservice: needs approval")
 // ErrApprovalUnavailable means an agent acting for a customer made a write
 // that would need an approval (ErrNeedsApproval), which nobody can give: a
 // customer never approves. The write is refused at once, never left
-// pending (Jira part 2, step 4a review). Phase B stub: declared, not yet
-// returned.
+// pending (Jira part 2, step 4a review). Distinct from ErrNeedsApproval
+// and ErrForbidden.
 var ErrApprovalUnavailable = errors.New("itemservice: an agent acting for a customer cannot be approved")
 
 // NeedsApprovalError carries the scope the agent's write would land in.
@@ -191,6 +191,10 @@ func needsApproval(ctx context.Context, tx pgx.Tx, p item.Principal, target uuid
 	}
 	if approved {
 		return nil
+	}
+	// Nobody can approve for a customer: refuse at once, never pending.
+	if policy.CustomerOf(p) != "" {
+		return fmt.Errorf("%w: the write lands wider than what this session read", ErrApprovalUnavailable)
 	}
 	open, err := scopeOpen(ctx, tx, target)
 	if err != nil {
