@@ -260,7 +260,7 @@ func causeRoot(ctx context.Context, q policy.Querier, p item.Principal, source u
 		return item.Principal{}, fmt.Errorf("read cause: %w", err)
 	}
 	root := onBehalfOf
-	if root == "" && item.IsKind(actor, item.KindUser) {
+	if root == "" && item.IsKind(actor, item.KindUser, item.KindCustomer) {
 		root = actor
 	}
 	return item.Principal{Actor: p.Actor, OnBehalfOf: root, Namespace: p.Namespace}, nil

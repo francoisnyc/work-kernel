@@ -43,15 +43,21 @@ func (k *Service) rollups(ctx context.Context, p item.Principal, ty *typedef.Typ
 	}
 	counted := map[string][]group{}
 	var read []*uuid.UUID
+	// A customer gets only the rollups the Type lists for them (Jira part
+	// 2, step 4a): the others are not computed at all.
+	customer := policy.CustomerOf(p) != ""
 	for _, r := range ty.Rollups {
-		if _, done := counted[r.Over]; done {
+		if _, done := counted[r.Over]; done || (customer && !ty.CustomerSees(r.ID)) {
 			continue
 		}
 		src, ok := ty.LinkSource(r.Over)
 		if !ok {
 			return nil, nil, fmt.Errorf("type %s v%d: rollup %s counts over %q, which it cannot read", ty.ID, ty.Version, r.ID, r.Over)
 		}
-		args := policy.VisibleArgs(p)
+		args, err := k.seeArgs(ctx, p)
+		if err != nil {
+			return nil, nil, err
+		}
 		args["id"], args["ns"], args["link"] = id, nsOf(p), src.Link
 		cte, inSession := sessionFilter(c, "o", args)
 		with := ""
@@ -70,7 +76,7 @@ func (k *Service) rollups(ctx context.Context, p item.Principal, ty *typedef.Typ
 		rows, err := k.pool.Query(ctx, with+
 			`select o.type_id, o.type_version, o.state, s.policy_scope_id, count(*)
 			 from links l join items o on `+join+` join scopes s on s.id = o.scope_id
-			 where `+where+` and o.namespace_id = @ns and `+policy.VisibleCondition+inSession+`
+			 where `+where+` and o.namespace_id = @ns and `+seeCondition("o")+inSession+`
 			 group by o.type_id, o.type_version, o.state, s.policy_scope_id`, args)
 		if err != nil {
 			return nil, nil, fmt.Errorf("count linked items: %w", err)
@@ -106,6 +112,9 @@ func (k *Service) rollups(ctx context.Context, p item.Principal, ty *typedef.Typ
 
 	out := make(map[string]item.Rollup, len(ty.Rollups))
 	for _, r := range ty.Rollups {
+		if customer && !ty.CustomerSees(r.ID) {
+			continue
+		}
 		counts := map[string]int64{}
 		for _, g := range counted[r.Over] {
 			key := g.category

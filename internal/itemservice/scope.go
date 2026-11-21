@@ -36,11 +36,12 @@ func checkReaders(readers []string, p item.Principal) ([]string, error) {
 	if slices.Contains(readers, "") {
 		return nil, readersInvalid("a reader ID is empty")
 	}
-	// Readers are users or agents. group: is reserved until groups exist,
-	// and system: principals read nothing through scopes.
+	// Readers are users, agents or customers (a customer reader is needed,
+	// never enough: the customer rule still applies). group: is reserved
+	// until groups exist, and system: principals read nothing through scopes.
 	for _, r := range readers {
-		if !item.IsKind(r, item.KindUser, item.KindAgent) {
-			return nil, readersInvalid("reader %q must be user:<id> or agent:<id>", r)
+		if !item.IsKind(r, item.KindUser, item.KindAgent, item.KindCustomer) {
+			return nil, readersInvalid("reader %q must be user:<id>, agent:<id> or customer:<id>", r)
 		}
 	}
 	if !slices.Contains(readers, p.Actor) ||

@@ -72,6 +72,10 @@ func CanSee(ctx context.Context, q Querier, p item.Principal, scopeID uuid.UUID)
 // Roles returns the roles one principal holds in a namespace. They are the
 // server's own records; a request never carries its roles.
 func Roles(ctx context.Context, q Querier, namespaceID, principal string) ([]string, error) {
+	// A customer never holds a role, whatever the table says.
+	if item.IsKind(principal, item.KindCustomer) {
+		return nil, nil
+	}
 	rows, err := q.Query(ctx,
 		`select role from principal_roles where namespace_id = $1 and principal = $2`,
 		namespaceID, principal)
@@ -87,15 +91,24 @@ func Roles(ctx context.Context, q Querier, namespaceID, principal string) ([]str
 
 // Project returns the Item as the principal may see it. The second value is
 // false when the principal may not see it at all; the caller must then behave
-// as if the Item did not exist.
+// as if the Item did not exist. ty is the Item's own Type version; every
+// path of the item service passes it (it is optional only so that the
+// Step 4 callers that project for staff stay as they were).
 //
-// Step 4 is all-or-nothing per Item: an Item in a visible scope comes back
-// unchanged. Hiding single fields comes later, which is why the principal is
-// already a parameter.
-func Project(p item.Principal, visible []uuid.UUID, it item.Item) (item.Item, bool) {
+// Staff see an Item in a visible scope whole. A customer (or an agent
+// acting for one) sees what the Type version lists in customer_fields and
+// nothing else (Jira part 2, step 4a): see projectForCustomer. Without the
+// Type, a customer sees nothing: fail closed.
+func Project(p item.Principal, visible []uuid.UUID, it item.Item, ty ...*typedef.Type) (item.Item, bool) {
 	// An Item without a scope is never "visible to everyone".
 	if it.ScopeID == nil || !slices.Contains(visible, *it.ScopeID) {
 		return item.Item{}, false
+	}
+	if CustomerOf(p) != "" {
+		if len(ty) != 1 {
+			return item.Item{}, false
+		}
+		return projectForCustomer(it, ty[0])
 	}
 	return it, true
 }
@@ -231,6 +244,11 @@ func MayTransition(tr typedef.Transition, who Who, it ItemFacts) bool {
 	if slices.Contains(tr.Except, typedef.AllowedCreator) &&
 		TookPartInCreation(who.Actor, who.OnBehalfOf, it.CreatedBy, it.CreatedOnBehalfOf) {
 		return false
+	}
+	// A customer takes only the moves whose allowed names creator: an empty
+	// allowed, a role or a principal never lets one in.
+	if CustomerOf(item.Principal{Actor: who.Actor, OnBehalfOf: who.OnBehalfOf}) != "" {
+		return mayCustomerTransition(tr, who, it)
 	}
 	if len(tr.Allowed) == 0 {
 		return true

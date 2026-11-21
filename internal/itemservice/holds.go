@@ -481,7 +481,7 @@ func (in *Internal) HookInput(ctx context.Context, req HookInputRequest) (map[st
 	}
 	// A hook acts on the Item that triggered it, so it is not subject to
 	// visibility; Project is still the one door out. Then only the reads.
-	projected, ok := policy.Project(req.Principal, []uuid.UUID{*it.ScopeID}, it)
+	projected, ok := policy.Project(req.Principal, []uuid.UUID{*it.ScopeID}, it, ty)
 	if !ok {
 		return nil, ErrNotFound
 	}

@@ -138,7 +138,7 @@ func (tg trigger) principal() item.Principal {
 func (tg trigger) recorded() item.Principal {
 	p := tg.principal()
 	p.OnBehalfOf = tg.onBehalfOf
-	if p.OnBehalfOf == "" && item.IsKind(tg.actor, item.KindUser) {
+	if p.OnBehalfOf == "" && item.IsKind(tg.actor, item.KindUser, item.KindCustomer) {
 		p.OnBehalfOf = tg.actor
 	}
 	return p

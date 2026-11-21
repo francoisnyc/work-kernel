@@ -67,7 +67,7 @@ type sqlFilter struct {
 // filter.fields[i] or filter.links[i].
 func (k *Service) resolveFilter(ctx context.Context, p item.Principal, f Filter) (sqlFilter, error) {
 	out := sqlFilter{args: pgx.NamedArgs{}}
-	all, err := k.ListTypes(ctx)
+	all, err := k.typesFor(ctx, p)
 	if err != nil {
 		return out, err
 	}

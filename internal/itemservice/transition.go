@@ -57,6 +57,17 @@ func (k *Service) Transition(ctx context.Context, req TransitionRequest) (Transi
 	if req.Wait < 0 || req.Wait > k.maxWait {
 		return TransitionResult{}, fmt.Errorf("%w: wait must be between 0 and %v", ErrInvalid, k.maxWait)
 	}
+	// A customer moves only an Item the customer rule shows them, and with
+	// no fields: a move with a patch is an update, which they never make.
+	// Which moves they take is policy.MayTransition's (creator only).
+	if policy.CustomerOf(req.Principal) != "" {
+		if _, _, err := k.visibleItem(ctx, req.Principal, req.ItemID); err != nil {
+			return TransitionResult{}, err
+		}
+		if len(req.Fields) > 0 {
+			return TransitionResult{}, fmt.Errorf("%w: a customer moves an Item without changing its fields", ErrForbidden)
+		}
+	}
 	res, kind, err := k.transition(ctx, req, nil)
 	if err != nil {
 		return TransitionResult{}, err
@@ -356,8 +367,10 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 func authorize(ctx context.Context, tx pgx.Tx, p item.Principal, ty *typedef.Type, from, to string,
 	it policy.ItemFacts) error {
 	tr, _ := ty.Transition(from, to) // lifecycle.Transition has just found it
-	if len(tr.Allowed) == 0 && len(tr.Except) == 0 {
-		return nil // anyone who can see the Item; no need to read roles
+	// Anyone who can see the Item, with no need to read roles; never a
+	// customer, who takes only the moves whose allowed names creator.
+	if len(tr.Allowed) == 0 && len(tr.Except) == 0 && policy.CustomerOf(p) == "" {
+		return nil
 	}
 	who := policy.Who{Actor: p.Actor, OnBehalfOf: p.OnBehalfOf}
 	// Roles are read on every write, inside its transaction: no cache.

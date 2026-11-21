@@ -72,7 +72,7 @@ func (k *Service) offered(ctx context.Context, itemID uuid.UUID, name string) (s
 	if err != nil {
 		return "", err
 	}
-	projected, ok := policy.Project(recipient, []uuid.UUID{*seen.ScopeID}, seen)
+	projected, ok := policy.Project(recipient, []uuid.UUID{*seen.ScopeID}, seen, ty)
 	if !ok {
 		return none("the principal offered cannot see the container")
 	}

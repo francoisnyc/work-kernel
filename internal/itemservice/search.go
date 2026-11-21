@@ -70,29 +70,65 @@ type SearchResult struct {
 // Today search reads the same Postgres the writes go to, so the wait ends at
 // once. The contract is here so it still holds when search has its own index.
 func (k *Service) Search(ctx context.Context, req SearchRequest) (SearchResult, error) {
+	q, err := k.searchQuery(ctx, req)
+	if err != nil {
+		return SearchResult{}, err
+	}
+	if err := k.waitForCommit(ctx, req.MinSeq, req.Wait); err != nil {
+		return SearchResult{}, err
+	}
+	found, next, err := k.page(ctx, q)
+	if err != nil {
+		return SearchResult{}, err
+	}
+	// Every outbound path goes through Project, with each Item's own Type
+	// version (a customer sees its customer fields only). Any count or
+	// total is taken from what Project returns, never before it. An
+	// agent's read of every result is recorded for the write rule.
+	items := make([]item.Item, 0, len(found))
+	var read []*uuid.UUID
+	for _, h := range found {
+		ty, err := k.loadType(ctx, k.pool, h.it.TypeID, h.it.TypeVersion)
+		if err != nil {
+			return SearchResult{}, err
+		}
+		if projected, ok := policy.Project(req.Principal, []uuid.UUID{*h.it.ScopeID}, h.it, ty); ok {
+			items = append(items, projected)
+			read = append(read, h.policyScope)
+		}
+	}
+	if err := recordReads(ctx, k.pool, req.Principal, read); err != nil {
+		return SearchResult{}, err
+	}
+	return SearchResult{Items: items, NextPageToken: next}, nil
+}
+
+// searchQuery checks a search and resolves it into the page query that
+// Search runs (pageSQL): the same for the read and for the plan test.
+func (k *Service) searchQuery(ctx context.Context, req SearchRequest) (itemQuery, error) {
 	if req.Principal.Actor == "" || (strings.TrimSpace(req.Query) == "" && req.Filter.empty()) {
-		return SearchResult{}, fmt.Errorf("%w: actor and words or a filter are required", ErrInvalid)
+		return itemQuery{}, fmt.Errorf("%w: actor and words or a filter are required", ErrInvalid)
 	}
 	if err := checkPublicPrincipal(req.Principal); err != nil {
-		return SearchResult{}, err
+		return itemQuery{}, err
 	}
 	if err := checkSession(ctx, k.pool, req.Principal); err != nil {
-		return SearchResult{}, err
+		return itemQuery{}, err
 	}
 	if req.MinSeq < 0 || req.Wait < 0 {
-		return SearchResult{}, fmt.Errorf("%w: min_seq and wait cannot be negative", ErrInvalid)
+		return itemQuery{}, fmt.Errorf("%w: min_seq and wait cannot be negative", ErrInvalid)
 	}
 	limit, err := pageSize(req.Limit)
 	if err != nil {
-		return SearchResult{}, err
+		return itemQuery{}, err
 	}
 	filter, err := k.resolveFilter(ctx, req.Principal, req.Filter)
 	if err != nil {
-		return SearchResult{}, err
+		return itemQuery{}, err
 	}
-	order, err := k.resolveOrder(ctx, req.Filter.TypeIDs, req.OrderBy)
+	order, err := k.resolveOrder(ctx, req.Principal, req.Filter.TypeIDs, req.OrderBy)
 	if err != nil {
-		return SearchResult{}, err
+		return itemQuery{}, err
 	}
 	// The order is part of what a token is bound to: a token of one order
 	// names a place that means nothing in another.
@@ -103,36 +139,14 @@ func (k *Service) Search(ctx context.Context, req SearchRequest) (SearchResult, 
 	}{strings.TrimSpace(req.Query), req.Filter, req.OrderBy})
 	after, err := decodeToken(req.PageToken, key)
 	if err != nil {
-		return SearchResult{}, err
+		return itemQuery{}, err
 	}
-	if err := k.waitForCommit(ctx, req.MinSeq, req.Wait); err != nil {
-		return SearchResult{}, err
-	}
-	found, next, err := k.page(ctx, itemQuery{
+	return itemQuery{
 		p: req.Principal, words: strings.TrimSpace(req.Query), filter: filter, order: order,
 		limit: limit, after: after, key: key,
-	})
-	if err != nil {
-		return SearchResult{}, err
-	}
-	// Every outbound path goes through Project. The query has already
-	// checked each Item's scope, so this drops nothing today; it is where
-	// field-level redaction will happen. Any count or total is taken from
-	// what Project returns, never before it. An agent's read of every
-	// result is recorded for the write rule.
-	items := make([]item.Item, 0, len(found))
-	var read []*uuid.UUID
-	for _, h := range found {
-		if projected, ok := policy.Project(req.Principal, []uuid.UUID{*h.it.ScopeID}, h.it); ok {
-			items = append(items, projected)
-			read = append(read, h.policyScope)
-		}
-	}
-	if err := recordReads(ctx, k.pool, req.Principal, read); err != nil {
-		return SearchResult{}, err
-	}
-	return SearchResult{Items: items, NextPageToken: next}, nil
+	}, nil
 }
+
 
 // waitForCommit returns once the write named by minSeq is visible and every
 // transaction older than it has finished: the write's transaction ID is below

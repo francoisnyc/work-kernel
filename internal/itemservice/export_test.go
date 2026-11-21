@@ -2,6 +2,7 @@ package itemservice
 
 import (
 	"context"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 
@@ -28,12 +29,37 @@ func ChangesContent(ty *typedef.Type, op string, payload map[string]any) (bool, 
 func RequestHash(op string, req any) (string, error) { return requestHash(op, req) }
 
 // ExplainSearch and ExplainList return the plan (EXPLAIN, without ANALYZE)
-// of the page query that Search or List would run for the request, so a
-// test can hold a customer's reads to an index (Jira part 2, step 4a).
+// of the very page query Search or List runs for the request: the query is
+// built by searchQuery or listQuery and pageSQL, which the reads call too
+// (Jira part 2, step 4a: a customer's reads never scan every Item).
 func ExplainSearch(k *Service, ctx context.Context, req SearchRequest) (string, error) {
-	return k.explainSearch(ctx, req)
+	q, err := k.searchQuery(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	return k.explain(ctx, q)
 }
 
 func ExplainList(k *Service, ctx context.Context, req ListRequest) (string, error) {
-	return k.explainList(ctx, req)
+	q, err := k.listQuery(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	return k.explain(ctx, q)
+}
+
+func (k *Service) explain(ctx context.Context, q itemQuery) (string, error) {
+	sql, args, err := k.pageSQL(ctx, q)
+	if err != nil {
+		return "", err
+	}
+	rows, err := k.pool.Query(ctx, "explain "+sql, args)
+	if err != nil {
+		return "", err
+	}
+	lines, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return "", err
+	}
+	return strings.Join(lines, "\n"), nil
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/francoisnyc/work-kernel/internal/item"
 	"github.com/francoisnyc/work-kernel/internal/lifecycle"
 	"github.com/francoisnyc/work-kernel/internal/policy"
+	"github.com/francoisnyc/work-kernel/internal/typedef"
 )
 
 // ListEventsRequest asks for one page of an Item's history.
@@ -134,13 +135,30 @@ func (k *Service) ListEvents(ctx context.Context, req ListEventsRequest) (ListEv
 	}
 	// The one door out: the history belongs to an Item the principal may
 	// see, as Project says.
-	if _, ok := policy.Project(req.Principal, []uuid.UUID{*it.ScopeID}, it); !ok {
+	ty, err := k.loadType(ctx, k.pool, it.TypeID, it.TypeVersion)
+	if err != nil {
+		return ListEventsResult{}, err
+	}
+	if _, ok := policy.Project(req.Principal, []uuid.UUID{*it.ScopeID}, it, ty); !ok {
 		return ListEventsResult{}, ErrNotFound
 	}
 
 	var afterSeq int64
 	if after != nil {
 		afterSeq = after.Seq
+	}
+	// A customer's history (Jira part 2, step 4a) is the create, the moves
+	// and the updates that set or cleared a field they see; every other
+	// event is left out in SQL, so a page is a page. What is left is
+	// redacted below (customerEvent).
+	customer := policy.CustomerOf(req.Principal) != ""
+	listed := []string{}
+	if customer {
+		for _, f := range ty.Fields {
+			if ty.CustomerSees(f.ID) {
+				listed = append(listed, f.ID)
+			}
+		}
 	}
 	rows, err := k.pool.Query(ctx,
 		`select e.item_seq, e.commit_seq, e.op, e.created_at, e.actor, coalesce(e.on_behalf_of, ''),
@@ -149,8 +167,11 @@ func (k *Service) ListEvents(ctx context.Context, req ListEventsRequest) (ListEv
 		 from item_events e
 		 left join item_event_values v on v.item_id = e.item_id and v.item_seq = e.item_seq
 		 where e.item_id = $1 and e.item_seq > $2
+		   and (not $4 or e.op in ('create', 'transition') or (e.op = 'update' and (
+		        jsonb_exists_any(coalesce(e.payload->'field_ids', '[]'::jsonb), $5::text[])
+		        or jsonb_exists_any(coalesce(e.payload->'cleared_field_ids', '[]'::jsonb), $5::text[]))))
 		 order by e.item_seq
-		 limit $3`, req.ItemID, afterSeq, limit+1)
+		 limit $3`, req.ItemID, afterSeq, limit+1, customer, listed)
 	if err != nil {
 		return ListEventsResult{}, fmt.Errorf("read history: %w", err)
 	}
@@ -184,6 +205,9 @@ func (k *Service) ListEvents(ctx context.Context, req ListEventsRequest) (ListEv
 		}
 		if e.CausationID, err = refs.causation(ctx, req.ItemID, e.CausationID); err != nil {
 			return ListEventsResult{}, err
+		}
+		if customer {
+			e = customerEvent(e, ty)
 		}
 		res.Events = append(res.Events, e)
 	}
@@ -432,4 +456,44 @@ func (r *refResolver) raw(ctx context.Context, b json.RawMessage) (*ItemRef, err
 		return nil, nil
 	}
 	return r.ref(ctx, *id)
+}
+
+// customerEvent is what a customer sees of an event their history keeps
+// (a create, a move, an update of a field they see): who, when, the states,
+// and the values of the fields they see. Readers, containers, links,
+// holds, hooks and reaction records are never theirs to see.
+func customerEvent(e Event, ty *typedef.Type) Event {
+	out := Event{ItemID: e.ItemID, ItemSeq: e.ItemSeq, CommitSeq: e.CommitSeq, Op: e.Op, CreatedAt: e.CreatedAt,
+		Actor: e.Actor, OnBehalfOf: e.OnBehalfOf, OriginatingHook: e.OriginatingHook, CausationID: e.CausationID,
+		CorrelationID: e.CorrelationID, Hop: e.Hop, TypeID: e.TypeID, TypeVersion: e.TypeVersion, From: e.From, To: e.To}
+	for f, v := range e.Values {
+		if ty.CustomerSees(f) {
+			if out.Values == nil {
+				out.Values = map[string]any{}
+			}
+			out.Values[f] = v
+		}
+	}
+	for _, f := range e.Erased {
+		if ty.CustomerSees(f) {
+			out.Erased = append(out.Erased, f)
+		}
+	}
+	for f, op := range e.SetOps {
+		if ty.CustomerSees(f) {
+			if out.SetOps == nil {
+				out.SetOps = map[string]map[string][]any{}
+			}
+			out.SetOps[f] = op
+		}
+	}
+	for f, d := range e.Added {
+		if ty.CustomerSees(f) {
+			if out.Added == nil {
+				out.Added = map[string]any{}
+			}
+			out.Added[f] = d
+		}
+	}
+	return out
 }
