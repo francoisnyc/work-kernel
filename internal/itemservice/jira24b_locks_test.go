@@ -7,33 +7,22 @@
 //
 // Postgres breaks a deadlock by aborting one side, and the write path
 // retries that, so a deadlock is invisible in the results: the tests read
-// Postgres's own count of deadlocks for the database, before and after.
+// the write path's own count of deadlock retries, before and after, and
+// want it unchanged. The order (design.md): the container (FOR SHARE) when
+// the write reads it; then the Item with its linked rows, in one pass in
+// UUID order, as before; then its children, in UUID order.
 package itemservice_test
 
 import (
 	"errors"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/francoisnyc/work-kernel/internal/item"
 	"github.com/francoisnyc/work-kernel/internal/itemservice"
 )
-
-// deadlocks is the database's deadlock count. A backend reports its counts
-// when a transaction ends at most once a second, and when idle after up to
-// ten: settle waits for that before reading.
-func deadlocks(t *testing.T, settle time.Duration) int64 {
-	t.Helper()
-	time.Sleep(settle)
-	var n int64
-	if err := pool.QueryRow(testCtx(t), `select deadlocks from pg_stat_database where datname = current_database()`).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
-	return n
-}
 
 // expected reports whether an error is one of the refusals a race may give:
 // a guard that no longer holds, a move already made, a decision on a bean
@@ -51,7 +40,7 @@ func expected(err error) bool {
 // to full exactly once.
 func TestJira24b_Locks_DecisionsAndTheContainerMove_NeverDeadlock(t *testing.T) {
 	w := newWorld4b(t)
-	before := deadlocks(t, 0)
+	before := itemservice.DeadlockRetries()
 	for round := range 12 {
 		jar, beans := w.openJar(t)
 		var wg sync.WaitGroup
@@ -98,8 +87,8 @@ func TestJira24b_Locks_DecisionsAndTheContainerMove_NeverDeadlock(t *testing.T) 
 			t.Errorf("round %d: the jar is %s after %d moves to full; want full, once", round, st, full)
 		}
 	}
-	if after := deadlocks(t, 11*time.Second); after != before {
-		t.Errorf("%d deadlocks during the rounds; want none", after-before)
+	if after := itemservice.DeadlockRetries(); after != before {
+		t.Errorf("%d deadlocks retried during the rounds; want none", after-before)
 	}
 }
 
@@ -109,7 +98,7 @@ func TestJira24b_Locks_DecisionsAndTheContainerMove_NeverDeadlock(t *testing.T) 
 // first, whatever the IDs' order.
 func TestJira24b_Locks_OlderChildren_SetReactions_NeverDeadlock(t *testing.T) {
 	w := newWorld4b(t)
-	before := deadlocks(t, 0)
+	before := itemservice.DeadlockRetries()
 	for round := range 12 {
 		var peas []uuid.UUID
 		for i := range 3 {
@@ -155,7 +144,69 @@ func TestJira24b_Locks_OlderChildren_SetReactions_NeverDeadlock(t *testing.T) {
 			}
 		}
 	}
-	if after := deadlocks(t, 11*time.Second); after != before {
-		t.Errorf("%d deadlocks during the rounds; want none", after-before)
+	if after := itemservice.DeadlockRetries(); after != before {
+		t.Errorf("%d deadlocks retried during the rounds; want none", after-before)
+	}
+}
+
+// duo: Items linked to each other both ways, whose closing guard reads the
+// links (so a transition locks both ends, in one UUID-ordered pass); a duo
+// also contains peas, whose decision reads their container.
+const duo4b = `
+id: duo
+version: 1
+initial_state: open
+fields:
+  - {id: f_name, type: string}
+states:
+  - {id: open,   category: active}
+  - {id: closed, category: done}
+links:
+  - {name: pairs, inverse: paired_by, targets: [duo]}
+transitions:
+  - {from: open, to: closed, guard: 'links.pairs.size() >= 0 && links.paired_by.size() >= 0'}
+`
+
+// Two duos linked to each other both ways close at the same moment, while
+// a pea under one of them is decided: never a deadlock.
+func TestJira24b_Locks_LinkedBothWays_AndAChildDecision_NeverDeadlock(t *testing.T) {
+	w := newWorld4b(t)
+	registerSrc(t, w.k, duo4b)
+	before := itemservice.DeadlockRetries()
+	for round := range 15 {
+		a := w.mk(t, w.lea, "duo", nil, map[string]any{"f_name": "a"})
+		b := w.mk(t, w.lea, "duo", nil, map[string]any{"f_name": "b"})
+		for _, l := range [][2]uuid.UUID{{a, b}, {b, a}} {
+			if _, err := w.k.Link(testCtx(t), itemservice.LinkRequest{IdempotencyKey: newKey(), Principal: w.lea,
+				SourceID: l[0], LinkType: "pairs", TargetID: l[1]}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		pea := w.mk(t, w.lea, "pea", &a, map[string]any{"f_name": "p"})
+		var wg sync.WaitGroup
+		errs := make(chan error, 4)
+		for _, id := range []uuid.UUID{a, b, pea} {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				to := "closed"
+				if id == pea {
+					to = "done"
+				}
+				_, err := w.k.Transition(testCtx(t), itemservice.TransitionRequest{IdempotencyKey: newKey(), Principal: w.sam,
+					ItemID: id, ToState: to})
+				errs <- err
+			}()
+		}
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			if !expected(err) {
+				t.Fatalf("round %d: %v", round, err)
+			}
+		}
+	}
+	if after := itemservice.DeadlockRetries(); after != before {
+		t.Errorf("%d deadlocks retried during the rounds; want none", after-before)
 	}
 }

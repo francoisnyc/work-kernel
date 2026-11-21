@@ -63,3 +63,7 @@ func (k *Service) explain(ctx context.Context, q itemQuery) (string, error) {
 	}
 	return strings.Join(lines, "\n"), nil
 }
+
+// DeadlockRetries is how many write transactions Postgres has aborted as a
+// deadlock and write has run again, since the process started.
+func DeadlockRetries() int64 { return deadlockRetries.Load() }
