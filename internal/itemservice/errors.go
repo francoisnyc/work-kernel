@@ -164,3 +164,19 @@ func (e *NotYetError) Error() string {
 	return fmt.Sprintf("%v: the instant is %v away", ErrNotYet, e.Remaining)
 }
 func (e *NotYetError) Unwrap() error { return ErrNotYet }
+
+// PlacementNotWritableError (Jira 2.4b, kernel change 10): a move or a
+// narrowing of an Item whose Type version says who may place its Items
+// (placement_writable_by), by someone else. It is an ErrForbidden; the API
+// answers PERMISSION_DENIED / PLACEMENT_NOT_WRITABLE. Phase B stub:
+// declared, never returned.
+type PlacementNotWritableError struct{ TypeID string }
+
+func (e *PlacementNotWritableError) Error() string {
+	return fmt.Sprintf("%v: the caller may not move or narrow Items of %s", ErrForbidden, e.TypeID)
+}
+func (e *PlacementNotWritableError) Unwrap() error { return ErrForbidden }
+
+// CodeNotUnique (Jira 2.4b, kernel change 9): a write would give two
+// siblings the same value of a field declared unique_among_siblings.
+const CodeNotUnique = "not_unique"

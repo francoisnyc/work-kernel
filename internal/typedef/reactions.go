@@ -106,8 +106,15 @@ type Reaction struct {
 	Children *Children `yaml:"children" json:"children,omitempty"`
 	// Target and Set (set): the Item written (TargetContainer) and its
 	// fields, each a CEL expression over this Item's fields plus cause.at.
-	Target string            `yaml:"target" json:"target,omitempty"`
-	Set    map[string]string `yaml:"set" json:"set,omitempty"`
+	Target string `yaml:"target" json:"target,omitempty"`
+	// ForEach (Jira 2.4b, kernel change 3; create only): a multi-value
+	// field of the source; one Item per member, which the fields read as
+	// `each`. OnGuard (kernel change 6; move only): "skip" records a target
+	// guard that does not hold as reaction_skipped guard_false. Phase B
+	// stubs: parsed only.
+	ForEach string            `yaml:"for_each" json:"for_each,omitempty"`
+	OnGuard string            `yaml:"on_guard" json:"on_guard,omitempty"`
+	Set     map[string]string `yaml:"set" json:"set,omitempty"`
 
 	// Programs are Add's expressions compiled, by target field; Reads are
 	// the source fields they read, sorted (frozen while the reaction's hold
@@ -658,7 +665,7 @@ func (f *Field) UnmarshalYAML(n *yaml.Node) error {
 			case "writable_by":
 				wb = n.Content[i+1]
 				continue
-			case "id", "type", "options", "multiple", "max":
+			case "id", "type", "options", "multiple", "max", "unique_among_siblings":
 			default:
 				// Node.Decode does not carry the decoder's KnownFields, so
 				// unknown keys are refused here, as everywhere else.

@@ -619,6 +619,9 @@ message Type {
   // this version, and may set at creation. Anything else is hidden from a
   // customer, a field added in a later version included.
   repeated string customer_fields = 18;
+  // Jira 2.4b: who may move or narrow Items of this version: "kernel"
+  // (nobody) or role:<name> entries; empty is anyone who sees the Item.
+  repeated string placement_writable_by = 19;
 }
 
 // A named principal field a Type offers to the hooks of contained Items.
@@ -718,6 +721,10 @@ message Reaction {
   // fields, plus cause.at. Its value is set on the target; null unsets it.
   // The target's Type must accept it (AcceptedReaction.sets).
   map<string, string> set_fields = 19;
+  // Jira 2.4b: a create reaction's for_each (a multi-value field of the
+  // source: one Item per member) and a move reaction's on_guard ("skip").
+  string for_each = 20;
+  string on_guard = 21;
 }
 
 enum ReactionTrigger {
@@ -833,6 +840,8 @@ message Field {
   // Multi-value fields: the most members the set may have; 0 is no limit.
   // More is FAILED_PRECONDITION / TOO_MANY_VALUES.
   int32 max = 7;
+  // Jira 2.4b: the states in which no two siblings hold the same value.
+  repeated string unique_among_siblings = 8;
 }
 
 // Who may write a field.

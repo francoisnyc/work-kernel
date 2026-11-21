@@ -42,6 +42,7 @@ const (
 	SkipNotBy          = "not_by"          // the Item inside was created by someone else than `by` says
 	SkipNotInFrom      = "not_in_from"     // the target is not in a state the reaction moves from
 	SkipNoTarget       = "no_target"       // its link has no target
+	SkipGuardFalse     = "guard_false"     // on_guard: skip, and the target's guard does not hold (Jira 2.4b)
 )
 
 // ReactionRunRequest runs one move or create reaction for one trigger.

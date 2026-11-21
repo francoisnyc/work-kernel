@@ -152,6 +152,10 @@ type Field struct {
 	// may have.
 	Multiple bool `yaml:"multiple" json:"multiple,omitempty"`
 	Max      int  `yaml:"max" json:"max,omitempty"`
+	// UniqueAmongSiblings (Jira 2.4b, kernel change 9), on a principal
+	// field: no two Items of this Type in the same container, both in one
+	// of these states, hold the same value. Phase B stub: parsed only.
+	UniqueAmongSiblings []string `yaml:"unique_among_siblings" json:"unique_among_siblings,omitempty"`
 }
 
 // State is one lifecycle state. Every state has a category.
@@ -285,7 +289,28 @@ type Type struct {
 	Own            []string `yaml:"own" json:"own,omitempty"`
 	Shared         []string `yaml:"shared" json:"shared,omitempty"`
 	CustomerFields []string `yaml:"customer_fields" json:"customer_fields,omitempty"`
+	// PlacementWritableBy (Jira 2.4b, kernel change 10): who may move or
+	// narrow Items of this version: [kernel] (no person) or a list of
+	// role:<name>. Empty is anyone who sees the Item, as before. Phase B
+	// stub: parsed only.
+	PlacementWritableBy []string `yaml:"placement_writable_by" json:"placement_writable_by,omitempty"`
 }
+
+// Jira 2.4b keywords. AllowedNobody (kernel change 12) is the `allowed`
+// entry no person, agent or customer passes: only what passes by its own
+// rule (a reaction by consent) makes the move. AllowedContainerCreator
+// (kernel change 7), in `except`, matches whoever took part in creating
+// the Item's container. OnGuardSkip (kernel change 6) is a move
+// reaction's on_guard value: a target guard that does not hold is a skip
+// (guard_false), not a failure. Phase B stubs: declared only.
+const (
+	AllowedNobody           = "nobody"
+	AllowedContainerCreator = "container_creator"
+	OnGuardSkip             = "skip"
+	// EachVar is the CEL name of the member a for_each create reaction is
+	// creating one Item for (kernel change 3).
+	EachVar = "each"
+)
 
 // ContainerOfferPrefix starts a hook read that names an offer of the
 // Item's container: container:<offer>.
