@@ -55,17 +55,20 @@ func (k *Service) write(ctx context.Context, p item.Principal, key, hash string,
 		}
 		// Claim the key first. If another transaction holds the same key, this
 		// statement waits for it to finish, then sees its row and inserts nothing.
-		// Keys are scoped by namespace and actor, so two clients never collide.
+		// Keys are scoped by namespace, actor and the person an agent acts
+		// for (keyUser), so two clients never collide, and neither do two
+		// people one agent works for.
+		user := keyUser(p)
 		tag, err := tx.Exec(ctx,
-			`insert into idempotency (namespace_id, actor, key, request_hash, result)
-			 values ($1, $2, $3, $4, '{}')
-			 on conflict (namespace_id, actor, key) do nothing`,
-			nsOf(p), p.Actor, key, hash)
+			`insert into idempotency (namespace_id, actor, effective_user, key, request_hash, result)
+			 values ($1, $2, $5, $3, $4, '{}')
+			 on conflict (namespace_id, actor, effective_user, key) do nothing`,
+			nsOf(p), p.Actor, key, hash, user)
 		if err != nil {
 			return fmt.Errorf("claim idempotency key: %w", err)
 		}
 		if tag.RowsAffected() == 0 {
-			res, err = storedResult(ctx, tx, nsOf(p), p.Actor, key, hash)
+			res, err = storedResult(ctx, tx, nsOf(p), p.Actor, user, key, hash)
 			return err
 		}
 
@@ -79,8 +82,8 @@ func (k *Service) write(ctx context.Context, p item.Principal, key, hash string,
 			return err
 		}
 		_, err = tx.Exec(ctx,
-			`update idempotency set result = $4 where namespace_id = $1 and actor = $2 and key = $3`,
-			nsOf(p), p.Actor, key, res)
+			`update idempotency set result = $4 where namespace_id = $1 and actor = $2 and effective_user = $5 and key = $3`,
+			nsOf(p), p.Actor, key, res, user)
 		if err != nil {
 			return fmt.Errorf("store idempotency result: %w", err)
 		}
@@ -103,17 +106,28 @@ func (k *Service) write(ctx context.Context, p item.Principal, key, hash string,
 	return res, nil
 }
 
+// keyUser is the person an idempotency key belongs to besides its actor:
+// the person an agent acts for, else the actor itself (Jira part 2, step
+// 4a). The kernel's own actors carry an on_behalf_of for attribution only:
+// their keys stay theirs.
+func keyUser(p item.Principal) string {
+	if item.IsKind(p.Actor, item.KindAgent) && p.OnBehalfOf != "" {
+		return p.OnBehalfOf
+	}
+	return p.Actor
+}
+
 // storedResult returns the result recorded for an actor's idempotency key, or
 // ErrIdempotencyKeyReuse if the key was used with a different request.
-func storedResult(ctx context.Context, tx pgx.Tx, ns, actor, key, hash string) (WriteResult, error) {
+func storedResult(ctx context.Context, tx pgx.Tx, ns, actor, user, key, hash string) (WriteResult, error) {
 	var (
 		storedHash string
 		res        WriteResult
 	)
 	err := tx.QueryRow(ctx,
 		`select request_hash, result from idempotency
-		 where namespace_id = $1 and actor = $2 and key = $3`,
-		ns, actor, key,
+		 where namespace_id = $1 and actor = $2 and effective_user = $4 and key = $3`,
+		ns, actor, key, user,
 	).Scan(&storedHash, &res)
 	if err != nil {
 		return WriteResult{}, fmt.Errorf("read idempotency record: %w", err)

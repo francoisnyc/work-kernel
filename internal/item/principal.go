@@ -17,6 +17,11 @@ const (
 	// (proof of concept, Step 2, part 2). Like a hook, it has no version;
 	// the version is on originating_hook, reaction:<type>@v<n>:<id>.
 	KindReaction = "reaction"
+	// KindCustomer is a person outside the organization who opens requests
+	// (Jira part 2, step 4a): fixed permissions, never a role, never in the
+	// namespace's general audience. Phase B stub: declared, not yet known
+	// to KindOf.
+	KindCustomer = "customer"
 )
 
 // ReactionParts splits a reaction principal, reaction:<type>:<id>, into its
@@ -44,7 +49,7 @@ func KindOf(id string) (kind string, ok bool) {
 		return "", false
 	}
 	switch kind {
-	case KindUser, KindAgent, KindGroup, KindSystem:
+	case KindUser, KindAgent, KindGroup, KindSystem, KindCustomer:
 		return kind, true
 	case KindHook, KindReaction:
 		if _, _, ok := hookParts(rest); ok {
@@ -89,16 +94,19 @@ func IsKind(id string, kinds ...string) bool {
 }
 
 // Valid reports whether the principal is well formed: the actor is a user,
-// an agent, a system principal or a hook; on_behalf_of, when set, is a user (the human
-// at the root of a chain); and an agent, and only an agent, names its
+// an agent, a customer, a system principal, a hook or a reaction;
+// on_behalf_of, when set, is a user or a customer (the person at the root
+// of a chain), never set for a customer acting themselves; and an agent, and only an agent, names its
 // session. Whether that session exists and is the agent's is checked against
 // the database by the item service. Which door a kind may use (public or
 // internal) is the item service's rule, not this one.
 func (p Principal) Valid() bool {
-	if !IsKind(p.Actor, KindUser, KindAgent, KindSystem, KindHook, KindReaction) {
+	if !IsKind(p.Actor, KindUser, KindAgent, KindSystem, KindHook, KindReaction, KindCustomer) {
 		return false
 	}
-	if p.OnBehalfOf != "" && !IsKind(p.OnBehalfOf, KindUser) {
+	// Someone acts for a user, or (an agent) for a customer; a customer
+	// acts for nobody.
+	if p.OnBehalfOf != "" && (!IsKind(p.OnBehalfOf, KindUser, KindCustomer) || IsKind(p.Actor, KindCustomer)) {
 		return false
 	}
 	return (p.AgentSession != "") == IsKind(p.Actor, KindAgent)

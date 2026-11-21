@@ -1042,7 +1042,13 @@ type CreateItemRequest struct {
 	Fields *structpb.Struct `protobuf:"bytes,5,opt,name=fields,proto3" json:"fields,omitempty"`
 	// Optional: give the Item its own scope, readable only by these readers
 	// (who can also read the container). Must include the caller.
-	Narrow        *Readers `protobuf:"bytes,6,opt,name=narrow,proto3" json:"narrow,omitempty"`
+	Narrow *Readers `protobuf:"bytes,6,opt,name=narrow,proto3" json:"narrow,omitempty"`
+	// Optional (Jira part 2, step 4a): the customer a person creates the
+	// Item for, customer:<id>, recorded as creator_on_behalf_of. Only a user
+	// may send it, only for a customer the container admits; anything else
+	// is INVALID_ARGUMENT on requester, which never says whether the
+	// customer exists.
+	Requester     string `protobuf:"bytes,7,opt,name=requester,proto3" json:"requester,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1117,6 +1123,13 @@ func (x *CreateItemRequest) GetNarrow() *Readers {
 		return x.Narrow
 	}
 	return nil
+}
+
+func (x *CreateItemRequest) GetRequester() string {
+	if x != nil {
+		return x.Requester
+	}
+	return ""
 }
 
 type CreateItemResponse struct {
@@ -3156,9 +3169,19 @@ type Type struct {
 	// What this version offers to the hooks of the Items contained in its
 	// Items: a hook there reads container:<name>, and gets the value of the
 	// offer's field on its container when it runs.
-	Offers        []*Offer `protobuf:"bytes,15,rep,name=offers,proto3" json:"offers,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Offers []*Offer `protobuf:"bytes,15,rep,name=offers,proto3" json:"offers,omitempty"`
+	// Customers (Jira part 2, step 4a). own and shared are what this Type
+	// admits customers to inside its Items: the Types they may create and see
+	// as their own (own), or see and create inside an Item they see (shared).
+	// A shared Type ID covers all its versions.
+	Own    []string `protobuf:"bytes,16,rep,name=own,proto3" json:"own,omitempty"`
+	Shared []string `protobuf:"bytes,17,rep,name=shared,proto3" json:"shared,omitempty"`
+	// The field IDs, link names and rollup IDs a customer sees on Items of
+	// this version, and may set at creation. Anything else is hidden from a
+	// customer, a field added in a later version included.
+	CustomerFields []string `protobuf:"bytes,18,rep,name=customer_fields,json=customerFields,proto3" json:"customer_fields,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *Type) Reset() {
@@ -3292,6 +3315,27 @@ func (x *Type) GetReadableByReactions() []string {
 func (x *Type) GetOffers() []*Offer {
 	if x != nil {
 		return x.Offers
+	}
+	return nil
+}
+
+func (x *Type) GetOwn() []string {
+	if x != nil {
+		return x.Own
+	}
+	return nil
+}
+
+func (x *Type) GetShared() []string {
+	if x != nil {
+		return x.Shared
+	}
+	return nil
+}
+
+func (x *Type) GetCustomerFields() []string {
+	if x != nil {
+		return x.CustomerFields
 	}
 	return nil
 }
@@ -5118,7 +5162,7 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\aReaders\x12\x1e\n" +
 	"\n" +
 	"principals\x18\x01 \x03(\tR\n" +
-	"principals\"\xd9\x01\n" +
+	"principals\"\xf7\x01\n" +
 	"\x11CreateItemRequest\x12\x16\n" +
 	"\x06parent\x18\x01 \x01(\tR\x06parent\x12\x1d\n" +
 	"\n" +
@@ -5126,7 +5170,8 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\x04type\x18\x03 \x01(\tR\x04type\x12\x1c\n" +
 	"\tcontainer\x18\x04 \x01(\tR\tcontainer\x12/\n" +
 	"\x06fields\x18\x05 \x01(\v2\x17.google.protobuf.StructR\x06fields\x12*\n" +
-	"\x06narrow\x18\x06 \x01(\v2\x12.kernel.v1.ReadersR\x06narrow\"s\n" +
+	"\x06narrow\x18\x06 \x01(\v2\x12.kernel.v1.ReadersR\x06narrow\x12\x1c\n" +
+	"\trequester\x18\a \x01(\tR\trequester\"s\n" +
 	"\x12CreateItemResponse\x12#\n" +
 	"\x04item\x18\x01 \x01(\v2\x0f.kernel.v1.ItemR\x04item\x12\x19\n" +
 	"\bitem_seq\x18\x02 \x01(\x03R\aitemSeq\x12\x1d\n" +
@@ -5292,7 +5337,7 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\rvalidate_only\x18\x05 \x01(\bR\fvalidateOnly\x12+\n" +
 	"\x11expected_audience\x18\x06 \x01(\tR\x10expectedAudience\"2\n" +
 	"\x14ApproveWidenResponse\x12\x1a\n" +
-	"\baudience\x18\x01 \x01(\tR\baudience\"\xa6\x05\n" +
+	"\baudience\x18\x01 \x01(\tR\baudience\"\xf9\x05\n" +
 	"\x04Type\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x17\n" +
 	"\atype_id\x18\x02 \x01(\tR\x06typeId\x12\x18\n" +
@@ -5312,7 +5357,10 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\bincoming\x18\f \x03(\v2\x17.kernel.v1.IncomingLinkR\bincoming\x12+\n" +
 	"\arollups\x18\r \x03(\v2\x11.kernel.v1.RollupR\arollups\x122\n" +
 	"\x15readable_by_reactions\x18\x0e \x03(\tR\x13readableByReactions\x12(\n" +
-	"\x06offers\x18\x0f \x03(\v2\x10.kernel.v1.OfferR\x06offers\"1\n" +
+	"\x06offers\x18\x0f \x03(\v2\x10.kernel.v1.OfferR\x06offers\x12\x10\n" +
+	"\x03own\x18\x10 \x03(\tR\x03own\x12\x16\n" +
+	"\x06shared\x18\x11 \x03(\tR\x06shared\x12'\n" +
+	"\x0fcustomer_fields\x18\x12 \x03(\tR\x0ecustomerFields\"1\n" +
 	"\x05Offer\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05field\x18\x02 \x01(\tR\x05field\"J\n" +

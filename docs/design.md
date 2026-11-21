@@ -135,7 +135,7 @@ dropped; actions never are). If it cannot complete, it writes `hook_failed`
 client → item service (Go, stateless)
            check the request is well formed
            BEGIN
-             claim idempotency key (namespace, actor, key)
+             claim idempotency key (namespace, actor, effective user, key)
                already used → return the stored result, write nothing
              lock Item row (SELECT … FOR UPDATE)
              read the write's time (clock_timestamp()), now that the lock is held
@@ -153,7 +153,11 @@ client → item service (Go, stateless)
 ```
 
 - Same idempotency key again → return the stored result, write nothing. Keys
-  are scoped by `(namespace_id, actor, key)`, so two clients never collide.
+  are scoped by `(namespace_id, actor, effective_user, key)`, so two clients
+  never collide. The effective user is the person an agent acts for (a
+  user or a customer), else the actor itself (Jira part 2, step 4a; it was
+  `(namespace_id, actor, key)`, under which one agent acting for two people
+  had the second person's write refused as a reuse of the first's key).
   A key reused with a different request → `ErrIdempotencyKeyReuse`.
 - Validation runs inside the transaction because it depends on the Item's
   current state and fields, which are only reliable under the row lock.
@@ -320,9 +324,12 @@ client → item service (Go, stateless)
 - **Principals are typed IDs**, given by the caller: `user:<id>`, `agent:<id>`,
   `group:<id>`, and for the kernel's own actors `system:<id>` (`system:timer`)
   and `hook:<type>:<hook-id>` (a Type's hook), and since Step 2, part 2
-  `reaction:<type>:<id>` (a Type's link reaction).
+  `reaction:<type>:<id>` (a Type's link reaction), and since Jira part 2,
+  step 4a `customer:<id>` (a person outside the organization: fixed
+  permissions, never a role, never in the namespace's general audience; see
+  "Jira part 2, step 4a as built").
   The actor, `on_behalf_of`, every reader and every role holder is one. An
-  untyped ID is `ErrInvalid`. Only users and agents are readers today; `group:`
+  untyped ID is `ErrInvalid`. Users, agents and customers are readers; `group:`
   is reserved and refused until groups exist, so groups need no migration later.
   In a Type's `allowed` list a principal entry reads `principal:user:<id>`. It
   may name a hook of the same Type, `principal:hook:<type>:<hook-id>`; another
@@ -774,7 +781,20 @@ fields it names; JSON `null` clears one. No field masks.
 - `etag` on any write: refused as `ABORTED` / `STALE` if something the
   caller could have overwritten changed since they read it. It is derived
   from the Item's `content_seq`, not from `item_seq`, and written `c7`;
-  clients treat it as opaque. See "The etag" below.
+  clients treat it as opaque. See "The etag" below. **A customer gets no
+  etag** (empty): they never update, and an etag would tell them that
+  something they cannot see changed. They transition without one.
+- `requester` on `CreateItem` (Jira part 2, step 4a): a person (a `user:`,
+  not an agent, not a customer) opens an Item for a customer, as on the
+  phone. It is stored as `creator_on_behalf_of` and on the create event,
+  so the customer is the Item's requester. Allowed only in a container
+  whose Type version owns the Type, and that the customer can see.
+  Anything else is `INVALID_ARGUMENT` on `requester`, in the same bytes
+  whether the customer is hidden from the container or never existed.
+- The idempotency key belongs to the caller and the person an agent acts
+  for (Write path): one agent acting for kim and for lee with one
+  `request_id` makes two writes. This also fixes an agent acting for two
+  staff users.
 - `TransitionItem` takes `wait` (default 0, at most 5 s) and answers `APPLIED`,
   `DENIED` (with a reason code), `ERROR` or `PENDING` with the hold's name. A
   denied held transition is a successful call, not an error.
@@ -1486,7 +1506,7 @@ in the journal.
 | Jira 2.3a (**done**) | The kernel pieces for goals kept as contained Items, proved with test Types: working-time arithmetic on a calendar, reactions that move children or set a field on the container, consent by reaction ID, a create reaction reading linked Items, an **acting timer at a field's instant**, creation as an entry, `not_empty` (see "Jira part 2, step 3a as built") | A job starts, pauses, resumes and stops its meters; a meter is marked late at its due instant and never before; a stopped worker changes none of the numbers |
 | Jira 2.3b (**done**) | The `sla` package (`sla_goal`, `calendar`, `sla_policy`), the incident Type with first-response and resolution goals, pli and the web UI | Scenario B runs through pli. **Done 2026-11-20**: "Jira part 2, step 3b as built" below, and the journal |
 | Etag rule (**done**) | The etag changes only when something a caller could overwrite changes (the state, a field a caller may write, a link, the readers, the container); outcome records, hook records and kernel-written field writes leave it alone | A save made with an etag read right after an incident's creation is accepted once its goals have written their due instants: 10 times in 10 (measured in step 3b: refused 10 times in 10). **Done 2026-11-20**: "The etag" under "Public API (v1)", and the journal |
-| Jira 2.4 | Customers as principals and public or internal comments; the access request with N-of-M approvers | Scenario C runs through pli |
+| Jira 2.4 | Customers as principals and public or internal comments (4a, built); the access request with N-of-M approvers | Scenario C runs through pli |
 | Bonita | The company's real Bonita processes, mapped against the BPMN pattern table, then rebuilt | Planned after Jira 2 |
 
 ## Jira proof of concept
@@ -1760,7 +1780,9 @@ Going from single to multiple is a new field ID, never a type change.
 
 **Open for Jira part 2's Phase A:** a transition fired by a field change on
 the same Item (N-of-M approvers moving on); customers as a `customer:`
-principal kind with fixed permissions, or narrowed users; a running goal
+principal kind with fixed permissions, or narrowed users (decided and
+built in step 4a: a `customer:` kind, see "Jira part 2, step 4a as
+built"); a running goal
 keeping the policy it started with (proposed) or being recalculated; the
 clock during holds (keeps running by default, `pause_while: held` opt-in);
 sorting by the nearest deadline of any metric (later).
@@ -2229,6 +2251,114 @@ writes land about 320 ms after the create. Not fixed in this step.
 only when something a caller could overwrite changes; the same save is
 accepted 10 times in 10. See "The etag" under "Public API (v1)".
 
+### Jira part 2, step 4a as built (2026-11-21)
+
+Customers: a customer opens an incident in a portal and sees only their
+own requests and the public conversation on them; staff see everything as
+before. **Six kernel changes** (journal); `kernel.v1` only grew; one
+migration (00013); nothing in the kernel is named desk, incident, reply or
+note.
+
+**The principal.** `customer:<id>` is a kind of principal, like YouTrack's
+reporters, and not a user narrowed some other way:
+- **Fixed permissions.** A customer creates what a container admits
+  (below), takes the transitions whose `allowed` names `creator`, as the
+  requester (an empty `allowed`, a role or a principal never admits one),
+  and nothing else: an update, a move, a policy change or a link is
+  `PERMISSION_DENIED / NOT_ALLOWED` on an Item they see, `NOT_FOUND` on one
+  they do not. A move with fields is an update.
+- **Never a role**: the dev-token file and `EnsureRoles` refuse one, and
+  `policy.Roles` reads none for a customer, whatever the table says.
+- **Never in the general audience**: an open scope alone shows a customer
+  nothing. A customer may be a reader of a narrowed scope; that is needed,
+  never enough.
+- **Never a principal field's value**, so never a breach contact or a mail
+  recipient.
+
+**What a container admits** is declared by Types, never per Item:
+- `own: [incident]` on a container's Type (desk@2): customers create
+  Items of these Types inside its Items, and see their own. A Type version
+  that owns something is **a portal**: every customer of the namespace sees
+  it, through its customer fields, unless it is narrowed (then only its
+  customer readers do; `group:` readers are Later).
+- `shared: [reply]` on a request's Type (incident@2): inside a request of
+  theirs, customers see all Items of these Types and create them.
+- `customer_fields: [...]` on any Type whose Items a customer may see: the
+  field IDs, link names and rollup IDs they see and may set at creation
+  (never a field only the kernel writes). Fail-closed: anything else, a
+  field added in a later version included, is hidden. A Type that lists
+  nothing shows the header only (ID, Type, state, create time, creator).
+- Load rules: what `own` and `shared` name is loaded; a Type is not both
+  own and shared in one container; `customer_fields` names the version's
+  own fields, link names or rollups.
+- **`own` and `shared` name a Type ID with all its versions: changing what
+  a Type means for the audience takes a new Type ID, not a new version.**
+  So the public conversation is `reply@1` and the internal one `note@1`
+  (shared by nobody); `comment` stays as it was for PLAT and the ticket.
+
+**The rule** ("their own"), depth 1, from the current container: a
+customer sees an Item when (a) its Type version owns something, or (b) its
+effective creator (`created_on_behalf_of`, else `created_by`, as
+`IsRequester`) is the customer and its container's Type version owns its
+Type, or (c) its container is such a request of theirs and shares its
+Type. On top, the scope test applies as for anyone. Moved out of a portal,
+a request is no longer theirs to see. An agent acting for a customer gets
+the customer's view and its own scopes; the kernel's own actors are never a
+customer (their `on_behalf_of` is attribution only).
+
+**Two SQL forms of one rule, in package `policy`**, beside
+`VisibleCondition`: `CustomerCondition`, a predicate over one Item row (Get,
+links, rollups, history references, writes), and `CustomerRelation`, the
+same Items as a relation that drives a customer's Search and List (their
+own requests from the index `items_requester` on the effective creator,
+what those share, the portals). The predicate never drives a list: on
+500,000 Items it would scan every one (1,086 ms on Postgres 17, against
+0.3 ms; journal). The property test holds both to a naive evaluator (Get,
+Search and List of every container), and the plan test fails if a
+customer's Search or List plan scans `items`; it explains the very query
+Search and List build (`pageSQL`).
+
+**What a customer sees of an Item** (`policy.Project`, with the Item's
+Type version; without one, a customer gets nothing): its customer fields,
+no etag, no hold; outgoing links whose name is listed and whose target they
+see, incoming ones whose source they see and whose source's Type lists the
+name, never a restricted reference; listed rollups only, counting what they
+see. Every path, and its rule:
+
+| Path | For a customer |
+| --- | --- |
+| Get, List, Search | the rule in SQL before the limit; page tokens and counts from visible rows only |
+| Fields | `customer_fields` only, on every read |
+| Filters, `order_by` | a field they do not see is refused exactly as an unknown field |
+| Words | matched over the fields they see, on their own rows |
+| History | the create, the moves and the updates that set or cleared a field they see, with those values only; reader changes, moves, links, holds, hooks and reaction records left out; a cause naming an Item they cannot see is dropped |
+| Links, rollups | as above |
+| Not found | a hidden Item and a missing one answer the same bytes, by name and by key |
+| Refusals | `NOT_ALLOWED` with no metadata |
+| Types | readable, as for anyone |
+
+`updated_at`, `item_seq` and gaps in a customer's history show that
+something hidden changed, never what.
+
+**Staff for a customer.** `requester` on `CreateItem` (Public API, Writes):
+sam takes kim's call and opens the incident as hers. Refused from an agent
+session in this step (Later).
+
+**Agents.** A session acting for a customer holds at most a customer's
+powers (`read`, `create`, `comment`, `transition:*` or
+`transition:<state>`): more is `NOT_ALLOWED`, whatever the grant says; the
+dev-token file refuses such a grant too. The idempotency key now includes
+the person an agent acts for (Write path).
+
+**The Types.** desk@2 (a portal: `own: [incident]`, its name and key
+shown, never its calendar or policy), incident@2 (`shared: [reply]`; the
+requester's reply brings a waiting incident back, someone else's reply
+answers, with no field read; the requester cancels a new incident and
+reopens a resolved one, staff with `role:desk_agent`; a customer sees and
+sets the title, priority and impact, and sees the resolution), reply@1,
+note@1. Scenario B runs on the `@1` Types, unchanged; scenario C1 runs the
+customers.
+
 ## Web UI as built (2026-11-18)
 
 A generic web UI for playing with the proof of concept, in `web/`. It is
@@ -2278,6 +2408,16 @@ field reserved to roles the acting user does not hold (the page knows the
 dev user's roles; such a field is read-only, with a hint naming the role).
 A save made on a page opened before the kernel wrote goes through without
 a refresh; a real conflict still shows `ABORTED / STALE`.
+
+**Customers (Jira part 2, step 4a).** The act-as picker offers the dev
+file's customers, labelled "(customer)". A customer meets every Type as
+it is shown to them (`customerView`): its customer fields, its listed link
+names, and only the moves whose `allowed` names `creator`; New Item offers
+the Types the container admits (`own` and `shared`), nothing at the top
+level, and no readers. Still read from the Types, never decided in the UI:
+the server refuses the rest. `#/items` alone is the top level, as `#/` is.
+A page titles an Item by its Type's **first string field**, so desk@2
+declares `f_name` before `f_key`: a portal is shown by its name.
 
 **Serving.** A `web` container serves the built site and proxies `/api` to
 the item service: one origin, no CORS on the item service. Nothing updates

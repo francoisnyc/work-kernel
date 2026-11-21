@@ -125,7 +125,7 @@ type sqlOrder struct {
 // declared by at least one of them, with one type across all that declare
 // it, and that type must have an order: string, int, date, datetime or enum. A
 // malformed order is an *InvalidError on order_by.
-func (k *Service) resolveOrder(ctx context.Context, typeIDs []string, o *OrderBy) (*sqlOrder, error) {
+func (k *Service) resolveOrder(ctx context.Context, p item.Principal, typeIDs []string, o *OrderBy) (*sqlOrder, error) {
 	if o == nil {
 		return nil, nil
 	}
@@ -133,7 +133,7 @@ func (k *Service) resolveOrder(ctx context.Context, typeIDs []string, o *OrderBy
 	if o.Field == "" {
 		return nil, bad("order_by needs a field")
 	}
-	all, err := k.ListTypes(ctx)
+	all, err := k.typesFor(ctx, p)
 	if err != nil {
 		return nil, err
 	}
@@ -201,11 +201,57 @@ type hit struct {
 // caller projects each Item (policy.Project) and records an agent's reads
 // (projectHits).
 func (k *Service) page(ctx context.Context, q itemQuery) ([]hit, string, error) {
-	c, err := loadCaps(ctx, k.pool, q.p)
+	sql, args, err := k.pageSQL(ctx, q)
 	if err != nil {
 		return nil, "", err
 	}
-	args := policy.VisibleArgs(q.p)
+	rows, err := k.pool.Query(ctx, sql, args)
+	if err != nil {
+		return nil, "", fmt.Errorf("read items: %w", err)
+	}
+	found, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (hit, error) {
+		var h hit
+		err := row.Scan(&h.it.ID, &h.it.TypeID, &h.it.TypeVersion, &h.it.ContainerID, &h.it.ScopeID,
+			&h.it.State, &h.it.Fields, &h.it.ItemSeq, &h.it.ContentSeq, &h.it.CreatedAt, &h.it.CreatedBy, &h.it.CreatedOnBehalfOf,
+			&h.policyScope, &h.sortValue)
+		return h, err
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("read items: %w", err)
+	}
+	next := ""
+	if len(found) > q.limit {
+		found = found[:q.limit]
+		last := found[len(found)-1]
+		token := pageToken{Request: q.key, ID: last.it.ID}
+		if q.order != nil {
+			token.Value = last.sortValue
+		} else {
+			token.CreatedAt = last.it.CreatedAt
+		}
+		next = encodeToken(token)
+	}
+
+	return found, next, nil
+}
+
+// pageSQL builds the one query a page of Search or List runs: its text and
+// its named arguments. page runs it; the plan test explains this very text.
+//
+// A customer's page (Jira part 2, step 4a) reads from the relation
+// policy.CustomerRelation (mine) instead of items: their own requests from
+// the index on the effective creator, what those share, and the portals.
+// Their words match the fields they see only (policy.CustomerWords).
+func (k *Service) pageSQL(ctx context.Context, q itemQuery) (string, pgx.NamedArgs, error) {
+	c, err := loadCaps(ctx, k.pool, q.p)
+	if err != nil {
+		return "", nil, err
+	}
+	args, err := k.seeArgs(ctx, q.p)
+	if err != nil {
+		return "", nil, err
+	}
+	customer := policy.CustomerOf(q.p) != ""
 	args["ns"], args["limit"] = nsOf(q.p), q.limit+1
 	for name, v := range q.filter.args {
 		args[name] = v
@@ -219,11 +265,19 @@ func (k *Service) page(ctx context.Context, q itemQuery) ([]hit, string, error) 
 	// fold into the rest. Without it, Postgres walks Items newest-first and
 	// throws away non-matches, which grows with the size of the scope
 	// (Step A, EXPLAIN).
-	from := "items m"
+	from, base := "items m", "items"
+	if customer {
+		ctes = append(ctes, policy.CustomerRelation)
+		from, base = "mine m", "mine"
+	}
 	if q.words != "" {
 		args["q"] = q.words
+		match := "search"
+		if customer {
+			match = policy.CustomerWords(base)
+		}
 		ctes = append(ctes, `matches as materialized (
-		     select * from items where namespace_id = @ns and search @@ plainto_tsquery('simple', @q)
+		     select * from `+base+` where namespace_id = @ns and `+match+` @@ plainto_tsquery('simple', @q)
 		 )`)
 		from = "matches m"
 	}
@@ -258,7 +312,7 @@ func (k *Service) page(ctx context.Context, q itemQuery) ([]hit, string, error) 
 	case q.order != nil:
 		cond, err := q.order.after(q.after, args)
 		if err != nil {
-			return nil, "", err
+			return "", nil, err
 		}
 		conds = append(conds, cond)
 	default:
@@ -271,41 +325,14 @@ func (k *Service) page(ctx context.Context, q itemQuery) ([]hit, string, error) 
 	if len(ctes) > 0 {
 		with = "with recursive " + strings.Join(ctes, ",\n") + "\n"
 	}
-	rows, err := k.pool.Query(ctx, with+
+	return with +
 		`select m.id, m.type_id, m.type_version, m.container_id, m.scope_id, m.state, m.fields, m.item_seq, m.content_seq,
 		        m.created_at, m.created_by, coalesce(m.created_on_behalf_of, ''), s.policy_scope_id,
-		        `+sortValue+`
-		 from `+from+` join scopes s on s.id = m.scope_id
-		 where `+strings.Join(conds, "\n and ")+`
-		 order by `+orderBy+`
-		 limit @limit`, args)
-	if err != nil {
-		return nil, "", fmt.Errorf("read items: %w", err)
-	}
-	found, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (hit, error) {
-		var h hit
-		err := row.Scan(&h.it.ID, &h.it.TypeID, &h.it.TypeVersion, &h.it.ContainerID, &h.it.ScopeID,
-			&h.it.State, &h.it.Fields, &h.it.ItemSeq, &h.it.ContentSeq, &h.it.CreatedAt, &h.it.CreatedBy, &h.it.CreatedOnBehalfOf,
-			&h.policyScope, &h.sortValue)
-		return h, err
-	})
-	if err != nil {
-		return nil, "", fmt.Errorf("read items: %w", err)
-	}
-	next := ""
-	if len(found) > q.limit {
-		found = found[:q.limit]
-		last := found[len(found)-1]
-		token := pageToken{Request: q.key, ID: last.it.ID}
-		if q.order != nil {
-			token.Value = last.sortValue
-		} else {
-			token.CreatedAt = last.it.CreatedAt
-		}
-		next = encodeToken(token)
-	}
-
-	return found, next, nil
+		        ` + sortValue + `
+		 from ` + from + ` join scopes s on s.id = m.scope_id
+		 where ` + strings.Join(conds, "\n and ") + `
+		 order by ` + orderBy + `
+		 limit @limit`, args, nil
 }
 
 // requireNamespace refuses a principal with no namespace on the reads that

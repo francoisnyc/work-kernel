@@ -2,7 +2,7 @@
 // Items only through the API, like any other client.
 //
 //	pli [--server URL] [--tokens FILE] --as NAME [--session ID] <command>
-//	  item create --type TYPE [--in ITEM] [--narrow P,P] [--set ID=VALUE]... [--request-id ID]
+//	  item create --type TYPE [--in ITEM] [--narrow P,P] [--requester CUSTOMER] [--set ID=VALUE]... [--request-id ID]
 //	  item get ITEM
 //	  item update ITEM [--set ID=VALUE]... [--add ID=VALUE]... [--remove ID=VALUE]... [--readers P,P | --inherit]
 //	                   [--move-to ITEM | --move-to-top] [--confirm-widen] [--etag E] [--request-id ID]
@@ -96,7 +96,7 @@ const (
 )
 
 const usage = `usage: pli [--server URL] [--tokens FILE] --as NAME [--session ID] <command>
-  item create --type TYPE [--in ITEM] [--narrow P,P] [--set ID=VALUE]... [--request-id ID]
+  item create --type TYPE [--in ITEM] [--narrow P,P] [--requester CUSTOMER] [--set ID=VALUE]... [--request-id ID]
   item get ITEM
   item update ITEM [--set ID=VALUE]... [--readers P,P | --inherit]
                    [--move-to ITEM | --move-to-top] [--confirm-widen] [--etag E] [--request-id ID]
@@ -452,6 +452,7 @@ func (c *cli) itemCreate(ctx context.Context, args []string) error {
 	typ := fs.String("type", "", "TYPE (ticket@3) or a Type name")
 	in := fs.String("in", "", "the container ITEM")
 	narrow := fs.String("narrow", "", "readers, comma-separated (user:ana,user:bob)")
+	requester := fs.String("requester", "", "the customer the Item is for (customer:kim), when a person opens it for them")
 	requestID := fs.String("request-id", newRequestID(), "idempotency key")
 	var sets listFlag
 	fs.Var(&sets, "set", "ID=VALUE, repeatable")
@@ -474,7 +475,7 @@ func (c *cli) itemCreate(ctx context.Context, args []string) error {
 		return err
 	}
 	req := &kernelv1.CreateItemRequest{
-		Parent: "namespaces/" + c.ns, RequestId: *requestID, Type: typeName, Fields: fields,
+		Parent: "namespaces/" + c.ns, RequestId: *requestID, Type: typeName, Fields: fields, Requester: *requester,
 	}
 	if *in != "" {
 		req.Container = c.itemRef(*in)

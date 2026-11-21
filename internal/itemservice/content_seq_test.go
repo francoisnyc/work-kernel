@@ -614,8 +614,9 @@ func TestContentSeq_MigrationBackfillsFromItemSeq(t *testing.T) {
 			t.Errorf("content_seq = %d after the migration, want the Item's item_seq %d", got, want)
 		}
 	}
-	// Down drops the column and nothing else.
-	if _, err := provider.Down(ctx); err != nil {
+	// Down drops the column and nothing else. By version, not one step:
+	// a later migration must not change what this undoes.
+	if _, err := provider.DownTo(ctx, lastBefore); err != nil {
 		t.Fatalf("migrate down: %v", err)
 	}
 	var n int

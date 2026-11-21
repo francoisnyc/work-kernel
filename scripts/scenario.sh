@@ -20,7 +20,10 @@
 # progress; starting work creates a checklist). Jira part 2, step 3b added
 # scenario B, the IT service desk: incidents in a desk, with first-response
 # and resolution goals (the `sla` package), breach marks and emails, the
-# queue by due instant; lea holds the role sla_admin.
+# queue by due instant; lea holds the role sla_admin. Jira part 2, step 4a
+# added scenario C1, customers: kim and lee open incidents in a portal and
+# see their own and the replies on them, nothing else; sam opens one for kim
+# on the phone; portal-bot acts for each of them.
 #
 #   scripts/scenario.sh          (or: make scenario, which starts the stack first)
 #
@@ -1499,6 +1502,144 @@ refuse sam "ABORTED STALE" item transition "$be" --to in_progress --etag "$etag_
 # The etag is not item_seq: a decimal one, as before this step, is STALE.
 refuse ana "ABORTED STALE" item update "$be" --set f_impact=moderate --etag "$(j .item_seq <<<"$saved")"
 expect "the refused writes wrote nothing" "$(fld "$be" f_impact) $(ok ana item get "$be" | j .item.state)" "minor new"
+
+# ---------------------------------------------------------------------------
+# Scenario C1 (Jira part 2, step 4a): customers. kim and lee are customers
+# (customer:kim, customer:lee); the IT desk gets a portal (desk@2) where a
+# customer opens incidents (incident@2) and sees their own, the replies on
+# them (reply@1) and nothing else: no note (note@1), no goal, no assignee,
+# no deadline, nobody else's request, nothing else in the namespace. Staff
+# see everything as before; sam and lea hold desk_agent. portal-bot acts
+# for a customer with a customer's powers.
+# ---------------------------------------------------------------------------
+
+# cincident WHO PRIORITY TITLE [ARGS]...: an incident in the portal; prints its name.
+cincident() {
+	local who=$1 prio=$2 title=$3
+	shift 3
+	ok "$who" item create --type incident@2 --in "$portal" --set "f_title=$title $w" --set "f_priority=$prio" "$@" | j .item.name
+}
+# kinds WHO ITEM: the Types of what WHO lists inside ITEM, sorted.
+kinds() { ok "$1" item list "$2" --page-size 100 | j '[.items[]?.type | split("/")[3]] | sort | join(" ")'; }
+
+step "C1: lea opens a portal on the IT desk's calendar and policy; every customer sees it, its key and name only"
+portal=$(ok lea item create --type desk@2 --set "f_key=IT-$w" --set "f_name=IT portal $w" | j .item.name)
+ok lea item link "$portal" calendar "$cal" >/dev/null
+ok lea item link "$portal" sla_policy "$policy" >/dev/null
+expect "the portal, as kim reads it" "$(ok kim item get "$portal" | j '[.item.fields | keys[]] | join(" ")') links=$(ok kim item get "$portal" | j '.item.links | length')" "f_key f_name links=0"
+expect "the portal, as sam reads it" "$(ok sam item get "$portal" | j '.item.links | length')" "2"
+expect "kim's top level: portals only" "$(ok kim item list --page-size 500 | j '[.items[]?.type] | unique | join(" ")')" "namespaces/acme/types/desk/versions/2"
+ok kim item list --page-size 500 | j '.items[]?.name' | grep -qx "$portal" || fail "kim's top level does not list the portal"
+
+step "C2: kim opens a P3 incident; its goals start; she sees her fields only, with no etag"
+refuse kim "PERMISSION_DENIED FIELD_NOT_WRITABLE" item create --type incident@2 --in "$portal" --set "f_title=x $w" --set f_priority=P3 --set f_assignee=user:sam
+refuse kim "PERMISSION_DENIED NOT_ALLOWED" item create --type incident@2 --set "f_title=x $w" --set f_priority=P3
+c1=$(cincident kim P3 "Wifi keeps dropping")
+wait_until 30 "the incident's two goals" has_goals "$c1"
+wait_until 30 "its due instants, for staff" fld_set "$c1" f_due_resolution
+ok sam item update "$c1" --set f_assignee=user:sam >/dev/null
+kim_view=$(ok kim item get "$c1")
+expect "kim's fields" "$(j '[.item.fields | keys[]] | join(" ")' <<<"$kim_view")" "f_priority f_title"
+expect "kim's etag" "$(j '.item.etag // ""' <<<"$kim_view")" ""
+expect "the creator, as kim reads it" "$(j .item.creator <<<"$kim_view")" "customer:kim"
+expect "sam sees the assignee and the deadlines" "$(ok sam item get "$c1" | j '[.item.fields | keys[]] | join(" ")')" \
+	"f_assignee f_due_first_response f_due_resolution f_priority f_title"
+lee1=$(cincident lee P3 "Printer offline")
+
+step "C3: what kim cannot see: the goals, a note, lee's incident, the old desk, the PLAT space"
+note1=$(ok sam item create --type note@1 --in "$c1" --set "f_body=customer is on the old wifi driver $w" | j .item.name)
+for kim_hidden in "$(goal "$c1" first_response)" "$(goal "$c1" resolution)" "$note1" "$lee1" "$desk" "$plat" "$plat1"; do
+	refuse kim "NOT_FOUND NOT_FOUND" item get "$kim_hidden"
+done
+refuse lee "NOT_FOUND NOT_FOUND" item get "$c1"
+refuse kim "NOT_FOUND NOT_FOUND" item list "$lee1"
+refuse kim "NOT_FOUND NOT_FOUND" item create --type reply@1 --in "$lee1" --set "f_body=hello"
+
+step "C4: kim's history: the create and the moves, no reaction record, no assignee"
+hist=$(ok kim item history "$c1" --page-size 100)
+expect "kim's events" "$(j '[.events[].kind | sub("ITEM_EVENT_KIND_"; "")] | join(" ")' <<<"$hist")" "CREATED"
+expect "no value she cannot see" "$(j '[.events[].fields // {} | keys[]] | unique | join(" ")' <<<"$hist")" "f_priority f_title"
+
+step "C5: sam replies (first response met) and writes a note; kim sees the reply only"
+ok sam item transition "$c1" --to in_progress >/dev/null
+c1_reply=$(ok sam item create --type reply@1 --in "$c1" --set "f_body=Which client version? $w" | j .item.name)
+wait_until 30 "first response stopped by sam's reply" state_is lea "$(goal "$c1" first_response)" completed
+expect "what kim lists in her incident" "$(kinds kim "$c1")" "reply"
+expect "what sam lists in it" "$(kinds sam "$c1")" "note reply sla_goal sla_goal"
+expect "kim's search finds the portal, her incident and the reply, not the note nor lee's" "$(ok kim item search "$w" | names)" "$(sorted "$portal" "$c1" "$c1_reply")"
+expect "kim's incidents in the portal" "$(ok kim item list "$portal" | names)" "$c1"
+expect "a search on a hidden field is refused as one on an unknown field" \
+	"$(run kim item search "$w" --where f_assignee=user:sam; head -n 1 "$tmp/err")" \
+	"$(run kim item search "$w" --where f_nope=user:sam; head -n 1 "$tmp/err")"
+
+step "C6: kim's reply brings a waiting incident back and resumes resolution; a note does not"
+ok sam item transition "$c1" --to waiting_for_customer >/dev/null
+wait_until 30 "resolution paused" state_is lea "$(goal "$c1" resolution)" paused
+ok sam item create --type note@1 --in "$c1" --set "f_body=still waiting $w" >/dev/null
+sleep 2
+expect "after sam's note" "$(ok kim item get "$c1" | j .item.state)" "waiting_for_customer"
+ok kim item create --type reply@1 --in "$c1" --set "f_body=Driver 4.2, still broken $w" >/dev/null
+wait_until 30 "kim's reply brings it back" state_is kim "$c1" in_progress
+wait_until 30 "resolution resumed" state_is lea "$(goal "$c1" resolution)" running
+
+step "C7: kim never updates, links, moves or writes a note; she takes only the requester's moves"
+refuse kim "PERMISSION_DENIED NOT_ALLOWED" item update "$c1" --set "f_title=renamed $w"
+refuse kim "PERMISSION_DENIED NOT_ALLOWED" item create --type note@1 --in "$c1" --set "f_body=x"
+refuse kim "PERMISSION_DENIED NOT_ALLOWED" item transition "$c1" --to waiting_for_customer
+refuse kim "PERMISSION_DENIED NOT_ALLOWED" item transition "$c1" --to canceled
+refuse kim "NOT_FOUND NOT_FOUND" item update "$lee1" --set "f_title=x"
+ok sam item transition "$c1" --to resolved --set f_resolution=fixed >/dev/null
+ok kim item transition "$c1" --to in_progress >/dev/null
+expect "kim reopened it" "$(ok kim item get "$c1" | j .item.state)" "in_progress"
+
+step "C8: not found is not found: a hidden Item and a missing one, the same bytes, by name and by key"
+missing="namespaces/acme/items/$(random_uuid)"
+for verb in "item get" "item list" "item history"; do
+	run kim $verb "$lee1"
+	hidden_err=$(cat "$tmp/err")
+	run kim $verb "$missing"
+	expect "kim: $verb, hidden and missing" "$hidden_err" "$(cat "$tmp/err")"
+done
+staff_desk=$(ok lea item create --type desk@2 --set "f_key=DESK-12-$w" --set "f_name=staff only $w" --narrow user:lea,user:sam | j .item.name)
+expect "kim searches a hidden portal's key, and a key nobody uses" \
+	"$(ok kim item search --type desk --where "f_key=DESK-12-$w")" "$(ok kim item search --type desk --where "f_key=DESK-13-$w")"
+expect "lea finds it" "$(ok lea item search --type desk --where "f_key=DESK-12-$w" | names)" "$staff_desk"
+
+step "C9: sam takes kim's call: an incident he opens for her is hers; lee cannot see it"
+c9=$(cincident sam P2 "Phoned in: Outlook crashes" --requester customer:kim)
+expect "who and for whom" "$(ok kim item get "$c9" | j '"\(.item.creator) \(.item.creator_on_behalf_of)"')" "user:sam customer:kim"
+refuse lee "NOT_FOUND NOT_FOUND" item get "$c9"
+refuse sam "INVALID_ARGUMENT INVALID_REQUEST" item create --type incident@2 --in "$portal" --requester user:ana --set "f_title=x" --set f_priority=P3
+run sam item create --type incident@2 --in "$staff_desk" --requester customer:kim --set "f_title=x" --set f_priority=P3
+hidden_err=$(cat "$tmp/err")
+run sam item create --type incident@2 --in "$staff_desk" --requester customer:nobody --set "f_title=x" --set f_priority=P3
+expect "a customer the portal hides, and one that never was" "$hidden_err" "$(cat "$tmp/err")"
+ok kim item transition "$c9" --to canceled >/dev/null
+
+step "C10: portal-bot acts for kim and for lee: each one's view; one request id, two writes"
+s_kim=$(ok portal-bot agent start --for customer:kim --scopes namespaces/acme --powers 'read,create,comment,transition:*' | j .session.id)
+s_lee=$(ok portal-bot agent start --for customer:lee --scopes namespaces/acme --powers 'read,create,comment,transition:*' | j .session.id)
+refuse portal-bot "PERMISSION_DENIED NOT_ALLOWED" agent start --for customer:kim --scopes namespaces/acme --powers read,edit_fields
+ok portal-bot --session "$s_kim" item get "$c1" >/dev/null
+refuse portal-bot "NOT_FOUND NOT_FOUND" --session "$s_kim" item get "$lee1"
+refuse portal-bot "NOT_FOUND NOT_FOUND" --session "$s_lee" item get "$c1"
+rid="c10-$w"
+for_kim=$(ok portal-bot --session "$s_kim" item create --type reply@1 --in "$c1" --set "f_body=from the portal" --request-id "$rid" | j .item.name)
+for_lee=$(ok portal-bot --session "$s_lee" item create --type reply@1 --in "$lee1" --set "f_body=from the portal" --request-id "$rid" | j .item.name)
+[ "$for_kim" != "$for_lee" ] || fail "one request id for kim and for lee gave one reply"
+expect "kim's retry" "$(ok portal-bot --session "$s_kim" item create --type reply@1 --in "$c1" --set "f_body=from the portal" --request-id "$rid" | j .item.name)" "$for_kim"
+expect "lee's reply is lee's" "$(ok lee item get "$for_lee" | j .item.creator_on_behalf_of)" "customer:lee"
+
+step "C11: kim's P1 breaches: sam, its assignee, is emailed; kim never"
+c11=$(cincident kim P1 "Everything is down")
+ok sam item update "$c11" --set f_assignee=user:sam >/dev/null
+wait_until 30 "its goals" has_goals "$c11"
+fr11=$(goal "$c11" first_response)
+res11=$(goal "$c11" resolution)
+wait_until 30 "sam told of both breaches" sent_is "$res11" "$breach_hook" "user:sam"
+wait_until 30 "sam told of both breaches" sent_is "$fr11" "$breach_hook" "user:sam"
+expect "kim's search finds her P1 and nothing of the SLA" \
+	"$(ok kim item search "$w" --type incident --where f_priority=P1 | names)" "$c11"
 
 step "D1: lea searches VPN in the active category"
 vpn=$(issue lea story "VPN drops on wifi")

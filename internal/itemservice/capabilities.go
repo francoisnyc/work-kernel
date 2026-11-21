@@ -27,8 +27,8 @@ import (
 func (k *Service) StartAgentSession(ctx context.Context, req StartAgentSessionRequest) (string, error) {
 	p := req.Principal
 	if !item.IsKind(p.Actor, item.KindAgent) || p.AgentSession != "" ||
-		(p.OnBehalfOf != "" && !item.IsKind(p.OnBehalfOf, item.KindUser)) {
-		return "", fmt.Errorf("%w: a session is started by an agent:, acting for a user: or for itself, "+
+		(p.OnBehalfOf != "" && !item.IsKind(p.OnBehalfOf, item.KindUser, item.KindCustomer)) {
+		return "", fmt.Errorf("%w: a session is started by an agent:, acting for a user:, a customer: or itself, "+
 			"and the session ID is minted here", ErrInvalid)
 	}
 	if len(req.Scopes) == 0 {
@@ -40,6 +40,11 @@ func (k *Service) StartAgentSession(ctx context.Context, req StartAgentSessionRe
 	for _, pw := range req.Powers {
 		if !item.KnownPower(pw) {
 			return "", &InvalidError{Path: "powers", Reason: "unknown power"}
+		}
+		// Acting for a customer, an agent has at most a customer's fixed
+		// powers, whatever it was granted.
+		if policy.CustomerOf(p) != "" && !customerPower(pw) {
+			return "", fmt.Errorf("%w: power %s is not a customer's", ErrForbidden, pw)
 		}
 	}
 	ns := nsOf(p)
@@ -57,6 +62,9 @@ func (k *Service) StartAgentSession(ctx context.Context, req StartAgentSessionRe
 				return err
 			}
 			if err := checkVisible(ctx, tx, p, scope); err != nil {
+				return err
+			}
+			if err := k.checkCustomerSees(ctx, tx, p, s); err != nil {
 				return err
 			}
 		}

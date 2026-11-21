@@ -77,6 +77,11 @@ type CreateRequest struct {
 	// Item gets a scope node of its own, readable only by the readers named,
 	// and only by those of them who can read the container.
 	Narrow *Narrow
+	// Requester (Jira part 2, step 4a) is the customer a person creates
+	// the Item for (a phone call): stored as created_on_behalf_of. Only a
+	// user may name one, only a customer the container admits. omitempty
+	// keeps the idempotency hash of a request without it as before.
+	Requester string `json:",omitempty"`
 }
 
 // Narrow names the readers of a narrowed Item, as opaque principal IDs.
@@ -198,8 +203,25 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 		return WriteResult{}, rejected(CodeNotInitialState, "type %s v%d starts in state %q, not %q",
 			ty.ID, ty.Version, ty.InitialState, req.State)
 	}
+	// Customers (Jira part 2, step 4a): a person may open an Item for a
+	// customer (requester), checked first: its refusal is the same
+	// whatever else the request holds. A customer creates only what a
+	// container admits.
+	if err := k.checkRequester(ctx, req, ty); err != nil {
+		return WriteResult{}, err
+	}
 	if err := ty.CheckFields(req.Fields, false); err != nil {
 		return WriteResult{}, fieldsInvalid(err)
+	}
+	if err := k.checkCustomerCreate(ctx, req, ty); err != nil {
+		return WriteResult{}, err
+	}
+	// Who the Item is for: the requester, when a person names one, is
+	// stored as created_on_behalf_of and on the event, so the customer is
+	// its requester (policy.IsRequester).
+	owner := req.Principal
+	if req.Requester != "" {
+		owner.OnBehalfOf = req.Requester
 	}
 	// Create is the public door only: a kernel-written field is refused.
 	writer, err := publicWriter(ctx, k.pool, ty, req.Principal, req.Fields)
@@ -290,7 +312,7 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 			                    content_seq, created_at, created_by, created_on_behalf_of)
 			 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $13, $12, $10, nullif($11, ''))`,
 			id, ns, ty.ID, ty.Version, req.ContainerID, scopeID, ty.InitialState, fields, itemSeq,
-			req.Principal.Actor, req.Principal.OnBehalfOf, at, bump.n)
+			owner.Actor, owner.OnBehalfOf, at, bump.n)
 		if err != nil {
 			return WriteResult{}, fmt.Errorf("insert item: %w", err)
 		}
@@ -306,7 +328,7 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 			}
 		}
 
-		res, err := appendEvent(ctx, tx, ty, id, itemSeq, req.Principal, attr, bump, payload, fields)
+		res, err := appendEvent(ctx, tx, ty, id, itemSeq, owner, attr, bump, payload, fields)
 		if err != nil {
 			return WriteResult{}, err
 		}
@@ -347,8 +369,14 @@ func (k *Service) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item
 		return item.Item{}, err
 	}
 	it.Rollups = rollups
+	// Links both ways, each end passed through visibility. They name other
+	// Items by ID only, so they record no read. They are part of the Item
+	// that goes through Project, which chooses what a customer sees of them.
+	if it.Links, it.LinksTruncated, err = k.itemLinks(ctx, p, id); err != nil {
+		return item.Item{}, err
+	}
 	// The scope was found readable; Project is still the one door out.
-	it, ok := policy.Project(p, []uuid.UUID{*it.ScopeID}, it)
+	it, ok := policy.Project(p, []uuid.UUID{*it.ScopeID}, it, ty)
 	if !ok {
 		return item.Item{}, ErrNotFound
 	}
@@ -356,11 +384,6 @@ func (k *Service) Get(ctx context.Context, p item.Principal, id uuid.UUID) (item
 	// only): the Item's own scope, and the scopes of the Items a rollup
 	// counted.
 	if err := recordReads(ctx, k.pool, p, append([]*uuid.UUID{policyScope}, counted...)); err != nil {
-		return item.Item{}, err
-	}
-	// Links both ways, each end passed through visibility. They name other
-	// Items by ID only, so they record no read.
-	if it.Links, it.LinksTruncated, err = k.itemLinks(ctx, p, id); err != nil {
 		return item.Item{}, err
 	}
 	return it, nil
@@ -382,7 +405,11 @@ func (k *Service) visibleItem(ctx context.Context, p item.Principal, id uuid.UUI
 	// One statement reads the Item and decides visibility from its scope,
 	// so the two always agree. Nothing is cached: a change of readers takes
 	// effect on the very next read.
-	args := policy.VisibleArgs(p)
+	// A customer's read is also held to the customer rule (seeCondition).
+	args, err := k.seeArgs(ctx, p)
+	if err != nil {
+		return item.Item{}, nil, err
+	}
 	args["id"], args["ns"] = id, nsOf(p)
 	it := item.Item{ID: id}
 	var (
@@ -396,7 +423,7 @@ func (k *Service) visibleItem(ctx context.Context, p item.Principal, id uuid.UUI
 	err = k.pool.QueryRow(ctx,
 		`select i.type_id, i.type_version, i.container_id, i.scope_id, i.state, i.fields, i.item_seq, i.content_seq,
 		        i.created_at, i.created_by, coalesce(i.created_on_behalf_of, ''),
-		        s.policy_scope_id, `+policy.VisibleCondition+`,
+		        s.policy_scope_id, `+seeCondition("i")+`,
 		        h.id, h.hook, h.from_state, h.to_state, h.status, coalesce(h.reason, '')
 		 from items i join scopes s on s.id = i.scope_id
 		 left join lateral (

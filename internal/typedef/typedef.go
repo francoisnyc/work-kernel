@@ -276,6 +276,15 @@ type Type struct {
 	// offer name -> one of its principal fields. A hook there reads
 	// container:<name> (ContainerOfferPrefix).
 	Offers map[string]string `yaml:"offers" json:"offers,omitempty"`
+	// Customers (Jira part 2, step 4a). Own and Shared are declared by a
+	// container's Type: the Types customers may create inside its Items and
+	// see when they are their own (Own), or see and create inside an Item a
+	// customer sees (Shared). CustomerFields is declared by any Type whose
+	// Items a customer may see: the fields, link names and rollup IDs a
+	// customer sees and may set at creation (see customers.go).
+	Own            []string `yaml:"own" json:"own,omitempty"`
+	Shared         []string `yaml:"shared" json:"shared,omitempty"`
+	CustomerFields []string `yaml:"customer_fields" json:"customer_fields,omitempty"`
 }
 
 // ContainerOfferPrefix starts a hook read that names an offer of the
@@ -564,6 +573,9 @@ func (t *Type) check() error {
 
 	// Hooks last: they name states, transitions and fields checked above.
 	if err := t.checkOffers(); err != nil {
+		return err
+	}
+	if err := t.checkCustomers(); err != nil {
 		return err
 	}
 	if err := t.checkHooks(); err != nil {

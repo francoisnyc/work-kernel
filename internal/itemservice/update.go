@@ -56,6 +56,9 @@ func (k *Service) Update(ctx context.Context, req UpdateRequest) (WriteResult, e
 	if err := checkPublic(req.Principal, req.Attribution); err != nil {
 		return WriteResult{}, err
 	}
+	if err := k.refuseCustomer(ctx, req.Principal, req.ItemID); err != nil {
+		return WriteResult{}, err
+	}
 	return k.update(ctx, req, nil)
 }
 

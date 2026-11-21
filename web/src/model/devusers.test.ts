@@ -8,7 +8,7 @@ const file = readFileSync(new URL("../../../dev-tokens.example.yaml", import.met
 
 test("reads the users of the real dev-token file, in its order", () => {
   const users = parseDevUsers(file);
-  expect(users.map((u) => u.name)).toEqual(["ana", "bob", "dana", "erin", "hana", "lea", "sam", "carol"]);
+  expect(users.map((u) => u.name)).toEqual(["ana", "bob", "dana", "erin", "hana", "lea", "sam", "kim", "lee", "carol"]);
 });
 
 test("a user carries its token, principal, namespace and roles", () => {

@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactElement } from "react";
+import { customerView, isCustomer, pickerLabel } from "../model/customers";
 import type { DevUser } from "../model/devusers";
 import { BoardPage } from "../pages/BoardPage";
 import { InboxPage } from "../pages/InboxPage";
@@ -46,7 +47,10 @@ export function App(): ReactElement {
       (res) => {
         if (!current) return;
         const principals = users.filter((u) => u.namespace === user.namespace).map((u) => u.principal);
-        setSession(new Session(user, api, res.types, principals));
+        // A customer meets every Type as it is shown to them: its customer
+        // fields, and only the moves whose allowed names creator.
+        const types = isCustomer(user) ? res.types.map(customerView) : res.types;
+        setSession(new Session(user, api, types, principals));
         setError(undefined);
       },
       (e) => current && setError(e),
@@ -74,7 +78,7 @@ export function App(): ReactElement {
               <option value="">(choose a dev user)</option>
               {users.map((u) => (
                 <option key={u.name} value={u.name}>
-                  {u.name}
+                  {pickerLabel(u)}
                 </option>
               ))}
             </select>
@@ -113,7 +117,8 @@ function Page({ parts, query }: { parts: string[]; query: URLSearchParams }): Re
     case "search":
       return <ItemsPage mode="search" query={query} />;
     case "items":
-      return <ItemPage key={a} id={a ?? ""} />;
+      // #/items alone is the top level, as #/ is.
+      return a ? <ItemPage key={a} id={a} /> : <ItemsPage mode="browse" query={query} />;
     case "new":
       return <NewItemPage container={query.get("in") ?? ""} />;
     case "inbox":

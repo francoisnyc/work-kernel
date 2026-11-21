@@ -647,7 +647,7 @@ func (in *Internal) ActAt(ctx context.Context, req ActAtRequest) (ActAtResult, e
 			req.ItemID, req.EnteredSeq).Scan(&actor, &onBehalfOf); err != nil {
 			return WriteResult{}, fmt.Errorf("read cause: %w", err)
 		}
-		if recorded.OnBehalfOf = onBehalfOf; onBehalfOf == "" && item.IsKind(actor, item.KindUser) {
+		if recorded.OnBehalfOf = onBehalfOf; onBehalfOf == "" && item.IsKind(actor, item.KindUser, item.KindCustomer) {
 			recorded.OnBehalfOf = actor
 		}
 		payload := map[string]any{"field_ids": sortedKeys(set2), "timer": timer.ID}

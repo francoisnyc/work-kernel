@@ -144,6 +144,7 @@ func typeOut(ns string, t *typedef.Type) *kernelv1.Type {
 			Sets: acc.Sets})
 	}
 	out.ReadableByReactions = t.ReadableByReactions
+	out.Own, out.Shared, out.CustomerFields = t.Own, t.Shared, t.CustomerFields
 	// Offers, by name: a map has no order of its own.
 	for _, name := range slices.Sorted(maps.Keys(t.Offers)) {
 		out.Offers = append(out.Offers, &kernelv1.Offer{Name: name, Field: t.Offers[name]})

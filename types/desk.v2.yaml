@@ -1,0 +1,23 @@
+# A service desk, version 2 (Jira part 2, step 4a): a portal. As desk@1 (the
+# container of its incidents, linked to a calendar and an SLA policy that
+# only sla_admin sets), and open to customers:
+#
+#   - own: [incident]: a customer opens incidents here and sees their own,
+#     never anyone else's.
+#   - Every customer of the namespace sees the portal itself, its key and
+#     its name, unless it is narrowed (then only its customer readers do).
+#     Its calendar and policy links are not shown to them.
+id: desk
+version: 2
+
+# The name first: a page shows a portal by its first string field.
+fields:
+  - {id: f_name, type: string}
+  - {id: f_key,  type: string}
+
+links:
+  - {name: calendar,   inverse: desks,          targets: [calendar],   max: one, writable_by: ['role:sla_admin']}
+  - {name: sla_policy, inverse: governed_desks, targets: [sla_policy], max: one, writable_by: ['role:sla_admin']}
+
+own: [incident]
+customer_fields: [f_key, f_name]

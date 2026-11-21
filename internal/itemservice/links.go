@@ -92,6 +92,9 @@ func (k *Service) linkWrite(ctx context.Context, req LinkRequest, add bool) (Wri
 	if err := checkPublic(req.Principal, req.Attribution); err != nil {
 		return WriteResult{}, err
 	}
+	if err := k.refuseCustomer(ctx, req.Principal, req.SourceID); err != nil {
+		return WriteResult{}, err
+	}
 	if err := checkOptions(req.ExpectedItemSeq, req.ExpectedContentSeq, req.Attribution); err != nil {
 		return WriteResult{}, err
 	}
@@ -522,14 +525,18 @@ func (k *Service) itemLinks(ctx context.Context, p item.Principal, id uuid.UUID)
 	if err != nil {
 		return nil, false, err
 	}
-	args := policy.VisibleArgs(p)
+	args, err := k.seeArgs(ctx, p)
+	if err != nil {
+		return nil, false, err
+	}
 	args["id"], args["limit"] = id, MaxLinksShown+1
 	cte, inSession := sessionFilter(c, "o", args)
 	with := ""
 	if cte != "" {
 		with = "with recursive " + cte + "\n"
 	}
-	visible := policy.VisibleCondition + inSession
+	// A customer's links pass the customer rule too (Jira part 2, step 4a).
+	visible := seeCondition("o") + inSession
 
 	outRows, err := k.pool.Query(ctx, with+
 		`select l.link_type, l.target_id, `+visible+`
@@ -554,7 +561,7 @@ func (k *Service) itemLinks(ctx context.Context, p item.Principal, id uuid.UUID)
 	}
 
 	inRows, err := k.pool.Query(ctx, with+
-		`select l.source_type_id, l.link_type, l.source_id
+		`select l.source_type_id, o.type_version, l.link_type, l.source_id
 		 from links l join items o on o.id = l.source_id join scopes s on s.id = o.scope_id
 		 where l.target_id = @id and `+visible+`
 		 order by l.created_at, l.link_type, l.source_id
@@ -564,11 +571,12 @@ func (k *Service) itemLinks(ctx context.Context, p item.Principal, id uuid.UUID)
 	}
 	type incoming struct {
 		typeID, name string
+		version      int
 		source       uuid.UUID
 	}
 	in, err := pgx.CollectRows(inRows, func(r pgx.CollectableRow) (incoming, error) {
 		var x incoming
-		err := r.Scan(&x.typeID, &x.name, &x.source)
+		err := r.Scan(&x.typeID, &x.version, &x.name, &x.source)
 		return x, err
 	})
 	if err != nil {
@@ -584,7 +592,21 @@ func (k *Service) itemLinks(ctx context.Context, p item.Principal, id uuid.UUID)
 	}
 	var links []item.Link // nil when there are none, like an Item read any other way
 	links = append(links, out...)
+	customer := policy.CustomerOf(p) != ""
 	for _, x := range in {
+		// A customer sees an incoming link only when the source's Type
+		// version lists the link's name for them (the source is visible to
+		// them already: the query says so). Outgoing ones are chosen by
+		// policy.Project, from the Item's own Type.
+		if customer {
+			st, err := k.loadType(ctx, k.pool, x.typeID, x.version)
+			if err != nil {
+				return nil, false, err
+			}
+			if !st.CustomerSees(x.name) {
+				continue
+			}
+		}
 		inverse, err := k.inverseOf(ctx, x.typeID, x.name)
 		if err != nil {
 			return nil, false, err
