@@ -380,3 +380,21 @@ func TestFix_APortalBot_ApprovalUnavailable(t *testing.T) {
 		t.Errorf("an agent for lea: %v; want ErrNeedsApproval, as before", err)
 	}
 }
+
+// Words hold per row too: a word only in f_code matches kim's v2 ticket
+// (f_code listed) and never her v1 ticket (f_code hidden).
+func TestFix_Words_HoldPerVersion(t *testing.T) {
+	w := newVWorld(t)
+	secret, shown := "xray"+word()[1:9], "yankee"+word()[1:9]
+	v1 := w.ticket(t, 1, secret)
+	v2 := w.ticket(t, 2, shown)
+	if got := w.searchAll(t, w.kim, secret, itemservice.Filter{}, 50); len(got) != 0 {
+		t.Errorf("kim searches a word only in a v1 ticket's hidden f_code: %v; want nothing", got)
+	}
+	if got := w.searchAll(t, w.kim, shown, itemservice.Filter{}, 50); !sameIDs(got, []uuid.UUID{v2}) {
+		t.Errorf("kim searches a word in a v2 ticket's f_code: %v; want v2", got)
+	}
+	if got := w.searchAll(t, w.sam, secret, itemservice.Filter{}, 50); !sameIDs(got, []uuid.UUID{v1}) {
+		t.Errorf("sam searches the v1 ticket's f_code: %v; want v1", got)
+	}
+}

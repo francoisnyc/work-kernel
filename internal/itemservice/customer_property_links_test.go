@@ -9,6 +9,9 @@
 // f_secret not) linked at random by staff; narrowings whose readers mix
 // staff, customers and portal bots; inherits and moves. Visible fields hold
 // shared words (alpha, bravo, charlie), the hidden f_secret holds zulu.
+// Versions are mixed: vtickets at v1 (only the title listed) and v2 (also
+// f_code and the link rel), with f_code and rel set on both, so field
+// filters, order_by, link conditions and words are checked per row.
 // At the end, for every principal (staff, customers, a portal bot per
 // customer):
 //
@@ -20,7 +23,10 @@
 //     ticket, finds exactly the evaluator's Items, or is refused as an
 //     unknown name when the customer may not see the name;
 //   - a word search finds exactly the visible Items whose fields the
-//     principal sees hold the word.
+//     principal sees hold the word;
+//   - on vtickets, a filter on f_code finds exactly the visible ones whose
+//     own version shows the principal f_code with that value, and
+//     order_by f_code sorts those by value, the rest after, by ID.
 //
 // The whole test must stay under a minute.
 package itemservice_test
@@ -70,8 +76,10 @@ type linksProp struct {
 	bots      []item.Principal // bots[i] acts for customers[i]
 	portals   []uuid.UUID
 	kiosk     uuid.UUID
+	vkiosk    uuid.UUID
 	incidents []uuid.UUID
 	tickets   []uuid.UUID
+	vtickets  []uuid.UUID
 }
 
 func runLinksProperty(t *testing.T, seed uint64) {
@@ -85,15 +93,22 @@ func runLinksProperty(t *testing.T, seed uint64) {
 		p.bots = append(p.bots, w.portalBot(t, fmt.Sprintf("agent:pb%d-%s", i, word()), c))
 	}
 	p.kiosk = w.mk(t, w.lea, "kiosk", 1, nil, map[string]any{"f_name": "kiosk " + p.word()})
+	registerSrc(t, w.k, vticket1Src)
+	registerSrc(t, w.k, vticket2Src)
+	registerSrc(t, w.k, vkioskSrc)
+	p.vkiosk = w.mk(t, w.lea, "vkiosk", 1, nil, map[string]any{"f_name": "vkiosk"})
 	for step := range linksPropertySteps {
 		var what string
 		switch n := p.r.IntN(100); {
 		case n < 15:
 			what = "an incident"
 			p.newIncident(t)
-		case n < 30:
+		case n < 22:
 			what = "a ticket"
 			p.newTicket(t)
+		case n < 32:
+			what = "a versioned ticket"
+			p.newVTicket(t)
 		case n < 45:
 			what = "a reply, a note or a comment"
 			p.newChild(t)
@@ -177,6 +192,34 @@ func (p *linksProp) newTicket(t *testing.T) {
 	}
 }
 
+// newVTicket: a vticket at v1 or v2, by a customer or staff, with f_code
+// set by staff to a word (or the secret word) on either version.
+func (p *linksProp) newVTicket(t *testing.T) {
+	t.Helper()
+	who := p.staff[0]
+	if p.r.IntN(2) == 0 {
+		who = p.customers[p.customer()]
+	}
+	version := 1 + p.r.IntN(2)
+	res, err := p.w.k.Create(testCtx(t), itemservice.CreateRequest{IdempotencyKey: newKey(), Principal: who, TypeID: "vticket",
+		TypeVersion: version, ContainerID: &p.vkiosk, Fields: map[string]any{"f_title": p.word()}})
+	if errors.Is(err, itemservice.ErrNotFound) {
+		return
+	}
+	if err != nil {
+		t.Fatalf("%s creates a vticket@%d: %v", who.Actor, version, err)
+	}
+	p.vtickets = append(p.vtickets, res.ItemID)
+	code := p.word()
+	if p.r.IntN(3) == 0 {
+		code = secretWord
+	}
+	if _, err := p.w.k.Update(testCtx(t), itemservice.UpdateRequest{IdempotencyKey: newKey(), Principal: p.staff[0],
+		ItemID: res.ItemID, Fields: map[string]any{"f_code": code}}); err != nil {
+		t.Fatalf("set f_code: %v", err)
+	}
+}
+
 func (p *linksProp) newChild(t *testing.T) {
 	t.Helper()
 	if len(p.incidents) == 0 {
@@ -212,17 +255,18 @@ func (p *linksProp) newChild(t *testing.T) {
 
 func (p *linksProp) newLink(t *testing.T) {
 	t.Helper()
-	if len(p.tickets) < 2 {
+	pool, names := p.tickets, []string{"blocks", "relates"}
+	if p.r.IntN(2) == 0 {
+		pool, names = p.vtickets, []string{"rel"}
+	}
+	if len(pool) < 2 {
 		return
 	}
-	a, b := p.pick(p.tickets), p.pick(p.tickets)
+	a, b := p.pick(pool), p.pick(pool)
 	if a == b {
 		return
 	}
-	name := "blocks"
-	if p.r.IntN(2) == 0 {
-		name = "relates"
-	}
+	name := names[p.r.IntN(len(names))]
 	_, err := p.w.k.Link(testCtx(t), itemservice.LinkRequest{IdempotencyKey: newKey(), Principal: p.staff[0], SourceID: a, LinkType: name, TargetID: b})
 	if err != nil && !errors.Is(err, itemservice.ErrRejected) {
 		t.Fatalf("link: %v", err)
@@ -241,7 +285,7 @@ func (p *linksProp) readers() []string {
 }
 
 func (p *linksProp) targets() []uuid.UUID {
-	return append(append(append(slices.Clone(p.portals), p.kiosk), p.incidents...), p.tickets...)
+	return append(append(append(append(slices.Clone(p.portals), p.kiosk, p.vkiosk), p.incidents...), p.tickets...), p.vtickets...)
 }
 
 func (p *linksProp) narrow(t *testing.T) {
@@ -478,8 +522,16 @@ func (p *linksProp) check(t *testing.T) {
 				t.Errorf("Get(%s): links_truncated with %d links", who.Actor, len(it.Links))
 			}
 		}
-		if got := w.searchAll(t, who, "", anyType, 3); !sameIDs(got, want) {
-			t.Errorf("Search(%s): %d Items, evaluator says %d", who.Actor, len(got), len(want))
+		// anyType names the step's Types; the vtickets are checked per
+		// version below (checkVersions).
+		var wantTyped []uuid.UUID
+		for _, id := range want {
+			if slices.Contains(anyType.TypeIDs, lw.items[id].typeID) {
+				wantTyped = append(wantTyped, id)
+			}
+		}
+		if got := w.searchAll(t, who, "", anyType, 3); !sameIDs(got, wantTyped) {
+			t.Errorf("Search(%s): %d Items, evaluator says %d", who.Actor, len(got), len(wantTyped))
 		}
 		for c := range lw.items {
 			if !slices.Contains(want, c) {
@@ -496,6 +548,7 @@ func (p *linksProp) check(t *testing.T) {
 			}
 		}
 		p.checkLinkConditions(t, lw, who, want)
+		p.checkVersions(t, lw, who, want)
 		for _, word := range append(slices.Clone(propWords), secretWord) {
 			var exp []uuid.UUID
 			for _, id := range want {
@@ -567,6 +620,109 @@ func (p *linksProp) checkLinkConditions(t *testing.T, lw linksWorld, who item.Pr
 			}
 			if !sameIDs(got, exp) {
 				t.Errorf("%s: Items with %s %s: %d, evaluator says %d", who.Actor, c.name, x, len(got), len(exp))
+			}
+		}
+	}
+}
+
+// shownCode is a vticket's f_code as the principal may read it on that
+// row: its value when the row's own version shows it, else none.
+func (lw linksWorld) shownCode(who item.Principal, id uuid.UUID) (string, bool) {
+	if customerOfP(who) != "" && !lw.typeOf(id).CustomerSees("f_code") {
+		return "", false
+	}
+	v, ok := lw.fields[id]["f_code"].(string)
+	return v, ok
+}
+
+// checkVersions holds field filters, order_by and link conditions on the
+// vtickets to each row's own version.
+func (p *linksProp) checkVersions(t *testing.T, lw linksWorld, who item.Principal, want []uuid.UUID) {
+	t.Helper()
+	var visible []uuid.UUID
+	for _, id := range p.vtickets {
+		if slices.Contains(want, id) {
+			visible = append(visible, id)
+		}
+	}
+	only := itemservice.Filter{TypeIDs: []string{"vticket"}}
+	// Field filters.
+	for _, code := range append(slices.Clone(propWords), secretWord) {
+		var exp []uuid.UUID
+		for _, id := range visible {
+			if v, ok := lw.shownCode(who, id); ok && v == code {
+				exp = append(exp, id)
+			}
+		}
+		f := only
+		f.Fields = []itemservice.FieldFilter{{Field: "f_code", Eq: code}}
+		if got := p.w.searchAll(t, who, "", f, 50); !sameIDs(got, exp) {
+			t.Errorf("%s: f_code = %s: %d vtickets, evaluator says %d", who.Actor, code, len(got), len(exp))
+		}
+	}
+	// order_by: the values shown, ascending, ties by ID; the rest after, by ID.
+	exp := slices.Clone(visible)
+	slices.SortFunc(exp, func(a, b uuid.UUID) int {
+		va, oka := lw.shownCode(who, a)
+		vb, okb := lw.shownCode(who, b)
+		switch {
+		case oka && !okb:
+			return -1
+		case !oka && okb:
+			return 1
+		case oka && okb && va != vb:
+			return strings.Compare(va, vb)
+		}
+		return strings.Compare(a.String(), b.String())
+	})
+	var got []uuid.UUID
+	token := ""
+	for {
+		res, err := p.w.k.Search(testCtx(t), itemservice.SearchRequest{Principal: who, Filter: only,
+			OrderBy: &itemservice.OrderBy{Field: "f_code"}, Limit: 4, PageToken: token})
+		if err != nil {
+			t.Fatalf("%s: order_by f_code: %v", who.Actor, err)
+		}
+		for _, it := range res.Items {
+			got = append(got, it.ID)
+		}
+		if token = res.NextPageToken; token == "" {
+			break
+		}
+	}
+	if !slices.Equal(got, exp) {
+		t.Errorf("%s: vtickets by f_code: %v, evaluator says %v", who.Actor, got, exp)
+	}
+	// Link conditions on rel, both ways, per row.
+	cust := customerOfP(who) != ""
+	for _, x := range visible {
+		for _, c := range []struct {
+			name string
+			dir  item.LinkDirection
+		}{{"rel", item.LinkOutgoing}, {"rel_by", item.LinkIncoming}} {
+			var exp []uuid.UUID
+			for _, l := range lw.links {
+				if l.name != "rel" {
+					continue
+				}
+				m := l.source
+				if c.dir == item.LinkOutgoing && l.target != x {
+					continue
+				}
+				if c.dir == item.LinkIncoming {
+					if l.source != x {
+						continue
+					}
+					m = l.target
+				}
+				if slices.Contains(want, m) && (!cust || lw.typeOf(l.source).CustomerSees("rel")) {
+					exp = append(exp, m)
+				}
+			}
+			f := only
+			f.Links = []itemservice.LinkFilter{{LinkType: c.name, Direction: c.dir, ItemID: x}}
+			if got := p.w.searchAll(t, who, "", f, 50); !sameIDs(got, exp) {
+				t.Errorf("%s: vtickets with %s %s: %d, evaluator says %d", who.Actor, c.name, x, len(got), len(exp))
 			}
 		}
 	}
