@@ -12,15 +12,23 @@ tokens:
   # herself; erin is not in it. hana is HR: she alone writes who owns a
   # leave balance and its allowance (role hr_admin). lea runs the IT service
   # desk: she alone links a desk to its calendar and its SLA policy, and
-  # writes the policy's targets (role sla_admin).
+  # writes the policy's targets (role sla_admin). lea and sam answer the
+  # desk's customers (role desk_agent).
   - {name: ana, token: dev-ana-not-a-secret, principal: "user:ana", namespace: acme}
   - {name: bob, token: dev-bob-not-a-secret, principal: "user:bob", namespace: acme, roles: [approver]}
   - {name: dana, token: dev-dana-not-a-secret, principal: "user:dana", namespace: acme}
   - {name: erin, token: dev-erin-not-a-secret, principal: "user:erin", namespace: acme}
   - {name: hana, token: dev-hana-not-a-secret, principal: "user:hana", namespace: acme, roles: [hr_admin]}
-  - {name: lea, token: dev-lea-not-a-secret, principal: "user:lea", namespace: acme, roles: [sla_admin]}
-  - {name: sam, token: dev-sam-not-a-secret, principal: "user:sam", namespace: acme}
+  - {name: lea, token: dev-lea-not-a-secret, principal: "user:lea", namespace: acme, roles: [sla_admin, desk_agent]}
+  - {name: sam, token: dev-sam-not-a-secret, principal: "user:sam", namespace: acme, roles: [desk_agent]}
+  # Two customers of the IT desk (Jira part 2, step 4a): they open incidents
+  # in its portal and see their own, and nothing else. A customer never
+  # holds a role.
+  - {name: kim, token: dev-kim-not-a-secret, principal: "customer:kim", namespace: acme}
+  - {name: lee, token: dev-lee-not-a-secret, principal: "customer:lee", namespace: acme}
   - {name: triage-bot, token: dev-triage-bot-not-a-secret, principal: "agent:triage-bot", namespace: acme}
+  # The portal's bot: it acts for a customer, with a customer's powers.
+  - {name: portal-bot, token: dev-portal-bot-not-a-secret, principal: "agent:portal-bot", namespace: acme}
   # globex: another namespace, which sees nothing of acme.
   - {name: carol, token: dev-carol-not-a-secret, principal: "user:carol", namespace: globex}
 
@@ -39,3 +47,15 @@ grants:
     namespace: acme
     scopes: [namespaces/acme]
     powers: [read, create, edit_fields, "transition:*", move]
+  # kim and lee let the portal bot act for them, with a customer's fixed
+  # powers: read, create, comment and their own moves.
+  - agent: "agent:portal-bot"
+    user: "customer:kim"
+    namespace: acme
+    scopes: [namespaces/acme]
+    powers: [read, create, comment, "transition:*"]
+  - agent: "agent:portal-bot"
+    user: "customer:lee"
+    namespace: acme
+    scopes: [namespaces/acme]
+    powers: [read, create, comment, "transition:*"]

@@ -6,9 +6,9 @@ import { parse } from "yaml";
 
 export type DevUser = { name: string; token: string; principal: string; namespace: string; roles: string[] };
 
-// The file's users, in the file's order. Agents are left out: an agent
-// needs a session, which the UI does not start. Throws on a file without
-// a tokens list.
+// The file's users and customers, in the file's order. Agents are left
+// out: an agent needs a session, which the UI does not start. Throws on a
+// file without a tokens list.
 export function parseDevUsers(yamlText: string): DevUser[] {
   let doc: unknown;
   try {
@@ -26,5 +26,5 @@ export function parseDevUsers(yamlText: string): DevUser[] {
       namespace: String(t.namespace),
       roles: Array.isArray(t.roles) ? t.roles.map(String) : [],
     }))
-    .filter((u) => u.principal.startsWith("user:"));
+    .filter((u) => u.principal.startsWith("user:") || u.principal.startsWith("customer:"));
 }

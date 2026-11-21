@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactElement } from "react";
+import { customerView, isCustomer, pickerLabel } from "../model/customers";
 import type { DevUser } from "../model/devusers";
 import { BoardPage } from "../pages/BoardPage";
 import { InboxPage } from "../pages/InboxPage";
@@ -20,13 +21,18 @@ const CHOSEN = "pli.actAs"; // sessionStorage: per tab, so two tabs can be two u
 async function loadDevUsers(): Promise<DevUser[]> {
   const { parseDevUsers } = await import("../model/devusers");
   const res = await fetch("/dev-tokens.yaml", { cache: "no-store" });
-  if (!res.ok) throw new Error(`the dev-token file is not served here (HTTP ${res.status})`);
+  if (!res.ok)
+    throw new Error(
+      `the dev-token file is not served here (HTTP ${res.status})`,
+    );
   return parseDevUsers(await res.text());
 }
 
 export function App(): ReactElement {
   const [users, setUsers] = useState<DevUser[]>([]);
-  const [chosen, setChosen] = useState(() => sessionStorage.getItem(CHOSEN) ?? "");
+  const [chosen, setChosen] = useState(
+    () => sessionStorage.getItem(CHOSEN) ?? "",
+  );
   const [session, setSession] = useState<Session>();
   const [error, setError] = useState<unknown>();
   const route = parseHash(useHash());
@@ -45,8 +51,15 @@ export function App(): ReactElement {
     api.listTypes({ parent: `namespaces/${user.namespace}` }).then(
       (res) => {
         if (!current) return;
-        const principals = users.filter((u) => u.namespace === user.namespace).map((u) => u.principal);
-        setSession(new Session(user, api, res.types, principals));
+        const principals = users
+          .filter((u) => u.namespace === user.namespace)
+          .map((u) => u.principal);
+        // A customer meets every Type as it is shown to them: its customer
+        // fields, and only the moves whose allowed names creator.
+        const types = isCustomer(user)
+          ? res.types.map(customerView)
+          : res.types;
+        setSession(new Session(user, api, types, principals));
         setError(undefined);
       },
       (e) => current && setError(e),
@@ -67,14 +80,22 @@ export function App(): ReactElement {
         {DEV_USERS ? (
           <>
             <strong>DEV</strong>{" "}
-            <span>{user ? `acting as ${user.name} (${user.principal}, ${user.namespace})` : "nobody chosen"}</span>
+            <span>
+              {user
+                ? `acting as ${user.name} (${user.principal}, ${user.namespace})`
+                : "nobody chosen"}
+            </span>
             <span className="warning"> dev tokens, not real sign-on</span>
             <label htmlFor="act-as">Act as</label>
-            <select id="act-as" value={chosen} onChange={(e) => actAs(e.target.value)}>
+            <select
+              id="act-as"
+              value={chosen}
+              onChange={(e) => actAs(e.target.value)}
+            >
               <option value="">(choose a dev user)</option>
               {users.map((u) => (
                 <option key={u.name} value={u.name}>
-                  {u.name}
+                  {pickerLabel(u)}
                 </option>
               ))}
             </select>
@@ -92,8 +113,14 @@ export function App(): ReactElement {
       </header>
       <main>
         {error !== undefined && <RefusalView error={error} />}
-        {!DEV_USERS && <p>This build has no sign-on configured: there is nobody to act as.</p>}
-        {DEV_USERS && !user && <p>Choose a dev user in the banner to act as them.</p>}
+        {!DEV_USERS && (
+          <p>
+            This build has no sign-on configured: there is nobody to act as.
+          </p>
+        )}
+        {DEV_USERS && !user && (
+          <p>Choose a dev user in the banner to act as them.</p>
+        )}
         {session && (
           // A new key per user: every page starts over when the user changes.
           <SessionProvider value={session} key={session.user.name}>
@@ -105,7 +132,13 @@ export function App(): ReactElement {
   );
 }
 
-function Page({ parts, query }: { parts: string[]; query: URLSearchParams }): ReactElement {
+function Page({
+  parts,
+  query,
+}: {
+  parts: string[];
+  query: URLSearchParams;
+}): ReactElement {
   const [page, a, b] = parts;
   switch (page) {
     case undefined:
@@ -113,13 +146,25 @@ function Page({ parts, query }: { parts: string[]; query: URLSearchParams }): Re
     case "search":
       return <ItemsPage mode="search" query={query} />;
     case "items":
-      return <ItemPage key={a} id={a ?? ""} />;
+      // #/items alone is the top level, as #/ is.
+      return a ? (
+        <ItemPage key={a} id={a} />
+      ) : (
+        <ItemsPage mode="browse" query={query} />
+      );
     case "new":
       return <NewItemPage container={query.get("in") ?? ""} />;
     case "inbox":
       return <InboxPage />;
     case "board":
-      return <BoardPage key={`${a}/${b}`} id={a ?? ""} link={b ?? ""} rankField={query.get("rank") ?? "f_rank"} />;
+      return (
+        <BoardPage
+          key={`${a}/${b}`}
+          id={a ?? ""}
+          link={b ?? ""}
+          rankField={query.get("rank") ?? "f_rank"}
+        />
+      );
     case "types":
       return <TypesPage />;
     default:
