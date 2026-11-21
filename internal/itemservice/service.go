@@ -77,6 +77,12 @@ type CreateRequest struct {
 	// Item gets a scope node of its own, readable only by the readers named,
 	// and only by those of them who can read the container.
 	Narrow *Narrow
+	// Requester (Jira part 2, step 4a) is the customer a person creates
+	// the Item for (a phone call): stored as created_on_behalf_of. Only a
+	// user may name one, only a customer the container admits. omitempty
+	// keeps the idempotency hash of a request without it as before.
+	// Phase B stub: accepted and ignored.
+	Requester string `json:",omitempty"`
 }
 
 // Narrow names the readers of a narrowed Item, as opaque principal IDs.

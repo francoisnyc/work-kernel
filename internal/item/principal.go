@@ -17,6 +17,11 @@ const (
 	// (proof of concept, Step 2, part 2). Like a hook, it has no version;
 	// the version is on originating_hook, reaction:<type>@v<n>:<id>.
 	KindReaction = "reaction"
+	// KindCustomer is a person outside the organization who opens requests
+	// (Jira part 2, step 4a): fixed permissions, never a role, never in the
+	// namespace's general audience. Phase B stub: declared, not yet known
+	// to KindOf.
+	KindCustomer = "customer"
 )
 
 // ReactionParts splits a reaction principal, reaction:<type>:<id>, into its

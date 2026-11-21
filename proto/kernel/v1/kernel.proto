@@ -178,6 +178,12 @@ message CreateItemRequest {
   // Optional: give the Item its own scope, readable only by these readers
   // (who can also read the container). Must include the caller.
   Readers narrow = 6;
+  // Optional (Jira part 2, step 4a): the customer a person creates the
+  // Item for, customer:<id>, recorded as creator_on_behalf_of. Only a user
+  // may send it, only for a customer the container admits; anything else
+  // is INVALID_ARGUMENT on requester, which never says whether the
+  // customer exists.
+  string requester = 7;
 }
 
 message CreateItemResponse {
@@ -603,6 +609,16 @@ message Type {
   // Items: a hook there reads container:<name>, and gets the value of the
   // offer's field on its container when it runs.
   repeated Offer offers = 15;
+  // Customers (Jira part 2, step 4a). own and shared are what this Type
+  // admits customers to inside its Items: the Types they may create and see
+  // as their own (own), or see and create inside an Item they see (shared).
+  // A shared Type ID covers all its versions.
+  repeated string own = 16;
+  repeated string shared = 17;
+  // The field IDs, link names and rollup IDs a customer sees on Items of
+  // this version, and may set at creation. Anything else is hidden from a
+  // customer, a field added in a later version included.
+  repeated string customer_fields = 18;
 }
 
 // A named principal field a Type offers to the hooks of contained Items.

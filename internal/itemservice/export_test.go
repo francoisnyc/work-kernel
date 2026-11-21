@@ -26,3 +26,14 @@ func ChangesContent(ty *typedef.Type, op string, payload map[string]any) (bool, 
 
 // RequestHash is the idempotency hash of a request.
 func RequestHash(op string, req any) (string, error) { return requestHash(op, req) }
+
+// ExplainSearch and ExplainList return the plan (EXPLAIN, without ANALYZE)
+// of the page query that Search or List would run for the request, so a
+// test can hold a customer's reads to an index (Jira part 2, step 4a).
+func ExplainSearch(k *Service, ctx context.Context, req SearchRequest) (string, error) {
+	return k.explainSearch(ctx, req)
+}
+
+func ExplainList(k *Service, ctx context.Context, req ListRequest) (string, error) {
+	return k.explainList(ctx, req)
+}
