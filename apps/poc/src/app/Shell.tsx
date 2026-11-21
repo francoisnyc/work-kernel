@@ -66,13 +66,15 @@ function PersonMenu(): ReactElement {
       <button
         type="button"
         className="person-button"
-        aria-label={`Signed in as ${s.user.name}`}
         aria-expanded={open}
         aria-controls="person-panel"
         onClick={() => setOpen(!open)}
       >
         <Avatar principal={s.me} size={28} />
-        <span aria-hidden="true">{s.user.name}</span>
+        <span>
+          <span className="sr-only">Signed in as </span>
+          {s.user.name}
+        </span>
       </button>
       {open && (
         <div className="person-panel" id="person-panel">
