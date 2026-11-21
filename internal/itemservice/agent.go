@@ -21,6 +21,13 @@ import (
 // succeeds. The error is a *NeedsApprovalError naming that scope.
 var ErrNeedsApproval = errors.New("itemservice: needs approval")
 
+// ErrApprovalUnavailable means an agent acting for a customer made a write
+// that would need an approval (ErrNeedsApproval), which nobody can give: a
+// customer never approves. The write is refused at once, never left
+// pending (Jira part 2, step 4a review). Phase B stub: declared, not yet
+// returned.
+var ErrApprovalUnavailable = errors.New("itemservice: an agent acting for a customer cannot be approved")
+
 // NeedsApprovalError carries the scope the agent's write would land in.
 type NeedsApprovalError struct {
 	Scope uuid.UUID
