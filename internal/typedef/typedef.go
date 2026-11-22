@@ -372,18 +372,9 @@ func FromJSON(data []byte) (*Type, error) {
 
 // problems runs stage (b), the checks on this Type alone.
 func (t *Type) problems() Problems {
-	err := t.check()
-	if err == nil {
-		return nil
-	}
 	var ps Problems
-	if errors.As(err, &ps) {
-		return ps
-	}
-	// Transitional (Ventoux 2a, Phase C): a check not yet converted to
-	// coded problems. Removed when the last one is.
-	msg := strings.TrimPrefix(err.Error(), fmt.Sprintf("typedef %s v%d: ", t.ID, t.Version))
-	return Problems{{TypeID: t.ID, Version: t.Version, Severity: SeverityError, Code: Code("UNSORTED"), Message: msg}}
+	errors.As(t.check(), &ps)
+	return ps
 }
 
 // Field returns the field with the given ID. The second value reports
@@ -424,16 +415,6 @@ func (t *Type) Transition(from, to string) (Transition, bool) {
 func (t *Type) check() error {
 	var ps Problems
 	r := newReporter(&ps, t.ID, t.Version)
-	// Sections not yet converted to coded problems (Ventoux 2a, Phase C):
-	// each records its first problem, uncoded, and the next section runs.
-	legacy := r.legacy()
-	legacyErr := func(err error) {
-		if err != nil && !errors.Is(err, errReported) {
-			msg := strings.TrimPrefix(err.Error(), fmt.Sprintf("typedef %s v%d: ", t.ID, t.Version))
-			r.fail(Code("UNSORTED"), "", "", "%s", msg)
-		}
-	}
-
 	if t.ID == "" {
 		r.fail(CodeRequired, "id", "Name the Type, such as id: ticket", "id is required")
 	}
@@ -503,7 +484,7 @@ func (t *Type) check() error {
 	t.checkCustomers(r)
 	t.checkHooks(r)
 	// Then what names hooks and fields: reactions, invariants, consents.
-	legacyErr(t.checkReactions(legacy))
+	t.checkReactions(r)
 	t.checkInvariants(r)
 	t.checkAccepts(r)
 	t.checkMultiUses(r)

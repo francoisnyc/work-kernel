@@ -259,14 +259,6 @@ func (r reporter) within(format string, args ...any) reporter {
 	return r
 }
 
-// legacy adapts a check not yet converted to coded problems (Ventoux 2a,
-// Phase C): it records an uncoded problem. Removed with the last one.
-func (r reporter) legacy() func(string, ...any) error {
-	return func(format string, args ...any) error {
-		return r.fail(Code("UNSORTED"), "", "", format, args...)
-	}
-}
-
 // at builds a path into the YAML. The first part is written as it is (a
 // top-level key, or a path built before); after it, a string is a key and
 // an int an index: at("transitions", 3, "allowed", 0) is

@@ -519,138 +519,195 @@ func (t *Type) checkAccepts(r reporter) {
 }
 
 // checkReactions validates and compiles the reactions. Hooks are known.
-func (t *Type) checkReactions(fail func(string, ...any) error) error {
+func (t *Type) checkReactions(rep reporter) {
 	env, err := newFieldEnv(t)
 	if err != nil {
-		return fail("reaction environment: %v", err)
+		rep.fail(CodeExpressionInvalid, "reactions", "Fix the fields the message names", "reaction environment: %v", err)
+		return
 	}
 	seen := map[string]bool{}
 	for i := range t.Reactions {
-		r := &t.Reactions[i]
-		where := fmt.Sprintf("reaction %q", r.ID)
-		if !reactionID.MatchString(r.ID) {
-			return fail("%s: not a reaction ID (lower case, digits and _)", where)
-		}
-		if seen[r.ID] {
-			return fail("%s is declared twice", where)
-		}
-		seen[r.ID] = true
-		if _, ok := t.Hook(r.ID); ok {
-			return fail("%s: a hook has the same ID; holds name either, so the IDs are shared", where)
-		}
-		if r.Kind == ReactionMove || r.Kind == ReactionCreate || r.Kind == ReactionSet {
-			if err := t.checkAfterReaction(r, where, fail); err != nil {
-				return err
-			}
-			continue
-		}
-		if len(r.Of) > 0 || r.When != "" || r.By != "" || r.To != "" || len(r.TargetFrom) > 0 || r.Type != "" || len(r.Fields) > 0 {
-			return fail("%s: of, when, by, to, target_from, type and fields are for move and create reactions", where)
-		}
-		if r.Children != nil || r.Target != "" || len(r.Set) > 0 {
-			return fail("%s: children, target and set are for move and set reactions", where)
-		}
-		if r.On != OnEnter {
-			return fail("%s: on must be enter, not %q", where, r.On)
-		}
-		if _, ok := t.State(r.State); !ok {
-			return fail("%s: unknown state %q", where, r.State)
-		}
-		for _, from := range r.From {
-			if _, ok := t.State(from); !ok {
-				return fail("%s: unknown from state %q", where, from)
-			}
-		}
-		switch r.Kind {
-		case ReactionHeld:
-			if r.Undoes != "" {
-				return fail("%s: a held reaction undoes nothing", where)
-			}
-			if len(r.From) == 0 {
-				return fail("%s: a held reaction names the states it holds the move from (from)", where)
-			}
-			for _, from := range r.From {
-				tr, ok := t.Transition(from, r.State)
-				if !ok {
-					return fail("%s: there is no transition %s -> %s to hold", where, from, r.State)
-				}
-				if tr.Escape {
-					return fail("%s: transition %s -> %s is an escape: it cancels a hold, so it may not open one",
-						where, from, r.State)
-				}
-				if h, ok := t.checkOn(from, r.State); ok {
-					return fail("%s: transition %s -> %s already has the check %q; one hold per transition",
-						where, from, r.State, h)
-				}
-			}
-			l, ok := t.Link(r.Link)
-			if !ok {
-				return fail("%s: link %q is not declared", where, r.Link)
-			}
-			if !l.SourceSingle() {
-				return fail("%s: link %s may have many targets; a reaction follows a link of max: one", where, l.Name)
-			}
-			// A link the kernel resolves is sure to be set only in the state
-			// whose entry resolves it. (A link people set is exempt.)
-			if l.Resolve != nil {
-				for _, from := range r.From {
-					if from != l.Resolve.OnEnter {
-						return fail("%s: it leaves %s, but link %s is resolved on entering %s, so it may be unset in %s",
-							where, from, l.Name, l.Resolve.OnEnter, from)
-					}
-				}
-			}
-			if len(r.Add) == 0 {
-				return fail("%s: a held reaction adds to some field (add)", where)
-			}
-			r.Programs = map[string]cel.Program{}
-			var reads []string
-			for _, field := range slices.Sorted(maps.Keys(r.Add)) {
-				prg, rs, out, err := compileFields(env, r.Add[field])
-				if err != nil {
-					return fail("%s: add %s: %v", where, field, err)
-				}
-				if !isInt(out) {
-					return fail("%s: add %s must yield an int, not %s", where, field, out)
-				}
-				r.Programs[field] = prg
-				reads = append(reads, rs...)
-			}
-			slices.Sort(reads)
-			r.Reads = slices.Compact(reads)
-		case ReactionAfter:
-			if len(r.Add) > 0 || r.Link != "" {
-				return fail("%s: an after reaction only undoes a held one for now (undoes); a patch of its own is Later", where)
-			}
-			if r.Undoes == "" {
-				return fail("%s: an after reaction names the held reaction it undoes (undoes)", where)
-			}
-		default:
-			return fail("%s: unknown kind %q: want held, after, move, create or set", where, r.Kind)
-		}
+		t.checkReaction(rep, i, seen, env)
 	}
 	// Undos: each names a held reaction, and each held reaction has one.
 	undos := map[string]string{}
-	for _, r := range t.Reactions {
-		if r.Kind != ReactionAfter {
+	for i, r := range t.Reactions {
+		if r.Kind != ReactionAfter || r.Undoes == "" {
 			continue
 		}
 		held, ok := t.Reaction(r.Undoes)
 		if !ok || held.Kind != ReactionHeld {
-			return fail("reaction %q undoes %q, which is no held reaction", r.ID, r.Undoes)
+			rep.fail(CodeUnknownReaction, at("reactions", i, "undoes"), "Name a held reaction of this Type",
+				"reaction %q undoes %q, which is no held reaction", r.ID, r.Undoes)
+			continue
 		}
 		if other, dup := undos[held.ID]; dup {
-			return fail("held reaction %q has two undos, %q and %q", held.ID, other, r.ID)
+			rep.fail(CodeOnlyOneAllowed, at("reactions", i, "undoes"), "Keep one undo per held reaction",
+				"held reaction %q has two undos, %q and %q", held.ID, other, r.ID)
+			continue
 		}
 		undos[held.ID] = r.ID
 	}
-	for _, r := range t.Reactions {
-		if r.Kind == ReactionHeld && undos[r.ID] == "" {
-			return fail("held reaction %q has no undo: what it takes must be given back if its hold "+
-				"closes any other way than allowed (an after reaction with undoes: %s)", r.ID, r.ID)
+	for i, r := range t.Reactions {
+		if r.Kind == ReactionHeld && reactionID.MatchString(r.ID) && undos[r.ID] == "" {
+			rep.fail(CodeMissingCounterpart, at("reactions", i), "Add an after reaction with undoes naming it",
+				"held reaction %q has no undo: what it takes must be given back if its hold "+
+					"closes any other way than allowed (an after reaction with undoes: %s)", r.ID, r.ID)
 		}
 	}
-	return nil
+}
+
+// keySet pairs a key with whether a declaration sets it.
+type keySet struct {
+	key string
+	set bool
+}
+
+// firstKey returns the first key that is set: where a problem about keys
+// that do not apply points.
+func firstKey(keys ...keySet) string {
+	for _, k := range keys {
+		if k.set {
+			return k.key
+		}
+	}
+	return ""
+}
+
+// checkReaction checks reactions[i]: its first problem stops it.
+func (t *Type) checkReaction(rep reporter, i int, seen map[string]bool, env *cel.Env) {
+	r, p := &t.Reactions[i], at("reactions", i)
+	where := fmt.Sprintf("reaction %q", r.ID)
+	if !reactionID.MatchString(r.ID) {
+		rep.fail(CodeInvalidName, at(p, "id"), "Name it in lower case, digits and _", "%s: not a reaction ID (lower case, digits and _)", where)
+		return
+	}
+	if seen[r.ID] {
+		rep.fail(CodeDuplicate, at(p, "id"), "Rename one of the two reactions", "%s is declared twice", where)
+		return
+	}
+	seen[r.ID] = true
+	if _, ok := t.Hook(r.ID); ok {
+		rep.fail(CodeConflict, at(p, "id"), "Rename the reaction or the hook", "%s: a hook has the same ID; holds name either, so the IDs are shared", where)
+		return
+	}
+	if r.Kind == ReactionMove || r.Kind == ReactionCreate || r.Kind == ReactionSet {
+		t.checkAfterReaction(rep, p, r, where)
+		return
+	}
+	if k := firstKey(keySet{"of", len(r.Of) > 0}, keySet{"when", r.When != ""}, keySet{"by", r.By != ""}, keySet{"to", r.To != ""},
+		keySet{"target_from", len(r.TargetFrom) > 0}, keySet{"type", r.Type != ""}, keySet{"fields", len(r.Fields) > 0}); k != "" {
+		rep.fail(CodeKeyNotApplicable, at(p, k), "Remove it, or make the reaction a move or a create",
+			"%s: of, when, by, to, target_from, type and fields are for move and create reactions", where)
+		return
+	}
+	if k := firstKey(keySet{"children", r.Children != nil}, keySet{"target", r.Target != ""}, keySet{"set", len(r.Set) > 0}); k != "" {
+		rep.fail(CodeKeyNotApplicable, at(p, k), "Remove it, or make the reaction a move or a set",
+			"%s: children, target and set are for move and set reactions", where)
+		return
+	}
+	if r.On != OnEnter {
+		rep.fail(CodeInvalidValue, at(p, "on"), "Write on: enter", "%s: on must be enter, not %q", where, r.On)
+		return
+	}
+	if _, ok := t.State(r.State); !ok {
+		rep.fail(CodeUnknownState, at(p, "state"), "Name a declared state", "%s: unknown state %q", where, r.State)
+		return
+	}
+	for j, from := range r.From {
+		if _, ok := t.State(from); !ok {
+			rep.fail(CodeUnknownState, at(p, "from", j), "Name a declared state", "%s: unknown from state %q", where, from)
+			return
+		}
+	}
+	switch r.Kind {
+	case ReactionHeld:
+		t.checkHeldReaction(rep, p, r, where, env)
+	case ReactionAfter:
+		if k := firstKey(keySet{"add", len(r.Add) > 0}, keySet{"link", r.Link != ""}); k != "" {
+			rep.fail(CodeKeyNotApplicable, at(p, k), "Remove it: an after reaction only undoes a held one",
+				"%s: an after reaction only undoes a held one for now (undoes); a patch of its own is Later", where)
+			return
+		}
+		if r.Undoes == "" {
+			rep.fail(CodeRequired, at(p, "undoes"), "Name the held reaction it undoes", "%s: an after reaction names the held reaction it undoes (undoes)", where)
+		}
+	default:
+		rep.fail(CodeInvalidValue, at(p, "kind"), "Use kind: held, after, move, create or set",
+			"%s: unknown kind %q: want held, after, move, create or set", where, r.Kind)
+	}
+}
+
+// checkHeldReaction checks and compiles a held reaction.
+func (t *Type) checkHeldReaction(rep reporter, p string, r *Reaction, where string, env *cel.Env) {
+	if r.Undoes != "" {
+		rep.fail(CodeKeyNotApplicable, at(p, "undoes"), "Remove undoes: an after reaction undoes a held one", "%s: a held reaction undoes nothing", where)
+		return
+	}
+	if len(r.From) == 0 {
+		rep.fail(CodeRequired, at(p, "from"), "List the states it holds the move from", "%s: a held reaction names the states it holds the move from (from)", where)
+		return
+	}
+	for j, from := range r.From {
+		tr, ok := t.Transition(from, r.State)
+		if !ok {
+			rep.fail(CodeUnknownTransition, at(p, "from", j), "Declare the transition, or hold another",
+				"%s: there is no transition %s -> %s to hold", where, from, r.State)
+			return
+		}
+		if tr.Escape {
+			rep.fail(CodeHeldTransition, at(p, "from", j), "Hold another transition: an escape may not be held",
+				"%s: transition %s -> %s is an escape: it cancels a hold, so it may not open one", where, from, r.State)
+			return
+		}
+		if h, ok := t.checkOn(from, r.State); ok {
+			rep.fail(CodeOnlyOneAllowed, at(p, "from", j), "Hold the transition by the check or by the reaction, not both",
+				"%s: transition %s -> %s already has the check %q; one hold per transition", where, from, r.State, h)
+			return
+		}
+	}
+	l, ok := t.Link(r.Link)
+	if !ok {
+		rep.fail(CodeUnknownLink, at(p, "link"), "Name a declared link", "%s: link %q is not declared", where, r.Link)
+		return
+	}
+	if !l.SourceSingle() {
+		rep.fail(CodeConflict, at(p, "link"), "Follow a link with max: one", "%s: link %s may have many targets; a reaction follows a link of max: one", where, l.Name)
+		return
+	}
+	// A link the kernel resolves is sure to be set only in the state whose
+	// entry resolves it. (A link people set is exempt.)
+	if l.Resolve != nil {
+		for j, from := range r.From {
+			if from != l.Resolve.OnEnter {
+				rep.fail(CodeConflict, at(p, "from", j), "Hold the move only from the state that resolves the link",
+					"%s: it leaves %s, but link %s is resolved on entering %s, so it may be unset in %s",
+					where, from, l.Name, l.Resolve.OnEnter, from)
+				return
+			}
+		}
+	}
+	if len(r.Add) == 0 {
+		rep.fail(CodeRequired, at(p, "add"), "Name the field it adds to, and the expression it adds", "%s: a held reaction adds to some field (add)", where)
+		return
+	}
+	r.Programs = map[string]cel.Program{}
+	var reads []string
+	for _, field := range slices.Sorted(maps.Keys(r.Add)) {
+		prg, rs, out, err := compileFields(env, r.Add[field])
+		if err != nil {
+			rep.failExpr(err, at(p, "add", field), "%s: add %s: %v", where, field, err)
+			return
+		}
+		if !isInt(out) {
+			rep.fail(CodeExpressionType, at(p, "add", field), "Add a whole number", "%s: add %s must yield an int, not %s", where, field, out)
+			return
+		}
+		r.Programs[field] = prg
+		reads = append(reads, rs...)
+	}
+	slices.Sort(reads)
+	r.Reads = slices.Compact(reads)
 }
 
 // checkOn returns the check hook on from -> to, if any.

@@ -267,7 +267,7 @@ func linkedReads(expr string) ([]LinkedRead, []string, error) {
 		for _, m := range re.FindAllStringSubmatchIndex(s, -1) {
 			// What follows a read must end it: linked.a.b.c reads no field.
 			if rest := s[m[1]:]; strings.HasPrefix(rest, ".") || strings.HasPrefix(rest, "[") || strings.HasPrefix(rest, "(") {
-				return "", fmt.Errorf("%s is no read of a linked Item's field (linked.<link>.<field>)", s[m[0]:m[1]]+rest)
+				return "", exprError{CodeReadNotAllowed, fmt.Errorf("%s is no read of a linked Item's field (linked.<link>.<field>)", s[m[0]:m[1]]+rest)}
 			}
 			out = append(out, LinkedRead{Container: container, Link: s[m[2]:m[3]], Field: s[m[4]:m[5]]})
 		}
@@ -285,8 +285,8 @@ func linkedReads(expr string) ([]LinkedRead, []string, error) {
 		return nil, nil, err
 	}
 	if linkedWord.MatchString(rest) {
-		return nil, nil, fmt.Errorf("%q: linked and container are read as linked.<link>.<field>, container.<field> and "+
-			"container.linked.<link>.<field> only", expr)
+		return nil, nil, exprError{CodeReadNotAllowed, fmt.Errorf("%q: linked and container are read as linked.<link>.<field>, container.<field> and "+
+			"container.linked.<link>.<field> only", expr)}
 	}
 	return out, fields, nil
 }
@@ -336,28 +336,36 @@ func (t *Type) checkReadable(r reporter) {
 // --- children ---
 
 // checkChildren validates and compiles a move reaction's `children`.
-func (r *Reaction) checkChildren(where string, fail func(string, ...any) error) error {
+func (r *Reaction) checkChildren(rep reporter, p, where string) bool {
 	c := r.Children
 	if len(c.Of) == 0 {
-		return fail("%s: children names the Types of the contained Items it moves (of)", where)
+		rep.fail(CodeRequired, at(p, "of"), "List the Types of the contained Items it moves",
+			"%s: children names the Types of the contained Items it moves (of)", where)
+		return false
 	}
 	c.WhenProgram, c.Reads = nil, nil
 	if c.When == "" {
-		return nil
+		return true
 	}
+	q := at(p, "when")
 	env, err := newChildEnv()
 	if err != nil {
-		return fail("%s: children.when: %v", where, err)
+		rep.fail(CodeExpressionInvalid, q, "Fix the expression", "%s: children.when: %v", where, err)
+		return false
 	}
 	ast, iss := env.Compile(c.When)
 	if iss.Err() != nil {
-		return fail("%s: children.when %q: %v (it reads a contained Item's fields, as child.<id>)", where, c.When, iss.Err())
+		rep.fail(CodeExpressionInvalid, q, "Fix the CEL expression; it reads a contained Item as child.<id>",
+			"%s: children.when %q: %v (it reads a contained Item's fields, as child.<id>)", where, c.When, iss.Err())
+		return false
 	}
 	if !ast.OutputType().IsExactType(cel.BoolType) {
-		return fail("%s: children.when %q must yield a bool, not %s", where, c.When, ast.OutputType())
+		rep.fail(CodeExpressionType, q, "Write a condition that is true or false", "%s: children.when %q must yield a bool, not %s", where, c.When, ast.OutputType())
+		return false
 	}
 	if c.WhenProgram, err = env.Program(ast); err != nil {
-		return fail("%s: children.when: %v", where, err)
+		rep.fail(CodeExpressionInvalid, q, "Fix the CEL expression", "%s: children.when: %v", where, err)
+		return false
 	}
 	for _, m := range childRef.FindAllStringSubmatch(c.When, -1) {
 		if !slices.Contains(c.Reads, m[1]) {
@@ -365,7 +373,7 @@ func (r *Reaction) checkChildren(where string, fail func(string, ...any) error) 
 		}
 	}
 	slices.Sort(c.Reads)
-	return nil
+	return true
 }
 
 // --- set ---
@@ -373,44 +381,58 @@ func (r *Reaction) checkChildren(where string, fail func(string, ...any) error) 
 // checkSetReaction validates and compiles a set reaction within its Type.
 // The target's fields are another Type's: ParseDir checks them where a
 // Type accepts the reaction, and the write checks them for the rest.
-func (t *Type) checkSetReaction(r *Reaction, where string, fail func(string, ...any) error, ownWhen func() error) error {
+func (t *Type) checkSetReaction(rep reporter, p string, r *Reaction, where string, ownWhen func() bool) {
 	switch {
 	case r.On != OnEnter:
-		return fail("%s: a set reaction is on: enter, not %q", where, r.On)
+		rep.fail(CodeInvalidValue, at(p, "on"), "Write on: enter", "%s: a set reaction is on: enter, not %q", where, r.On)
+		return
 	case r.Link != "" || r.To != "" || r.Children != nil || len(r.Of) > 0 || r.By != "" || len(r.TargetFrom) > 0:
-		return fail("%s: link, to, children, of, by and target_from are not for a set reaction", where)
+		rep.fail(CodeKeyNotApplicable, at(p, firstKey(keySet{"link", r.Link != ""}, keySet{"to", r.To != ""}, keySet{"children", r.Children != nil},
+			keySet{"of", len(r.Of) > 0}, keySet{"by", r.By != ""}, keySet{"target_from", len(r.TargetFrom) > 0})),
+			"Remove it: a set reaction writes its container", "%s: link, to, children, of, by and target_from are not for a set reaction", where)
+		return
 	case r.Type != "" || r.Version != 0 || len(r.Fields) > 0:
-		return fail("%s: type, version and fields are for a create reaction", where)
+		rep.fail(CodeKeyNotApplicable, at(p, firstKey(keySet{"type", r.Type != ""}, keySet{"version", r.Version != 0}, keySet{"fields", len(r.Fields) > 0})),
+			"Remove it, or make the reaction a create", "%s: type, version and fields are for a create reaction", where)
+		return
 	case r.Target == "":
-		return fail("%s: a set reaction names the Item it writes (target: %s)", where, TargetContainer)
+		rep.fail(CodeRequired, at(p, "target"), "Write target: container", "%s: a set reaction names the Item it writes (target: %s)", where, TargetContainer)
+		return
 	case r.Target != TargetContainer:
-		return fail("%s: target %q: the only value is %s", where, r.Target, TargetContainer)
+		rep.fail(CodeInvalidValue, at(p, "target"), "Write target: container", "%s: target %q: the only value is %s", where, r.Target, TargetContainer)
+		return
 	case len(r.Set) == 0:
-		return fail("%s: a set reaction sets some field (set)", where)
+		rep.fail(CodeRequired, at(p, "set"), "Name the fields it sets, and their expressions", "%s: a set reaction sets some field (set)", where)
+		return
 	}
-	if _, ok := t.State(r.State); !ok {
-		return fail("%s: unknown state %q (on: enter needs the state entered)", where, r.State)
+	if !t.hasState(r.State) {
+		rep.fail(CodeUnknownState, at(p, "state"), "Name the declared state whose entry triggers it",
+			"%s: unknown state %q (on: enter needs the state entered)", where, r.State)
+		return
 	}
-	if err := ownWhen(); err != nil {
-		return err
+	if !ownWhen() {
+		return
 	}
 	env, err := newSetsEnv(t)
 	if err != nil {
-		return fail("%s: set: %v", where, err)
+		rep.fail(CodeExpressionInvalid, at(p, "set"), "Fix the fields the message names", "%s: set: %v", where, err)
+		return
 	}
 	r.SetPrograms, r.setTypes = map[string]cel.Program{}, map[string]*cel.Type{}
 	for _, id := range slices.Sorted(maps.Keys(r.Set)) {
+		q := at(p, "set", id)
 		ast, iss := env.Compile(r.Set[id])
 		if iss.Err() != nil {
-			return fail("%s: set %s: %q: %v", where, id, r.Set[id], iss.Err())
+			rep.fail(CodeExpressionInvalid, q, "Fix the CEL expression; it reads this Item's fields by their ids", "%s: set %s: %q: %v", where, id, r.Set[id], iss.Err())
+			return
 		}
 		prg, err := env.Program(ast)
 		if err != nil {
-			return fail("%s: set %s: %v", where, id, err)
+			rep.fail(CodeExpressionInvalid, q, "Fix the CEL expression", "%s: set %s: %v", where, id, err)
+			return
 		}
 		r.SetPrograms[id], r.setTypes[id] = prg, ast.OutputType()
 	}
-	return nil
 }
 
 // --- an acting timer at an instant ---
