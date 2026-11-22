@@ -1289,3 +1289,7 @@ textarea {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
+.field-row input {
+  height: 40px;
+  box-sizing: border-box;
+}

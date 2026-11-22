@@ -53,7 +53,7 @@ export function BalanceSummary({ title, balance, pending, missing }: { title: st
           </p>
           <p className="muted">
             {balance.used} used of {balance.allowance}
-            {pending !== undefined && pending > 0 ? ` · ${pending} waiting for approval` : ""}
+            {pending !== undefined && pending > 0 ? ` · ${pending} ${pending === 1 ? "day" : "days"} waiting for approval` : ""}
           </p>
         </>
       ) : (
