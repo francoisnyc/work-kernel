@@ -29,7 +29,6 @@ func envelope(kind hookproto.Kind, connector, operation string, inputs map[strin
 		Protocol: hookproto.Protocol, Kind: kind, RequestID: "req-1", IdempotencyKey: "hook:item-1:2:h", Attempt: 1,
 		Hook:   hookproto.HookRef{Binding: "ticket@3#h", Connector: connector, Operation: operation},
 		Event:  hookproto.Event{ID: "item-1:2", Type: hookproto.EventStateEntered, Subject: "item/item-1"},
-		Actor:  hookproto.Actor{Principal: "user:ana"},
 		Item:   hookproto.ItemRef{ID: "item-1", Type: "ticket", TypeVersion: 3},
 		Inputs: inputs, Trace: hookproto.Trace{CausationID: "item-1:2"},
 		Connection: hookproto.ConnectionRef{Slot: strings.Split(connector, "@")[0], Ref: connector},

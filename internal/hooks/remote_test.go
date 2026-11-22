@@ -154,7 +154,6 @@ func hrCall() hooks.Call {
 	return hooks.Call{HookID: "hr_check", ItemID: "item-1", Kind: hookproto.KindCheck,
 		TypeID: "vacation_request", TypeVersion: 3, From: "draft", To: "submitted",
 		EventID: "item-1:4", EventType: hookproto.EventTransitionRequested,
-		Actor:         hookproto.Actor{Principal: "agent:triage-bot", OnBehalfOf: "user:ana", AgentSession: "as_01"},
 		CorrelationID: "corr-1", Attempt: 2}
 }
 
@@ -180,7 +179,6 @@ func TestRemote_SendsTheEnvelope(t *testing.T) {
 		Attempt: 2, Deadline: p.req.Deadline,
 		Hook:       hookproto.HookRef{Binding: "vacation_request@3#hr_check", Connector: "hr@1", Operation: "manager_of"},
 		Event:      hookproto.Event{ID: "item-1:4", Type: hookproto.EventTransitionRequested, Subject: "item/item-1"},
-		Actor:      hookproto.Actor{Principal: "agent:triage-bot", OnBehalfOf: "user:ana", AgentSession: "as_01"},
 		Item:       hookproto.ItemRef{ID: "item-1", Type: "vacation_request", TypeVersion: 3},
 		Transition: &hookproto.Transition{From: "draft", To: "submitted"},
 		Inputs:     map[string]any{"onBehalfOf": "user:ana", "createdBy": "agent:triage-bot"},
@@ -489,7 +487,7 @@ func TestRemote_Enrich(t *testing.T) {
 	}
 	c := newWorld(t).c.WithConnection("text@1", hooks.Connection{URL: f.srv.URL, Secret: f.secret})
 	call := hooks.Call{HookID: "shout", ItemID: "item-2", Kind: hookproto.KindEnrich, TypeID: "note", TypeVersion: 1,
-		EventID: "item-2:1", EventType: hookproto.EventStateEntered, Actor: hookproto.Actor{Principal: "user:ana"}}
+		EventID: "item-2:1", EventType: hookproto.EventStateEntered}
 	res, err := c.RunCall(ctx(t), "text.upper", "hook:item-2:1:shout", []any{"ana"}, call)
 	if err != nil || !reflect.DeepEqual(res, hooks.Result{Values: []any{"ANA", float64(3)}}) {
 		t.Errorf("RunCall = %+v, %v; want values [ANA 3]", res, err)

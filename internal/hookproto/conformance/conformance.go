@@ -512,7 +512,6 @@ func (c *checker) request(cs Case, key string) hookproto.Request {
 		Hook: hookproto.HookRef{Binding: "conformance@1#" + cs.Operation,
 			Connector: c.desc.Connector + "@" + strconv.Itoa(major), Operation: cs.Operation},
 		Event:      hookproto.Event{ID: item + ":1", Type: hookproto.EventStateEntered, Subject: "item/" + item},
-		Actor:      hookproto.Actor{Principal: "user:conformance"},
 		Item:       hookproto.ItemRef{ID: item, Type: "conformance", TypeVersion: 1},
 		Inputs:     cs.Inputs,
 		Trace:      hookproto.Trace{CausationID: item + ":1"},

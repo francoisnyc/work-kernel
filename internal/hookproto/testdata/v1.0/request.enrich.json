@@ -7,7 +7,6 @@
   "hook": {"binding": "ticket@3#get_plan", "connector": "crm@1", "operation": "get_plan"},
   "event": {"id": "9d1e7c2a-0b4f-4e6d-8a3c-5f2e1d0c9b8a:2", "type": "item.state.entered",
             "subject": "item/9d1e7c2a-0b4f-4e6d-8a3c-5f2e1d0c9b8a"},
-  "actor": {"principal": "user:ana"},
   "item": {"id": "9d1e7c2a-0b4f-4e6d-8a3c-5f2e1d0c9b8a", "type": "ticket", "typeVersion": 3},
   "inputs": {"customerId": "cust-1"},
   "trace": {"causationId": "9d1e7c2a-0b4f-4e6d-8a3c-5f2e1d0c9b8a:2"},

@@ -88,7 +88,6 @@ type Call struct {
 	From, To      string // a check's transition
 	EventID       string // <item>:<seq>, the cause
 	EventType     string // a hookproto.Event* constant
-	Actor         hookproto.Actor
 	CorrelationID string
 	Attempt       int
 }

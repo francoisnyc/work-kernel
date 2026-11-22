@@ -67,7 +67,6 @@ func postManagerOf(t *testing.T, base, secret, createdBy string) (int, hookproto
 		Protocol: hookproto.Protocol, Kind: hookproto.KindCheck, RequestID: "req-1", IdempotencyKey: "hold:cmd-" + createdBy,
 		Attempt: 1, Hook: hookproto.HookRef{Binding: "vacation_request@3#hr_check", Connector: "hr@1", Operation: "manager_of"},
 		Event:      hookproto.Event{ID: "item-1:2", Type: hookproto.EventTransitionRequested, Subject: "item/item-1"},
-		Actor:      hookproto.Actor{Principal: createdBy},
 		Item:       hookproto.ItemRef{ID: "item-1", Type: "vacation_request", TypeVersion: 3},
 		Transition: &hookproto.Transition{From: "draft", To: "submitted"},
 		Inputs:     map[string]any{"onBehalfOf": nil, "createdBy": createdBy},

@@ -90,22 +90,6 @@ type HookInputRequest struct {
 	Attribution item.Attribution
 }
 
-// HookActor is who caused the event a hook runs for (the hook protocol's
-// envelope, actor): the cause event's actor, on_behalf_of and
-// agent_session, opaque principal IDs only.
-type HookActor struct {
-	Principal    string
-	OnBehalfOf   string
-	AgentSession string
-}
-
-// HookActor returns who caused the hook's cause event. Like HookInput, only
-// a hook asks it, for an event of its own Item, and the Item passes
-// through policy.Project first. Phase B stub.
-func (in *Internal) HookActor(ctx context.Context, req HookInputRequest) (HookActor, error) {
-	return HookActor{}, fmt.Errorf("%w: HookActor is not implemented", ErrInvalid)
-}
-
 // openHold is the row of an Item's open hold.
 type openHold struct {
 	id             uuid.UUID

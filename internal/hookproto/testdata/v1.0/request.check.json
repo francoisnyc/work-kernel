@@ -8,7 +8,6 @@
   "hook": {"binding": "vacation_request@3#hr_check", "connector": "hr@1", "operation": "manager_of"},
   "event": {"id": "9d1e7c2a-0b4f-4e6d-8a3c-5f2e1d0c9b8a:4", "type": "item.transition.requested",
             "subject": "item/9d1e7c2a-0b4f-4e6d-8a3c-5f2e1d0c9b8a"},
-  "actor": {"principal": "agent:triage-bot", "onBehalfOf": "user:ana", "agentSession": "as_01"},
   "item": {"id": "9d1e7c2a-0b4f-4e6d-8a3c-5f2e1d0c9b8a", "type": "vacation_request", "typeVersion": 3},
   "transition": {"from": "draft", "to": "submitted"},
   "inputs": {"onBehalfOf": "user:ana", "createdBy": "agent:triage-bot"},

@@ -87,9 +87,10 @@ type Request struct {
 	// work after it. Zero when the caller set none.
 	Deadline time.Time `json:"deadline,omitzero"`
 
-	Hook       HookRef        `json:"hook"`
-	Event      Event          `json:"event"`
-	Actor      Actor          `json:"actor"`
+	Hook  HookRef `json:"hook"`
+	Event Event   `json:"event"`
+	// "actor" (who caused the event) is reserved: left out of this step,
+	// it can be added within v1 without breaking anyone (Later).
 	Item       ItemRef        `json:"item"`
 	Transition *Transition    `json:"transition,omitempty"` // a check only
 	Inputs     map[string]any `json:"inputs"`               // the operation's declared inputs, by name; nothing else
@@ -110,13 +111,6 @@ type Event struct {
 	ID      string `json:"id"`      // <item>:<item_seq>
 	Type    string `json:"type"`    // one of the Event* constants
 	Subject string `json:"subject"` // item/<item>
-}
-
-// Actor is who caused the event: opaque principal IDs only.
-type Actor struct {
-	Principal    string `json:"principal"`
-	OnBehalfOf   string `json:"onBehalfOf,omitempty"`
-	AgentSession string `json:"agentSession,omitempty"`
 }
 
 // ItemRef names the Item, never its field values (those are Inputs).

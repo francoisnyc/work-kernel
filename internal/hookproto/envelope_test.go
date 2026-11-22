@@ -49,7 +49,6 @@ func TestRequest_IsTheDocumentedEnvelope(t *testing.T) {
 		Attempt: 2, Deadline: time.Date(2026, 11, 22, 10, 15, 5, 0, time.UTC),
 		Hook:       hookproto.HookRef{Binding: "vacation_request@3#hr_check", Connector: "hr@1", Operation: "manager_of"},
 		Event:      hookproto.Event{ID: item + ":4", Type: hookproto.EventTransitionRequested, Subject: "item/" + item},
-		Actor:      hookproto.Actor{Principal: "agent:triage-bot", OnBehalfOf: "user:ana", AgentSession: "as_01"},
 		Item:       hookproto.ItemRef{ID: item, Type: "vacation_request", TypeVersion: 3},
 		Transition: &hookproto.Transition{From: "draft", To: "submitted"},
 		Inputs:     map[string]any{"onBehalfOf": "user:ana", "createdBy": "agent:triage-bot"},
