@@ -17,7 +17,10 @@
 package hookproto
 
 import (
-	"errors"
+	"encoding/json"
+	"fmt"
+	"regexp"
+	"strconv"
 	"time"
 )
 
@@ -220,15 +223,43 @@ type Property struct {
 // TypeList is JSON Schema's type keyword, read in either form.
 type TypeList []string
 
-// ErrNotImplemented marks a Phase B stub.
-var ErrNotImplemented = errors.New("hookproto: not implemented")
+// UnmarshalJSON reads "string" or ["string", "null"].
+//
+// (Java readers: a type gets custom JSON by having this method; the
+// encoding/json package finds it through the json.Unmarshaler interface.)
+func (t *TypeList) UnmarshalJSON(data []byte) error {
+	var one string
+	if err := json.Unmarshal(data, &one); err == nil {
+		*t = TypeList{one}
+		return nil
+	}
+	var many []string
+	if err := json.Unmarshal(data, &many); err != nil {
+		return fmt.Errorf("hookproto: a schema type is a string or a list of strings, not %s", data)
+	}
+	*t = many
+	return nil
+}
 
 // Operation returns the operation with the given name.
 func (d Descriptor) Operation(name string) (Operation, bool) {
+	for _, op := range d.Operations {
+		if op.Name == name {
+			return op, true
+		}
+	}
 	return Operation{}, false
 }
 
+// semver is MAJOR.MINOR.PATCH, each a number without a leading zero, with
+// an optional -prerelease and +build.
+var semver = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$`)
+
 // Major returns the major version of a semver string ("1.4.0" -> 1).
 func Major(version string) (int, error) {
-	return 0, ErrNotImplemented
+	m := semver.FindStringSubmatch(version)
+	if m == nil {
+		return 0, fmt.Errorf("hookproto: %q is not a semver version (MAJOR.MINOR.PATCH)", version)
+	}
+	return strconv.Atoi(m[1])
 }
