@@ -38,11 +38,22 @@ Ideas noted during the spike, not built yet.
 - Type problems: a reaction, and a consent across Types, still stop at
   their first problem (every other one is checked); a reaction cycle is
   reported one at a time. Finer when a tool needs it. (Ventoux 2a)
-- V2c (the JSON Schema): it must validate a Type file after its YAML merge
-  keys (`<<: *anchor`) are expanded, as the sla package uses them
-  (sla_goal), or say how it handles them; a schema run on the raw YAML
-  would read `<<` as an unknown key. Stage (a) of typedef expands them
-  (mappingPairs in shape.go). (Ventoux 2a review)
+- ~~V2c (the JSON Schema): it must validate a Type file after its YAML merge
+  keys (`<<: *anchor`) are expanded.~~ Done in V2c: the tests decode the
+  YAML with yaml.v3 (merges expanded) before validating; the sla package's
+  files validate.
+- **Tighten typedef's stage (a), then the schema, in one step.** typedef
+  reads any scalar where a string is meant (`id: 5` loads) and lets null
+  through for lists and maps (`fields: ~` loads), so the schema, which may
+  never be stricter, does too. Refuse a non-string scalar where a string is
+  meant and null for a list or a map in stage (a) (`WRONG_SHAPE`), then
+  tighten `schema/type.schema.json` to match; its tests then prove the two
+  agree. (Ventoux V2c, Phase B review)
+- `RegisterType`'s own refusal at start (a registered version with another
+  definition) as `VERSION_CHANGED` too; today it is a plain error. (Ventoux
+  V2b, Phase A)
+- `ValidateTypes` could return the drafts as parsed Types (as `GetType`
+  shows them), for an authoring tool's preview. (Ventoux V2b, Phase A)
 - **High, before real use: move Items to a new Type version.** The kernel
   has no such operation, so every Item created before a hardening keeps its
   version's rules: an incident@2 is still narrowed by its requester, its
@@ -2899,3 +2910,52 @@ CI decides.
 
 **Open:** the Later entries above (the custom YAML decoders' checks, unreachable once stage (a) runs, were removed
 after review). **Next session:** CI on the PR, then V2b (`ValidateTypes`).
+
+## 2026-11-22 — Ventoux V2b and V2c: ValidateTypes and the Type format as JSON Schema (Phase D)
+
+**Built:** V2b, `ValidateTypes`: draft Types checked against every registered version, nothing written,
+through the API (`kernel.v1` grew one operation and three messages; `buf breaking` green) and
+`pli type validate` (files or folders; one line per problem, `--json`, exit 1 on an ERROR). V2c,
+`schema/type.schema.json`, by hand, checked in tests only. design.md: "Ventoux V2b and V2c, as built", the
+`ValidateTypes` row in the API table, the V2b row's wording (`pli type validate`), both rows done.
+
+**Kernel changes (two, counted):** (1) `typedef.Check(sources, registered)`: every stage on drafts with the
+registered versions' stored JSON beside them; stage (c) run on the registered alone, then with the drafts,
+and only new problems reported; a new code, `VERSION_CHANGED`. `ParseDir` now reads its folder and calls it:
+one code path. (2) The item service's `ValidateTypes`, a read that reads no Items (exempt from
+`policy.Project`, like `ListTypes`). No schema change, no write path touched.
+
+**Decided in Phase A, each agreed:** the API shape (`code` a string, no `valid` bool, `content` a string,
+not a write); limits on `sources`, in the handler; customers and agents acting for one refused, no agent
+power needed; identical as `RegisterType` decides it (jsonb); old problems of the registered set not
+reported, a registered version's named in the caller's namespace; `pli type validate`, singular; the schema
+at `schema/type.schema.json`, keys and shapes only plus enums and `required` where typedef has the same
+closed rule; the jsonschema library in go.mod, imported by tests only.
+
+**Tests:** 44 new Go tests (typedef Check 13, the schema 8, item service 7, API 9, pli 7) and two scenario
+steps. **Test changes, agreed, each in its own commit:** four additive ones in Phase B (`EachHasACase` counts
+Check's cases; `ValidateTypes` exempt from `policy.Project`; the API's operation list and `calls()`), and
+three fixes to my own Phase B tests in Phase C: an unreadable `{` cannot name its Type; a property named
+`required` is not the keyword; the scenario's first run prints one line, not two.
+
+**Surprises:** typedef is more lenient than it looks: `id: 5` and `fields: ~` load, so a schema that is never
+stricter takes any scalar for text and null almost everywhere (Later: tighten both together). The stage (a)
+walker made a good oracle: the schema test places eleven kinds of value at every position of the format and
+asks the walker, then the schema (500+ checks). Only three keys were used by no file in `types/`
+(`inverse_max`, the map form of a consent with `fields`): the corpus is one file. A draft can break a
+registered version (`leave_balance@2` without the deduction's consent breaks `vacation_request` v2 and v3):
+that case drove the "problem on a registered version" design.
+
+**Numbers.** `go test -race ./...` green: workflow suite with the replay test 348 s, item service 162 s.
+Scenario twice on a fresh stack: 106 and 103 s. Web Playwright 9 in 9.1 s; apps/poc's journeys 4 in 28.0 s.
+Web 464 and apps/poc 408 unit tests.
+
+**Local workarounds, outside the repository (nothing committed):** dockerd started by hand in this
+container (it stopped once mid-session and was started again). Docker builds here cannot use the HTTPS
+proxy's CA, so a compose override in the scratchpad served Go modules from the host's module cache
+(`python3 -m http.server` as a GOPROXY, builds on the host network) and built the web and poc images from
+sites built on the host with `VITE_DEV_USERS=1`. Playwright ran with a local config (excluded from git)
+pointing at this container's Chromium. CI builds the real images and runs the pinned browser.
+
+**Open:** the three new Later entries above. **Next session:** V1 (action contracts), or Ventoux item 3 (checks
+that prove properties), which would add warnings to the same `{path, code, message}` problems.
