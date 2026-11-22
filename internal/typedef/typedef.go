@@ -5,7 +5,6 @@
 package typedef
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -325,31 +324,66 @@ const (
 const ContainerOfferPrefix = "container:"
 
 // Parse reads a Type from YAML and checks it. Unknown keys are errors, so a
-// typo in a Type file is caught at load time.
+// typo in a Type file is caught at load time. The error, if any, is
+// Problems: every problem found, positioned in the YAML.
 func Parse(data []byte) (*Type, error) {
-	var t Type
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
-	if err := dec.Decode(&t); err != nil {
-		return nil, fmt.Errorf("typedef: parse YAML: %w", err)
+	t, _, ps := parseDoc(data)
+	if len(ps) > 0 {
+		return nil, ps
 	}
-	if err := t.check(); err != nil {
-		return nil, err
+	return t, nil
+}
+
+// parseDoc runs stages (a) and (b) on one YAML document. It returns the
+// document too, so ParseDir can place the problems of stage (c).
+func parseDoc(data []byte) (*Type, *yaml.Node, Problems) {
+	doc, ps := readYAML(data)
+	if len(ps) == 0 {
+		var t *Type
+		if t, ps = decodeType(doc); len(ps) == 0 {
+			ps = t.problems()
+			position(ps, doc)
+			if len(ps) == 0 {
+				return t, doc, nil
+			}
+		}
+	}
+	sortProblems(ps)
+	return nil, doc, ps
+}
+
+// FromJSON reads a Type from the JSON form produced by json.Marshal, which
+// is how the item service stores it in Postgres. Its problems have paths
+// but no positions.
+func FromJSON(data []byte) (*Type, error) {
+	var t Type
+	if err := json.Unmarshal(data, &t); err != nil {
+		var ps Problems
+		newReporter(&ps, "", 0).fail(CodeWrongShape, "", "Store the definition json.Marshal produced",
+			"typedef: parse JSON: %v", err)
+		return nil, ps
+	}
+	if ps := t.problems(); len(ps) > 0 {
+		sortProblems(ps)
+		return nil, ps
 	}
 	return &t, nil
 }
 
-// FromJSON reads a Type from the JSON form produced by json.Marshal, which
-// is how the item service stores it in Postgres.
-func FromJSON(data []byte) (*Type, error) {
-	var t Type
-	if err := json.Unmarshal(data, &t); err != nil {
-		return nil, fmt.Errorf("typedef: parse JSON: %w", err)
+// problems runs stage (b), the checks on this Type alone.
+func (t *Type) problems() Problems {
+	err := t.check()
+	if err == nil {
+		return nil
 	}
-	if err := t.check(); err != nil {
-		return nil, err
+	var ps Problems
+	if errors.As(err, &ps) {
+		return ps
 	}
-	return &t, nil
+	// Transitional (Ventoux 2a, Phase C): a check not yet converted to
+	// coded problems. Removed when the last one is.
+	msg := strings.TrimPrefix(err.Error(), fmt.Sprintf("typedef %s v%d: ", t.ID, t.Version))
+	return Problems{{TypeID: t.ID, Version: t.Version, Severity: SeverityError, Code: Code("UNSORTED"), Message: msg}}
 }
 
 // Field returns the field with the given ID. The second value reports

@@ -1,5 +1,17 @@
 package typedef
 
+import (
+	"cmp"
+	"errors"
+	"fmt"
+	"regexp"
+	"slices"
+	"strconv"
+	"strings"
+
+	"go.yaml.in/yaml/v3"
+)
+
 // Problems in a Type definition (Ventoux item 2a). Parse, FromJSON and
 // ParseDir report every problem they find, not just the first, as data a
 // tool can act on: where it is, a stable code, and a message that says
@@ -16,7 +28,6 @@ package typedef
 // Within a stage every problem is reported, except one that only follows
 // from another: a declaration with a problem still counts as declared.
 //
-// Phase B stub: the types and codes are the contract; nothing returns them yet.
 
 // Severity says whether a problem stops a Type from loading. Only ERROR
 // exists for now; warnings (Ventoux item 3) will not stop a load.
@@ -150,4 +161,173 @@ type Problems []Problem
 // leaving out <source>: when there is none, :<col> when the column is
 // unknown (a syntax error), <line>:<col>: when the line is unknown, and
 // "typedef <id> v<n>: " when the Type is unknown.
-func (ps Problems) Error() string { return "" } // Phase B stub
+func (ps Problems) Error() string {
+	lines := make([]string, len(ps))
+	for i, p := range ps {
+		lines[i] = p.String()
+	}
+	return strings.Join(lines, "\n")
+}
+
+// String is the problem's line in Error().
+func (p Problem) String() string {
+	var where []string
+	if p.Source != "" {
+		where = append(where, p.Source)
+	}
+	if p.Line > 0 {
+		where = append(where, strconv.Itoa(p.Line))
+		if p.Column > 0 {
+			where = append(where, strconv.Itoa(p.Column))
+		}
+	}
+	var b strings.Builder
+	if len(where) > 0 {
+		b.WriteString(strings.Join(where, ":") + ": ")
+	}
+	b.WriteString(string(p.Code) + " ")
+	if p.TypeID != "" {
+		fmt.Fprintf(&b, "typedef %s v%d: ", p.TypeID, p.Version)
+	}
+	b.WriteString(p.Message)
+	return b.String()
+}
+
+// sortProblems orders problems by source, then position. The sort is
+// stable, so problems without a position (FromJSON) keep the order they
+// were found in, which is the order of the definition.
+func sortProblems(ps Problems) {
+	slices.SortStableFunc(ps, func(a, b Problem) int {
+		return cmp.Or(strings.Compare(a.Source, b.Source), cmp.Compare(a.Line, b.Line), cmp.Compare(a.Column, b.Column))
+	})
+}
+
+// errReported is what a check returns once it has recorded a problem: the
+// declaration it was checking stops there, and the caller goes on to the
+// next one. It never leaves the package.
+var errReported = errors.New("typedef: problem reported")
+
+// reporter records problems for one Type. A check calls
+// r.fail(code, path, todo, format, args...): the message is the formatted
+// text (what is wrong) then todo (what to do). within adds context to the
+// start of every message, such as the hook being checked. It is a small
+// value, passed by copy, like a Java record.
+type reporter struct {
+	list    *Problems
+	typeID  string
+	version int
+	prefix  string
+}
+
+func newReporter(list *Problems, typeID string, version int) reporter {
+	return reporter{list: list, typeID: typeID, version: version}
+}
+
+func (r reporter) fail(code Code, at, todo, format string, args ...any) error {
+	*r.list = append(*r.list, Problem{
+		Path: at, TypeID: r.typeID, Version: r.version, Severity: SeverityError, Code: code,
+		Message: r.prefix + fmt.Sprintf(format, args...) + ". " + todo,
+	})
+	return errReported
+}
+
+// within returns a reporter whose messages start with the given context.
+func (r reporter) within(format string, args ...any) reporter {
+	r.prefix += fmt.Sprintf(format, args...)
+	return r
+}
+
+// at builds a path into the YAML. The first part is written as it is (a
+// top-level key, or a path built before); after it, a string is a key and
+// an int an index: at("transitions", 3, "allowed", 0) is
+// transitions[3].allowed[0]. A key that is not a plain name is quoted:
+// accepts_reactions["part:finish"].
+func at(parts ...any) string {
+	var b strings.Builder
+	for i, part := range parts {
+		switch v := part.(type) {
+		case int:
+			fmt.Fprintf(&b, "[%d]", v)
+		case string:
+			switch {
+			case i == 0:
+				b.WriteString(v)
+			case plainKey.MatchString(v):
+				b.WriteString("." + v)
+			default:
+				b.WriteString("[" + strconv.Quote(v) + "]")
+			}
+		}
+	}
+	return b.String()
+}
+
+var (
+	plainKey  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	pathToken = regexp.MustCompile(`\.?([A-Za-z_][A-Za-z0-9_]*)|\[(\d+)\]|\[("(?:[^"\\]|\\.)*")\]`)
+)
+
+// locate finds a path's position in a YAML document: the key's when the
+// path ends in a key, the item's when it ends in an index, the nearest
+// enclosing node's when the path names something missing. 0, 0 without a
+// document.
+func locate(doc *yaml.Node, path string) (line, col int) {
+	if doc == nil {
+		return 0, 0
+	}
+	n := doc
+	if n.Kind == yaml.DocumentNode {
+		if len(n.Content) == 0 {
+			return 0, 0
+		}
+		n = n.Content[0]
+	}
+	line, col = n.Line, n.Column
+	for _, m := range pathToken.FindAllStringSubmatch(path, -1) {
+		n = resolveAlias(n)
+		switch {
+		case m[2] != "": // an index
+			i, _ := strconv.Atoi(m[2])
+			if n.Kind != yaml.SequenceNode || i >= len(n.Content) {
+				return line, col
+			}
+			n = n.Content[i]
+			line, col = n.Line, n.Column
+		default: // a key, plain or quoted
+			key := m[1]
+			if m[3] != "" {
+				key, _ = strconv.Unquote(m[3])
+			}
+			k, v := mappingEntry(n, key)
+			if k == nil {
+				return line, col
+			}
+			line, col, n = k.Line, k.Column, v
+		}
+	}
+	return line, col
+}
+
+func resolveAlias(n *yaml.Node) *yaml.Node {
+	for n != nil && n.Kind == yaml.AliasNode {
+		n = n.Alias
+	}
+	return n
+}
+
+// mappingEntry returns the key and value nodes of key in a mapping node.
+func mappingEntry(n *yaml.Node, key string) (k, v *yaml.Node) {
+	for _, kv := range mappingPairs(n) {
+		if kv[0].Value == key {
+			return kv[0], kv[1]
+		}
+	}
+	return nil, nil
+}
+
+// position fills in each problem's line and column from the document.
+func position(ps Problems, doc *yaml.Node) {
+	for i := range ps {
+		ps[i].Line, ps[i].Column = locate(doc, ps[i].Path)
+	}
+}
