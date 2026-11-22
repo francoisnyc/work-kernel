@@ -6,7 +6,7 @@ import { applyTheme, savedTheme, type ThemeChoice } from "../theme/css";
 import { Avatar } from "../ui/Avatar";
 import { useSession } from "./session";
 
-const areaLabels: Record<Area, string> = { desk: "Service desk", tracker: "Tracker", portal: "Help center" };
+const areaLabels: Record<Area, string> = { desk: "Service desk", tracker: "Tracker", portal: "Help center", requests: "Requests" };
 
 export function Shell({ area, children }: { area: Area; children: ReactNode }): ReactElement {
   const s = useSession();

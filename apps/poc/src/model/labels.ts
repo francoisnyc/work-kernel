@@ -32,6 +32,11 @@ const states: Record<string, string> = {
   waiting_for_customer: "Waiting for customer",
 };
 
+// A Type's own word for a state, where it differs from the shared one.
+const typeStates: Record<string, Record<string, string>> = {
+  vacation_request: { submitted: "Waiting for approval" },
+};
+
 const customerStates: Record<string, string> = {
   new: "Received",
   waiting_for_customer: "Waiting for you",
@@ -42,7 +47,7 @@ const customerStates: Record<string, string> = {
 // "On hold").
 export function stateLabel(typeId: string, state: string, audience: Audience = "staff"): string {
   if (audience === "customer" && typeId === "incident" && customerStates[state]) return customerStates[state];
-  return states[state] ?? humanize(state);
+  return typeStates[typeId]?.[state] ?? states[state] ?? humanize(state);
 }
 
 const fields: Record<string, string> = {
@@ -84,6 +89,15 @@ const moves: Record<string, Record<string, string>> = {
     "resolved>in_progress": "Reopen",
     "*>canceled": "Cancel",
   },
+  vacation_request: {
+    "draft>submitted": "Submit",
+    "submitted>approved": "Approve",
+    "submitted>rejected": "Reject",
+    "submitted>draft": "Recall",
+    "*>withdrawn": "Withdraw",
+    "submitted>expired": "Expire",
+  },
+  leave_balance: { "open>closed": "Close" },
 };
 const customerMoves: Record<string, string> = {
   "new>canceled": "Cancel request",
