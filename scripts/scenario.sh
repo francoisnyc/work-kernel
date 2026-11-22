@@ -1690,17 +1690,18 @@ request() {
 }
 breach_hook2=$(ok lea type get sla_goal@2 | j '[.type.states[] | select(.id == "running") | .acting[]?.hook][0] // ""')
 
-step "E1: lea sets up the access desk (desk@3) and two resources; sam cannot narrow the desk"
-adesk=$(ok lea item create --type desk@3 --set "f_key=AR-$w" --set "f_name=Access $w" | j .item.name)
+step "E1: lea sets up the access desk (desk@3, for its people only) and two resources; sam cannot narrow it"
+adesk=$(ok lea item create --type desk@3 --set "f_key=AR-$w" --set "f_name=Access $w" \
+	--narrow user:lea,user:sam,user:ana,user:bob,user:dana,user:erin | j .item.name)
 refuse sam "PERMISSION_DENIED PLACEMENT_NOT_WRITABLE" item update "$adesk" --readers user:sam
 slow=$(ok lea item create --type sla_policy@2 --set "f_name=Access, a day $w" --set f_approval_s=86400 | j .item.name)
 fast=$(ok lea item create --type sla_policy@2 --set "f_name=Access, seconds $w" --set f_approval_s=3 | j .item.name)
-vpn=$(ok lea item create --type resource@1 --in "$adesk" --set "f_name=VPN $w" \
+wiki=$(ok lea item create --type resource@1 --in "$adesk" --set "f_name=Wiki $w" \
 	--set 'f_approvers=["user:bob","user:dana","user:erin"]' --set f_required=2 --set f_contact=user:sam | j .item.name)
 prod=$(ok lea item create --type resource@1 --in "$adesk" --set "f_name=Prod DB $w" \
 	--set 'f_approvers=["user:ana","user:bob","user:dana"]' --set f_required=2 --set f_contact=user:sam | j .item.name)
-for r in "$vpn" "$prod"; do ok lea item link "$r" calendar "$cal" >/dev/null; done
-ok lea item link "$vpn" sla_policy "$slow" >/dev/null
+for r in "$wiki" "$prod"; do ok lea item link "$r" calendar "$cal" >/dev/null; done
+ok lea item link "$wiki" sla_policy "$slow" >/dev/null
 ok lea item link "$prod" sla_policy "$fast" >/dev/null
 refuse ana "PERMISSION_DENIED FIELD_NOT_WRITABLE" item create --type resource@1 --in "$adesk" --set "f_name=mine $w" \
 	--set 'f_approvers=["user:ana"]' --set f_required=1
@@ -1713,11 +1714,11 @@ refuse ana "FAILED_PRECONDITION INVARIANT_FAILED" item transition "$loose" --to 
 expect "the invariant" "$(meta invariant)" "submit_without_quorum"
 
 step "E3: 2 of 3 approve: the request moves once; the third approval is closed and refuses a late decision"
-e1=$(request ana "$vpn" "VPN for the audit")
+e1=$(request ana "$wiki" "Wiki for the audit")
 wait_until 30 "one approval per approver" has_approvals "$e1" 3
 expect "the copies" "$(fld "$e1" f_required) $(ok lea item get "$e1" | j '.item.fields.f_approvers | join(" ")') $(fld "$e1" f_desk_contact)" \
 	"2 user:bob user:dana user:erin user:sam"
-expect "the approval's title" "$(fld "$(approval_of "$e1" user:bob)" f_title)" "VPN for the audit $w"
+expect "the approval's title" "$(fld "$(approval_of "$e1" user:bob)" f_title)" "Wiki for the audit $w"
 wait_until 30 "the approval goal" fld_set "$e1" f_due_approval
 ok bob item transition "$(approval_of "$e1" user:bob)" --to approved >/dev/null
 ok dana item transition "$(approval_of "$e1" user:dana)" --to approved >/dev/null
@@ -1734,13 +1735,13 @@ step "E4: the fulfilment task appears for sam and lea"
 wait_until 30 "the fulfilment task" has_child "$e1" fulfilment_task
 task=$(children_of "$e1" fulfilment_task)
 for who in sam lea; do
-	expect "$who reads the task" "$(ok "$who" item get "$task" | j '"\(.item.state) \(.item.fields.f_resource)"')" "open VPN $w"
+	expect "$who reads the task" "$(ok "$who" item get "$task" | j '"\(.item.state) \(.item.fields.f_resource)"')" "open Wiki $w"
 done
 ok sam item transition "$task" --to in_progress >/dev/null
 refuse ana "PERMISSION_DENIED NOT_ALLOWED" item transition "$task" --to done
 
 step "E5: a rejection after one approval rejects the request and closes the rest"
-e2=$(request ana "$vpn" "VPN for the contractor")
+e2=$(request ana "$wiki" "Wiki for the contractor")
 wait_until 30 "its approvals" has_approvals "$e2" 3
 ok erin item transition "$(approval_of "$e2" user:erin)" --to approved >/dev/null
 ok bob item transition "$(approval_of "$e2" user:bob)" --to rejected >/dev/null
@@ -1751,7 +1752,7 @@ expect "a rejection is a decision: the goal is met" "$(ok lea item list "$e2" --
 expect "no fulfilment task" "$(children_of "$e2" fulfilment_task)" ""
 
 step "E6: bob hands over to sam; refused to dana (already approving) and to himself; one to ana she cannot decide"
-e3=$(request ana "$vpn" "VPN for the auditor")
+e3=$(request ana "$wiki" "Wiki for the auditor")
 wait_until 30 "its approvals" has_approvals "$e3" 3
 refuse bob "FAILED_PRECONDITION NOT_UNIQUE" item transition "$(approval_of "$e3" user:bob)" --to pending --set f_delegate=user:dana
 refuse bob "FAILED_PRECONDITION GUARD_FAILED" item transition "$(approval_of "$e3" user:bob)" --to pending --set f_delegate=user:bob
