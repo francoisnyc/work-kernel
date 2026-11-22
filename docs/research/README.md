@@ -13,6 +13,7 @@ page are marked UNVERIFIED. `docs/design.md` is the spec; these explain why.
 | [Extension points in work platforms](extension-points-in-work-platforms.md) | 2026-11-12 | Hooks |
 | [Connectors for the Item kernel](connectors-for-the-item-kernel.md) | 2026-11-12 | Connectors, holds (Steps 6–7) |
 | [Inherited permissions at scale](inherited-permissions-at-scale.md) | 2026-11-14 | Policy (Steps A, A2) |
+| [Hook protocol versus package system](hook-protocol-versus-package-system.md) | 2026-11-22 | The hook protocol (pli.hooks/v1); packages as bundles, later |
 
 Later decisions sometimes supersede a report; the decision log and
 `docs/design.md` win. For example, the permissions report reverses the
