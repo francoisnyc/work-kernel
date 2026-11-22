@@ -197,3 +197,8 @@ func (s *server) ListTypes(ctx context.Context, req *connect.Request[kernelv1.Li
 	}
 	return connect.NewResponse(out), nil
 }
+
+// ValidateTypes checks draft Types (Ventoux V2b). Stub: not implemented yet.
+func (s *server) ValidateTypes(ctx context.Context, req *connect.Request[kernelv1.ValidateTypesRequest]) (*connect.Response[kernelv1.ValidateTypesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ValidateTypes: not implemented"))
+}

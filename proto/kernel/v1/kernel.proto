@@ -55,6 +55,11 @@ service ItemService {
   rpc GetType(GetTypeRequest) returns (GetTypeResponse);
   // Every Type version the server knows.
   rpc ListTypes(ListTypesRequest) returns (ListTypesResponse);
+  // Check draft Types against every registered version without registering
+  // anything (Ventoux V2b). A draft with problems is a successful call that
+  // lists them. Users and agents (in a session) may call it; customers, and
+  // agents acting for one, may not (PERMISSION_DENIED / NOT_ALLOWED).
+  rpc ValidateTypes(ValidateTypesRequest) returns (ValidateTypesResponse);
   // Called with an agent's token: mint a session in capability mode, with
   // the scopes it may touch and the powers it may use. Later calls carry its
   // ID in the Pli-Agent-Session header.
@@ -998,6 +1003,61 @@ message ListTypesRequest {
 message ListTypesResponse {
   // Ordered by type ID, then version.
   repeated Type types = 1;
+}
+
+message ValidateTypesRequest {
+  // namespaces/{ns}
+  string parent = 1;
+  // The drafts: 1 to 50 sources, 256 KiB of content in all, each with a
+  // name of its own (else INVALID_ARGUMENT, field sources).
+  repeated TypeSource sources = 2;
+}
+
+// One draft Type file.
+message TypeSource {
+  // Required and unique in the request; echoed back as TypeProblem.source.
+  // A file's path, say.
+  string name = 1;
+  // The Type's YAML.
+  string content = 2;
+}
+
+message ValidateTypesResponse {
+  // Every problem, sorted by source, then position; empty when the drafts
+  // would load. Checking runs in stages (docs/design.md, "Type problems"):
+  // the problems of the Types together come only once each draft is sound
+  // on its own. A problem a registered version had already is not listed.
+  repeated TypeProblem problems = 1;
+}
+
+// One thing wrong with a draft, or with a registered Type version because
+// of a draft.
+message TypeProblem {
+  // The draft's TypeSource.name; for a problem on a registered version, the
+  // version's name, namespaces/{ns}/types/{type}/versions/{n}.
+  string source = 1;
+  // Where in the YAML: transitions[3].allowed[0]; empty for the whole file.
+  string path = 2;
+  // 1-based position in the source; 0 when unknown (a registered version,
+  // a syntax error's column).
+  int32 line = 3;
+  int32 column = 4;
+  TypeProblemSeverity severity = 5;
+  // Stable; tools match on it. The codes are in docs/design.md, "Type
+  // problems"; new ones may be added.
+  string code = 6;
+  // What is wrong, then what to do.
+  string message = 7;
+  // The Type version the problem belongs to,
+  // namespaces/{ns}/types/{type}/versions/{n}; empty when its id and
+  // version could not be read.
+  string type = 8;
+}
+
+enum TypeProblemSeverity {
+  TYPE_PROBLEM_SEVERITY_UNSPECIFIED = 0;
+  // The Type would not load.
+  TYPE_PROBLEM_SEVERITY_ERROR = 1;
 }
 
 message LinkItemsRequest {

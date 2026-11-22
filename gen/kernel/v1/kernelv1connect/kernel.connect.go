@@ -79,6 +79,9 @@ const (
 	ItemServiceGetTypeProcedure = "/kernel.v1.ItemService/GetType"
 	// ItemServiceListTypesProcedure is the fully-qualified name of the ItemService's ListTypes RPC.
 	ItemServiceListTypesProcedure = "/kernel.v1.ItemService/ListTypes"
+	// ItemServiceValidateTypesProcedure is the fully-qualified name of the ItemService's ValidateTypes
+	// RPC.
+	ItemServiceValidateTypesProcedure = "/kernel.v1.ItemService/ValidateTypes"
 	// ItemServiceStartAgentSessionProcedure is the fully-qualified name of the ItemService's
 	// StartAgentSession RPC.
 	ItemServiceStartAgentSessionProcedure = "/kernel.v1.ItemService/StartAgentSession"
@@ -113,6 +116,11 @@ type ItemServiceClient interface {
 	GetType(context.Context, *connect.Request[v1.GetTypeRequest]) (*connect.Response[v1.GetTypeResponse], error)
 	// Every Type version the server knows.
 	ListTypes(context.Context, *connect.Request[v1.ListTypesRequest]) (*connect.Response[v1.ListTypesResponse], error)
+	// Check draft Types against every registered version without registering
+	// anything (Ventoux V2b). A draft with problems is a successful call that
+	// lists them. Users and agents (in a session) may call it; customers, and
+	// agents acting for one, may not (PERMISSION_DENIED / NOT_ALLOWED).
+	ValidateTypes(context.Context, *connect.Request[v1.ValidateTypesRequest]) (*connect.Response[v1.ValidateTypesResponse], error)
 	// Called with an agent's token: mint a session in capability mode, with
 	// the scopes it may touch and the powers it may use. Later calls carry its
 	// ID in the Pli-Agent-Session header.
@@ -193,6 +201,12 @@ func NewItemServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(itemServiceMethods.ByName("ListTypes")),
 			connect.WithClientOptions(opts...),
 		),
+		validateTypes: connect.NewClient[v1.ValidateTypesRequest, v1.ValidateTypesResponse](
+			httpClient,
+			baseURL+ItemServiceValidateTypesProcedure,
+			connect.WithSchema(itemServiceMethods.ByName("ValidateTypes")),
+			connect.WithClientOptions(opts...),
+		),
 		startAgentSession: connect.NewClient[v1.StartAgentSessionRequest, v1.StartAgentSessionResponse](
 			httpClient,
 			baseURL+ItemServiceStartAgentSessionProcedure,
@@ -231,6 +245,7 @@ type itemServiceClient struct {
 	listItemEvents    *connect.Client[v1.ListItemEventsRequest, v1.ListItemEventsResponse]
 	getType           *connect.Client[v1.GetTypeRequest, v1.GetTypeResponse]
 	listTypes         *connect.Client[v1.ListTypesRequest, v1.ListTypesResponse]
+	validateTypes     *connect.Client[v1.ValidateTypesRequest, v1.ValidateTypesResponse]
 	startAgentSession *connect.Client[v1.StartAgentSessionRequest, v1.StartAgentSessionResponse]
 	approveWiden      *connect.Client[v1.ApproveWidenRequest, v1.ApproveWidenResponse]
 	linkItems         *connect.Client[v1.LinkItemsRequest, v1.LinkItemsResponse]
@@ -282,6 +297,11 @@ func (c *itemServiceClient) ListTypes(ctx context.Context, req *connect.Request[
 	return c.listTypes.CallUnary(ctx, req)
 }
 
+// ValidateTypes calls kernel.v1.ItemService.ValidateTypes.
+func (c *itemServiceClient) ValidateTypes(ctx context.Context, req *connect.Request[v1.ValidateTypesRequest]) (*connect.Response[v1.ValidateTypesResponse], error) {
+	return c.validateTypes.CallUnary(ctx, req)
+}
+
 // StartAgentSession calls kernel.v1.ItemService.StartAgentSession.
 func (c *itemServiceClient) StartAgentSession(ctx context.Context, req *connect.Request[v1.StartAgentSessionRequest]) (*connect.Response[v1.StartAgentSessionResponse], error) {
 	return c.startAgentSession.CallUnary(ctx, req)
@@ -324,6 +344,11 @@ type ItemServiceHandler interface {
 	GetType(context.Context, *connect.Request[v1.GetTypeRequest]) (*connect.Response[v1.GetTypeResponse], error)
 	// Every Type version the server knows.
 	ListTypes(context.Context, *connect.Request[v1.ListTypesRequest]) (*connect.Response[v1.ListTypesResponse], error)
+	// Check draft Types against every registered version without registering
+	// anything (Ventoux V2b). A draft with problems is a successful call that
+	// lists them. Users and agents (in a session) may call it; customers, and
+	// agents acting for one, may not (PERMISSION_DENIED / NOT_ALLOWED).
+	ValidateTypes(context.Context, *connect.Request[v1.ValidateTypesRequest]) (*connect.Response[v1.ValidateTypesResponse], error)
 	// Called with an agent's token: mint a session in capability mode, with
 	// the scopes it may touch and the powers it may use. Later calls carry its
 	// ID in the Pli-Agent-Session header.
@@ -400,6 +425,12 @@ func NewItemServiceHandler(svc ItemServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(itemServiceMethods.ByName("ListTypes")),
 		connect.WithHandlerOptions(opts...),
 	)
+	itemServiceValidateTypesHandler := connect.NewUnaryHandler(
+		ItemServiceValidateTypesProcedure,
+		svc.ValidateTypes,
+		connect.WithSchema(itemServiceMethods.ByName("ValidateTypes")),
+		connect.WithHandlerOptions(opts...),
+	)
 	itemServiceStartAgentSessionHandler := connect.NewUnaryHandler(
 		ItemServiceStartAgentSessionProcedure,
 		svc.StartAgentSession,
@@ -444,6 +475,8 @@ func NewItemServiceHandler(svc ItemServiceHandler, opts ...connect.HandlerOption
 			itemServiceGetTypeHandler.ServeHTTP(w, r)
 		case ItemServiceListTypesProcedure:
 			itemServiceListTypesHandler.ServeHTTP(w, r)
+		case ItemServiceValidateTypesProcedure:
+			itemServiceValidateTypesHandler.ServeHTTP(w, r)
 		case ItemServiceStartAgentSessionProcedure:
 			itemServiceStartAgentSessionHandler.ServeHTTP(w, r)
 		case ItemServiceApproveWidenProcedure:
@@ -495,6 +528,10 @@ func (UnimplementedItemServiceHandler) GetType(context.Context, *connect.Request
 
 func (UnimplementedItemServiceHandler) ListTypes(context.Context, *connect.Request[v1.ListTypesRequest]) (*connect.Response[v1.ListTypesResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kernel.v1.ItemService.ListTypes is not implemented"))
+}
+
+func (UnimplementedItemServiceHandler) ValidateTypes(context.Context, *connect.Request[v1.ValidateTypesRequest]) (*connect.Response[v1.ValidateTypesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kernel.v1.ItemService.ValidateTypes is not implemented"))
 }
 
 func (UnimplementedItemServiceHandler) StartAgentSession(context.Context, *connect.Request[v1.StartAgentSessionRequest]) (*connect.Response[v1.StartAgentSessionResponse], error) {

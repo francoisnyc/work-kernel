@@ -43,6 +43,7 @@ type Kernel interface {
 	Unlink(context.Context, itemservice.LinkRequest) (itemservice.WriteResult, error)
 	Type(ctx context.Context, id string, version int) (*typedef.Type, error)
 	ListTypes(context.Context) ([]*typedef.Type, error)
+	ValidateTypes(context.Context, []typedef.Source) (typedef.Problems, error)
 }
 
 // Options configure the API.
