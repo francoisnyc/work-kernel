@@ -1023,6 +1023,7 @@ As a log line, a problem reads
 | `REACTION_CYCLE` | 3 | Reactions form a cycle (reported on the first reaction of the cycle, one cycle at a time) |
 | `DUPLICATE_VERSION` | 3 | Two files declare the same Type version (reported on the second) |
 | `FOLDER_TOO_DEEP` | 3 | A folder more than one level below the Types folder |
+| `VERSION_CHANGED` | 3 | A draft declares a registered Type version with another definition (`ValidateTypes`; reported on the draft's `version`) |
 
 ### Versioning
 
