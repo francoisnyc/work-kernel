@@ -2644,7 +2644,7 @@ under sla_goal@1 could complete it by hand, as met.
 |---|---|---|
 | incident@3 | `role:desk_agent` | Agents move an incident to another desk and narrow it; its requester does not (a customer never updates anyway). Otherwise incident@2. |
 | reply@2, note@2 | `kernel` | A reply or a note stays in the incident it was written in, with the incident's readers. |
-| comment@3 | `kernel` | The same for a comment (story, ticket, incident@1). |
+| comment@3 | `kernel` | The same for a comment, wherever it was written. |
 | sla_goal@3 | `kernel` | A goal stays in its host, with its host's readers: no one hides a goal from the desk. Otherwise sla_goal@2: every move `allowed: [nobody]`, `metric_missing`. |
 
 incident@3 starts sla_goal@3 goals. sla_goal@3 accepts every reaction the
