@@ -9,17 +9,13 @@
 package workflow_test
 
 import (
-	"os"
 	"testing"
 
 	"github.com/google/uuid"
 
 	"github.com/francoisnyc/work-kernel/internal/connstub"
-	"github.com/francoisnyc/work-kernel/internal/hooks"
 	"github.com/francoisnyc/work-kernel/internal/item"
 	"github.com/francoisnyc/work-kernel/internal/itemservice"
-	"github.com/francoisnyc/work-kernel/internal/typedef"
-	wf "github.com/francoisnyc/work-kernel/internal/workflow"
 )
 
 // hrStack runs the worker with an HR directory. Each test names its own
@@ -31,40 +27,7 @@ type hrStack struct {
 
 func newHRStack(t *testing.T) *hrStack {
 	t.Helper()
-	if _, err := pool.Exec(serverCtx(t), `update outbox set delivered_at = now() where delivered_at is null`); err != nil {
-		t.Fatalf("clear outbox: %v", err)
-	}
-	data, err := os.ReadFile("../../types/vacation_request.v1.yaml")
-	if err != nil {
-		t.Fatalf("read vacation_request v1: %v", err)
-	}
-	ty, err := typedef.Parse(data)
-	if err != nil {
-		t.Fatalf("parse vacation_request v1: %v", err)
-	}
-	if err := itemservice.New(pool).RegisterType(serverCtx(t), ty); err != nil {
-		t.Fatalf("register vacation_request v1: %v", err)
-	}
-	h := &hrStack{
-		stack: &stack{t: t, k: itemservice.New(pool), queue: "items-" + uuid.NewString()},
-		crm:   connstub.NewCRM(), erp: connstub.NewERP(), hr: connstub.NewHR(),
-	}
-	h.worker = wf.NewWorker(tc, h.queue, h.k, wf.WorkerOptions{
-		Connectors: hooks.NewConnectors(h.crm.URL, h.erp.URL).WithHR(h.hr.URL),
-		HookBudget: testBudget,
-	})
-	if err := h.worker.Start(); err != nil {
-		t.Fatalf("start worker: %v", err)
-	}
-	h.startRelay()
-	t.Cleanup(func() {
-		h.stopRelay()
-		h.stopWorker()
-		h.crm.Close()
-		h.erp.Close()
-		h.hr.Close()
-	})
-	return h
+	return newHRStackWith(t, testBudget, (*hrStack).remoteHR)
 }
 
 func user(name string) item.Principal {

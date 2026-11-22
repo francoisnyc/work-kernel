@@ -29,7 +29,7 @@ func newHR(t *testing.T) (*connstub.Server, *hooks.Connectors) {
 	hr.SetManager("user:ana", "user:bob")
 	hr.SetManager("user:bob", "user:dana")
 	hr.SetManager("user:dana", "user:dana")
-	return hr, w.c.WithHR(hr.URL)
+	return hr, w.c.WithConnection("hr@1", hooks.Connection{URL: hr.URL, Secret: hr.Secret()})
 }
 
 func TestManagerOf_Arity(t *testing.T) {

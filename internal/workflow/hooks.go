@@ -6,8 +6,10 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
 
+	"github.com/francoisnyc/work-kernel/internal/hookproto"
 	"github.com/francoisnyc/work-kernel/internal/hooks"
 	"github.com/francoisnyc/work-kernel/internal/item"
 	"github.com/francoisnyc/work-kernel/internal/itemservice"
@@ -23,10 +25,13 @@ import (
 
 // hookCall is what every hook activity starts from.
 type hookCall struct {
-	id        uuid.UUID
-	hook      typedef.Hook
-	principal item.Principal
-	attr      item.Attribution
+	id          uuid.UUID
+	hook        typedef.Hook
+	principal   item.Principal
+	attr        item.Attribution
+	typeID      string
+	typeVersion int
+	causeSeq    int64
 }
 
 func (a *Activities) prepare(ctx context.Context, in HookInput) (hookCall, error) {
@@ -44,8 +49,7 @@ func (a *Activities) prepare(ctx context.Context, in HookInput) (hookCall, error
 			fmt.Sprintf("%s v%d declares no hook %s", in.TypeID, in.TypeVersion, in.HookID), ErrTypeInvalid, nil)
 	}
 	return hookCall{
-		id:        id,
-		hook:      h,
+		id: id, hook: h, typeID: in.TypeID, typeVersion: in.TypeVersion, causeSeq: in.CauseSeq,
 		principal: item.Principal{Actor: fmt.Sprintf("%s:%s:%s", item.KindHook, in.TypeID, in.HookID)},
 		attr: item.Attribution{
 			OriginatingHook: fmt.Sprintf("hook:%s@v%d:%s", in.TypeID, in.TypeVersion, in.HookID),
@@ -75,14 +79,51 @@ func (a *Activities) run(ctx context.Context, c hookCall, key string) (hooks.Res
 	for i, f := range c.hook.Reads {
 		args[i] = values[f] // nil when unset; the action refuses it
 	}
-	res, err := a.Connectors.RunCall(ctx, c.hook.Action, key, args, hooks.Call{HookID: c.hook.ID, ItemID: c.id.String()})
-	if errors.Is(err, hooks.ErrKeyConflict) { // before ErrPermanent, which it also is
-		return hooks.Result{}, temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeKeyConflict, err)
+	res, err := a.Connectors.RunCall(ctx, c.hook.Action, key, args, c.envelope(ctx))
+	// The specific failures before ErrPermanent, which each also is.
+	for _, k := range []struct {
+		target error
+		typ    string
+	}{
+		{hooks.ErrKeyConflict, ErrTypeKeyConflict},
+		{hooks.ErrConnectorUnconfigured, ErrTypeConnectorUnconfigured},
+		{hooks.ErrConnectorUnauthorized, ErrTypeConnectorUnauthorized},
+		{hooks.ErrConnectorMismatch, ErrTypeConnectorMismatch},
+	} {
+		if errors.Is(err, k.target) {
+			return hooks.Result{}, temporal.NewNonRetryableApplicationError(err.Error(), k.typ, err)
+		}
 	}
 	if errors.Is(err, hooks.ErrPermanent) {
 		return hooks.Result{}, temporal.NewNonRetryableApplicationError(err.Error(), ErrTypeHookFailed, err)
 	}
 	return res, err
+}
+
+// envelope says what the hook protocol's envelope carries besides the
+// inputs: the hook, its Item and Type, the cause, and the attempt (from the
+// activity; 1 when called outside one, as tests do).
+func (c hookCall) envelope(ctx context.Context) hooks.Call {
+	call := hooks.Call{
+		HookID: c.hook.ID, ItemID: c.id.String(), Kind: hookproto.Kind(c.hook.Kind),
+		TypeID: c.typeID, TypeVersion: c.typeVersion,
+		EventID: fmt.Sprintf("%s:%d", c.id, c.causeSeq), CorrelationID: c.attr.CorrelationID,
+		Attempt: 1,
+	}
+	switch c.hook.On {
+	case typedef.OnTransition:
+		call.From, call.To, call.EventType = c.hook.From, c.hook.To, hookproto.EventTransitionRequested
+	case typedef.OnTimer:
+		call.EventType = hookproto.EventTimerFired
+	case typedef.OnReaction:
+		call.EventType = hookproto.EventReactionApplied
+	default:
+		call.EventType = hookproto.EventStateEntered
+	}
+	if activity.IsActivity(ctx) {
+		call.Attempt = int(activity.GetInfo(ctx).Attempt)
+	}
+	return call
 }
 
 // writes pairs an action's values with the hook's writes, by position.

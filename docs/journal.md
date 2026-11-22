@@ -6,6 +6,32 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
+- **The hook protocol's Later items** (design.md, "Hook protocol
+  (pli.hooks/v1), as built"):
+  - `actor` in the envelope (who caused the event: principal,
+    `onBehalfOf`, `agentSession`), the day a connector needs it, with the
+    `HookInput` change it takes, behind `policy.Project`. The name is
+    reserved; v1 only grows, so adding it breaks nobody.
+  - **Before real use:** connector configuration as operator data, in a
+    table, audited, instead of a file the worker follows.
+  - Record on the Item which connector version answered (the answer's
+    `connectorVersion`), for audit.
+  - Named connector reasons for action hooks: today an unconfigured,
+    unauthorized or mismatched connector is recorded as `action_failed`,
+    because the item service accepts four `hook_failed` reasons.
+  - **Before open-sourcing:** move the ERP, CRM and email connectors out of
+    the worker, as HR now is; the kernel then ships only generic ones.
+  - A `pli hooks call` command (signed fixture envelopes to a local
+    connector) and `pli hooks serve-mock` (the kernel's side, for callback
+    tests); a delivery log in the kernel, per attempt, with manual replay;
+    connector URLs through an SSRF-filtering egress proxy, and mTLS as an
+    option; `Retry-After` honoured on a 429 (Temporal's next retry delay);
+    `v2a` (ed25519) signing and signed answers.
+  - Failure policy and timeouts per hook binding, in the Type (the report's
+    table); namespaced connector names through a local alias (`hr` to
+    `acme.hr-directory@1`), with the bundle format.
+  (Hook protocol spike)
+
 - **High, before real use: move Items to a new Type version.** The kernel
   has no such operation, so every Item created before a hardening keeps its
   version's rules: an incident@2 is still narrowed by its requester, its
@@ -2786,3 +2812,54 @@ container); vitest 408 and typecheck. CI builds the real images.
 **Open:** the Later list: version migration before real use, plat_admin and narrow-at-creation, vacation_request
 and ticket placement. **Next session:** Bonita (an exported process, then the packages design pass).
 
+## 2026-11-22 — Hook protocol spike: pli.hooks/v1, and the HR directory out of the worker (Phase D)
+
+**Built:** `pli.hooks/v1`, from the research report's recommendation (protocol now, no package system), trimmed to
+what the spike exercises: the request envelope, check and enrich outcomes, error classes as RFC 9457 problems,
+Standard Webhooks signing with replay protection, a descriptor at `/.well-known/pli-connector`, and a conformance
+test any connector runs (`internal/hookproto`). The HR directory (`hr.manager_of`) left the worker: connstub's HR
+server speaks the protocol and decides what the worker's code decided; the worker reaches it as `hr@1`, by
+configuration (`--connectors`, `deploy/connectors.yaml`, read again when it changes). CRM, ERP and email stay
+compiled in, behind the same `hooks.Connector` interface. **No Type file changed**; the scenario is unchanged.
+design.md: "Hook protocol (pli.hooks/v1), as built", with the specified-only parts (action hooks over the wire,
+async completion, failure policy per binding), the rerun rule, the alias idea for namespaces, "Packages: bundles,
+later" with the five triggers, and "Next step: incidents".
+
+**Kernel changes (three):** (1) a Type's action may name a major, `<connector>.<operation>[@<major>]`, none
+meaning 1, and a major the catalog does not declare is refused at load; (2) the worker runs every hook through one
+`Connector` interface, compiled in or remote by configuration; (3) the workflow records `connector_unconfigured`,
+`connector_unauthorized` or `connector_mismatch` on a check's hold, at once. No item service, schema or proto change.
+
+**Decided in Phase A, each agreed:** plain Go structs and JSON, no proto; inputs by the operation's names, mapped
+by position (so connectors never see field IDs); the catalog keeps a declaration of each remote operation, so Types
+load with no network; check outcomes keep `correct`; 409 in flight, 422 key conflict; `webhook-id` from the key,
+replay answered from the success store; extend connstub rather than a new service; a rerun reuses the key
+(the report mints a new one); incidents only for action hooks and enrich hooks without a fallback, specified, not
+built; a read-only call without a key uses its request ID. **Actor:** first included, then left out before Phase C
+(its own commit): the name is reserved, and Later.
+
+**Tests:** 49 new (signing on the reference library's known answer, the envelopes and the frozen v1.0 fixtures,
+the conformance test and its six broken connectors, the HR connector, the remote client's envelope, failure classes,
+descriptor checks and enrich, the connectors file and its reload, `@N` in typedef, the connector reasons in the
+workflow, and end to end: retries within the budget, the three misconfigurations, HR 1.4 switched to 1.5 while a
+request is held). **Test change, agreed, in a commit of its own:** the existing HR tests' setup reaches HR as a
+remote connector (`newHR`, `newHRStack`, the mail and leave stacks, the correction-refused test); no assertion
+changed.
+
+**Surprises:** the spec has deprecated `v1a` (which the report names) for `v2a`. Go's own resend of a dropped
+request stopped being a question once `webhook-id` was stable and replays are answered from the store. Every
+existing HR test passed against the remote connector on the first full run. `go mod download all` rewrites
+`go.sum` (restored; not committed).
+
+**Numbers.** `go test -race ./...` green in 6m45s (workflow suite with the replay test 335 s, item service 137 s).
+Scenario twice on a fresh stack: 103 s each; the HR check over the protocol answered in 224 and 174 ms. Web
+Playwright 9 in 7.8 s; apps/poc's journeys 4 in 26.6 s.
+
+**Local workarounds, outside the repository (nothing committed):** Docker Hub answered 429 for the golang and
+nginx base images, so they were pulled from `mirror.gcr.io` and tagged with their usual names; Docker builds here
+cannot use the HTTPS proxy's CA, so a compose override in the scratchpad served Go modules from the host's cache
+and built the web and poc images from sites built on the host; Playwright ran with a local config (excluded from
+git) pointing at this container's Chromium. CI builds the real images and runs the pinned browser.
+
+**Open:** the hook protocol's Later items (top of this file). **Next session:** incidents (design.md, "Next step:
+incidents"), or Bonita, whose connectors would be written against `pli.hooks/v1` from the start.

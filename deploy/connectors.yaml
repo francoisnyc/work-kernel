@@ -1,0 +1,8 @@
+# The worker's connectors file (--connectors): which connector@major is a
+# remote service speaking the hook protocol (pli.hooks/v1), at which URL,
+# signed with the secret in which environment variable. A connector not
+# listed stays compiled into the worker (crm@1, erp@1, email@1). The worker
+# reads this file again whenever it changes: pointing hr@1 at another
+# implementation of the same major needs no restart and no Type change.
+connectors:
+  hr@1: {url: "http://connstub:8083", secret_env: HR_HOOK_SECRET, ref: hr-directory}

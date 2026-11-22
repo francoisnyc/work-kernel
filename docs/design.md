@@ -113,7 +113,10 @@ Hooks (Step 6) are declared in the Type version, pinned with the lifecycle:
 writes others, never holds the Item, optional `fallback`), or `{id, on:
 transition, from, to}` for a **check**. Each names an action (code in
 `internal/hooks`, never in the Type) with `reads` and `writes`, matched to the
-action by position; the action's arity is checked at load. Besides fields,
+action by position; the action's arity is checked at load. Since the hook
+protocol, an action is `<connector>.<operation>[@<major>]` (no major means
+1), and the connector is compiled in or a remote service, by configuration:
+see "Hook protocol (pli.hooks/v1), as built". Besides fields,
 `reads` may name the kernel-set attributes `created_by` and
 `created_on_behalf_of`. A transition may be an `escape` (cancel): it may
 leave a held state.
@@ -1518,6 +1521,7 @@ in the journal.
 | Jira 2.3b (**done**) | The `sla` package (`sla_goal`, `calendar`, `sla_policy`), the incident Type with first-response and resolution goals, pli and the web UI | Scenario B runs through pli. **Done 2026-11-20**: "Jira part 2, step 3b as built" below, and the journal |
 | Etag rule (**done**) | The etag changes only when something a caller could overwrite changes (the state, a field a caller may write, a link, the readers, the container); outcome records, hook records and kernel-written field writes leave it alone | A save made with an etag read right after an incident's creation is accepted once its goals have written their due instants: 10 times in 10 (measured in step 3b: refused 10 times in 10). **Done 2026-11-20**: "The etag" under "Public API (v1)", and the journal |
 | Jira 2.4 (**done**) | Customers as principals and public or internal comments (4a); the access request with N-of-M approvers (4b: the building blocks, then the Types) | Scenarios C and E run through pli. **Done 2026-11-22**: "Jira 2.4b, PR 2 as built" below, and the journal |
+| Hook protocol (**done**) | `pli.hooks/v1`: the envelope, outcomes, error classes, Standard Webhooks signing, the descriptor and the major check, a connectors file the worker follows; the HR directory moved out of the worker as the first remote connector | The vacation scenario passes unchanged against the remote HR; its HR tests pass against it; a conformance test any connector runs; HR 1.4 switched to 1.5 while a request waits, with no restart and no Type change. **Done 2026-11-22**: "Hook protocol (pli.hooks/v1), as built" below, and the journal |
 | Bonita | The company's real Bonita processes, mapped against the BPMN pattern table, then rebuilt | Planned after Jira 2 |
 
 ## Jira proof of concept
@@ -3023,6 +3027,285 @@ for the real processes.
 12. **No "who am I", no display names** (as for the other areas). *Cost:*
     the dev-token file decides who sees Balances; before a request is sent
     the form can only say "your manager decides": the HR check names them.
+
+## Hook protocol (pli.hooks/v1), as built (2026-11-22)
+
+Background: `docs/research/hook-protocol-versus-package-system.md`. Its
+recommendation is taken: a small versioned wire contract for connectors
+now, no package system. The spike proves it on one connector: the HR
+directory (`hr.manager_of`) left the worker and became a service speaking
+the protocol, with the vacation scenario unchanged and **no Type file
+changed**. The CRM, ERP and email connectors stay compiled in, behind the
+same interface. Code: `internal/hookproto` (the envelopes, signing, the
+conformance test), `internal/hooks` (the worker side), `internal/connstub`
+(the HR connector).
+
+**Bindings.** Two, with the same envelopes: HTTPS (`POST {base}/hooks/v1`,
+signed), and the Go interface `hooks.Connector`, `Handle(ctx, Request)
+(Response, error)`. A compiled-in connector is an adapter over the existing
+action code, so a Type cannot tell a remote connector from a compiled-in one.
+
+**Names and majors.** A hook's action is `<connector>.<operation>[@<major>]`;
+no major means 1, so every existing Type names `hr@1`, `crm@1`, `erp@1`,
+`email@1`. The worker's catalog declares each operation: its kinds, its
+input and output names in order (a hook's `reads` and `writes` map to them
+by position, as before, so an operation never sees a Type's field IDs),
+whether it has a side effect, and whether it is remote (no code in the
+worker: `hr.manager_of@1`). A Type naming a major the catalog does not
+declare is refused at load, as an unknown action is (a kernel change). A
+new major needs a new Type version naming `@2` (specified, not built): Items
+keep their version's major, and configuration may hold `hr@1` and `hr@2`
+side by side until no `@1` Item waits.
+
+**The request envelope.** JSON, lowerCamel, the same for every kind:
+
+| Field | What |
+| --- | --- |
+| `protocol` | `pli.hooks/v1` |
+| `kind` | `check`, `enrich` or `action` |
+| `requestId` | new for every send; echoed in the answer |
+| `idempotencyKey` | the hook's key (`hold:<id>` for a check, `hook:<item>:<seq>:<hook>` for an enrich or action hook), stable across retries and reruns, no personal data. A read-only call without a key (tests, the bench) uses its request ID |
+| `attempt` | the activity's attempt |
+| `deadline` | the activity context's deadline, absolute; left out when there is none |
+| `hook` | `binding` (`vacation_request@3#hr_check`), `connector` (`hr@1`), `operation` (`manager_of`) |
+| `event` | the cause: `id` (`<item>:<seq>`), `type` (`item.transition.requested`, `item.state.entered`, `item.timer.fired`, `item.reaction.applied`), `subject` (`item/<id>`) |
+| `item` | `id`, `type`, `typeVersion`; never a field value |
+| `transition` | a check's `from` and `to`; left out otherwise |
+| `inputs` | the operation's declared inputs by name, nothing else (unset is `null`); the values come from `HookInput`, behind `policy.Project` |
+| `trace` | `correlationId`, `causationId` |
+| `connection` | `slot` (the connector name) and `ref` (the configured connection): a reference, never a secret |
+
+Reserved, not sent: `actor` (who caused the event; Later), `traceparent`
+(when the stack has tracing), `dryRun` (with action hooks over the wire).
+Both sides ignore fields they do not know. Within v1 the envelopes only
+grow: `internal/hookproto/testdata/v1.0` holds frozen fixtures that every
+later version must read and write back unchanged (a test).
+
+**Outcomes** (HTTP 200: a business answer, never retried):
+
+| Kind | Outcomes in v1 | Payload |
+| --- | --- | --- |
+| check | `allow`, `deny`, `correct` | `reason.code` on deny; `patch` on correct (allow with values: the HR check writes the approver). `correct` is Pli's addition to the report's allow/deny |
+| enrich | `ok` | `patch` |
+| action | `ok` (specified; actions are not yet built over the wire) | `patch` |
+
+`pending` (asynchronous) and `business_error` are specified below, not
+built: today either is a permanent failure. A patch must give every
+declared output and nothing else. A deny must name a reason the descriptor
+declares (`errors`); an undeclared one, or none, is `connector_mismatch`,
+so the hold still fails closed. A reason's `message` is logged, never
+stored: only the code reaches the Item. The answer carries
+`connectorVersion`, the implementation that answered.
+
+**Failures** are RFC 9457 `application/problem+json` bodies with a `class`;
+the status decides, unless the problem's `retryable` says otherwise:
+
+| Status | Class | The worker |
+| --- | --- | --- |
+| 400, 404, other 4xx | `invalid` | permanent |
+| 401, 403 | `config` | permanent: `connector_unauthorized` |
+| 409 | `in_flight` (the key is being answered) | retried within the budget |
+| 410 | `gone` | permanent |
+| 422 | `key_conflict` (the key with a different request) | permanent, `ErrKeyConflict` |
+| 429 | `rate_limited` | retried (`Retry-After` is not honoured yet: Later) |
+| 5xx, a network failure, the deadline | `transient` | retried within the budget |
+| 3xx | | permanent: a redirect is never followed |
+
+An answer that breaks the protocol (another `requestId` or `protocol`, an
+outcome its kind does not take, an undeclared output) is permanent. A check
+that fails permanently resolves its hold as error at once; three causes have
+their own reason, so a misconfiguration shows at once instead of using up the
+budget: `connector_unconfigured` (no connection for a remote-only
+connector), `connector_unauthorized`, `connector_mismatch`. The others stay
+`check_failed`, and anything retryable still ends as `budget_exhausted`. An
+action hook records any of the three as `action_failed`: `hook_failed`
+takes four reasons (Later).
+
+**Signing and replay.** Standard Webhooks v1.0.0, symmetric (`v1`),
+written on the standard library: `webhook-id`, `webhook-timestamp` (unix
+seconds), `webhook-signature: v1,<base64 HMAC-SHA256 of id.timestamp.body>`.
+The secret is per connection, `whsec_<base64>`, read from the environment
+variable the connectors file names; it never travels. `webhook-id` is
+`msg_` and the first 16 bytes of SHA-256 of the idempotency key, in hex:
+stable across retries, as Standard Webhooks wants, and without the key's
+text; the key also travels in the envelope and the `Idempotency-Key`
+header. A receiver checks the timestamp within five minutes either way,
+accepts any `v1` signature matching any secret it trusts (rotation: several
+signatures, several secrets), and skips entries it cannot read. Replay
+protection is the tolerance plus the connector's success store: a replayed
+request inside the window gets the stored answer and causes nothing new, so
+Go's own resend of a dropped request is harmless too. The spec has since
+deprecated `v1a` (which the report names) for `v2a`, ed25519 with an
+endpoint ID: Later, with signed answers (today TLS covers them) and the
+signed callback.
+
+**The descriptor** is served unsigned at `GET /.well-known/pli-connector`:
+`connector` (the name Types use), `version` (the implementation's semver),
+`supportedProtocolVersions`, and `operations[]` with `name`, `kinds`,
+`inputSchema` and `outputSchema` (a JSON Schema subset: an object with typed
+properties; `type` read as a string or a list), `sideEffects` (`none` or
+`some`), `async` (`forbidden`, `optional`, `required`) and `errors` (the
+reason codes it may answer). The worker reads it once per URL, before the
+first call there, and checks it against the catalog: the connector's name,
+the major of its version, `pli.hooks/v1`, the operation, its kinds, and its
+input and output names. A mismatch fails at once (`connector_mismatch`)
+and nothing is posted; a descriptor it cannot read is retryable and not
+remembered. An answer whose `connectorVersion` has another major is a
+mismatch too, and the URL's descriptor is read again on the next call
+(another major deployed behind the same URL).
+
+**Configuration and reload.** The worker's `--connectors FILE`
+(`deploy/connectors.yaml` in the stack):
+
+```yaml
+connectors:
+  hr@1: {url: "http://connstub:8083", secret_env: HR_HOOK_SECRET, ref: hr-directory}
+```
+
+A key is `<connector>@<major>`; a connector not listed stays compiled in.
+Unknown keys, a bad key or URL, or a `secret_env` unset or not a `whsec_`
+secret are errors naming the file. The worker reads the file at start (an
+error stops it) and again on any call after its modification time or size
+changes; a file that no longer parses keeps the last good one and is logged
+once. So pointing `hr@1` at another implementation of the same major (HR
+1.4, then 1.5) takes effect on the next call, with no restart and no Type
+change: a test switches it while a request waits in its hold, between the
+check's retries. Without `--connectors`, every remote-only connector is
+unconfigured.
+
+**Success-only stores.** A connector stores each success under its
+idempotency key, with a digest of what was asked (operation, kind,
+inputs). The same key asking the same again gets the stored answer, with
+its own `requestId`; asking something else is 422; a key still being
+answered is 409. A failure is never stored. The store must survive deploys
+within a major (a shared store, not a process's memory): the stubs keep
+theirs in memory, so the 1.4-to-1.5 test switches while every 1.4 attempt
+had failed.
+
+**Retry and rerun, and how they differ from the report.** A **retry** sends
+the same request again: the same key, the inputs as first sent. A **rerun**
+reads the inputs again, under the same key. Because stores keep successes
+only, a rerun can never make a second effect: if every attempt failed,
+nothing is stored and the rerun does the work, with corrected inputs if
+someone corrected the Item; if one attempt succeeded and its answer was
+lost, the stored success comes back for the same inputs, and other inputs
+are 422 `key_conflict`, which is right: the effect happened with the old
+ones. The report has a rerun mint a new key, audited, because it can create
+a second invoice. Here a deliberate second effect means entering the state
+again, which is a new entry and a new key. (Incidents, which offer retry,
+rerun and skip, are the next step, below.)
+
+**The conformance test** (`internal/hookproto/conformance`) is test code
+any connector runs over HTTP, `conformance.Run(t, Target{URL, Secret,
+Cases, Outage})`. It checks the descriptor's shape and that the cases fit
+it; each case's answer (envelope, echoed request ID, an outcome valid for
+the kind, declared outputs and reasons, the version the descriptor
+reports); idempotency (a replay gets the identical answer, a resend the same
+answer, other inputs under the key 422, and after a failure the key is
+still free: success-only stores); signatures (unsigned, tampered, another
+secret, six minutes old or ahead, only an unknown scheme: 401; unreadable
+entries beside a good one: ignored); the protocol (another version, a
+malformed body, a kind the operation does not take: 400; an unknown
+operation: 404; unknown envelope fields ignored; every refusal a problem
+body). A target without two answered cases of one operation, or without an
+outage switch, is itself a problem: the test never passes by checking less.
+Its own test runs it against six broken connectors and finds each.
+
+**The HR connector** is connstub's HR server: connector `hr`, operation
+`manager_of`, a check, beside its REST endpoint on 8083. It decides what
+the worker's `hr.manager_of` decided before: the requester is `onBehalfOf`
+if set, else `createdBy`; `correct` with the requester's manager, or `deny`
+`unknown_employee` or `no_eligible_approver`; bad inputs are 400. It
+verifies every request (`--hr-hook-secret-env`; without it, every hook
+request is 401), keeps the stubs' knobs (latency, error rate, outage, a
+dropped first answer), and its version can be set for tests.
+
+**Specified, not built.**
+- *Action hooks over the wire.* Only after the transition commits; the key
+  reaches the connector, which stores successes only. `ok` with declared
+  outputs and `externalRefs`; `business_error{code}` routed to a
+  Type-declared error transition. `dryRun` must not actuate anything.
+- *Asynchronous completion.* An answer `202 {outcome: pending, taskId,
+  pollAfter, expiresAt, message}`. The connector completes with a signed
+  `POST /hooks/v1/tasks/{taskId}/complete` carrying the original key and a
+  normal answer, or the kernel polls `GET {connector}/tasks/{taskId}`. The
+  callback completes the activity by workflow ID and activity ID
+  (`CompleteActivityByID`): a connector never sees a task token. A task ID
+  is bound to the connector that made it; a second callback is a no-op; one
+  after the hold expired or was canceled is refused and recorded as a
+  discard event, never applied. A heartbeat extends `expiresAt` up to the
+  binding's `maxHold`; `cancel` is idempotent. A check answering `pending`
+  is the visible hold the kernel already has.
+- *Failure policy per binding, in the Type* (the report's table: timeouts
+  by kind, `fail`, `ignore` audited, `degrade`). Today: a check fails
+  closed, an enrich hook with a fallback degrades to it, an action records
+  `hook_failed`.
+
+**Namespaces later: the connector name as an alias.** The report wants
+namespaced connector names (`acme.hr-directory`); renaming would change
+Types. Instead, a Type's connector name can become a local alias that
+configuration maps to a namespaced connector (`hr` to
+`acme.hr-directory@1`), and the worker checks the descriptor's name against
+the namespaced one. Bundles can then add namespaces without changing a Type.
+
+**Packages: bundles, later.** No package system now. When one is needed, a
+package is a **bundle**: a git directory, the single source of truth for one
+namespace, applied with `pli apply`, holding YAML Types and connector
+descriptors (vendored, pinned by digest), per-environment endpoints and
+golden fixtures, and no code the kernel loads (connector code is at most an
+image reference the operator deploys). Its rules: a mandatory namespace on
+Type, field and connector names; one channel per namespace (a namespace a
+bundle manages is not edited by hand in production); `apply` adds by
+default, and a removal needs an explicit flag, deprecates rather than
+deletes, keeps Items readable and reserves the name forever; version bounds
+for Pli and the protocol; a lockfile of descriptor digests. Build a real
+package system (dependency resolution, a registry, signing) only when one of
+these becomes true:
+
+1. Untrusted third parties ship connector code to other organisations
+   through a shared catalogue.
+2. Cross-bundle Type dependencies appear in practice (a shared
+   `hr.employee` several bundles extend); even then, a "requires X >=
+   version" check before a solver.
+3. Pli is offered as a multi-tenant hosted service.
+4. Extensions need to run code inside Pli's UI or transaction path (after
+   exhausting CEL).
+5. Bundles are installed across many independent deployments and upgrades
+   start breaking Items in flight.
+
+### Next step: incidents
+
+What happens after a hook's budget runs out, so that nothing is dropped and
+someone can act. Specified here; to build next.
+
+- **Checks are unchanged.** A check fails closed: its hold resolves as
+  error (`budget_exhausted`, or a connector reason), the request stays where
+  it was, and the requester asking again is their rerun (a new hold, a new
+  key). `TestE2E_HRCheck_OutageIsAnError` holds this.
+- **An incident opens** on the Item for an action hook, and for an enrich
+  hook with no fallback, when it gives up (its budget ran out, or it failed
+  for good). An enrich hook with a fallback writes it, as today, and opens
+  none. The action's `hook_failed` is still recorded; the incident is the
+  open part. While it is open the Item says so (`Get`, history), and the
+  action is not complete for its entry.
+- **Three moves close it:**
+  - *retry*: run the hook again with a fresh budget, the same key and the
+    inputs exactly as first sent (kept with the incident). For a fault fixed
+    since (the connector was down, misconfigured).
+  - *rerun*: run it again with a fresh budget and the same key, reading the
+    inputs again. For an Item someone corrected (a wrong customer ID).
+    Success-only stores make it safe: see "Retry and rerun" above.
+  - *skip*: close it without running the hook; `hook_skipped` is recorded,
+    and the action counts as complete for its entry.
+- **Who:** retry and rerun, anyone who may move the Item in its current
+  state, or the `ops` role; skip, `ops` only, since it gives up an effect on
+  purpose. Each move is recorded with the person as actor, the hook as
+  `originating_hook`, and a reason code.
+- **What it takes:** an `item_incidents` table or open-incident events (a
+  schema change); three operations in `kernel.v1` (which only grows) and pli
+  commands; a workflow update that schedules the hook again, behind
+  `GetVersion` so recorded histories replay; the `ops` role in the dev
+  tokens.
 
 ## Out of scope for the spike
 

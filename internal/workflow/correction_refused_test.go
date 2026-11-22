@@ -17,7 +17,6 @@ import (
 	"github.com/google/uuid"
 	"go.temporal.io/sdk/temporal"
 
-	"github.com/francoisnyc/work-kernel/internal/hooks"
 	"github.com/francoisnyc/work-kernel/internal/item"
 	"github.com/francoisnyc/work-kernel/internal/itemservice"
 	wf "github.com/francoisnyc/work-kernel/internal/workflow"
@@ -87,7 +86,7 @@ func TestActivities_RunCheck_CorrectionRefused_RetryEndsCleanly(t *testing.T) {
 	}
 	id := res.ItemID
 	ask := m.transition(m.ana, id, "submitted", 0)
-	a := &wf.Activities{Items: m.k, Connectors: hooks.NewConnectors(m.crm.URL, m.erp.URL).WithHR(m.hr.URL)}
+	a := &wf.Activities{Items: m.k, Connectors: m.remoteHR()}
 	in := wf.HookInput{ItemID: id.String(), TypeID: "vacation_request", TypeVersion: 3, HookID: "hr_check",
 		CauseSeq: ask.ItemSeq, HoldID: ask.HoldID.String(), Hop: 1, IdempotencyKey: "hold:" + ask.HoldID.String()}
 	for attempt := 1; attempt <= 2; attempt++ {

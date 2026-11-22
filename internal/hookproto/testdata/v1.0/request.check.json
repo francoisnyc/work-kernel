@@ -1,0 +1,16 @@
+{
+  "protocol": "pli.hooks/v1",
+  "kind": "check",
+  "requestId": "6b1f4c1e-2d8a-4f0e-9a51-0c3b7d9e2f10",
+  "idempotencyKey": "hold:3f2c9a1e-5b7d-4c8e-9f01-2a3b4c5d6e7f",
+  "attempt": 2,
+  "deadline": "2026-11-22T10:15:05Z",
+  "hook": {"binding": "vacation_request@3#hr_check", "connector": "hr@1", "operation": "manager_of"},
+  "event": {"id": "9d1e7c2a-0b4f-4e6d-8a3c-5f2e1d0c9b8a:4", "type": "item.transition.requested",
+            "subject": "item/9d1e7c2a-0b4f-4e6d-8a3c-5f2e1d0c9b8a"},
+  "item": {"id": "9d1e7c2a-0b4f-4e6d-8a3c-5f2e1d0c9b8a", "type": "vacation_request", "typeVersion": 3},
+  "transition": {"from": "draft", "to": "submitted"},
+  "inputs": {"onBehalfOf": "user:ana", "createdBy": "agent:triage-bot"},
+  "trace": {"correlationId": "corr-1", "causationId": "9d1e7c2a-0b4f-4e6d-8a3c-5f2e1d0c9b8a:4"},
+  "connection": {"slot": "hr", "ref": "hr-directory"}
+}

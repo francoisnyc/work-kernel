@@ -49,7 +49,7 @@ func newMailStack(t *testing.T) *mailStack {
 }
 
 func (m *mailStack) connectors() *hooks.Connectors {
-	return hooks.NewConnectors(m.crm.URL, m.erp.URL).WithHR(m.hr.URL).WithEmail(m.mail.URL)
+	return m.remoteHR().WithEmail(m.mail.URL)
 }
 
 // submittedV3: ana's v3 request, submitted with --wait (HR names bob).
