@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/francoisnyc/work-kernel/internal/hookproto"
 	"github.com/francoisnyc/work-kernel/internal/item"
 )
 
@@ -73,9 +74,23 @@ type action struct {
 
 // Call says which hook of which Item runs an action. email.notify sends the
 // hook's ID as the message's template and the Item's ID with it.
+//
+// Since the hook protocol, it also carries what the envelope says besides
+// the inputs (pli.hooks/v1): RunCall builds a hookproto.Request from it.
+// Fields left empty are sent empty.
 type Call struct {
 	HookID string
 	ItemID string
+
+	Kind          hookproto.Kind // empty: from the action's declaration
+	TypeID        string
+	TypeVersion   int
+	From, To      string // a check's transition
+	EventID       string // <item>:<seq>, the cause
+	EventType     string // a hookproto.Event* constant
+	Actor         hookproto.Actor
+	CorrelationID string
+	Attempt       int
 }
 
 // catalog is every action a Type may name. A package-level map is fine here:

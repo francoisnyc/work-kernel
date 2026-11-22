@@ -78,6 +78,20 @@ const (
 	// different result (a second invoice), or the connector saw the key with
 	// a different request. A duplicate, never "already written".
 	ErrTypeKeyConflict = "KeyConflict"
+	// The hook protocol: a remote connector's configuration or contract is
+	// wrong. Each fails a check at once, with its own reason on the hold.
+	ErrTypeConnectorUnconfigured = "ConnectorUnconfigured"
+	ErrTypeConnectorUnauthorized = "ConnectorUnauthorized"
+	ErrTypeConnectorMismatch     = "ConnectorMismatch"
+)
+
+// The reasons a check's hold records when its connector is misconfigured
+// (the hook protocol). The others are check_failed, budget_exhausted and
+// correction_refused.
+const (
+	ReasonConnectorUnconfigured = "connector_unconfigured"
+	ReasonConnectorUnauthorized = "connector_unauthorized"
+	ReasonConnectorMismatch     = "connector_mismatch"
 )
 
 // versionTimerWaitsForHold is the workflow.GetVersion change ID of Step 2,

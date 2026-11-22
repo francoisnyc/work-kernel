@@ -113,7 +113,15 @@ type config struct {
 	DevDay time.Duration
 	// DevTypes are the Types the scale applies to; required with it.
 	DevTypes []string
+	// Connectors is the connectors file (--connectors): which
+	// connector@major is a remote service, at which URL. Empty: every
+	// connector is compiled in, and a remote-only one (hr@1) is
+	// unconfigured.
+	Connectors string
 }
+
+// flagConnectors names the connectors file (the hook protocol).
+const flagConnectors = "connectors"
 
 // The dev clock's flags. --dev-time-scale takes the length a day lasts
 // (2s: a day of a Type's timers passes in two seconds). It is refused

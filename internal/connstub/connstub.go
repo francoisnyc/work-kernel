@@ -139,6 +139,26 @@ func ServeHR(addr string) (*Server, error) {
 	return s, s.startOn(addr, s.hrHandler())
 }
 
+// The HR directory as a pli.hooks/v1 connector (the hook protocol spike):
+// connector hr, operation manager_of, on POST /hooks/v1, with its
+// descriptor at /.well-known/pli-connector. Every request must be signed
+// with its secret (Standard Webhooks); its successes are stored by
+// idempotency key, its failures never.
+
+// Secret returns the HR connector's signing secret (whsec_ form). NewHR
+// generates one.
+func (s *Server) Secret() string {
+	return ""
+}
+
+// SetSecret replaces the HR connector's signing secret: two instances (a
+// 1.4 and a 1.5) behind one connection share it.
+func (s *Server) SetSecret(whsec string) {}
+
+// SetVersion sets the version the HR connector reports (descriptor and
+// answers), "1.0.0" by default.
+func (s *Server) SetVersion(version string) {}
+
 // SetManager records who an employee's manager is, both principal IDs
 // (user:ana reports to user:bob).
 func (s *Server) SetManager(employee, manager string) {
