@@ -1046,3 +1046,246 @@ textarea {
 .options li:hover {
   background: var(--accent-soft);
 }
+
+/* --- Requests --- */
+
+.notice-success {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--tone-done-text);
+  background: var(--tone-done-bg);
+  border-color: transparent;
+  font-weight: 600;
+}
+.balance-title {
+  font-size: 1em;
+  margin: 0 0 4px;
+}
+.balance-left {
+  margin: 0;
+  font-size: 1.1em;
+  font-weight: 600;
+}
+.balance-number {
+  font-size: 2em;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.form-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 20px;
+  align-items: start;
+}
+.form-aside {
+  display: grid;
+  gap: 12px;
+}
+.field-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+@media (max-width: 960px) {
+  .form-layout,
+  .field-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.case-timeline {
+  display: grid;
+  gap: 2px;
+  border-left: 2px solid var(--border);
+  padding-left: 12px;
+}
+.case-entry {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 0;
+  font-size: 0.95em;
+}
+.case-entry-mark {
+  flex: none;
+  color: var(--text-muted);
+}
+.case-entry-system {
+  color: var(--text-muted);
+}
+.case-entry-refused .case-entry-mark {
+  color: var(--danger-text);
+}
+.case-system-tag {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 4px;
+  font-size: 0.85em;
+  font-weight: 600;
+}
+
+/* The process map (ui/ProcessMap.tsx). */
+.process {
+  display: grid;
+  gap: 16px;
+}
+.process-scroll {
+  overflow-x: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.process-map {
+  display: block;
+  font-size: 12px;
+}
+.pm-node rect {
+  fill: var(--surface);
+  stroke: var(--border-strong);
+  stroke-width: 1.5;
+}
+.pm-node text {
+  fill: var(--text);
+}
+.pm-node-label {
+  font-weight: 650;
+  font-size: 13px;
+}
+.pm-node-status {
+  font-size: 11px;
+}
+.pm-done rect {
+  fill: var(--tone-done-bg);
+  stroke: var(--tone-done-text);
+}
+.pm-done .pm-node-status {
+  fill: var(--tone-done-text);
+}
+.pm-current rect {
+  fill: var(--accent-soft);
+  stroke: var(--accent);
+  stroke-width: 3;
+}
+.pm-current .pm-node-status {
+  fill: var(--accent-strong);
+  font-weight: 700;
+}
+.pm-edge path {
+  fill: none;
+  stroke: var(--border-strong);
+  stroke-width: 1.5;
+}
+.pm-arrowhead {
+  fill: var(--border-strong);
+}
+.pm-edge.pm-taken path {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+.pm-edge.pm-system path {
+  stroke-dasharray: 5 4;
+}
+.pm-edge-label {
+  fill: var(--text-muted);
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+.pm-taken .pm-edge-label {
+  fill: var(--accent-strong);
+  font-weight: 650;
+}
+.pm-marker circle {
+  fill: var(--tone-waiting-bg);
+  stroke: var(--tone-waiting-text);
+}
+.pm-marker text {
+  fill: var(--tone-waiting-text);
+  font-size: 10px;
+  font-weight: 700;
+}
+.process-side {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 12px 24px;
+  align-items: start;
+  font-size: 0.9em;
+}
+@media (max-width: 720px) {
+  .process-side {
+    grid-template-columns: 1fr;
+  }
+}
+.process-side-title {
+  font-size: 1em;
+  margin: 0 0 6px;
+}
+.process-legend {
+  display: grid;
+  gap: 4px;
+}
+.process-legend li,
+.process-steps li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.process-steps {
+  display: grid;
+  gap: 6px;
+}
+.pm-number {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 0.8em;
+  font-weight: 700;
+  color: var(--tone-waiting-text);
+  background: var(--tone-waiting-bg);
+  border: 1px solid var(--tone-waiting-text);
+}
+.legend-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+  border-radius: 3px;
+  border: 2px solid var(--border-strong);
+}
+.legend-current {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.legend-done {
+  background: var(--tone-done-bg);
+  border-color: var(--tone-done-text);
+}
+.legend-line {
+  display: inline-block;
+  width: 18px;
+  border-top: 2px solid var(--border-strong);
+  transform: translateY(-3px);
+}
+.legend-taken {
+  border-top: 3px solid var(--accent);
+}
+.legend-system {
+  border-top-style: dashed;
+}
+.process-list summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.process-list ul ul {
+  margin: 2px 0 6px;
+  color: var(--text-muted);
+}
+.process-scroll:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}

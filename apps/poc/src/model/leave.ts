@@ -36,9 +36,10 @@ export function balanceSearch(ns: string): MessageInitShape<typeof SearchItemsRe
   };
 }
 
-// Every open balance the caller can read: HR's view.
+// Every balance in one state the caller can read: HR's view. (A principal
+// field cannot be an order_by: the page sorts by owner itself.)
 export function allBalancesSearch(ns: string, state: "open" | "closed" = "open"): MessageInitShape<typeof SearchItemsRequestSchema> {
-  return { parent: ns, filter: { types: [`${ns}/types/leave_balance`], states: [state] }, pageSize: 500, orderBy: "f_owner" };
+  return { parent: ns, filter: { types: [`${ns}/types/leave_balance`], states: [state] }, pageSize: 500 };
 }
 
 export function balanceOf(item: Item): Balance {
