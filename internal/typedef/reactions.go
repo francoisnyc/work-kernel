@@ -345,54 +345,60 @@ func (f Field) checkRoles(r reporter, p string) error {
 
 // checkKernelLinks validates a link type's writable_by and resolve. States
 // are known; the resolve's target Type is checked by CheckReactions.
-func (t *Type) checkKernelLinks(fail func(string, ...any) error) error {
+func (t *Type) checkKernelLinks(r reporter) {
 	resolvedOn := map[string]string{} // on_enter -> the link set there
-	for _, l := range t.Links {
-		where := "link " + l.Name
-		if err := l.checkRoles(); err != nil {
-			return fail("%v", err)
-		}
-		switch l.WritableBy {
-		case WritableByAnyone, WritableByKernel:
-		default:
-			return fail("%s: writable_by %q: the only value is kernel", where, l.WritableBy)
-		}
-		r := l.Resolve
-		if l.WritableBy == WritableByKernel && r == nil {
-			return fail("%s is writable_by kernel, but nothing sets it: add a resolve", where)
-		}
-		if r == nil {
-			continue
-		}
-		if l.WritableBy != WritableByKernel {
-			return fail("%s: a resolved link must be writable_by kernel, or the public door could change it", where)
-		}
-		if !l.SourceSingle() {
-			return fail("%s: a resolved link has at most one target (max: one)", where)
-		}
-		if len(l.Targets) != 1 || l.Targets[0] == AnyType {
-			return fail("%s: a resolved link has exactly one target Type, not %v", where, l.Targets)
-		}
-		if _, ok := t.State(r.OnEnter); !ok {
-			return fail("%s: resolve on_enter %q is not a declared state", where, r.OnEnter)
-		}
-		if r.OnEnter == t.InitialState {
-			return fail("%s: resolve on_enter %q is the initial state, which Create enters without resolving links",
-				where, r.OnEnter)
-		}
-		if r.Equals != ResolveEqualsCreator {
-			return fail("%s: resolve equals %q: the only value is creator", where, r.Equals)
-		}
-		if r.Field == "" || r.State == "" {
-			return fail("%s: resolve needs a field and a state of the target", where)
-		}
-		// One per state: the entering event records the one link it set.
-		if other, dup := resolvedOn[r.OnEnter]; dup {
-			return fail("%s: link %s is already set on entering %s; one resolved link per state", where, other, r.OnEnter)
-		}
-		resolvedOn[r.OnEnter] = l.Name
+	for i, l := range t.Links {
+		t.checkKernelLink(r, at("links", i), l, resolvedOn)
 	}
-	return nil
+}
+
+func (t *Type) checkKernelLink(r reporter, p string, l LinkType, resolvedOn map[string]string) {
+	where := "link " + l.Name
+	l.checkRoles(r, p)
+	switch l.WritableBy {
+	case WritableByAnyone, WritableByKernel:
+	default:
+		r.fail(CodeInvalidValue, at(p, "writable_by"), "Write writable_by: kernel, a list of role:<name>, or leave it out",
+			"%s: writable_by %q: the only value is kernel", where, l.WritableBy)
+	}
+	res, q := l.Resolve, at(p, "resolve")
+	if l.WritableBy == WritableByKernel && res == nil {
+		r.fail(CodeMissingCounterpart, at(p, "writable_by"), "Add a resolve that says how the kernel sets the link",
+			"%s is writable_by kernel, but nothing sets it: add a resolve", where)
+		return
+	}
+	if res == nil {
+		return
+	}
+	if l.WritableBy != WritableByKernel {
+		r.fail(CodeConflict, q, "Add writable_by: kernel to the link",
+			"%s: a resolved link must be writable_by kernel, or the public door could change it", where)
+	}
+	if !l.SourceSingle() {
+		r.fail(CodeConflict, q, "Give the link max: one", "%s: a resolved link has at most one target (max: one)", where)
+	}
+	if len(l.Targets) != 1 || l.Targets[0] == AnyType {
+		r.fail(CodeConflict, at(p, "targets"), "Name exactly one target Type", "%s: a resolved link has exactly one target Type, not %v", where, l.Targets)
+	}
+	if _, ok := t.State(res.OnEnter); !ok {
+		r.fail(CodeUnknownState, at(q, "on_enter"), "Name a declared state", "%s: resolve on_enter %q is not a declared state", where, res.OnEnter)
+	} else if res.OnEnter == t.InitialState {
+		r.fail(CodeInvalidValue, at(q, "on_enter"), "Resolve the link on entering a later state",
+			"%s: resolve on_enter %q is the initial state, which Create enters without resolving links", where, res.OnEnter)
+	}
+	if res.Equals != ResolveEqualsCreator {
+		r.fail(CodeInvalidValue, at(q, "equals"), "Write equals: creator", "%s: resolve equals %q: the only value is creator", where, res.Equals)
+	}
+	if res.Field == "" || res.State == "" {
+		r.fail(CodeRequired, q, "Give the resolve a field and a state of the target", "%s: resolve needs a field and a state of the target", where)
+	}
+	// One per state: the entering event records the one link it set.
+	if other, dup := resolvedOn[res.OnEnter]; dup {
+		r.fail(CodeOnlyOneAllowed, at(q, "on_enter"), "Resolve the two links on entering different states",
+			"%s: link %s is already set on entering %s; one resolved link per state", where, other, res.OnEnter)
+		return
+	}
+	resolvedOn[res.OnEnter] = l.Name
 }
 
 // newFieldEnv declares one CEL variable per field and nothing else: no
@@ -430,81 +436,86 @@ func isInt(ct *cel.Type) bool {
 }
 
 // checkInvariants validates and compiles the invariants.
-func (t *Type) checkInvariants(fail func(string, ...any) error) error {
+func (t *Type) checkInvariants(r reporter) {
 	env, err := newFieldEnv(t)
 	if err != nil {
-		return fail("invariant environment: %v", err)
+		r.fail(CodeExpressionInvalid, "invariants", "Fix the fields the message names", "invariant environment: %v", err)
+		return
 	}
 	seen := map[string]bool{}
 	for i := range t.Invariants {
-		inv := &t.Invariants[i]
+		inv, p := &t.Invariants[i], at("invariants", i)
 		if !reactionID.MatchString(inv.ID) {
-			return fail("invariant %q: the ID is a refusal code (lower case, digits and _)", inv.ID)
-		}
-		if seen[inv.ID] {
-			return fail("invariant %s is declared twice", inv.ID)
+			r.fail(CodeInvalidName, at(p, "id"), "Name it in lower case, digits and _: the ID is the code a refused write carries",
+				"invariant %q: the ID is a refusal code (lower case, digits and _)", inv.ID)
+		} else if seen[inv.ID] {
+			r.fail(CodeDuplicate, at(p, "id"), "Rename one of the two invariants", "invariant %s is declared twice", inv.ID)
 		}
 		seen[inv.ID] = true
 		if inv.Rule == "" {
-			return fail("invariant %s has no rule", inv.ID)
+			r.fail(CodeRequired, at(p, "rule"), "Write the rule, a condition that is always true", "invariant %s has no rule", inv.ID)
+			continue
 		}
 		prg, _, out, err := compileFields(env, inv.Rule)
-		if err != nil {
-			return fail("invariant %s: %v", inv.ID, err)
+		switch {
+		case err != nil:
+			r.failExpr(err, at(p, "rule"), "invariant %s: %v", inv.ID, err)
+		case !out.IsExactType(cel.BoolType):
+			r.fail(CodeExpressionType, at(p, "rule"), "Write a condition that is true or false", "invariant %s must yield a bool, not %s", inv.ID, out)
+		default:
+			inv.Program = prg
 		}
-		if !out.IsExactType(cel.BoolType) {
-			return fail("invariant %s must yield a bool, not %s", inv.ID, out)
-		}
-		inv.Program = prg
 	}
-	return nil
 }
 
 // checkAccepts validates accepts_reactions within the Type: the keys'
 // shape, and the fields (declared ints: reactions only add).
-func (t *Type) checkAccepts(fail func(string, ...any) error) error {
+func (t *Type) checkAccepts(r reporter) {
 	for _, key := range slices.Sorted(maps.Keys(t.AcceptsReactions)) {
+		p := at("accepts_reactions", key)
 		typeID, id, ok := item.ReactionParts(item.KindReaction + ":" + key)
 		// A star stands for any Type, whole, and only there: *:<id>.
 		if !ok || !reactionID.MatchString(id) || (typeID != WildcardType && strings.Contains(typeID, "*")) {
-			return fail("accepts_reactions key %q must be <type>:<reaction> or *:<reaction>, without a version", key)
+			r.fail(CodeInvalidName, p, "Write the key as <type>:<reaction> or *:<reaction>",
+				"accepts_reactions key %q must be <type>:<reaction> or *:<reaction>, without a version", key)
+			continue
 		}
 		acc := t.AcceptsReactions[key]
 		if len(acc.Fields) == 0 && len(acc.Moves) == 0 && !acc.MayCreate && len(acc.Sets) == 0 {
-			return fail("accepts_reactions %s accepts nothing: name fields, moves, creates or sets", key)
+			r.fail(CodeRequired, p, "Name the fields, moves, creates or sets it accepts, or remove the consent",
+				"accepts_reactions %s accepts nothing: name fields, moves, creates or sets", key)
+			continue
 		}
 		// A reaction adds to a field over a link only, and there consent
 		// names the Type.
 		if typeID == WildcardType && len(acc.Fields) > 0 {
-			return fail("accepts_reactions %s: fields are added over a link, where consent names the Type; "+
-				"*:<reaction> is for moves, creates and sets from the container or a contained Item", key)
+			r.fail(CodeKeyNotApplicable, at(p, "fields"), "Name the Type in the key, or consent to moves, creates and sets only",
+				"accepts_reactions %s: fields are added over a link, where consent names the Type; "+
+					"*:<reaction> is for moves, creates and sets from the container or a contained Item", key)
 		}
-		for _, id := range acc.Sets {
+		for j, id := range acc.Sets {
 			if _, ok := t.Field(id); !ok {
-				return fail("accepts_reactions %s: sets %s, which is not declared", key, id)
+				r.fail(CodeUnknownField, at(p, "sets", j), "Declare the field, or remove it", "accepts_reactions %s: sets %s, which is not declared", key, id)
 			}
 		}
-		for _, id := range acc.Fields {
-			f, ok := t.Field(id)
-			if !ok {
-				return fail("accepts_reactions %s: field %s is not declared", key, id)
-			}
-			if f.Type != Int {
-				return fail("accepts_reactions %s: field %s is not an int (a reaction adds)", key, id)
+		for j, id := range acc.Fields {
+			if f, ok := t.Field(id); !ok {
+				r.fail(CodeUnknownField, at(p, "fields", j), "Declare the field, or remove it", "accepts_reactions %s: field %s is not declared", key, id)
+			} else if f.Type != Int {
+				r.fail(CodeWrongFieldType, at(p, "fields", j), "Accept additions to an int field only", "accepts_reactions %s: field %s is not an int (a reaction adds)", key, id)
 			}
 		}
-		for _, st := range acc.Moves {
+		for j, st := range acc.Moves {
 			if _, ok := t.State(st); !ok {
-				return fail("accepts_reactions %s: moves into %q, which is not a state", key, st)
+				r.fail(CodeUnknownState, at(p, "moves", j), "Name a declared state", "accepts_reactions %s: moves into %q, which is not a state", key, st)
 			}
 		}
-		for _, id := range acc.Creates {
+		for j, id := range acc.Creates {
 			if _, ok := t.Field(id); !ok {
-				return fail("accepts_reactions %s: creates with field %s, which is not declared", key, id)
+				r.fail(CodeUnknownField, at(p, "creates", j), "Declare the field, or remove it", "accepts_reactions %s: creates with field %s, which is not declared", key, id)
 			}
 		}
 	}
-	return nil
 }
 
 // checkReactions validates and compiles the reactions. Hooks are known.

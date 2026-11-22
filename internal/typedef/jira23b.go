@@ -124,24 +124,25 @@ func CheckOffers(types []*Type) error {
 }
 
 // checkRoles validates a link type's writable_by roles.
-func (l LinkType) checkRoles() error {
+func (l LinkType) checkRoles(r reporter, p string) {
 	if len(l.WritableByRoles) == 0 {
-		return nil
+		return
 	}
 	if l.WritableBy != WritableByAnyone {
-		return fmt.Errorf("link %s: writable_by is either kernel or a list of roles, not both", l.Name)
+		r.fail(CodeConflict, at(p, "writable_by"), "Write writable_by: kernel, or a list of roles, not both",
+			"link %s: writable_by is either kernel or a list of roles, not both", l.Name)
+		return
 	}
 	seen := map[string]bool{}
-	for _, r := range l.WritableByRoles {
-		if !roleNameRe.MatchString(r) {
-			return fmt.Errorf("link %s: writable_by role %q is not a role name (lower case, digits, _ and -)", l.Name, r)
+	for i, role := range l.WritableByRoles {
+		if !roleNameRe.MatchString(role) {
+			r.fail(CodeInvalidName, at(p, "writable_by", i), "Name the role in lower case, digits, _ and -",
+				"link %s: writable_by role %q is not a role name (lower case, digits, _ and -)", l.Name, role)
+		} else if seen[role] {
+			r.fail(CodeDuplicate, at(p, "writable_by", i), "Remove the second one", "link %s: writable_by names role %s twice", l.Name, role)
 		}
-		if seen[r] {
-			return fmt.Errorf("link %s: writable_by names role %s twice", l.Name, r)
-		}
-		seen[r] = true
+		seen[role] = true
 	}
-	return nil
 }
 
 // UnmarshalYAML reads a link type. As for a field, writable_by takes a

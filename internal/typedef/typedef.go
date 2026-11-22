@@ -475,7 +475,7 @@ func (t *Type) check() error {
 	}
 
 	t.checkLinks(r)
-	legacyErr(t.checkKernelLinks(legacy))
+	t.checkKernelLinks(r)
 	// Before the guards: they may read the incoming names.
 	t.checkIncoming(r)
 	t.checkRollups(r)
@@ -504,8 +504,8 @@ func (t *Type) check() error {
 	t.checkHooks(r)
 	// Then what names hooks and fields: reactions, invariants, consents.
 	legacyErr(t.checkReactions(legacy))
-	legacyErr(t.checkInvariants(legacy))
-	legacyErr(t.checkAccepts(legacy))
+	t.checkInvariants(r)
+	t.checkAccepts(r)
 	t.checkMultiUses(r)
 	t.checkReadable(r)
 	t.checkJira24b(r)
