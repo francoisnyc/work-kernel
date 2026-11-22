@@ -2716,3 +2716,40 @@ and 28 s; `go vet` clean; `go test ./...` green (no Go changed).
 **Open:** the four Later items needed for Bonita, and the API gaps. **Next session:** Jira 2.4b, PR 2, or the
 Bonita processes. Heads-up: 2.4b's next PR gives lea `access_admin` in the dev-token file, which
 `devusers.test.ts` reads; whichever PR merges second rebases and updates that expectation.
+
+## 2026-11-22 — Jira 2.4b, PR 2: the access request (Phase D)
+
+**Built:** four Types on PR 1's building blocks, with **no kernel change**: `resource@1` (approvers, quorum and
+contact, `access_admin`'s; calendar and policy, `sla_admin`'s; `quorum_invalid`), `access_request@1` (submit
+copies the three and marks `f_submitted_at`; `submit_without_quorum`; one approval per approver; the approval
+goal on sla_goal@2; the two counting guards; leftover approvals closed; a fulfilment task on approval),
+`approval@1` (decided by its approver, never the requester, while the request is pending; the move at the request
+with `on_guard: skip`; the hand-over; unique while pending or approved; canceled by nobody but the request) and
+`fulfilment_task@1`. lea holds `access_admin` in the dev-token file. Scenario E (E1 to E8). design.md: "Jira
+2.4b, PR 2 as built"; Jira 2.4 is done in the build order.
+
+**Decided in Phase A, each agreed:** the submit with no quorum is refused by an invariant with a kernel-written
+marker, not a guard (a guard is judged before the transition's sets, so it never sees the copies); the goal
+measures the time to a decision, so `sla_answered` completes it on a rejection (sla_goal@2 consents by reaction
+ID; no sla_goal@3); a late decision is `GUARD_FAILED` in the window, `NO_TRANSITION` once closed.
+
+**Tests:** 8 item service tests, 1 typedef test, 2 end-to-end tests with a real worker (two approvals at once,
+three rounds; an approval and a rejection at once, three rounds), 1 vitest (the generic Inbox over approval@1).
+**Test changes, each agreed, each in a commit of its own:** apps/poc's devusers test expects lea's
+`access_admin`; scenario E's access desk is narrowed to its people (unnarrowed, a desk@3 is a portal every
+customer lists: C1 failed on a second run, and so did the customer Playwright test) and its resource is named
+Wiki (D1 searches VPN in the active category and found E's fulfilment task). The four Type lists grew (typedef,
+API, pli 41 → 45). The end-to-end tests accept `guard_false` or `not_in_from` for the second move's skip
+(design.md): which one is timing.
+
+**Surprises:** none in the kernel: every Phase B test of the item service passed on the first run of the Types.
+The scenario's surprises were all about sharing one namespace across steps and runs.
+
+**Numbers.** `go test -race ./...` green (item service 132 s, workflow suite 342 s). Rebased on main after PR #39
+(apps/poc, Requests): apps/poc's vitest 408 and typecheck green. Scenario: twice on a fresh stack, 102 s and
+103 s. Playwright: 9 tests in 7.3 s. vitest: 464. The stack ran without the `poc` service, as before (its image
+cannot be built here); CI builds it and runs its journeys.
+
+**Open:** the Later list (placement for the other Types, sla_goal@1; groups as readers; excludes; the dropped
+reaction). **Next session:** Bonita, or the high Later items.
+

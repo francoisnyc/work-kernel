@@ -1657,6 +1657,145 @@ ok portal-bot --session "$s_kim" item get "$c12n" >/dev/null
 refuse portal-bot "PERMISSION_DENIED APPROVAL_UNAVAILABLE" --session "$s_kim" item create --type reply@1 --in "$c1" --set "f_body=wider $w"
 err_has "an agent acting for a customer cannot be approved"
 
+# ---------------------------------------------------------------------------
+# Scenario E (Jira 2.4b): an access request. A resource says who approves
+# it and how many must; a request inside it copies both on submit, gets one
+# approval per approver and an approval goal, and moves once when enough
+# decide. lea holds access_admin (the resources) and sla_admin (their
+# calendar and policy); sam is the resources' contact for breaches. ana
+# asks, and is also an approver of one resource: she can neither approve her
+# own request nor change who does.
+# ---------------------------------------------------------------------------
+
+# approvals REQ: "approver:state" for each approval in REQ, sorted.
+approvals() {
+	ok lea item list "$1" --type approval --page-size 100 |
+		j '[.items[]? | "\(.fields.f_approver):\(.state)"] | sort | join(" ")'
+}
+# approval_of REQ WHO: the name of WHO's approval in REQ.
+approval_of() {
+	ok lea item list "$1" --type approval --page-size 100 | jqx -r --arg w "$2" '[.items[]? | select(.fields.f_approver == $w) | .name][0] // ""'
+}
+# children_of REQ TYPE: the names of REQ's children of TYPE.
+children_of() { ok lea item list "$1" --type "$2" --page-size 100 | names; }
+has_approvals() { [ "$(approvals "$1" | wc -w | tr -d ' ')" = "$2" ]; }
+approvals_are() { [ "$(approvals "$1")" = "$2" ]; }
+has_child() { [ -n "$(children_of "$1" "$2")" ]; }
+# request WHO RESOURCE TITLE: a submitted request; prints its name.
+request() {
+	local r
+	r=$(ok "$1" item create --type access_request@1 --in "$2" --set "f_title=$3 $w" | j .item.name)
+	ok "$1" item transition "$r" --to pending >/dev/null
+	printf '%s\n' "$r"
+}
+breach_hook2=$(ok lea type get sla_goal@2 | j '[.type.states[] | select(.id == "running") | .acting[]?.hook][0] // ""')
+
+step "E1: lea sets up the access desk (desk@3, for its people only) and two resources; sam cannot narrow it"
+adesk=$(ok lea item create --type desk@3 --set "f_key=AR-$w" --set "f_name=Access $w" \
+	--narrow user:lea,user:sam,user:ana,user:bob,user:dana,user:erin | j .item.name)
+refuse sam "PERMISSION_DENIED PLACEMENT_NOT_WRITABLE" item update "$adesk" --readers user:sam
+slow=$(ok lea item create --type sla_policy@2 --set "f_name=Access, a day $w" --set f_approval_s=86400 | j .item.name)
+fast=$(ok lea item create --type sla_policy@2 --set "f_name=Access, seconds $w" --set f_approval_s=3 | j .item.name)
+wiki=$(ok lea item create --type resource@1 --in "$adesk" --set "f_name=Wiki $w" \
+	--set 'f_approvers=["user:bob","user:dana","user:erin"]' --set f_required=2 --set f_contact=user:sam | j .item.name)
+prod=$(ok lea item create --type resource@1 --in "$adesk" --set "f_name=Prod DB $w" \
+	--set 'f_approvers=["user:ana","user:bob","user:dana"]' --set f_required=2 --set f_contact=user:sam | j .item.name)
+for r in "$wiki" "$prod"; do ok lea item link "$r" calendar "$cal" >/dev/null; done
+ok lea item link "$wiki" sla_policy "$slow" >/dev/null
+ok lea item link "$prod" sla_policy "$fast" >/dev/null
+refuse ana "PERMISSION_DENIED FIELD_NOT_WRITABLE" item create --type resource@1 --in "$adesk" --set "f_name=mine $w" \
+	--set 'f_approvers=["user:ana"]' --set f_required=1
+refuse lea "FAILED_PRECONDITION INVARIANT_FAILED" item create --type resource@1 --in "$adesk" --set "f_name=none $w" \
+	--set 'f_approvers=["user:bob"]' --set f_required=2
+
+step "E2: a request outside a resource cannot be submitted (no quorum to copy)"
+loose=$(ok ana item create --type access_request@1 --in "$adesk" --set "f_title=loose $w" | j .item.name)
+refuse ana "FAILED_PRECONDITION INVARIANT_FAILED" item transition "$loose" --to pending
+expect "the invariant" "$(meta invariant)" "submit_without_quorum"
+
+step "E3: 2 of 3 approve: the request moves once; the third approval is closed and refuses a late decision"
+e1=$(request ana "$wiki" "Wiki for the audit")
+wait_until 30 "one approval per approver" has_approvals "$e1" 3
+expect "the copies" "$(fld "$e1" f_required) $(ok lea item get "$e1" | j '.item.fields.f_approvers | join(" ")') $(fld "$e1" f_desk_contact)" \
+	"2 user:bob user:dana user:erin user:sam"
+expect "the approval's title" "$(fld "$(approval_of "$e1" user:bob)" f_title)" "Wiki for the audit $w"
+wait_until 30 "the approval goal" fld_set "$e1" f_due_approval
+ok bob item transition "$(approval_of "$e1" user:bob)" --to approved >/dev/null
+ok dana item transition "$(approval_of "$e1" user:dana)" --to approved >/dev/null
+wait_until 30 "the request approved" state_is lea "$e1" approved
+wait_until 30 "erin's approval closed" approvals_are "$e1" "user:bob:approved user:dana:approved user:erin:canceled"
+refuse erin "FAILED_PRECONDITION NO_TRANSITION" item transition "$(approval_of "$e1" user:erin)" --to approved
+expect "moved once, by the second approval" \
+	"$(ok lea item history "$e1" --page-size 100 | j '[.events[] | select(.kind == "ITEM_EVENT_KIND_TRANSITIONED" and .to_state == "approved") | .actor] | join(" ")')" \
+	"reaction:approval:move_approved"
+wait_until 30 "the goal stopped" fld_is "$e1" f_due_approval ""
+expect "the goal: met" "$(ok lea item list "$e1" --type sla_goal | j '[.items[] | "\(.state) \(.fields.f_outcome)"] | join(",")')" "completed met"
+
+step "E4: the fulfilment task appears for sam and lea"
+wait_until 30 "the fulfilment task" has_child "$e1" fulfilment_task
+task=$(children_of "$e1" fulfilment_task)
+for who in sam lea; do
+	expect "$who reads the task" "$(ok "$who" item get "$task" | j '"\(.item.state) \(.item.fields.f_resource)"')" "open Wiki $w"
+done
+ok sam item transition "$task" --to in_progress >/dev/null
+refuse ana "PERMISSION_DENIED NOT_ALLOWED" item transition "$task" --to done
+
+step "E5: a rejection after one approval rejects the request and closes the rest"
+e2=$(request ana "$wiki" "Wiki for the contractor")
+wait_until 30 "its approvals" has_approvals "$e2" 3
+ok erin item transition "$(approval_of "$e2" user:erin)" --to approved >/dev/null
+ok bob item transition "$(approval_of "$e2" user:bob)" --to rejected >/dev/null
+wait_until 30 "the request rejected" state_is lea "$e2" rejected
+wait_until 30 "dana's approval closed" approvals_are "$e2" "user:bob:rejected user:dana:canceled user:erin:approved"
+wait_until 30 "the goal stopped" fld_is "$e2" f_due_approval ""
+expect "a rejection is a decision: the goal is met" "$(ok lea item list "$e2" --type sla_goal | j '[.items[] | "\(.state) \(.fields.f_outcome)"] | join(",")')" "completed met"
+expect "no fulfilment task" "$(children_of "$e2" fulfilment_task)" ""
+
+step "E6: bob hands over to sam; refused to dana (already approving) and to himself; one to ana she cannot decide"
+e3=$(request ana "$wiki" "Wiki for the auditor")
+wait_until 30 "its approvals" has_approvals "$e3" 3
+refuse bob "FAILED_PRECONDITION NOT_UNIQUE" item transition "$(approval_of "$e3" user:bob)" --to pending --set f_delegate=user:dana
+refuse bob "FAILED_PRECONDITION GUARD_FAILED" item transition "$(approval_of "$e3" user:bob)" --to pending --set f_delegate=user:bob
+refuse dana "PERMISSION_DENIED NOT_ALLOWED" item transition "$(approval_of "$e3" user:bob)" --to pending --set f_delegate=user:sam
+hand=$(approval_of "$e3" user:bob)
+ok bob item transition "$hand" --to pending --set f_delegate=user:sam >/dev/null
+expect "the approval is sam's" "$(fld "$hand" f_approver)" "user:sam"
+refuse bob "PERMISSION_DENIED NOT_ALLOWED" item transition "$hand" --to approved
+expect "the history says who handed over to whom" \
+	"$(ok lea item history "$hand" --page-size 100 | j '[.events[] | select(.kind == "ITEM_EVENT_KIND_TRANSITIONED" and .from_state == "pending" and .to_state == "pending") | .actor] | join(" ")')" "user:bob"
+# The documented weakness: handed to the requester, an approval waits for access_admin.
+ok erin item transition "$(approval_of "$e3" user:erin)" --to pending --set f_delegate=user:ana >/dev/null
+refuse ana "PERMISSION_DENIED NOT_ALLOWED" item transition "$(approval_of "$e3" user:ana)" --to approved
+ok lea item transition "$(approval_of "$e3" user:ana)" --to pending --set f_delegate=user:erin >/dev/null
+ok sam item transition "$hand" --to approved >/dev/null
+ok erin item transition "$(approval_of "$e3" user:erin)" --to approved >/dev/null
+wait_until 30 "the request approved" state_is lea "$e3" approved
+
+step "E7: ana, requester and approver of the prod DB: she cannot approve her own request, nor change who does"
+e4=$(request ana "$prod" "prod DB read access")
+wait_until 30 "its approvals" has_approvals "$e4" 3
+anas=$(approval_of "$e4" user:ana)
+refuse ana "PERMISSION_DENIED NOT_ALLOWED" item transition "$anas" --to approved
+refuse ana "PERMISSION_DENIED FIELD_NOT_WRITABLE" item update "$e4" --set 'f_approvers=["user:ana"]'
+refuse ana "PERMISSION_DENIED FIELD_NOT_WRITABLE" item update "$prod" --set f_required=1
+refuse ana "PERMISSION_DENIED PLACEMENT_NOT_WRITABLE" item update "$anas" --move-to "$e1"
+refuse ana "PERMISSION_DENIED PLACEMENT_NOT_WRITABLE" item update "$e4" --readers user:ana
+refuse ana "PERMISSION_DENIED FIELD_NOT_WRITABLE" item create --type approval@1 --in "$e4" --set f_approver=user:ana
+
+step "E8: the prod DB's target is 3 s: its approval goal breaches, sam is emailed, and the late decision is missed"
+[ -n "$breach_hook2" ] || fail "sla_goal@2's running state has no acting timer with a hook"
+wait_until 30 "the approval goal" has_child "$e4" sla_goal
+g4=$(children_of "$e4" sla_goal)
+wait_until 30 "the goal breached" fld_set "$g4" f_breached_at
+wait_until 30 "sam emailed about the breach" sent_is "$g4" "$breach_hook2" user:sam
+ok bob item transition "$(approval_of "$e4" user:bob)" --to approved >/dev/null
+ok dana item transition "$(approval_of "$e4" user:dana)" --to approved >/dev/null
+wait_until 30 "the request approved" state_is lea "$e4" approved
+wait_until 30 "the goal stopped" state_is lea "$g4" completed
+expect "a decision after the due instant: missed" "$(fld "$g4" f_outcome)" "missed"
+wait_until 30 "ana's approval closed" state_is lea "$anas" canceled
+expect "sam was emailed once" "$(sent "$g4" "$breach_hook2")" "user:sam"
+
 step "D1: lea searches VPN in the active category"
 vpn=$(issue lea story "VPN drops on wifi")
 issue lea task "VPN setup guide" >/dev/null
@@ -1755,7 +1894,8 @@ for reason in UNAUTHENTICATED SESSION_INVALID INVALID_REQUEST NOT_FOUND NOT_ALLO
 	NO_TRANSITION MISSING_FIELDS GUARD_FAILED WIDEN_NOT_CONFIRMED STALE HELD \
 	IDEMPOTENCY_KEY_REUSED NOT_CAUGHT_UP AUDIENCE_CHANGED \
 	LINK_CARDINALITY ALREADY_LINKED NOT_LINKED LINK_TARGET_TYPE \
-	FIELD_NOT_WRITABLE FIELD_FROZEN INVARIANT_FAILED LINK_NOT_WRITABLE TOO_MANY_VALUES APPROVAL_UNAVAILABLE; do
+	FIELD_NOT_WRITABLE FIELD_FROZEN INVARIANT_FAILED LINK_NOT_WRITABLE TOO_MANY_VALUES APPROVAL_UNAVAILABLE \
+	PLACEMENT_NOT_WRITABLE NOT_UNIQUE; do
 	case $seen in *" $reason "*) ;; *) fail "no step triggered $reason" ;; esac
 done
 cat <<'EOF'

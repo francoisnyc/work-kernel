@@ -17,7 +17,7 @@ describe("parseDevUsers", () => {
       token: "dev-lea-not-a-secret",
       principal: "user:lea",
       namespace: "acme",
-      roles: ["sla_admin", "desk_agent"],
+      roles: ["sla_admin", "desk_agent", "access_admin"],
     });
     expect(byName("kim").roles).toEqual([]);
   });

@@ -1517,7 +1517,7 @@ in the journal.
 | Jira 2.3a (**done**) | The kernel pieces for goals kept as contained Items, proved with test Types: working-time arithmetic on a calendar, reactions that move children or set a field on the container, consent by reaction ID, a create reaction reading linked Items, an **acting timer at a field's instant**, creation as an entry, `not_empty` (see "Jira part 2, step 3a as built") | A job starts, pauses, resumes and stops its meters; a meter is marked late at its due instant and never before; a stopped worker changes none of the numbers |
 | Jira 2.3b (**done**) | The `sla` package (`sla_goal`, `calendar`, `sla_policy`), the incident Type with first-response and resolution goals, pli and the web UI | Scenario B runs through pli. **Done 2026-11-20**: "Jira part 2, step 3b as built" below, and the journal |
 | Etag rule (**done**) | The etag changes only when something a caller could overwrite changes (the state, a field a caller may write, a link, the readers, the container); outcome records, hook records and kernel-written field writes leave it alone | A save made with an etag read right after an incident's creation is accepted once its goals have written their due instants: 10 times in 10 (measured in step 3b: refused 10 times in 10). **Done 2026-11-20**: "The etag" under "Public API (v1)", and the journal |
-| Jira 2.4 | Customers as principals and public or internal comments (4a, built); the access request with N-of-M approvers | Scenario C runs through pli |
+| Jira 2.4 (**done**) | Customers as principals and public or internal comments (4a); the access request with N-of-M approvers (4b: the building blocks, then the Types) | Scenarios C and E run through pli. **Done 2026-11-22**: "Jira 2.4b, PR 2 as built" below, and the journal |
 | Bonita | The company's real Bonita processes, mapped against the BPMN pattern table, then rebuilt | Planned after Jira 2 |
 
 ## Jira proof of concept
@@ -2532,6 +2532,103 @@ unchanged.
 **The API.** GetType shows `for_each`, `on_guard`, `unique_among_siblings`,
 `placement_writable_by` and `nobody`. Two reasons: `PLACEMENT_NOT_WRITABLE`
 (PERMISSION_DENIED) and `NOT_UNIQUE` (FAILED_PRECONDITION).
+
+### Jira 2.4b, PR 2 as built: the access request (2026-11-22)
+
+Someone asks for access to a resource; N of its M approvers must approve;
+the desk fulfils. Four Types, built on PR 1's building blocks, with **no
+kernel change**: `resource@1`, `access_request@1`, `approval@1`,
+`fulfilment_task@1`. The dev-token file gives lea `access_admin`. Scenario E
+runs it through pli.
+
+**resource@1.** Who approves (`f_approvers`, a set of up to 8, the reaction
+target cap), how many must (`f_required`) and who is told when a decision
+is late (`f_contact`): all three written by `access_admin` only, and kept
+sane by the invariant `quorum_invalid` (1 ≤ N ≤ M). Its calendar and SLA
+policy links are `sla_admin`'s. Placed by `access_admin` only. It lets
+reactions read all four of its fields (`f_name` for the fulfilment task).
+
+**access_request@1.** Made inside its resource; `draft → pending → approved
+| rejected | withdrawn`; placed by the kernel only.
+- **submit** (`draft → pending`, the requester only) copies `f_required`,
+  `f_approvers` and `f_contact` (as `f_desk_contact`) from the resource by
+  plain reference, in its own write, and marks `f_submitted_at`. All four are
+  the kernel's. The resource changing later changes no submitted request.
+- **A submit with no quorum** (outside a resource, say) is refused by the
+  invariant `submit_without_quorum`, judged after the copies: "submitted
+  means N and M are set and 1 ≤ N ≤ M". **Not a guard, because a guard is
+  judged before the transition's `sets`**, on the fields as they were: it
+  would never see the copies. The marker `f_submitted_at` is what tells
+  the invariant the request has been submitted (an invariant reads fields,
+  not the state).
+- **Entering pending** makes one `approval` per member of `f_approvers`
+  (`for_each`, `f_approver: each`, the request's title copied for the
+  Inbox) and an approval goal (`sla_goal@2`, metric `approval`) from the
+  resource's calendar and policy.
+- **The two moves out of pending** are guarded by counts over its
+  approvals, whoever can see them: `approved` when
+  `children.approval.filter(c, c.state == "approved").size() >= f_required`,
+  `rejected` as soon as one approval is rejected. Anyone who sees the
+  request may make them by hand; the guards make the result the same as the
+  reactions'.
+- **Leaving pending** closes the leftover approvals (`close_on_approved`,
+  `close_on_rejected`, `close_on_withdrawn`: children moves to `canceled`,
+  at most 8).
+- **The goal measures the time to a decision**, so a rejection completes it
+  as an approval does: `sla_stop` on entering `approved`, `sla_answered` on
+  entering `rejected`, `sla_cancel` on `withdrawn`. The second reuses the ID
+  `sla_answered` because sla_goal@2 consents **by reaction ID**
+  (`*:sla_stop`, `*:sla_answered`, `*:sla_cancel`), and a reaction runs on
+  entering one state: two states need two reactions, two IDs. No
+  sla_goal@3. The request offers `breach_contact: f_desk_contact`.
+- **Approved**, it makes a `fulfilment_task` naming the resource
+  (`container.f_name`).
+
+**approval@1.** One approver's decision, in its request; placed by the
+kernel only.
+- **Decided** (`pending → approved | rejected`) by its approver
+  (`field:f_approver`), never by whoever created the request
+  (`except: [container_creator]`), only while the request is pending
+  (guard `container.state == "pending"`).
+- **Each decision moves the request** (`move_approved`, `move_rejected`:
+  `target: container`, `target_from: [pending]`, `on_guard: skip`). Until
+  enough approvals have decided, the move is recorded as `reaction_skipped
+  guard_false`. **Two decisions at the same moment**: the request's row lock
+  lets one move leave pending, and the other move is skipped, as
+  `guard_false` if it ran before the other decision committed, or
+  `not_in_from` if the request had already left pending. Which one depends
+  on timing; the end-to-end tests accept either, and hold what matters:
+  exactly one `reaction_applied`, exactly one skip, and exactly one outcome
+  of the request.
+- **A late decision**: `GUARD_FAILED` in the window before the leftovers are
+  closed (the request is no longer pending), `NO_TRANSITION` after
+  (`canceled` has no move to `approved`).
+- **The hand-over**: `pending → pending` by its approver or `access_admin`,
+  `required: [f_delegate]`, `sets: {f_approver: 'f_delegate'}`, guard
+  `f_delegate != f_approver` (to oneself is `GUARD_FAILED`). `f_approver` is
+  `unique_among_siblings: [pending, approved]`, so to someone who already
+  holds a live approval on the request is `NOT_UNIQUE`. A delegate set any
+  other way breaks the invariant `delegate_not_approver`. The history shows
+  the move, by whom, and the new approver.
+- **Cancel** is `allowed: [nobody]`: only the request's reactions close one.
+- `approver_missing` refuses an approval made by hand (`f_approver` is the
+  kernel's).
+
+**fulfilment_task@1.** `open → in_progress → done`, `role:desk_agent`;
+`f_resource` is the kernel's, and `resource_missing` refuses one made by
+hand. Desk agents find it by its Type and state.
+
+**What the requester cannot do** (scenario E7, the item service tests):
+approve her own request; write the copies or the resource's fields; create
+an approval naming herself or none; move or narrow an approval, the request
+or the resource. The weakness of PR 1 (#8 and Q4c) stands: an approval
+handed over to the requester waits for `access_admin`.
+
+**Visibility.** Requests are not narrowed: the whole namespace sees who
+asked for what (Later: groups as readers). Approvers find their approvals in
+the generic web Inbox: approval@1's decisions name `field:f_approver`, so
+the Inbox asks for "approvals in pending whose f_approver is me", with no
+code that knows the access request.
 
 ## Web UI as built (2026-11-18)
 
