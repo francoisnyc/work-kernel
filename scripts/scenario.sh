@@ -1907,7 +1907,7 @@ run ana type validate "$repo/types"
 [ "$rc" -eq 0 ] || fail "pli type validate types/ exited $rc, want 0" "$(cat "$tmp/out")"
 [ ! -s "$tmp/out" ] || fail "pli type validate types/ printed: $(cat "$tmp/out")"
 
-step "type validate: a changed ticket v1 and a new Type with a problem exit 1, one line each; nothing is registered"
+step "type validate: a changed ticket v1 and a new Type with a problem exit 1: the new Type's problem first, then VERSION_CHANGED once it is sound; nothing is registered"
 mkdir -p "$tmp/drafts"
 awk '{ print } /^fields:$/ { print "  - {id: f_extra, type: string}" }' "$repo/types/ticket.v1.yaml" >"$tmp/drafts/ticket.v1.yaml"
 grep -q 'f_extra' "$tmp/drafts/ticket.v1.yaml" || fail "could not change the ticket v1 draft"
@@ -1915,7 +1915,7 @@ draft_id="vt_${w}"
 printf 'id: %s\nversion: 1\nfields:\n  - {id: today, type: date}\n' "$draft_id" >"$tmp/drafts/new.v1.yaml"
 run ana type validate "$tmp/drafts"
 [ "$rc" -eq 1 ] || fail "pli type validate drafts/ exited $rc, want 1" "$(cat "$tmp/out")"
-expect "problem lines" "$(wc -l <"$tmp/out" | tr -d ' ')" 2
+expect "problem lines" "$(wc -l <"$tmp/out" | tr -d ' ')" 1
 grep -q "^$tmp/drafts/new.v1.yaml:4:6: RESERVED_NAME typedef $draft_id v1: " "$tmp/out" ||
 	fail "no RESERVED_NAME line for the new Type:" "$(cat "$tmp/out")"
 # VERSION_CHANGED waits for every draft to be sound on its own.

@@ -370,18 +370,22 @@ func TestCheck_ActionMajors(t *testing.T) {
 }
 
 // A registered definition that cannot be read is the store's fault, not the
-// draft's: an error, not Problems, that names it ("registered memo").
+// draft's: an error, not Problems, that says so ("registered") and names
+// the Type when its JSON does ("memo").
 func TestCheck_AnUnreadableRegisteredVersion(t *testing.T) {
 	draft := sources(map[string]string{"memo.yaml": "id: memo\nversion: 1\n"})
-	for what, bad := range map[string][]byte{
-		"not JSON":         []byte("{"),
-		"not a sound Type": []byte(`{"id": "memo", "version": 0}`),
+	for what, c := range map[string]struct {
+		def  []byte
+		want string
+	}{
+		"not JSON":         {[]byte("{"), "registered"},
+		"not a sound Type": {[]byte(`{"id": "memo", "version": 0}`), "registered memo"},
 	} {
-		types, err := typedef.Check(draft, [][]byte{bad})
+		types, err := typedef.Check(draft, [][]byte{c.def})
 		var ps typedef.Problems
-		if err == nil || errors.As(err, &ps) || types != nil || !strings.Contains(err.Error(), "registered memo") {
-			t.Errorf("%s: Check = %v, %v; want no Types and an error, not Problems, that names the registered memo",
-				what, keys(types), err)
+		if err == nil || errors.As(err, &ps) || types != nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: Check = %v, %v; want no Types and an error, not Problems, that says %q",
+				what, keys(types), err, c.want)
 		}
 	}
 }

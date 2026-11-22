@@ -600,7 +600,9 @@ func TestSchema_RequiredIsTypedefs(t *testing.T) {
 	walk = func(node any) {
 		switch v := node.(type) {
 		case map[string]any:
-			if _, ok := v["required"]; ok {
+			// The keyword's value is a list; a property named required
+			// (transitions[].required) holds a schema.
+			if _, ok := v["required"].([]any); ok {
 				count++
 			}
 			for _, sub := range v {
