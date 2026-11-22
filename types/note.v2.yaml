@@ -1,0 +1,12 @@
+# A note, version 2 (the hardening step after Jira 2.4): version 1,
+# placed by the kernel only: a note stays in the incident it was written in;
+# nobody moves or narrows it.
+#
+# An internal note (Jira part 2, step 4a): staff only, because no Type
+# shares it.
+id: note
+version: 2
+fields:
+  - {id: f_body, type: string}
+
+placement_writable_by: [kernel]

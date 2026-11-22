@@ -14,7 +14,7 @@ export function validateRequest(form: NewRequest): Partial<Record<keyof NewReque
 }
 
 // Opens a request in a desk: the incident (title, priority, impact when
-// chosen), then its description as the requester's first reply (incident@2
+// chosen), then its description as the requester's first reply (incident@3
 // has no description field). If that second write fails the request still
 // exists: detailsSaved is false and the page offers to add them.
 //
@@ -30,7 +30,7 @@ export async function openRequest(
   const created = await api.createItem({
     parent: ns,
     requestId: crypto.randomUUID(),
-    type: `${ns}/types/incident/versions/2`,
+    type: `${ns}/types/incident/versions/3`,
     container: desk,
     fields,
   });
@@ -40,7 +40,7 @@ export async function openRequest(
     await api.createItem({
       parent: ns,
       requestId: crypto.randomUUID(),
-      type: `${ns}/types/reply/versions/1`,
+      type: `${ns}/types/reply/versions/2`,
       container: request.name,
       fields: { f_body: form.description.trim() },
     });
@@ -50,7 +50,8 @@ export async function openRequest(
   }
 }
 
-// A reply (public, reply@1) or a note (internal, note@1) in an incident.
+// A reply (public, reply@2) or a note (internal, note@2) in an incident:
+// both stay in the incident they were written in (placed by the kernel).
 export async function postMessage(
   api: Pick<Api, "createItem">,
   ns: string,
@@ -61,7 +62,7 @@ export async function postMessage(
   const res = await api.createItem({
     parent: ns,
     requestId: crypto.randomUUID(),
-    type: `${ns}/types/${kind}/versions/1`,
+    type: `${ns}/types/${kind}/versions/2`,
     container: incident,
     fields: { f_body: body },
   });

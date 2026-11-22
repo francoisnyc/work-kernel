@@ -1,0 +1,13 @@
+# A reply, version 2 (the hardening step after Jira 2.4): version 1,
+# placed by the kernel only: a reply stays in the incident it was written in;
+# nobody moves or narrows it.
+#
+# A reply (Jira part 2, step 4a): the public conversation on a request.
+# Customers see it where the request shares it (incident@2).
+id: reply
+version: 2
+fields:
+  - {id: f_body, type: string}
+customer_fields: [f_body]
+
+placement_writable_by: [kernel]
