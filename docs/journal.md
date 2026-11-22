@@ -32,6 +32,16 @@ Ideas noted during the spike, not built yet.
     `acme.hr-directory@1`), with the bundle format.
   (Hook protocol spike)
 
+- Serve the Type format's JSON Schema through the API (V2c checks it in as
+  a file only), so an authoring tool fetches the schema of the server it
+  talks to. (Ventoux 2a, answer 17)
+- Type problems: a reaction, and a consent across Types, still stop at
+  their first problem (every other one is checked); a reaction cycle is
+  reported one at a time. Finer when a tool needs it. (Ventoux 2a)
+- The custom YAML decoders of Field, LinkType and Accepted still validate
+  what stage (a) now checks first; unreachable, kept as a backstop (a
+  failure there is WRONG_SHAPE). Remove when the JSON Schema (V2c) lands.
+  (Ventoux 2a)
 - **High, before real use: move Items to a new Type version.** The kernel
   has no such operation, so every Item created before a hardening keeps its
   version's rules: an incident@2 is still narrowed by its requester, its
@@ -2863,3 +2873,27 @@ git) pointing at this container's Chromium. CI builds the real images and runs t
 
 **Open:** the hook protocol's Later items (top of this file). **Next session:** incidents (design.md, "Next step:
 incidents"), or Bonita, whose connectors would be written against `pli.hooks/v1` from the start.
+
+## 2026-11-22 — Ventoux 2a: every problem of a Type as data (Phase C)
+
+**Built:** `typedef` reports every problem of a Type, or of a folder, as `Problems` (an `error`):
+`{source, path, line, column, severity, code, message}`, 36 codes in design.md's new "Type problems".
+Three stages: (a) the YAML, walked against the Type's structs by reflection (every unknown key and wrong
+shape, merge keys expanded); (b) each Type, each declaration checked on its own; (c) the Types together,
+only once each is sound. ~400 `fail` sites now carry a code, a path and what to do; the old message is
+the start of each. design.md: "Type problems" and the Ventoux build order (V1, V2a–c). **No test
+written before 2a changed.**
+
+**Surprises:** yaml.v3 stops at the first custom decoder that fails, so it never reported more than one
+unknown key: stage (a) needed its own walk. Expression environments declared every field, so one bad
+field broke every guard (a cascade): they now declare each ID once and skip missing or reserved ones.
+`sla_goal` uses YAML merge keys (`<<: *anchor`), which a naive walk reads as a key. CEL errors span
+lines; a message is kept on one line.
+
+**Numbers.** typedef: 55 new tests, all green with `-race`, and every package that runs without
+Docker. **Not run here:** the Postgres packages (item service, API, pli, relay, workflow, cmd/itemservice)
+need Docker, which this container lacks. Read by hand: their only dependency on typedef's wording is
+`TestRegisterType_LinkInverseAgreesAcrossVersions`, whose four names are all still in the new message.
+CI decides.
+
+**Open:** the three Later entries above. **Next session:** CI on the PR, then V2b (`ValidateTypes`).
