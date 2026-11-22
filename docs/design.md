@@ -2610,7 +2610,8 @@ replaces the picker as it replaces the API's interceptor.
 ## PoC apps as built (2026-11-21)
 
 **PoC apps: a product-shaped client.** `apps/poc` is a third client of the
-public API, beside `pli` and the generic web UI: three apps whose screens
+public API, beside `pli` and the generic web UI: three apps (and, since
+2026-11-22, Requests, below) whose screens
 know their Types, the way a product would. A service desk for agents
 (`desk@2`, `incident@2`, `reply@1`, `note@1`, `sla_goal@1`), a customer
 portal on the same Types, and a tracker for the PLAT Types (`space`,
@@ -2719,6 +2720,170 @@ workaround cost is the case for a call or a field later (journal, Later).
 12. **Due instants are working time on a calendar the app does not read.**
     *Cost:* countdowns are wall-clock time and must say so ("(wall clock)" in
     a table's column header, on each value on a detail page).
+
+### The Requests area (2026-11-22)
+
+**A process app on the kernel.** A fourth area of `apps/poc`, on
+`vacation_request@3` and `leave_balance@1`, to see how a BPM-style app
+feels before the real Bonita processes arrive. Built on the public API
+only, like the other areas: no kernel, proto or Type change. **Who sees
+it:** every staff member, as the last area: the vacation request names no
+role for asking (`creator`) or deciding (`field:f_approver`, whoever the HR
+check names; dana decides bob's without a role; bob's `approver` role is the
+ticket's). Its **Balances** screen is for those who hold `hr_admin`
+(leave_balance's only role). Customers never see it.
+
+**The screens.**
+- *My leave*: the balance (allowance, used, left, days waiting for
+  approval), my requests with their status in the employee's words
+  ("Waiting for bob", "Checking with HR", "Being approved"), and why a
+  waiting request's approval was refused.
+- *Request time off*: dates, days, leave type, reason. Days follow the
+  dates (weekdays, no holiday calendar) until the person types in the
+  field; then a date change leaves them and shows the count as a hint. The
+  form checks blanks only. Sending creates a draft, then asks to move it to
+  submitted, waiting up to 5 s for the HR check; a refusal keeps the draft,
+  and the next send moves that same draft with the form's fields.
+- *Waiting for you*: the requests whose approver I am, oldest first by when
+  they last entered submitted, with how long each has waited (wall clock).
+- *The decision*: the request, the requester's balance (or why it cannot be
+  shown), their other requests in the same period; approve or reject with
+  a comment (needed to reject).
+- *The case*, for everyone: the facts, the viewer's moves, the process map
+  and the timeline.
+- *Balances* (`hr_admin`): every balance HR reads, with days waiting.
+  Read-only.
+
+**The process map is drawn from `GetType` alone**, so it is generic over
+the Type (it draws the ticket, the incident and the PLAT Types too, and
+should serve the Bonita processes). States are boxes in category order, one
+column per category (triage, backlog, todo, active, waiting), with the end
+states (done, canceled, none) sharing the last column. Moves are
+right-angled arrows: to the next column through the gap, skipping columns
+along a track below the boxes, going back along a track above, inside a
+column in a loop on the right; each arrow has its own port, lane and
+track, so no two arrows that share no end run along each other (a test
+holds every Type to it). Labels say the move and who may take it, read
+from `allowed` and `except` ("Approver (not the requester)"). **System
+steps** are numbered on the map and listed under it: a checked move, a
+state timer ("After 5 days"), an acting timer ("Reminder to the approver
+after 2 days, then every day, 2 at most"), a link the kernel sets ("Links
+the requester's leave balance"), a reaction ("Adds Days to Used on the
+balance, before the move applies", "Gives back what Deduct took"). A move
+no person makes (`principal:system:*`, or `allowed: [nobody]` since Jira
+2.4b) is dashed, and is never offered as a button anywhere in the apps.
+The current step is highlighted, the steps done ticked, the moves made
+drawn in the accent colour, all from the history. "The process as a list"
+says the same in text. No diagram library: a state machine of ten states
+does not need one; a larger Bonita process may.
+
+**The timeline** says who did what when, from the request's history, the
+decision comments inside it and what its reactions wrote on the balance. A
+move the kernel finished (after the HR check, after the deduction) is said
+as the person's who asked for it (`on_behalf_of`); what the kernel did by
+itself is a system step: who the HR check named, the balance it linked,
+reminders, emails, days taken and given back, expiry.
+
+**What the app decides, and what it does not.** It warns before sending
+when the days are more than the days left, and refuses nothing: the server
+refuses. A refusal is said in plain words by its reason and, for the date
+rule (`GUARD_FAILED`), the part that failed is named from the values sent
+("The last day is before the first day."): an explanation of the server's
+refusal, never one the app makes. A decision carries the **etag** the
+approver read: a request recalled, edited and sent again meanwhile comes
+back `STALE`, is read again, and nothing applies. Verified against the
+stack: two reminders and a refused approval leave the etag as it was. The
+comment is a `comment@1` inside the request, written only once the
+decision has applied. A case page offers the moves whose `allowed` names
+the viewer plainly (the requester, the person a field holds, a role they
+hold, anyone), never a system move; guards and `except` stay the server's.
+
+**The dev clock.** The stack's worker runs `vacation_request` with a day of
+2 s (a submitted request expires after 10 s): right for the scenario and
+the journeys, too fast for a person. `compose.demo.yaml` (`docker compose
+-f docker-compose.yml -f compose.demo.yaml up`) makes a day 2 minutes:
+reminders at 4 and 6 minutes, expiry at 10. The journey keeps the fast
+clock: bob's tab is open before ana sends, and each of the two requests is
+decided within its 10 s.
+
+**Learned from the stack:**
+- `GetType` marks a move **checked** when a held reaction holds it, not
+  only when a check hook does: Approve is checked (the deduction holds it),
+  so the map says so beside the deduction.
+- An action hook's record (`hook_ran`) carries the root human as
+  `on_behalf_of` (bob on the approval email, ana on the reminders): a
+  timeline must not read it as that person's act.
+- `order_by` takes no principal field: Balances sorts by owner in the
+  browser.
+- A balance write is tied to its case by causation: its `causation_id` is
+  `<request id>:<item_seq>`, the deduction's the approval's ask
+  (`transition_requested` toward approved), the refund's the move into
+  withdrawn. The case keeps a balance write only when its cause is in the
+  request's history and moves, or asks to move, into the reaction's state.
+
+#### The Requests area: what the API and the Types lacked
+
+Each gap was worked around in the app, without a kernel, proto or Type
+change. The four marked **Bonita** are in the journal's Later list as needed
+for the real processes.
+
+1. **`GetType` lists no hooks** (**Bonita**). It says a move is `checked`,
+   names an acting timer's hook, and lists reactions; an action on entering
+   a state (the emails) and a check's name are invisible. *Cost:* the map
+   shows an unnamed check and no emails; emails appear only in the timeline,
+   after they ran (`hook_ran`), in words the app keeps per hook ID. *A real
+   process needs:* hooks in `GetType` (id, trigger, kind, action, state).
+2. **No balance check at submit, no reservation for pending days**
+   (**Bonita**). The balance is checked only when an approval deducts it.
+   *Cost:* the form can only warn; the refusal comes at approval, to the
+   approver, and the employee learns it from the request; two requests that
+   do not both fit can both wait for approval (the app sums the days
+   waiting, for display only). *A real process needs:* a check at submit
+   and a reservation, released by a rejection or an expiry.
+3. **No decision comment** (**Bonita**). `f_comment` is the requester's
+   reason; the approver may write it, which would overwrite the reason.
+   *Cost:* a `comment@1` inside the request, a second write after the
+   decision; if it fails, the decision stands without it (the approver is
+   told); the timeline shows a comment once its author's move is in the
+   history. *A real process needs:* a decision field only the approver may
+   write.
+4. **No filter on the creator.** *Cost:* My leave reads every request the
+   person can read (three pages of 500, newest first) and keeps theirs; past
+   that it says older ones are not shown. The decision screen's "other
+   requests in this period" and Balances' days waiting pick the requester
+   out the same way. A link filter on the balance would find submitted
+   requests, never drafts.
+5. **No time-in-state, no `update_time`, no sort by create time.** *Cost:*
+   the inbox reads one history per row to know when each request entered
+   submitted, and orders one page of 500 in the browser.
+6. **An approver cannot see the requester's balance** (**Bonita**).
+   Balances are narrowed to their owner and HR. *Cost:* the journey's seed
+   (HR) adds the manager as a reader; otherwise the decision screen says it
+   cannot show the balance, and a refusal for lack of days comes without
+   the numbers. *A real process needs:* readers derived from a field (the
+   approver of a linked request joins the balance's readers), with groups
+   as readers (Jira 2.4b's Later item).
+7. **Every staff member can read every request** (dates and reason): the
+   approver is known only after the HR check, so requests are not narrowed
+   (as in the scenario). *Cost:* none in the app; a privacy hole. The same
+   readers-from-a-field would close it.
+8. **The deduction lives on the balance**, not on the request. *Cost:* the
+   case page reads the balance's history and ties writes to the case by
+   causation; someone who cannot read the balance sees "Days given back"
+   from the request's own record, and no amounts.
+9. **Unpaid leave is deducted too**: the deduction has no condition on the
+   leave type. *Cost:* the form says so when Unpaid is chosen.
+10. **No working-day calendar, and `f_days` is not checked against the
+    dates.** *Cost:* the form suggests the weekdays, which the person may
+    change; HR and the app can disagree on a request's length.
+11. **No Watch.** *Cost:* pages read again every 30 s; on the dev clock an
+    inbox can show a request that has since expired. Deciding it comes back
+    `STALE` (the etag changed with the state) and the page reads it again:
+    the etag keeps an approver from deciding a request that changed since
+    they opened it.
+12. **No "who am I", no display names** (as for the other areas). *Cost:*
+    the dev-token file decides who sees Balances; before a request is sent
+    the form can only say "your manager decides": the HR check names them.
 
 ## Out of scope for the spike
 

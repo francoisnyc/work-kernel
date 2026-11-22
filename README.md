@@ -35,7 +35,7 @@ only:
   **on 127.0.0.1 only**.
 - `http://localhost:8090`: [the web UI](#the-web-ui), **on 127.0.0.1 only**.
 - `http://localhost:8091`: [the PoC apps](#the-poc-apps) (a tracker, a
-  service desk and a customer portal), **on 127.0.0.1 only**.
+  service desk, a customer portal and leave requests), **on 127.0.0.1 only**.
 - `http://localhost:8233`: the Temporal UI, **on 127.0.0.1 only** (it shows
   workflow histories with field values, and can terminate and signal workflows).
 - `http://localhost:8085`: dev only, **on 127.0.0.1 only**, the emails the stack sent, read-only
@@ -298,7 +298,7 @@ reachable from this machine.
 docker compose up -d --build --wait     # then open http://localhost:8091
 ```
 
-A product-shaped client of the proof of concept, in `apps/poc`: three apps
+A product-shaped client of the proof of concept, in `apps/poc`: four apps
 whose screens know their Types, the way a product would, built on the
 public API only (no kernel, proto or Type change). The generic UI on 8090
 stays as it is, the admin view. Sign in as one of the dev users (staff and
@@ -327,6 +327,19 @@ menu switches users and the theme (light, dark, or the system's).
   place, moves, links both ways, comments and history; the backlog with
   quick filters, a word search held to the space and a quick create; epics
   with their progress.
+- **Requests** (every staff member: the vacation request names no role for
+  asking or deciding): a process app on the vacation request and the leave
+  balance. My leave (the balance, my requests and where each stands);
+  Request time off (dates, days, leave type, reason; refusals in plain
+  words); Waiting for you (the requests I approve, oldest first, with how
+  long each has waited); a decision screen (the request, the requester's
+  balance, their other requests in the period; approve or reject with a
+  comment); a case page for everyone, with a process map drawn from the
+  Type (the current step, the steps done, the system's steps numbered) and
+  a timeline, the deduction from the balance included. hana (`hr_admin`)
+  also gets Balances, across people. On the stack's dev clock a request
+  expires 10 s after it is sent: to try it by hand, start the stack with
+  `compose.demo.yaml` (above), where it waits 10 minutes.
 - Times due are shown **on the wall clock** ("in 2 h"): tables say "(wall
   clock)" in the column header, detail pages on each value. A due instant
   was computed in working time on a calendar the app does not know.
@@ -389,8 +402,9 @@ only Postgres or only Temporal leaves the two out of step.
   `apps/poc`: `npm ci`, then `npm test` (vitest: the logic in Node, the
   components in jsdom), `npm run typecheck`, and `npm run dev` (a dev server
   on 5174 against the running stack's API; `VITE_DEV_USERS=1 npm run dev`
-  for the sign-in list). `npm run e2e` runs the three journeys (lea on the
-  board, sam working an incident, kim in the portal) against the stack on
+  for the sign-in list). `npm run e2e` runs the four journeys (lea on the
+  board, sam working an incident, kim in the portal, ana and bob on a leave
+  request, with hana's balances) against the stack on
   8091; they seed their own data, so they run after `make scenario` or not,
   any number of times. The apps import `web/src/gen` and `web/src/rank`
   read-only; they never edit `web/`.
