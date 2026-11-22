@@ -203,6 +203,17 @@ Ideas noted during the spike, not built yet.
   V2b, Phase A)
 - `ValidateTypes` could return the drafts as parsed Types (as `GetType`
   shows them), for an authoring tool's preview. (Ventoux V2b, Phase A)
+- A `from: [list]` form for transitions, so "the owner may drop it from
+  anywhere" is one line, not six (build_step@1 has six X->dropped lines; a
+  `from:` list is `WRONG_SHAPE` today). Next to Ventoux item 8 (patterns
+  that expand into rules, `docs/plans/ideas-from-ventoux.md`); decide with
+  the next Type-format change. (build_step@1)
+- epic@2: count build_step in an epic's progress (`incoming: issues` lists
+  only story, bug and task today) and in its close guard, so an epic of
+  steps is not done while a step is neither done nor dropped. (build_step@1)
+- Action hooks on build_step through a pli.hooks/v1 connector: start a
+  builder on entering `questions`, a reviewer on entering
+  `tests_proposed`. (build_step@1)
 - **High, before real use: move Items to a new Type version.** The kernel
   has no such operation, so every Item created before a hardening keeps its
   version's rules: an incident@2 is still narrowed by its requester, its
@@ -3560,3 +3571,30 @@ trust in its input) still first. Starting work, step 2 (the `start` block) was m
 and not used here: it would replace the access Types' "only inside a system" invariant with `start: {in:
 [system]}`, and could stop an agent asking in its own name; it does not retire an old version. **Next session:**
 the owner's decision on the two reports.
+
+## 2026-11-22 — build_step@1: how a step of this repository is built, as a Type (Phase C)
+
+**Built:** `types/build_step.v1.yaml`, the Type of `docs/plans/build-step-type.md` with the owner's
+decisions: only a maintainer creates a step (`f_owner` is `role:maintainer`'s, invariant
+`owner_missing`); every approval is `field:f_owner`, which never matches an agent; frozen fields per
+state, with `f_questions` frozen once the step leaves answering (not in dropped), `f_pr_url` from
+in_review, `f_journal` in done; six X->dropped lines. Tests first: `internal/api/buildstep_test.go`
+(approved), 7 tests and 41 subtests; then an expectation update for a new Type in the three tests that
+list every Type, before the YAML. The plan's tracker namespace corrected to `acme`. **No kernel, schema
+or API change**, and no test written before this step changed except those three expected lists.
+
+**Surprises:** none in the kernel: every rule the Type needs already existed, and the tests passed on
+the first load of the YAML. The agent-session rules mattered for the tests: a fresh session with no
+narrowing read creates at the top level without `NEEDS_APPROVAL`. `autonomous-loop.md` named no
+tracker namespace, so only `build-step-type.md` needed the `dev` -> `acme` correction.
+
+**Numbers.** `go vet ./...` clean; `go test ./...` green with Docker (the whole repository).
+
+**Open:** the design.md section "build_step as built", whose wording goes to the owner first; the
+three Later entries above. **Next session:** the design.md section, then the PR; the owner moves the
+tracker stack (`~/code/ori-tracker`) forward and loads build_step@1; the first real build_step is the
+next step picked from the tracker after that.
+
+**Rebased onto main 2026-11-24.** Written on 2026-11-22; it sits here, after later entries, because
+the branch waited for the draft limits to be raised (PR #58): with build_step@1 the repository's Types
+passed 50 files, the most one `ValidateTypes` call took then.
