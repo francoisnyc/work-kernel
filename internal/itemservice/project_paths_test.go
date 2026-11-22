@@ -37,6 +37,8 @@ var projectExempt = map[string]string{
 	"AgentSession":     "returns the session's agent, user, namespace, scopes (opaque Item IDs the session was granted) and powers; no Item data",
 	// Step 0, part 3: the item service's start in dev-token mode.
 	"EnsureRoles": "returns roles (namespace, principal ID, role name) the server's own config named; no Item data",
+	// Ventoux V2b: draft Types checked against the registered ones.
+	"ValidateTypes": "returns problems in Type definitions (the caller's drafts and the registered versions), which hold no Item data; reads no Items",
 }
 
 // noItemData are the result types that carry no Item data. A

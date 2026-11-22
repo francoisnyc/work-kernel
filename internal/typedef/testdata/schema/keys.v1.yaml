@@ -1,0 +1,17 @@
+# Corpus for the schema tests (Ventoux V2c): the keys and shapes no file of
+# types/ uses. With types/, the corpus uses every key typedef knows, and both
+# shapes of accepts_reactions and writable_by (schema_internal_test.go). It
+# loads on its own (stages a and b); its link names a Type it does not load.
+id: corpus_keys
+version: 1
+
+fields:
+  - {id: f_total, type: int, writable_by: kernel}
+
+links:
+  # inverse_max: how many sources one target may have.
+  - {name: part_of, inverse: parts, targets: [corpus_whole], max: one, inverse_max: many}
+
+# The map form of a consent, with fields.
+accepts_reactions:
+  corpus_part:tally: {fields: [f_total]}

@@ -48,6 +48,8 @@ func TestContract_OnlyPublicOperations(t *testing.T) {
 	want := []string{"CreateItem", "GetItem", "UpdateItem", "TransitionItem", "SearchItems",
 		"ListItems", "ListItemEvents", "GetType", "ListTypes", "StartAgentSession", "ApproveWiden", // part 2 added five
 		"LinkItems", "UnlinkItems"} // proof of concept Step 1
+	// Ventoux V2b, after ListTypes.
+	want = slices.Insert(want, slices.Index(want, "ListTypes")+1, "ValidateTypes")
 	if !slices.Equal(got, want) {
 		t.Errorf("ItemService methods = %v, want %v", got, want)
 	}

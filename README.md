@@ -97,7 +97,11 @@ let anyone on your network call the API with a dev token.
 ```sh
 export PLI_TOKENS=dev-tokens.example.yaml
 pli --as ana type list
+pli --as ana type validate types/   # draft Types checked against the registered ones; nothing registered
 ```
+
+The Type format is also described by a JSON Schema, `schema/type.schema.json`,
+for editors and authoring tools; typedef stays the authority.
 
 ## A two-minute walkthrough
 

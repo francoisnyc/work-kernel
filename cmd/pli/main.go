@@ -14,6 +14,7 @@
 //	  item unlink SRC LINK_TYPE TARGET [--etag E] [--request-id ID]
 //	  type get TYPE
 //	  type list
+//	  type validate [--json] PATH...
 //	  agent start [--for USER] --scopes S,S --powers P,P
 //	  agent approve SESSION SCOPE [--expect-audience A] [--yes] [--request-id ID]  (run it --as the user who approves)
 //
@@ -45,9 +46,14 @@
 // --expect-audience A (namespace or restricted) names the audience instead
 // of asking the server for it first.
 //
-// Each response is printed as JSON (protobuf's JSON mapping, with the proto
-// field names). An API error goes to stderr as "error: CODE REASON: message"
-// and exits 1; a usage error exits 2. After SESSION_INVALID pli adds a hint.
+// "type validate" sends draft Types (files, or folders read as the item
+// service reads its Types folder) to ValidateTypes and prints one line per
+// problem, "<source>:<line>:<col>: <CODE> typedef <id> v<n>: <message>", or
+// the response with --json; it exits 1 on any ERROR.
+//
+// Every other response is printed as JSON (protobuf's JSON mapping, with
+// the proto field names). An API error goes to stderr as
+// "error: CODE REASON: message" and exits 1; a usage error exits 2. After SESSION_INVALID pli adds a hint.
 package main
 
 import (
@@ -111,6 +117,7 @@ const usage = `usage: pli [--server URL] [--tokens FILE] --as NAME [--session ID
   rank rebalance --in CONTAINER    (rewrite the container's rank keys, short and even; run it when nobody is dragging)
   type get TYPE
   type list
+  type validate [--json] PATH...  (draft Types, files or folders, checked against the registered ones; nothing registered)
   agent start [--for USER] --scopes S,S --powers P,P
   agent approve SESSION SCOPE [--expect-audience A] [--yes] [--request-id ID]  (run it --as the user who approves)
 
@@ -195,6 +202,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		"agent approve":   c.agentApprove,
 		"type get":        c.typeGet,
 		"type list":       c.typeList,
+		"type validate":   c.typeValidate,
 	}
 	name := rest[0] + " " + rest[1]
 	cmd, ok := commands[name]
@@ -214,6 +222,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	switch {
 	case err == nil:
 		return exitOK
+	case errors.Is(err, errProblems): // printed already
+		return exitAPI
 	case errors.As(err, &ue):
 		fmt.Fprintf(stderr, "pli %s: %v\n", name, err)
 		return exitUsage

@@ -1,0 +1,247 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/francoisnyc/work-kernel/schema/type.schema.json",
+  "title": "Work kernel Type",
+  "description": "One version of a Type, as written in YAML (types/*.yaml). Written by hand (Ventoux V2c) and checked in tests against what typedef accepts: it is never stricter. It covers keys and shapes, the closed lists of categories and field types, and that id and version are required; everything else (names that resolve, expressions that compile, the Types together) is typedef's and ValidateTypes's. For now it is as lenient as typedef: a text value may be any scalar, and most values may be null (docs/journal.md, Later).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "version"],
+  "properties": {
+    "id": {"description": "The Type's ID: lower case, digits and _.", "type": ["string", "number", "boolean"]},
+    "version": {"description": "The version, 1 or more. A registered version never changes: publish the next one.", "type": "integer"},
+    "initial_state": {"description": "The state Items start in.", "$ref": "#/$defs/text"},
+    "fields": {"description": "The fields Items of this Type hold.", "type": ["array", "null"], "items": {"$ref": "#/$defs/field"}},
+    "states": {"description": "The states, each with a category.", "type": ["array", "null"], "items": {"$ref": "#/$defs/state"}},
+    "transitions": {"description": "The moves between states, and who may make them.", "type": ["array", "null"], "items": {"$ref": "#/$defs/transition"}},
+    "hooks": {"description": "Calls to actions of the catalog: enrich, check and action hooks.", "type": ["array", "null"], "items": {"$ref": "#/$defs/hook"}},
+    "links": {"description": "Link types from Items of this Type to other Items.", "type": ["array", "null"], "items": {"$ref": "#/$defs/link"}},
+    "incoming": {"description": "Names for links other Types declare to this one.", "type": ["array", "null"], "items": {"$ref": "#/$defs/incoming"}},
+    "rollups": {"description": "Counts over linked Items.", "type": ["array", "null"], "items": {"$ref": "#/$defs/rollup"}},
+    "reactions": {"description": "What happens to linked or contained Items when an Item of this Type moves.", "type": ["array", "null"], "items": {"$ref": "#/$defs/reaction"}},
+    "invariants": {"description": "Rules every write must keep (CEL).", "type": ["array", "null"], "items": {"$ref": "#/$defs/invariant"}},
+    "accepts_reactions": {
+      "description": "Consent: which reactions of other Types (<type>:<reaction>) may write, move or create Items of this Type.",
+      "type": ["object", "null"],
+      "additionalProperties": {"$ref": "#/$defs/accepted"}
+    },
+    "readable_by_reactions": {"description": "Fields reactions of other Types may read.", "$ref": "#/$defs/texts"},
+    "offers": {"description": "What this Type offers the hooks of Items created inside it: offer name -> field.", "$ref": "#/$defs/textMap"},
+    "customer_fields": {"description": "Fields a customer may see.", "$ref": "#/$defs/texts"},
+    "own": {"description": "What a customer sees of their own Items.", "$ref": "#/$defs/texts"},
+    "shared": {"description": "What a customer sees of Items shared with them.", "$ref": "#/$defs/texts"},
+    "placement_writable_by": {"description": "Who may place Items of this Type in a container: role:<name> entries.", "$ref": "#/$defs/texts"}
+  },
+  "$defs": {
+    "text": {"description": "A text value. typedef reads any scalar as text for now.", "type": ["string", "number", "boolean", "null"]},
+    "texts": {"description": "A list of text values.", "type": ["array", "null"], "items": {"$ref": "#/$defs/text"}},
+    "textMap": {"description": "A map of text values.", "type": ["object", "null"], "additionalProperties": {"$ref": "#/$defs/text"}},
+    "count": {"description": "A whole number.", "type": ["integer", "null"]},
+    "flag": {"description": "true or false.", "type": ["boolean", "null"]},
+    "writableBy": {
+      "description": "kernel (only hooks and the kernel write it), or a list of role:<name>.",
+      "type": ["string", "number", "boolean", "null", "array"],
+      "items": {"$ref": "#/$defs/text"}
+    },
+    "accepted": {
+      "description": "A consent: a list of fields the reaction may write, or a map of fields, moves, creates and sets.",
+      "anyOf": [
+        {"$ref": "#/$defs/texts"},
+        {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "fields": {"description": "Fields the reaction may write.", "$ref": "#/$defs/texts"},
+            "moves": {"description": "States the reaction may move Items into.", "$ref": "#/$defs/texts"},
+            "creates": {"description": "Fields a create reaction may set.", "$ref": "#/$defs/texts"},
+            "sets": {"description": "Fields a set reaction may write.", "$ref": "#/$defs/texts"}
+          }
+        }
+      ]
+    },
+    "field": {
+      "description": "A field.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"description": "The field's ID, usually f_<name>.", "$ref": "#/$defs/text"},
+        "type": {"description": "The field's type.", "enum": ["string", "int", "bool", "enum", "principal", "date", "datetime"]},
+        "options": {"description": "An enum field's values.", "$ref": "#/$defs/texts"},
+        "multiple": {"description": "The field holds a set of values.", "$ref": "#/$defs/flag"},
+        "max": {"description": "A multiple field's most values (0: no limit).", "$ref": "#/$defs/count"},
+        "writable_by": {"$ref": "#/$defs/writableBy"},
+        "unique_among_siblings": {"description": "Fields whose values are unique among the Items of one container.", "$ref": "#/$defs/texts"}
+      }
+    },
+    "state": {
+      "description": "A state.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"$ref": "#/$defs/text"},
+        "category": {"description": "What the state means to every Type.", "enum": ["triage", "backlog", "todo", "active", "waiting", "done", "canceled", "none"]},
+        "frozen": {"description": "Fields no write may change in this state.", "$ref": "#/$defs/texts"},
+        "timer": {"$ref": "#/$defs/timer"},
+        "at": {"$ref": "#/$defs/atTimer"},
+        "acting": {"description": "Timers that act without leaving the state.", "type": ["array", "null"], "items": {"$ref": "#/$defs/actingTimer"}}
+      }
+    },
+    "timer": {
+      "description": "Leave the state for another after a while.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "after": {"description": "A duration, such as 4h.", "$ref": "#/$defs/text"},
+        "to": {"$ref": "#/$defs/text"}
+      }
+    },
+    "atTimer": {
+      "description": "Leave the state for another at a datetime field's instant.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "field": {"$ref": "#/$defs/text"},
+        "to": {"$ref": "#/$defs/text"}
+      }
+    },
+    "actingTimer": {
+      "description": "A timer that runs a hook or sets fields while the Item stays in its state.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"$ref": "#/$defs/text"},
+        "after": {"$ref": "#/$defs/text"},
+        "every": {"$ref": "#/$defs/text"},
+        "at": {"$ref": "#/$defs/text"},
+        "max": {"$ref": "#/$defs/count"},
+        "when": {"description": "A CEL guard.", "$ref": "#/$defs/text"},
+        "hook": {"$ref": "#/$defs/text"},
+        "sets": {"description": "Field -> CEL expression.", "$ref": "#/$defs/textMap"}
+      }
+    },
+    "transition": {
+      "description": "A move from one state to another.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "from": {"$ref": "#/$defs/text"},
+        "to": {"$ref": "#/$defs/text"},
+        "guard": {"description": "A CEL expression that must be true.", "$ref": "#/$defs/text"},
+        "required": {"description": "Fields that must be set.", "$ref": "#/$defs/texts"},
+        "allowed": {"description": "Who may make the move (empty: anyone who sees the Item).", "$ref": "#/$defs/texts"},
+        "except": {"description": "Who may not, even if allowed.", "$ref": "#/$defs/texts"},
+        "escape": {"description": "May leave a state while a hold is open.", "$ref": "#/$defs/flag"},
+        "clears": {"description": "Fields the move unsets.", "$ref": "#/$defs/texts"},
+        "sets": {"description": "Computed effects: field -> CEL expression.", "$ref": "#/$defs/textMap"}
+      }
+    },
+    "hook": {
+      "description": "A call to an action of the catalog (<connector>.<operation>[@<major>]).",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"$ref": "#/$defs/text"},
+        "on": {"$ref": "#/$defs/text"},
+        "state": {"$ref": "#/$defs/text"},
+        "from": {"$ref": "#/$defs/text"},
+        "to": {"$ref": "#/$defs/text"},
+        "reaction": {"$ref": "#/$defs/text"},
+        "kind": {"$ref": "#/$defs/text"},
+        "action": {"$ref": "#/$defs/text"},
+        "reads": {"$ref": "#/$defs/texts"},
+        "writes": {"$ref": "#/$defs/texts"},
+        "fallback": {"description": "Values an enrich hook writes when its action fails.", "type": ["object", "null"], "additionalProperties": {}}
+      }
+    },
+    "link": {
+      "description": "A link type.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"$ref": "#/$defs/text"},
+        "inverse": {"description": "The link's name seen from its target.", "$ref": "#/$defs/text"},
+        "targets": {"description": "The Types a link may point to (* for any).", "$ref": "#/$defs/texts"},
+        "max": {"description": "one or many targets per source.", "$ref": "#/$defs/text"},
+        "inverse_max": {"description": "one or many sources per target.", "$ref": "#/$defs/text"},
+        "writable_by": {"$ref": "#/$defs/writableBy"},
+        "resolve": {"$ref": "#/$defs/linkResolve"}
+      }
+    },
+    "linkResolve": {
+      "description": "How the kernel finds a link's target on entering a state.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "on_enter": {"$ref": "#/$defs/text"},
+        "state": {"$ref": "#/$defs/text"},
+        "field": {"$ref": "#/$defs/text"},
+        "equals": {"$ref": "#/$defs/text"}
+      }
+    },
+    "incoming": {
+      "description": "A name, on this Type, for a link another Type declares to it.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"$ref": "#/$defs/text"},
+        "link": {"$ref": "#/$defs/text"},
+        "from": {"$ref": "#/$defs/texts"}
+      }
+    },
+    "rollup": {
+      "description": "A count over linked Items.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"$ref": "#/$defs/text"},
+        "over": {"$ref": "#/$defs/text"},
+        "count_by": {"$ref": "#/$defs/text"}
+      }
+    },
+    "reaction": {
+      "description": "A reaction: held, after, move, create or set.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"$ref": "#/$defs/text"},
+        "kind": {"$ref": "#/$defs/text"},
+        "on": {"$ref": "#/$defs/text"},
+        "state": {"$ref": "#/$defs/text"},
+        "from": {"$ref": "#/$defs/texts"},
+        "to": {"$ref": "#/$defs/text"},
+        "when": {"$ref": "#/$defs/text"},
+        "on_guard": {"$ref": "#/$defs/text"},
+        "link": {"$ref": "#/$defs/text"},
+        "target": {"$ref": "#/$defs/text"},
+        "target_from": {"$ref": "#/$defs/texts"},
+        "for_each": {"$ref": "#/$defs/text"},
+        "by": {"$ref": "#/$defs/text"},
+        "undoes": {"$ref": "#/$defs/text"},
+        "type": {"$ref": "#/$defs/text"},
+        "version": {"$ref": "#/$defs/count"},
+        "of": {"$ref": "#/$defs/texts"},
+        "children": {"$ref": "#/$defs/children"},
+        "fields": {"$ref": "#/$defs/textMap"},
+        "add": {"$ref": "#/$defs/textMap"},
+        "set": {"$ref": "#/$defs/textMap"}
+      }
+    },
+    "children": {
+      "description": "The contained Items a reaction moves.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "of": {"$ref": "#/$defs/texts"},
+        "when": {"$ref": "#/$defs/text"}
+      }
+    },
+    "invariant": {
+      "description": "A rule every write must keep.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"$ref": "#/$defs/text"},
+        "rule": {"description": "A CEL expression that must be true.", "$ref": "#/$defs/text"}
+      }
+    }
+  }
+}

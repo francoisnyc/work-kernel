@@ -122,6 +122,9 @@ const (
 	CodeDuplicateVersion Code = "DUPLICATE_VERSION"
 	// A folder deeper than one level below the Types folder.
 	CodeFolderTooDeep Code = "FOLDER_TOO_DEEP"
+	// A draft declares a registered Type version with another definition
+	// (Check, Ventoux V2b).
+	CodeVersionChanged Code = "VERSION_CHANGED"
 )
 
 // Problem is one thing wrong with a Type definition.

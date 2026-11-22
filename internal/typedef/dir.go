@@ -1,15 +1,10 @@
 package typedef
 
 import (
-	"cmp"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
-
-	"go.yaml.in/yaml/v3"
 )
 
 // typeFiles lists the .yaml files of dir and of its subfolders, one level
@@ -67,73 +62,15 @@ func ParseDir(dir string) ([]*Type, error) {
 	if err != nil {
 		return nil, err
 	}
-	type loaded struct {
-		doc    *yaml.Node
-		source string
-	}
-	var types []*Type
-	where := map[string]loaded{} // "id@version" -> its document and file
+	sources := make([]Source, 0, len(files))
 	for _, path := range files {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil, fmt.Errorf("typedef: %w", err)
 		}
-		t, doc, fps := parseDoc(data)
-		if t != nil {
-			key := fmt.Sprintf("%s@%d", t.ID, t.Version)
-			if first, dup := where[key]; dup {
-				newReporter(&fps, t.ID, t.Version).fail(CodeDuplicateVersion, "version",
-					"Give one of the two files the next version number, or remove it",
-					"%s v%d is declared by both %s and %s", t.ID, t.Version, first.source, path)
-				position(fps, doc)
-			} else {
-				where[key] = loaded{doc, path}
-				types = append(types, t)
-			}
-		}
-		for i := range fps {
-			fps[i].Source = path
-		}
-		ps = append(ps, fps...)
+		sources = append(sources, Source{Name: path, Content: data})
 	}
-	if len(ps) > 0 {
-		sortProblems(ps)
-		return nil, ps
-	}
-
-	// Stage (c). cmp.Or picks the first non-zero comparison: by ID, then by
-	// version, so a problem across versions lands on the later one.
-	slices.SortFunc(types, func(a, b *Type) int {
-		return cmp.Or(strings.Compare(a.ID, b.ID), cmp.Compare(a.Version, b.Version))
-	})
-	for _, check := range []func([]*Type) error{
-		// Links name other Types, and keep their inverses across versions.
-		CheckLinkTargets, CheckLinkInverses,
-		// So do incoming declarations: the links other Types declare.
-		CheckIncoming,
-		// One value or several is part of what a field is, in every version.
-		CheckFieldShapes,
-		// Reactions and link resolution name other Types too.
-		CheckReactions,
-		// So do offers: a host offers what the hooks of the Items it creates
-		// inside itself read from their container.
-		CheckOffers,
-		// And what a container admits customers to.
-		CheckCustomers,
-	} {
-		var cps Problems
-		if errors.As(check(types), &cps) {
-			ps = append(ps, cps...)
-		}
-	}
-	if len(ps) > 0 {
-		for i := range ps {
-			l := where[fmt.Sprintf("%s@%d", ps[i].TypeID, ps[i].Version)]
-			ps[i].Source = l.source
-			ps[i].Line, ps[i].Column = locate(l.doc, ps[i].Path)
-		}
-		sortProblems(ps)
-		return nil, ps
-	}
-	return types, nil
+	// The folder's problems (FOLDER_TOO_DEEP) hold stage (c) back as a
+	// file's would. Nothing is registered: the folder is checked alone.
+	return check(sources, nil, ps)
 }

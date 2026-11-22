@@ -23,7 +23,8 @@
 # queue by due instant; lea holds the role sla_admin. Jira part 2, step 4a
 # added scenario C1, customers: kim and lee open incidents in a portal and
 # see their own and the replies on them, nothing else; sam opens one for kim
-# on the phone; portal-bot acts for each of them.
+# on the phone; portal-bot acts for each of them. Ventoux V2b added pli
+# type validate: draft Types checked against the registered ones.
 #
 #   scripts/scenario.sh          (or: make scenario, which starts the stack first)
 #
@@ -1895,6 +1896,37 @@ theirs=$(ok carol item create --type ticket@5 --set "f_title=globex $w" | j .ite
 case $theirs in namespaces/globex/items/*) ;; *) fail "carol's Item is $theirs, want it in globex" ;; esac
 refuse ana "NOT_FOUND NOT_FOUND" item get "$theirs"
 refuse triage-bot "NOT_FOUND NOT_FOUND" agent start --for user:ana --scopes "$theirs" --powers read
+
+# ---------------------------------------------------------------------------
+# Ventoux V2b: draft Types checked against every registered version, with
+# nothing registered (pli type validate, ValidateTypes).
+# ---------------------------------------------------------------------------
+
+step "type validate: the repository's Types pass as drafts, and pli prints nothing"
+run ana type validate "$repo/types"
+[ "$rc" -eq 0 ] || fail "pli type validate types/ exited $rc, want 0" "$(cat "$tmp/out")"
+[ ! -s "$tmp/out" ] || fail "pli type validate types/ printed: $(cat "$tmp/out")"
+
+step "type validate: a changed ticket v1 and a new Type with a problem exit 1: the new Type's problem first, then VERSION_CHANGED once it is sound; nothing is registered"
+mkdir -p "$tmp/drafts"
+awk '{ print } /^fields:$/ { print "  - {id: f_extra, type: string}" }' "$repo/types/ticket.v1.yaml" >"$tmp/drafts/ticket.v1.yaml"
+grep -q 'f_extra' "$tmp/drafts/ticket.v1.yaml" || fail "could not change the ticket v1 draft"
+draft_id="vt_${w}"
+printf 'id: %s\nversion: 1\nfields:\n  - {id: today, type: date}\n' "$draft_id" >"$tmp/drafts/new.v1.yaml"
+run ana type validate "$tmp/drafts"
+[ "$rc" -eq 1 ] || fail "pli type validate drafts/ exited $rc, want 1" "$(cat "$tmp/out")"
+expect "problem lines" "$(wc -l <"$tmp/out" | tr -d ' ')" 1
+grep -q "^$tmp/drafts/new.v1.yaml:4:6: RESERVED_NAME typedef $draft_id v1: " "$tmp/out" ||
+	fail "no RESERVED_NAME line for the new Type:" "$(cat "$tmp/out")"
+# VERSION_CHANGED waits for every draft to be sound on its own.
+grep -q "VERSION_CHANGED" "$tmp/out" && fail "VERSION_CHANGED before the drafts are each sound:" "$(cat "$tmp/out")"
+printf 'id: %s\nversion: 1\nfields:\n  - {id: f_today, type: date}\n' "$draft_id" >"$tmp/drafts/new.v1.yaml"
+run ana type validate "$tmp/drafts"
+[ "$rc" -eq 1 ] || fail "pli type validate drafts/ exited $rc, want 1" "$(cat "$tmp/out")"
+expect "problem lines" "$(wc -l <"$tmp/out" | tr -d ' ')" 1
+grep -q "^$tmp/drafts/ticket.v1.yaml:3:1: VERSION_CHANGED typedef ticket v1: " "$tmp/out" ||
+	fail "no VERSION_CHANGED line for ticket v1:" "$(cat "$tmp/out")"
+refuse ana "NOT_FOUND NOT_FOUND" type get "${draft_id}@1"
 
 # ---------------------------------------------------------------------------
 # Every reason of the error table a client can cause came back once.

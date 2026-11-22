@@ -1,14 +1,18 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	"connectrpc.com/connect"
 
 	kernelv1 "github.com/francoisnyc/work-kernel/gen/kernel/v1"
+	"github.com/francoisnyc/work-kernel/internal/item"
 	"github.com/francoisnyc/work-kernel/internal/itemservice"
 	"github.com/francoisnyc/work-kernel/internal/lifecycle"
 	"github.com/francoisnyc/work-kernel/internal/typedef"
@@ -195,5 +199,67 @@ func (s *server) ListTypes(ctx context.Context, req *connect.Request[kernelv1.Li
 	for _, t := range types {
 		out.Types = append(out.Types, typeOut(p.Namespace, t))
 	}
+	return connect.NewResponse(out), nil
+}
+
+// The limits of one ValidateTypes call (Ventoux V2b).
+const (
+	maxTypeSources     = 50
+	maxTypeSourceBytes = 256 << 10 // in all
+)
+
+// ValidateTypes checks draft Types against every registered version and
+// registers nothing (Ventoux V2b). Users and agents may call it; customers,
+// and agents acting for one, may not. Like ListTypes it reads no Items: a
+// Type definition holds no Item data, so nothing here goes through
+// policy.Project.
+func (s *server) ValidateTypes(ctx context.Context, req *connect.Request[kernelv1.ValidateTypesRequest]) (*connect.Response[kernelv1.ValidateTypesResponse], error) {
+	p := caller(ctx)
+	if cerr := parentNamespace(p, req.Msg.Parent); cerr != nil {
+		return nil, cerr
+	}
+	if item.IsKind(p.Actor, item.KindCustomer) || item.IsKind(p.OnBehalfOf, item.KindCustomer) {
+		return nil, apiError(connect.CodePermissionDenied, "NOT_ALLOWED", nil)
+	}
+	srcs := req.Msg.Sources
+	if len(srcs) == 0 || len(srcs) > maxTypeSources {
+		return nil, badField("sources", fmt.Sprintf("give 1 to %d sources", maxTypeSources))
+	}
+	total, names := 0, map[string]bool{}
+	sources := make([]typedef.Source, 0, len(srcs))
+	for _, src := range srcs {
+		if src.Name == "" || names[src.Name] {
+			return nil, badField("sources", "give each source a name of its own")
+		}
+		names[src.Name] = true
+		total += len(src.Content)
+		sources = append(sources, typedef.Source{Name: src.Name, Content: []byte(src.Content)})
+	}
+	if total > maxTypeSourceBytes {
+		return nil, badField("sources", fmt.Sprintf("send at most %d KiB of content in all", maxTypeSourceBytes>>10))
+	}
+	ps, err := s.k.ValidateTypes(ctx, sources)
+	if err != nil {
+		return nil, errorFor(err, "")
+	}
+	out := &kernelv1.ValidateTypesResponse{Problems: make([]*kernelv1.TypeProblem, 0, len(ps))}
+	for _, pr := range ps {
+		tp := &kernelv1.TypeProblem{
+			Source: pr.Source, Path: pr.Path, Line: int32(pr.Line), Column: int32(pr.Column),
+			Severity: kernelv1.TypeProblemSeverity_TYPE_PROBLEM_SEVERITY_ERROR,
+			Code:     string(pr.Code), Message: pr.Message,
+		}
+		if pr.TypeID != "" {
+			tp.Type = typeName(p.Namespace, pr.TypeID, pr.Version)
+		}
+		if tp.Source == "" { // a registered version's: named in the caller's namespace
+			tp.Source = tp.Type
+		}
+		out.Problems = append(out.Problems, tp)
+	}
+	// Sorted by source, then position, now that every source has a name.
+	slices.SortStableFunc(out.Problems, func(a, b *kernelv1.TypeProblem) int {
+		return cmp.Or(strings.Compare(a.Source, b.Source), cmp.Compare(a.Line, b.Line), cmp.Compare(a.Column, b.Column))
+	})
 	return connect.NewResponse(out), nil
 }

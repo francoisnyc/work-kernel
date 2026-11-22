@@ -756,6 +756,7 @@ container is a field, not part of its name, so a move never renames it.
 | `ListItemEvents` | An Item's history, projected for the caller; paged |
 | `LinkItems`, `UnlinkItems` | Add or remove a link of a type the source's Type declares |
 | `GetType`, `ListTypes` | Read Type definitions (read-only; Types load from files at start) |
+| `ValidateTypes` | Check draft Types against every registered version; registers nothing ("Ventoux V2b and V2c, as built") |
 | `StartAgentSession`, `ApproveWiden` | The agent rules |
 
 `Link` and `Archive` as they stand in the first-cut proto are removed until
@@ -985,6 +986,11 @@ before it found nothing:
 As a log line, a problem reads
 `<source>:<line>:<col>: <CODE> typedef <id> v<n>: <message>`.
 
+The same stages check drafts against the registered versions
+(`ValidateTypes`, `typedef.Check`; "Ventoux V2b and V2c, as built"):
+stage 3 then also runs with every registered version, and adds
+`VERSION_CHANGED`.
+
 | Code | Stage | Meaning |
 | --- | --- | --- |
 | `YAML_SYNTAX` | 1 | The file is not YAML |
@@ -1023,6 +1029,7 @@ As a log line, a problem reads
 | `REACTION_CYCLE` | 3 | Reactions form a cycle (reported on the first reaction of the cycle, one cycle at a time) |
 | `DUPLICATE_VERSION` | 3 | Two files declare the same Type version (reported on the second) |
 | `FOLDER_TOO_DEEP` | 3 | A folder more than one level below the Types folder |
+| `VERSION_CHANGED` | 3 | A draft declares a registered Type version with another definition (`ValidateTypes`; reported on the draft's `version`) |
 
 ### Versioning
 
@@ -1605,8 +1612,8 @@ See `docs/plans/ideas-from-ventoux.md`.
 | --- | --- | --- |
 | V1 | Action contracts: each hook action declares `name@version`, typed reads and writes, side effect, risk, idempotency and the reason codes it may answer; hooks name `action@version`; the catalogue is readable through the API. The hook protocol work (`pli.hooks/v1`: the descriptor and the compiled-in declaration `hr.manager_of@1`) is the first version of these contracts | Settled in its Phase A |
 | V2a | Every problem of a Type or a folder of Types as data: `{source, path, line, column, severity, code, message}`, in three stages (the YAML, each Type, the Types together), with no cascades; the codes in "Type problems" | Each code has a case with its exact path and position; a folder reports every file's problems at once; a source walk finds no problem without a code and a what-to-do; every test written before V2a passes unchanged |
-| V2b | `ValidateTypes`: draft Types checked against every registered version, nothing written; `pli types validate`; exempt from `policy.Project` like `ListTypes`; users and agents (in a session), not customers; 256 KiB and 50 sources at most | A draft with problems is a successful call listing them; an identical registered `id@version` passes, a different one is `VERSION_CHANGED`; pli prints `source:line:col: CODE message` and exits non-zero on errors |
-| V2c | The Type format as JSON Schema, by hand, in a checked-in file; checked with `santhosh-tekuri/jsonschema/v6` (test only) | Every file in `types/` validates; every key the schema allows is a key `typedef` knows; the schema is never stricter than `typedef` |
+| V2b (**done**) | `ValidateTypes`: draft Types checked against every registered version, nothing written; `pli type validate`; exempt from `policy.Project` like `ListTypes`; users and agents (in a session), not customers; 256 KiB and 50 sources at most | A draft with problems is a successful call listing them; an identical registered `id@version` passes, a different one is `VERSION_CHANGED`; pli prints `source:line:col: CODE message` and exits non-zero on errors. **Done 2026-11-22**: "Ventoux V2b and V2c, as built" below, and the journal |
+| V2c (**done**) | The Type format as JSON Schema, by hand, in a checked-in file; checked with `santhosh-tekuri/jsonschema/v6` (test only) | Every file in `types/` validates; every key the schema allows is a key `typedef` knows; the schema is never stricter than `typedef`. **Done 2026-11-22**: "Ventoux V2b and V2c, as built" below |
 
 ## Jira proof of concept
 
@@ -3390,6 +3397,105 @@ someone can act. Specified here; to build next.
   commands; a workflow update that schedules the hook again, behind
   `GetVersion` so recorded histories replay; the `ops` role in the dev
   tokens.
+
+## Ventoux V2b and V2c, as built (2026-11-22)
+
+Item 2 of `docs/plans/ideas-from-ventoux.md`, after V2a ("Type problems"):
+a draft Type can be checked against the Types already registered, without
+registering it, and the Type format has a JSON Schema.
+
+### V2b: ValidateTypes
+
+**One code path.** `typedef.Check(sources, registered)` runs every stage
+on draft sources (`{name, content}`) with the registered versions beside
+them, given as their **stored JSON definitions**. `ParseDir` reads its
+folder and calls it with nothing registered, so a folder at start and a
+draft through the API are checked by the same code. Check is pure; the
+item service's `ValidateTypes` reads every stored definition and calls it.
+Actions are checked against the compiled-in catalog only, as at load: an
+undeclared major (`hr.manager_of@2`) is `UNKNOWN_ACTION`, with no network
+and nothing from the worker's connectors file.
+
+**The rules.**
+- Stages 1 and 2 run draft by draft; stage 3 only when every draft is
+  sound on its own. Two drafts of one `id@version`: `DUPLICATE_VERSION`.
+- A draft of a registered `id@version` must be **identical**, as
+  `RegisterType` decides it: the same definition, compared with the stored
+  one as JSON values (key order and spacing do not matter, as for jsonb);
+  else `VERSION_CHANGED` on the draft's `version`. An identical draft
+  stands in for the registered version.
+- Stage 3 runs on the registered versions alone, then with the drafts;
+  **only the problems that are new are reported** (by code, Type version
+  and path). The store may hold versions a Types folder no longer has, and
+  their problems are not the draft's.
+- A new problem can land on a **registered** version (a draft
+  `leave_balance@2` without the vacation request's consent breaks
+  `vacation_request` v2 and v3). It has no position; the API gives it the
+  version's name in the caller's namespace as its `source` and `type`.
+- A registered definition that cannot be read is the kernel's failure,
+  not the draft's: an error (`INTERNAL`), not a problem.
+
+**The operation.** `ValidateTypes {parent, sources[]}` returns
+`{problems[]}`, each `{source, path, line, column, severity, code,
+message, type}`. A draft with problems is a **successful call**. The API
+sorts the problems by source, then position, once every source has a name
+(a registered version's included). `code` is a string, like a refusal's
+reason, so a new code needs no proto change.
+- Limits, each `INVALID_ARGUMENT` / `INVALID_REQUEST` on `sources`: 1 to
+  50 sources, 256 KiB of content in all, a non-empty name of its own each.
+  Checked in the handler (a server-wide read limit would bind every
+  operation).
+- Who: users, and agents in a session, with no particular power: it
+  writes nothing and reads no Items. Customers, and agents acting for one:
+  `PERMISSION_DENIED` / `NOT_ALLOWED`.
+- Exempt from `policy.Project`, like `ListTypes`: a Type definition holds
+  no Item data.
+- It is not a write: no `request_id`, no `commit_seq`, nothing stored.
+
+**pli.** `pli type validate [--json] PATH...`: a PATH is a file or a
+folder, read as the item service reads its Types folder (one level of
+subfolders, names starting with a dot skipped); a deeper folder is
+`FOLDER_TOO_DEEP`, found by pli itself, which walks folders on its own so
+it does not link typedef. Each source is named by its path as given. It
+prints one line per problem in the log-line format above, or the response
+with `--json`; it exits 1 on any ERROR, 0 when clean, 2 on a usage error.
+
+### V2c: the Type format as JSON Schema
+
+`schema/type.schema.json` (draft 2020-12), written by hand. **Its
+purpose:** an editor or an authoring tool learns the format from it (every
+key, its shape, the closed lists of categories and field types, short
+descriptions), and can catch a typo before asking the kernel. It is
+**not** a second checker: typedef stays the authority, and the schema is
+checked in tests only (`santhosh-tekuri/jsonschema/v6`, imported by
+`_test.go` files only).
+
+**Never stricter than typedef**: whatever typedef loads, the schema
+accepts. The tests (`internal/typedef/schema_internal_test.go`, an
+internal test so they read typedef's own key table) prove it this way:
+- **Keys.** At every level the schema's properties are exactly the keys
+  the stage 1 walker knows, both ways, and `additionalProperties` is false
+  wherever typedef refuses unknown keys.
+- **Shapes.** At every position of the format, eleven kinds of value
+  (null, text, a number, a bool, lists, maps, `kernel`, `[role:clerk]`) are
+  placed in a document; each one stage 1 lets through, the schema must
+  accept (more than 500 checks).
+- **enum** only at `states[].category` and `fields[].type`, each equal to
+  typedef's list; typedef loads every listed value and refuses another
+  one, and null. **required** only `id` and `version`, which typedef
+  requires (missing or null).
+- **Keywords.** The schema may use keys, shapes, `enum`, `required`,
+  `$ref` and descriptions only; `pattern`, `minimum` and the like are
+  refused by a test, so nothing stricter creeps in.
+- **Files.** Every file of `types/` validates, and so does a corpus
+  (`internal/typedef/testdata/schema`) that, with `types/`, uses every key
+  and both shapes of `accepts_reactions` and `writable_by`; each corpus
+  file loads.
+
+**As lenient as typedef, for now.** typedef reads any scalar where a
+string is meant (`id: 5` loads) and lets null through for most keys
+(`fields: ~` loads), so the schema does too. Tightening typedef's stage 1
+and the schema together is a Later entry in the journal.
 
 ## Out of scope for the spike
 
