@@ -67,48 +67,69 @@ func (t *Type) Link(name string) (LinkType, bool) {
 // guards read links.<name>.
 var linkName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
 
-// checkLinks validates the link types. fail formats an error naming the Type.
-func (t *Type) checkLinks(fail func(string, ...any) error) error {
+// checkLinks validates the link types.
+func (t *Type) checkLinks(r reporter) {
 	seen := map[string]bool{} // names and inverses share one space
-	for _, l := range t.Links {
-		if l.Name == "" {
-			return fail("a link type has no name")
-		}
-		where := fmt.Sprintf("link %s", l.Name)
-		if l.Name == ContainerLink || l.Inverse == ContainerLink {
-			return fail("%s: %q is a reserved name (containment is not a link)", where, ContainerLink)
-		}
-		if l.Inverse == "" {
-			return fail("%s: no inverse name", where)
-		}
-		if l.Inverse == l.Name {
-			return fail("%s: its inverse is the same name", where)
-		}
-		for _, n := range []string{l.Name, l.Inverse} {
+	for i, l := range t.Links {
+		t.checkLink(r, at("links", i), l, seen)
+	}
+}
+
+func (t *Type) checkLink(r reporter, p string, l LinkType, seen map[string]bool) {
+	if l.Name == "" {
+		r.fail(CodeRequired, at(p, "name"), "Name the link type, such as blocks", "a link type has no name")
+		return
+	}
+	where := fmt.Sprintf("link %s", l.Name)
+	switch {
+	case l.Name == ContainerLink:
+		r.fail(CodeReservedName, at(p, "name"), "Choose another name; containment is declared by placing Items, not by a link",
+			"%s: %q is a reserved name (containment is not a link)", where, ContainerLink)
+	case l.Inverse == ContainerLink:
+		r.fail(CodeReservedName, at(p, "inverse"), "Choose another name; containment is declared by placing Items, not by a link",
+			"%s: %q is a reserved name (containment is not a link)", where, ContainerLink)
+	case l.Inverse == "":
+		r.fail(CodeRequired, at(p, "inverse"), "Name the link as seen from its target, such as blocked_by", "%s: no inverse name", where)
+	case l.Inverse == l.Name:
+		r.fail(CodeConflict, at(p, "inverse"), "Give the inverse its own name, such as blocked_by for blocks", "%s: its inverse is the same name", where)
+	default:
+		for _, k := range []string{"name", "inverse"} {
+			n := l.Name
+			if k == "inverse" {
+				n = l.Inverse
+			}
 			if !linkName.MatchString(n) {
-				return fail("%s: %q is not a link name (lower case letters, digits and _)", where, n)
+				r.fail(CodeInvalidName, at(p, k), "Use lower case letters, digits and _, starting with a letter",
+					"%s: %q is not a link name (lower case letters, digits and _)", where, n)
+				continue
 			}
 			if seen[n] {
-				return fail("%s: the name %q is used twice among link names and inverses", where, n)
+				r.fail(CodeDuplicate, at(p, k), "Rename one of the two: link names and inverses share one space",
+					"%s: the name %q is used twice among link names and inverses", where, n)
 			}
 			seen[n] = true
 		}
-		if len(l.Targets) == 0 {
-			return fail("%s: no target Types", where)
+	}
+	switch {
+	case len(l.Targets) == 0:
+		r.fail(CodeRequired, at(p, "targets"), "List the Types the link may point to, or [\"*\"] for any",
+			"%s: no target Types", where)
+	case slices.Contains(l.Targets, ""):
+		r.fail(CodeInvalidValue, at(p, "targets", slices.Index(l.Targets, "")), "Name a Type, or remove the empty entry",
+			"%s: an empty target Type", where)
+	case slices.Contains(l.Targets, AnyType) && len(l.Targets) != 1:
+		r.fail(CodeConflict, at(p, "targets"), "Write targets: [\"*\"] alone, or name the Types without *",
+			"%s: %q means any Type and stands alone in targets", where, AnyType)
+	}
+	for _, k := range []string{"max", "inverse_max"} {
+		c := l.Max
+		if k == "inverse_max" {
+			c = l.InverseMax
 		}
-		if slices.Contains(l.Targets, "") {
-			return fail("%s: an empty target Type", where)
-		}
-		if slices.Contains(l.Targets, AnyType) && len(l.Targets) != 1 {
-			return fail("%s: %q means any Type and stands alone in targets", where, AnyType)
-		}
-		for _, c := range []Cardinality{l.Max, l.InverseMax} {
-			if c != "" && c != One && c != Many {
-				return fail("%s: cardinality %q is not one or many", where, c)
-			}
+		if c != "" && c != One && c != Many {
+			r.fail(CodeInvalidValue, at(p, k), "Write one or many", "%s: cardinality %q is not one or many", where, c)
 		}
 	}
-	return nil
 }
 
 // guardLinks are the names a guard of t may read as links.<name>: the

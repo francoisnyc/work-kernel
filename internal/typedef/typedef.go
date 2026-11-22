@@ -426,9 +426,7 @@ func (t *Type) check() error {
 	r := newReporter(&ps, t.ID, t.Version)
 	// Sections not yet converted to coded problems (Ventoux 2a, Phase C):
 	// each records its first problem, uncoded, and the next section runs.
-	legacy := func(format string, args ...any) error {
-		return r.fail(Code("UNSORTED"), "", "", format, args...)
-	}
+	legacy := r.legacy()
 	legacyErr := func(err error) {
 		if err != nil && !errors.Is(err, errReported) {
 			msg := strings.TrimPrefix(err.Error(), fmt.Sprintf("typedef %s v%d: ", t.ID, t.Version))
@@ -476,7 +474,7 @@ func (t *Type) check() error {
 		}
 	}
 
-	legacyErr(t.checkLinks(legacy))
+	t.checkLinks(r)
 	legacyErr(t.checkKernelLinks(legacy))
 	// Before the guards: they may read the incoming names.
 	legacyErr(t.checkIncoming(legacy))
@@ -503,7 +501,7 @@ func (t *Type) check() error {
 	// Hooks last: they name states, transitions and fields checked above.
 	legacyErr(t.checkOffers())
 	legacyErr(t.checkCustomers())
-	legacyErr(t.checkHooks())
+	t.checkHooks(r)
 	// Then what names hooks and fields: reactions, invariants, consents.
 	legacyErr(t.checkReactions(legacy))
 	legacyErr(t.checkInvariants(legacy))

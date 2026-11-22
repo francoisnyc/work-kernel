@@ -53,15 +53,17 @@ func (t *Type) checkOffers() error {
 // Only an action hook reads one: a check's reads are what its hold freezes
 // and an enrich hook's are its own Item's facts, and neither can freeze or
 // depend on a field of another Item.
-func checkOfferRead(h Hook, read string) error {
+func checkOfferRead(r reporter, p string, h Hook, read string) {
 	name, _ := OfferOf(read)
 	if !linkName.MatchString(name) {
-		return fmt.Errorf("read %q: %q is not an offer's name (container:<name>)", read, name)
+		r.fail(CodeInvalidName, p, "Write container:<name>, with the name in lower case letters, digits and _",
+			"read %q: %q is not an offer's name (container:<name>)", read, name)
+		return
 	}
 	if h.Kind != HookAction {
-		return fmt.Errorf("read %q: only an action hook reads an offer of its container, not a %s hook", read, h.Kind)
+		r.fail(CodeReadNotAllowed, p, "Read the container's offer from an action hook, or read a field of this Type",
+			"read %q: only an action hook reads an offer of its container, not a %s hook", read, h.Kind)
 	}
-	return nil
 }
 
 // OfferReads returns the offers the Type's hooks read from their Item's
