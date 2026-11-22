@@ -61,39 +61,46 @@ func (t *Type) LinkSource(name string) (LinkSource, bool) {
 
 // checkIncoming validates what one Type's file can tell about its incoming
 // declarations; CheckIncoming checks them against the other Types.
-func (t *Type) checkIncoming(fail func(string, ...any) error) error {
+func (t *Type) checkIncoming(r reporter) {
 	taken := map[string]bool{}
 	for _, l := range t.Links {
 		taken[l.Name], taken[l.Inverse] = true, true
 	}
-	for _, in := range t.Incoming {
+	for i, in := range t.Incoming {
+		p := at("incoming", i)
 		if in.Name == "" {
-			return fail("an incoming declaration has no name")
+			r.fail(CodeRequired, at(p, "name"), "Name it as the inverse of the link the other Types declare",
+				"an incoming declaration has no name")
+			continue
 		}
 		where := "incoming " + in.Name
-		if !linkName.MatchString(in.Name) {
-			return fail("%s: %q is not a link name (lower case letters, digits and _)", where, in.Name)
-		}
-		if taken[in.Name] {
-			return fail("%s: the name %q is used twice among link names, inverses and incoming names", where, in.Name)
+		switch {
+		case !linkName.MatchString(in.Name):
+			r.fail(CodeInvalidName, at(p, "name"), "Use lower case letters, digits and _, starting with a letter",
+				"%s: %q is not a link name (lower case letters, digits and _)", where, in.Name)
+		case taken[in.Name]:
+			r.fail(CodeDuplicate, at(p, "name"), "Rename one of the two: link names, inverses and incoming names share one space",
+				"%s: the name %q is used twice among link names, inverses and incoming names", where, in.Name)
 		}
 		taken[in.Name] = true
 		if in.Link == "" {
-			return fail("%s: no link: the link type the other Types declare", where)
+			r.fail(CodeRequired, at(p, "link"), "Name the link type the other Types declare",
+				"%s: no link: the link type the other Types declare", where)
 		}
 		if len(in.From) == 0 {
-			return fail("%s: no from: the Types that declare link %s", where, in.Link)
+			r.fail(CodeRequired, at(p, "from"), "List the Types that declare the link",
+				"%s: no from: the Types that declare link %s", where, in.Link)
 		}
-		for _, from := range in.From {
-			if from == "" {
-				return fail("%s: an empty from Type", where)
-			}
-			if from == t.ID {
-				return fail("%s: from names the Type itself (%s); its own links to itself are read by their inverse", where, from)
+		for j, from := range in.From {
+			switch from {
+			case "":
+				r.fail(CodeInvalidValue, at(p, "from", j), "Name a Type, or remove the empty entry", "%s: an empty from Type", where)
+			case t.ID:
+				r.fail(CodeConflict, at(p, "from", j), "Remove the Type itself: read its links to itself by their inverse",
+					"%s: from names the Type itself (%s); its own links to itself are read by their inverse", where, from)
 			}
 		}
 	}
-	return nil
 }
 
 // CheckIncoming checks every Type's `incoming` against the set loaded at
@@ -151,36 +158,38 @@ type Rollup struct {
 	CountBy string `yaml:"count_by" json:"count_by"`
 }
 
-func (t *Type) checkRollups(fail func(string, ...any) error) error {
+func (t *Type) checkRollups(r reporter) {
 	seen := map[string]bool{}
-	for _, r := range t.Rollups {
-		if r.ID == "" {
-			return fail("a rollup has no id")
+	for i, ru := range t.Rollups {
+		p := at("rollups", i)
+		if ru.ID == "" {
+			r.fail(CodeRequired, at(p, "id"), "Give the rollup an id, such as open_tasks", "a rollup has no id")
+			continue
 		}
-		where := "rollup " + r.ID
-		if !linkName.MatchString(r.ID) {
-			return fail("%s: %q is not a rollup id (lower case letters, digits and _)", where, r.ID)
+		where := "rollup " + ru.ID
+		switch {
+		case !linkName.MatchString(ru.ID):
+			r.fail(CodeInvalidName, at(p, "id"), "Use lower case letters, digits and _, starting with a letter",
+				"%s: %q is not a rollup id (lower case letters, digits and _)", where, ru.ID)
+		case seen[ru.ID]:
+			r.fail(CodeDuplicate, at(p, "id"), "Rename one of the two rollups", "%s: declared twice", where)
 		}
-		if seen[r.ID] {
-			return fail("%s: declared twice", where)
+		seen[ru.ID] = true
+		if ru.Over == "" {
+			r.fail(CodeRequired, at(p, "over"), "Name the link the rollup counts over", "%s: no `over`: the link name it counts", where)
+		} else if _, ok := t.LinkSource(ru.Over); !ok {
+			r.fail(CodeUnknownLink, at(p, "over"), "Name a declared link, the inverse of a link to this Type, or an incoming name",
+				"%s: counts over %q, which is not a link name the Type can read (a declared link, "+
+					"the inverse of a link to itself, or an incoming name)", where, ru.Over)
 		}
-		seen[r.ID] = true
-		if r.Over == "" {
-			return fail("%s: no `over`: the link name it counts", where)
-		}
-		if _, ok := t.LinkSource(r.Over); !ok {
-			return fail("%s: counts over %q, which is not a link name the Type can read (a declared link, "+
-				"the inverse of a link to itself, or an incoming name)", where, r.Over)
-		}
-		switch r.CountBy {
+		switch ru.CountBy {
 		case CountByCategory, CountByState:
 		case "":
-			return fail("%s: no count_by: category or state", where)
+			r.fail(CodeRequired, at(p, "count_by"), "Write count_by: category or state", "%s: no count_by: category or state", where)
 		default:
-			return fail("%s: count_by %q is not category or state", where, r.CountBy)
+			r.fail(CodeInvalidValue, at(p, "count_by"), "Write count_by: category or state", "%s: count_by %q is not category or state", where, ru.CountBy)
 		}
 	}
-	return nil
 }
 
 // checkClears validates each transition's clears. A clear that could never
@@ -193,44 +202,51 @@ func (t *Type) checkRollups(fail func(string, ...any) error) error {
 //   - only the kernel writes it (the public door could never make the move);
 //   - the transition is held by a check or a held reaction: a held move is
 //     written in two steps, and which one clears is not designed (Later).
-func (t *Type) checkClears(fail func(string, ...any) error) error {
-	for _, tr := range t.Transitions {
+func (t *Type) checkClears(r reporter) {
+	for i, tr := range t.Transitions {
 		if len(tr.Clears) == 0 {
 			continue
 		}
+		p := at("transitions", i)
 		name := tr.From + " -> " + tr.To
 		from, _ := t.State(tr.From)
 		seen := map[string]bool{}
-		for _, id := range tr.Clears {
+		for j, id := range tr.Clears {
 			f, ok := t.Field(id)
+			q := at(p, "clears", j)
 			switch {
 			case !ok:
-				return fail("transition %s: clears %q, which is not a declared field", name, id)
+				r.fail(CodeUnknownField, q, "Declare the field, or remove it from clears",
+					"transition %s: clears %q, which is not a declared field", name, id)
 			case seen[id]:
-				return fail("transition %s: clears %q twice", name, id)
+				r.fail(CodeDuplicate, q, "Remove the second one", "transition %s: clears %q twice", name, id)
 			case slices.Contains(tr.Required, id):
-				return fail("transition %s: requires and clears %q", name, id)
+				r.fail(CodeConflict, q, "Either require the field or clear it, not both", "transition %s: requires and clears %q", name, id)
 			case slices.Contains(from.Frozen, id):
-				return fail("transition %s: clears %q, which state %s freezes", name, id, tr.From)
+				r.fail(CodeWritesFrozenField, q, "Clear it on another transition, or stop freezing it in the state the move leaves",
+					"transition %s: clears %q, which state %s freezes", name, id, tr.From)
 			case slices.Contains(tr.Allowed, AllowedFieldPrefix+id):
-				return fail("transition %s: clears %q, which its own allowed list names", name, id)
+				r.fail(CodeConflict, q, "Clear another field: the move may not unset who may make it",
+					"transition %s: clears %q, which its own allowed list names", name, id)
 			case f.WritableBy == WritableByKernel:
-				return fail("transition %s: clears %q, which only the kernel writes", name, id)
+				r.fail(CodeWritesKernelField, q, "Clear a field people write, or let a hook clear it",
+					"transition %s: clears %q, which only the kernel writes", name, id)
 			}
 			seen[id] = true
 		}
 		for _, h := range t.Hooks {
 			if h.Kind == HookCheck && h.From == tr.From && h.To == tr.To {
-				return fail("transition %s: it clears fields and is held by the check %s; a held transition may not clear fields",
-					name, h.ID)
+				r.fail(CodeHeldTransition, at(p, "clears"), "Remove clears, or clear on another transition that is not held",
+					"transition %s: it clears fields and is held by the check %s; a held transition may not clear fields", name, h.ID)
+				break
 			}
 		}
-		for _, r := range t.Reactions {
-			if r.Kind == ReactionHeld && r.State == tr.To && (len(r.From) == 0 || slices.Contains(r.From, tr.From)) {
-				return fail("transition %s: it clears fields and is held by the reaction %s; a held transition may not clear fields",
-					name, r.ID)
+		for _, rx := range t.Reactions {
+			if rx.Kind == ReactionHeld && rx.State == tr.To && (len(rx.From) == 0 || slices.Contains(rx.From, tr.From)) {
+				r.fail(CodeHeldTransition, at(p, "clears"), "Remove clears, or clear on another transition that is not held",
+					"transition %s: it clears fields and is held by the reaction %s; a held transition may not clear fields", name, rx.ID)
+				break
 			}
 		}
 	}
-	return nil
 }

@@ -231,6 +231,28 @@ func (r reporter) fail(code Code, at, todo, format string, args ...any) error {
 	return errReported
 }
 
+// failExpr reports an expression's problem under the code its exprError
+// carries (EXPRESSION_INVALID for any other error).
+func (r reporter) failExpr(err error, at, format string, args ...any) error {
+	code := CodeExpressionInvalid
+	var ee exprError
+	if errors.As(err, &ee) {
+		code = ee.code
+	}
+	switch code {
+	case CodeExpressionType:
+		return r.fail(CodeExpressionType, at, "Write an expression that yields a value of the right type", format, args...)
+	case CodeReadNotAllowed:
+		return r.fail(CodeReadNotAllowed, at, "Read only what the message says this expression may read", format, args...)
+	case CodeUnknownField:
+		return r.fail(CodeUnknownField, at, "Declare the field, or name one that is declared", format, args...)
+	case CodeWrongFieldType:
+		return r.fail(CodeWrongFieldType, at, "Name a field of the same type and shape", format, args...)
+	default:
+		return r.fail(CodeExpressionInvalid, at, "Fix the expression; it reads fields by their ids", format, args...)
+	}
+}
+
 // within returns a reporter whose messages start with the given context.
 func (r reporter) within(format string, args ...any) reporter {
 	r.prefix += fmt.Sprintf(format, args...)

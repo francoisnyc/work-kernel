@@ -477,8 +477,8 @@ func (t *Type) check() error {
 	t.checkLinks(r)
 	legacyErr(t.checkKernelLinks(legacy))
 	// Before the guards: they may read the incoming names.
-	legacyErr(t.checkIncoming(legacy))
-	legacyErr(t.checkRollups(legacy))
+	t.checkIncoming(r)
+	t.checkRollups(r)
 	guards, err := newGuardEnv(t)
 	if err != nil {
 		// celFields leaves out what would break the environment; anything
@@ -496,7 +496,7 @@ func (t *Type) check() error {
 	for i := range t.States {
 		t.checkTimer(r, i)
 	}
-	legacyErr(t.checkAtTimers(legacy))
+	t.checkAtTimers(r)
 
 	// Hooks last: they name states, transitions and fields checked above.
 	legacyErr(t.checkOffers())
@@ -508,12 +508,12 @@ func (t *Type) check() error {
 	legacyErr(t.checkAccepts(legacy))
 	legacyErr(t.checkMultiUses(legacy))
 	legacyErr(t.checkReadable(legacy))
-	legacyErr(t.checkJira24b(legacy))
+	t.checkJira24b(r)
 	// Clears name fields, and may not sit on a held transition.
-	legacyErr(t.checkClears(legacy))
+	t.checkClears(r)
 	// Computed effects: the same, and each expression compiles to a value
 	// of its field.
-	legacyErr(t.checkSets(legacy))
+	t.checkSets(r)
 
 	// A field only the kernel writes needs a writer: a hook that writes it,
 	// or another Type's reaction this Type accepts for it.

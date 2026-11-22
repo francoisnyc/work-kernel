@@ -138,11 +138,11 @@ func takeContainerFields(expr string) (string, []string, error) {
 	for _, m := range containerFieldRef.FindAllStringSubmatchIndex(expr, -1) {
 		name := expr[m[2]:m[3]]
 		if rest := expr[m[1]:]; strings.HasPrefix(rest, ".") || strings.HasPrefix(rest, "[") || strings.HasPrefix(rest, "(") {
-			return "", nil, fmt.Errorf("%s is no read of a container's field (container.<field>)", expr[m[0]:m[1]]+rest)
+			return "", nil, exprError{CodeReadNotAllowed, fmt.Errorf("%s is no read of a container's field (container.<field>)", expr[m[0]:m[1]]+rest)}
 		}
 		if name == GuardKeyState || name == GuardKeyCategory || name == "linked" {
-			return "", nil, fmt.Errorf("container.%s: an effect reads the container's fields (container.<field>); "+
-				"its state and category are a guard's", name)
+			return "", nil, exprError{CodeReadNotAllowed, fmt.Errorf("container.%s: an effect reads the container's fields (container.<field>); "+
+				"its state and category are a guard's", name)}
 		}
 		if !slices.Contains(fields, name) {
 			fields = append(fields, name)
@@ -198,18 +198,18 @@ func checkCopy(f Field, expr string, own *Type) (PlainRef, error) {
 	}
 	ref, ok := plainRef(expr)
 	if !ok {
-		return ref, fmt.Errorf("%s is %s: it is set by a plain reference only (container.<field>, a field, or each), not %q",
-			f.ID, what, expr)
+		return ref, exprError{CodeExpressionInvalid, fmt.Errorf("%s is %s: it is set by a plain reference only (container.<field>, a field, or each), not %q",
+			f.ID, what, expr)}
 	}
 	if ref.Container || ref.Each || ref.Linked {
 		return ref, nil
 	}
 	src, declared := own.Field(ref.Field)
 	if !declared {
-		return ref, fmt.Errorf("%s: %q is not a declared field", f.ID, ref.Field)
+		return ref, exprError{CodeUnknownField, fmt.Errorf("%s: %q is not a declared field", f.ID, ref.Field)}
 	}
 	if src.Multiple != f.Multiple || !sameStoredType(src, f) {
-		return ref, fmt.Errorf("%s is %s: %s is not a field of its shape", f.ID, what, ref.Field)
+		return ref, exprError{CodeWrongFieldType, fmt.Errorf("%s is %s: %s is not a field of its shape", f.ID, what, ref.Field)}
 	}
 	return ref, nil
 }
@@ -235,53 +235,63 @@ func memberCELType(f Field) *cel.Type {
 
 // checkJira24b validates what a Type declares of 2.4b that check does not
 // reach elsewhere: unique_among_siblings and placement_writable_by.
-func (t *Type) checkJira24b(fail func(string, ...any) error) error {
-	for _, f := range t.Fields {
+func (t *Type) checkJira24b(r reporter) {
+	for i, f := range t.Fields {
 		if f.UniqueAmongSiblings == nil {
 			continue
 		}
+		p := at("fields", i, "unique_among_siblings")
 		switch {
 		case len(f.UniqueAmongSiblings) == 0:
-			return fail("field %s: unique_among_siblings names the states in which its value is unique; leave it out for none", f.ID)
+			r.fail(CodeInvalidValue, p, "Name the states, or leave unique_among_siblings out",
+				"field %s: unique_among_siblings names the states in which its value is unique; leave it out for none", f.ID)
+			continue
 		case f.Type != Principal || f.Multiple:
-			return fail("field %s: unique_among_siblings is for a single principal field, not a %s field", f.ID, f.Type)
+			r.fail(CodeKeyNotApplicable, p, "Remove it, or use it on a single principal field",
+				"field %s: unique_among_siblings is for a single principal field, not a %s field", f.ID, f.Type)
 		}
 		seen := map[string]bool{}
-		for _, s := range f.UniqueAmongSiblings {
+		for j, s := range f.UniqueAmongSiblings {
 			if _, ok := t.State(s); !ok {
-				return fail("field %s: unique_among_siblings names %q, which is not a declared state", f.ID, s)
-			}
-			if seen[s] {
-				return fail("field %s: unique_among_siblings names %s twice", f.ID, s)
+				r.fail(CodeUnknownState, at(p, j), "Name a declared state",
+					"field %s: unique_among_siblings names %q, which is not a declared state", f.ID, s)
+			} else if seen[s] {
+				r.fail(CodeDuplicate, at(p, j), "Remove the second one", "field %s: unique_among_siblings names %s twice", f.ID, s)
 			}
 			seen[s] = true
 		}
 	}
-	if t.PlacementWritableBy != nil {
-		p := t.PlacementWritableBy
-		if len(p) == 0 {
-			return fail("placement_writable_by is an empty list; leave it out for anyone who sees the Item")
+	if t.PlacementWritableBy == nil {
+		return
+	}
+	pw := t.PlacementWritableBy
+	if len(pw) == 0 {
+		r.fail(CodeInvalidValue, "placement_writable_by", "Name kernel or roles, or leave placement_writable_by out",
+			"placement_writable_by is an empty list; leave it out for anyone who sees the Item")
+		return
+	}
+	seen := map[string]bool{}
+	for j, e := range pw {
+		p := at("placement_writable_by", j)
+		if seen[e] {
+			r.fail(CodeDuplicate, p, "Remove the second one", "placement_writable_by names an entry twice")
+			continue
 		}
-		for _, e := range p {
-			if e == PlacementKernel {
-				if len(p) > 1 {
-					return fail("placement_writable_by: %s stands alone (no person places the Items)", PlacementKernel)
-				}
-				continue
+		seen[e] = true
+		if e == PlacementKernel {
+			if len(pw) > 1 {
+				r.fail(CodeConflict, p, "Write kernel alone, or name roles without it",
+					"placement_writable_by: %s stands alone (no person places the Items)", PlacementKernel)
 			}
-			name, ok := strings.CutPrefix(e, AllowedRolePrefix)
-			if !ok {
-				return fail("placement_writable_by entry %q: want %s or role:<name>", e, PlacementKernel)
-			}
-			if !roleNameRe.MatchString(name) {
-				return fail("placement_writable_by entry %q: not a role name", e)
-			}
+			continue
 		}
-		if len(slices.Compact(slices.Sorted(slices.Values(p)))) != len(p) {
-			return fail("placement_writable_by names an entry twice")
+		name, ok := strings.CutPrefix(e, AllowedRolePrefix)
+		if !ok {
+			r.fail(CodeInvalidValue, p, "Write kernel or role:<name>", "placement_writable_by entry %q: want %s or role:<name>", e, PlacementKernel)
+		} else if !roleNameRe.MatchString(name) {
+			r.fail(CodeInvalidName, p, "Name the role in lower case, digits, _ and -", "placement_writable_by entry %q: not a role name", e)
 		}
 	}
-	return nil
 }
 
 // PlacementRoles returns the roles that may place Items of t, and whether
