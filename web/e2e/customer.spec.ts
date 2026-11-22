@@ -106,7 +106,7 @@ test("kim, a customer: her portal, her incident, its replies, and nothing else",
   await actAs(page, "sam");
   await page.goto(`/#/items/${incidentId}`);
   const all = page.getByRole("list", { name: "Contained Items" }).getByRole("listitem");
-  await expect(all.filter({ hasText: "sla_goal@1" })).toHaveCount(2);
+  await expect(all.filter({ hasText: "sla_goal@3" })).toHaveCount(2);
   await expect(all.filter({ hasText: "note@2" })).toHaveCount(1);
   await expect(page.getByRole("region", { name: "Fields" })).toContainText("f_assignee");
 });
