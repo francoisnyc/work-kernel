@@ -80,261 +80,334 @@ func (t *Type) Hook(id string) (Hook, bool) {
 
 // checkHooks validates the hooks against the states, transitions and fields
 // already checked, and against the actions the hooks package registers.
-func (t *Type) checkHooks() error {
+func (t *Type) checkHooks(r reporter) {
 	seen := map[string]bool{}
 	checked := map[string]string{} // "from -> to" -> the check hook on it
-	for _, h := range t.Hooks {
-		// Every error names the hook and where it attaches.
-		where := fmt.Sprintf("hook %q", h.ID)
-		switch h.On {
-		case OnEnter:
-			where += fmt.Sprintf(" (on enter %s)", h.State)
-		case OnTransition:
-			where += fmt.Sprintf(" (on %s -> %s)", h.From, h.To)
-		case OnReaction:
-			where += fmt.Sprintf(" (on reaction %s)", h.Reaction)
-		}
-		fail := func(format string, args ...any) error {
-			return fmt.Errorf("typedef %s v%d: %s: %s", t.ID, t.Version, where, fmt.Sprintf(format, args...))
-		}
+	for i := range t.Hooks {
+		t.checkHook(r, i, seen, checked)
+	}
+	t.checkActing(r)
+}
 
-		if _, _, ok := item.HookParts(item.KindHook + ":" + t.ID + ":" + h.ID); !ok {
-			return fail("not a valid hook ID: it must be non-empty, without ':' or '@'")
-		}
-		if seen[h.ID] {
-			return fail("duplicate hook ID")
-		}
-		seen[h.ID] = true
+func (t *Type) checkHook(r reporter, i int, seen map[string]bool, checked map[string]string) {
+	h, p := t.Hooks[i], at("hooks", i)
+	// Every message names the hook and where it attaches.
+	where := fmt.Sprintf("hook %q", h.ID)
+	switch h.On {
+	case OnEnter:
+		where += fmt.Sprintf(" (on enter %s)", h.State)
+	case OnTransition:
+		where += fmt.Sprintf(" (on %s -> %s)", h.From, h.To)
+	case OnReaction:
+		where += fmt.Sprintf(" (on reaction %s)", h.Reaction)
+	}
+	r = r.within("%s: ", where)
 
-		switch h.On {
-		case OnEnter:
-			if _, ok := t.State(h.State); !ok {
-				return fail("unknown state %q", h.State)
-			}
-			if h.Kind != HookEnrich && h.Kind != HookAction {
-				return fail("a hook on entering a state must be kind enrich or action, not %q: a check belongs on a transition", h.Kind)
-			}
-		case OnTransition:
-			tr, ok := t.Transition(h.From, h.To)
-			if !ok {
-				return fail("there is no transition %s -> %s", h.From, h.To)
-			}
-			if h.Kind != HookCheck {
-				return fail("a hook on a transition must be kind check, not %q: enrich and action belong on entering a state", h.Kind)
-			}
-			if tr.Escape {
-				return fail("transition %s -> %s is an escape: it cancels a hold, so it may not open one", h.From, h.To)
-			}
-			name := h.From + " -> " + h.To
-			if other, dup := checked[name]; dup {
-				return fail("transition %s already has the check %q", name, other)
-			}
-			checked[name] = h.ID
-			// The correction travels with the move out of the from-state:
-			// it may not write what that state freezes (else every
-			// resolution would be refused FIELD_FROZEN).
-			if from, ok := t.State(h.From); ok {
-				for _, id := range h.Writes {
-					if slices.Contains(from.Frozen, id) {
-						return fail("it writes %s, which state %s freezes: its correction leaves %s with the move",
-							id, h.From, h.From)
-					}
-				}
-			}
-			// A check's correction is the transition's patch, applied by
-			// ResolveHold: like any patch of the transition, it may not
-			// write a field the transition's `allowed` names.
-			for _, id := range h.Writes {
-				if slices.Contains(tr.Allowed, AllowedFieldPrefix+id) {
-					return fail("it writes %s, which the transition's allowed names (field:%s): "+
-						"a transition's patch may not choose who may make it", id, id)
-				}
-			}
-			// The hold applies the requester's transition: `allowed` is
-			// checked against the requester. A hook named there could
-			// approve on its own authority.
-			for _, entry := range tr.Allowed {
-				if who, ok := strings.CutPrefix(entry, AllowedPrincipalPrefix); ok && item.IsKind(who, item.KindHook) {
-					return fail("the checked transition's allowed entry %q names a hook; "+
-						"a hook never makes a checked move on its own authority", entry)
-				}
-			}
-		case OnTimer:
-			// Which state's timer runs it is the acting timer's to say
-			// (checkActing): each such hook is named by exactly one.
-			if h.State != "" || h.From != "" || h.To != "" {
-				return fail("a hook on: timer names no state or transition: the acting timer that runs it does")
-			}
-			if h.Kind != HookAction {
-				return fail("a hook on: timer must be kind action, not %q", h.Kind)
-			}
-		case OnReaction:
-			if h.State != "" || h.From != "" || h.To != "" {
-				return fail("a hook on: reaction names no state or transition: its reaction does")
-			}
-			if h.Reaction == "" {
-				return fail("a hook on: reaction needs `reaction`, the undo whose applied event runs it")
-			}
-			r, ok := t.Reaction(h.Reaction)
-			if !ok {
-				return fail("unknown reaction %q", h.Reaction)
-			}
-			if r.Kind != ReactionAfter || r.Undoes == "" {
-				return fail("reaction %q is not an undo (an after reaction): only an undo records that it was applied", h.Reaction)
-			}
-			if h.Kind != HookAction {
-				return fail("a hook on: reaction must be kind action, not %q", h.Kind)
-			}
-		default:
-			return fail("unknown attach point %q: want enter, transition, timer or reaction", h.On)
-		}
-		if h.On != OnReaction && h.Reaction != "" {
-			return fail("only a hook on: reaction names a reaction")
-		}
+	if _, _, ok := item.HookParts(item.KindHook + ":" + t.ID + ":" + h.ID); !ok {
+		r.fail(CodeInvalidName, at(p, "id"), "Give the hook an id without ':' or '@', such as check_credit",
+			"not a valid hook ID: it must be non-empty, without ':' or '@'")
+		return
+	}
+	if seen[h.ID] {
+		r.fail(CodeDuplicate, at(p, "id"), "Rename one of the two hooks", "duplicate hook ID")
+		return
+	}
+	seen[h.ID] = true
 
-		if h.Action == "" {
-			return fail("no action")
+	switch h.On {
+	case OnEnter:
+		if _, ok := t.State(h.State); !ok {
+			r.fail(CodeUnknownState, at(p, "state"), "Name a declared state", "unknown state %q", h.State)
 		}
-		// A hook reads fields or the creator attributes; it writes fields only.
-		for _, id := range h.Reads {
-			// container:<offer>: read from the Item's container when the
-			// hook runs (jira23b.go).
-			if _, offer := OfferOf(id); offer {
-				if err := checkOfferRead(h, id); err != nil {
-					return fail("%v", err)
-				}
-				continue
-			}
-			if _, ok := t.Field(id); !ok && !IsAttribute(id) {
-				return fail("field %q is not declared", id)
-			}
+		if h.Kind != HookEnrich && h.Kind != HookAction {
+			r.fail(CodeInvalidValue, at(p, "kind"), "Use kind: enrich or action here, or put the check on a transition",
+				"a hook on entering a state must be kind enrich or action, not %q: a check belongs on a transition", h.Kind)
 		}
-		for _, id := range h.Writes {
-			if _, offer := OfferOf(id); offer {
-				return fail("%q is the container's to offer: no hook writes it", id)
-			}
-			if IsAttribute(id) {
-				return fail("%q is set by the kernel at create: no hook writes it", id)
-			}
-			if _, ok := t.Field(id); !ok {
-				return fail("field %q is not declared", id)
-			}
+	case OnTransition:
+		t.checkCheckHook(r, p, h, checked)
+	case OnTimer:
+		// Which state's timer runs it is the acting timer's to say
+		// (checkActing): each such hook is named by exactly one.
+		if k := namedKey(h.State, h.From, h.To); k != "" {
+			r.fail(CodeKeyNotApplicable, at(p, k), "Remove it: the acting timer that runs the hook names its state",
+				"a hook on: timer names no state or transition: the acting timer that runs it does")
 		}
-		if h.Kind == HookCheck && len(h.Reads) == 0 {
-			return fail("a check reads at least one field: its reads are what the hold freezes")
+		if h.Kind != HookAction {
+			r.fail(CodeInvalidValue, at(p, "kind"), "Use kind: action", "a hook on: timer must be kind action, not %q", h.Kind)
 		}
-		if h.Kind == HookEnrich && len(h.Writes) == 0 {
-			return fail("an enrich hook writes at least one field")
+	case OnReaction:
+		if k := namedKey(h.State, h.From, h.To); k != "" {
+			r.fail(CodeKeyNotApplicable, at(p, k), "Remove it: the hook's reaction says when it runs",
+				"a hook on: reaction names no state or transition: its reaction does")
 		}
-		if _, writes, ok := hooks.Arity(h.Action); h.Kind == HookAction && len(h.Writes) == 0 && !(ok && writes == 0) {
-			return fail("an action hook writes at least one field: what it made records that it ran")
+		switch rx, ok := t.Reaction(h.Reaction); {
+		case h.Reaction == "":
+			r.fail(CodeRequired, at(p, "reaction"), "Name the undo (an after reaction) whose applied event runs the hook",
+				"a hook on: reaction needs `reaction`, the undo whose applied event runs it")
+		case !ok:
+			r.fail(CodeUnknownReaction, at(p, "reaction"), "Name a reaction this Type declares",
+				"unknown reaction %q", h.Reaction)
+		case rx.Kind != ReactionAfter || rx.Undoes == "":
+			r.fail(CodeInvalidValue, at(p, "reaction"), "Name an after reaction that undoes a held one",
+				"reaction %q is not an undo (an after reaction): only an undo records that it was applied", h.Reaction)
 		}
-		if len(h.Fallback) > 0 {
-			if h.Kind != HookEnrich {
-				return fail("only an enrich hook has a fallback: there is no default for a side effect")
-			}
-			for id := range h.Fallback {
-				if !slices.Contains(h.Writes, id) {
-					return fail("fallback for %q, a field the hook does not write", id)
-				}
-			}
-			if err := t.CheckFields(h.Fallback, false); err != nil {
-				return fail("fallback: %v", err)
-			}
+		if h.Kind != HookAction {
+			r.fail(CodeInvalidValue, at(p, "kind"), "Use kind: action", "a hook on: reaction must be kind action, not %q", h.Kind)
 		}
+	default:
+		r.fail(CodeInvalidValue, at(p, "on"), "Use on: enter, transition, timer or reaction",
+			"unknown attach point %q: want enter, transition, timer or reaction", h.On)
+		return
+	}
+	if h.On != OnReaction && h.Reaction != "" {
+		r.fail(CodeKeyNotApplicable, at(p, "reaction"), "Remove reaction, or attach the hook on: reaction",
+			"only a hook on: reaction names a reaction")
+	}
 
-		reads, writes, ok := hooks.Arity(h.Action)
-		if !ok {
-			return fail("unknown action %q", h.Action)
+	// A hook reads fields or the creator attributes; it writes fields only.
+	for k, id := range h.Reads {
+		// container:<offer>: read from the Item's container when the hook
+		// runs (jira23b.go).
+		if _, offer := OfferOf(id); offer {
+			checkOfferRead(r, at(p, "reads", k), h, id)
+			continue
 		}
-		if reads != len(h.Reads) || writes != len(h.Writes) {
-			return fail("action %s takes %d reads and %d writes; the hook declares %d and %d",
-				h.Action, reads, writes, len(h.Reads), len(h.Writes))
+		if _, ok := t.Field(id); !ok && !IsAttribute(id) {
+			r.fail(CodeUnknownField, at(p, "reads", k), "Declare the field, or read one that is declared", "field %q is not declared", id)
 		}
 	}
-	return t.checkActing()
+	for k, id := range h.Writes {
+		switch _, offer := OfferOf(id); {
+		case offer:
+			r.fail(CodeInvalidValue, at(p, "writes", k), "Write a field of this Type", "%q is the container's to offer: no hook writes it", id)
+		case IsAttribute(id):
+			r.fail(CodeInvalidValue, at(p, "writes", k), "Write a field of this Type", "%q is set by the kernel at create: no hook writes it", id)
+		default:
+			if _, ok := t.Field(id); !ok {
+				r.fail(CodeUnknownField, at(p, "writes", k), "Declare the field, or write one that is declared", "field %q is not declared", id)
+			}
+		}
+	}
+	if h.Kind == HookCheck && len(h.Reads) == 0 {
+		r.fail(CodeRequired, at(p, "reads"), "Name the fields the check reads",
+			"a check reads at least one field: its reads are what the hold freezes")
+	}
+	if h.Kind == HookEnrich && len(h.Writes) == 0 {
+		r.fail(CodeRequired, at(p, "writes"), "Name the fields the hook writes", "an enrich hook writes at least one field")
+	}
+	// Only a known action says whether it may write nothing.
+	if _, writes, ok := hooks.Arity(h.Action); ok && h.Kind == HookAction && len(h.Writes) == 0 && writes != 0 {
+		r.fail(CodeRequired, at(p, "writes"), "Name the field that records what the action made",
+			"an action hook writes at least one field: what it made records that it ran")
+	}
+	t.checkFallback(r, p, h)
+
+	if h.Action == "" {
+		r.fail(CodeRequired, at(p, "action"), "Name the action the hook runs", "no action")
+		return
+	}
+	reads, writes, ok := hooks.Arity(h.Action)
+	switch {
+	case !ok:
+		r.fail(CodeUnknownAction, at(p, "action"), "Name an action the kernel registers (internal/hooks)", "unknown action %q", h.Action)
+	case reads != len(h.Reads):
+		r.fail(CodeActionArity, at(p, "reads"), "Give the action as many reads as it takes",
+			"action %s takes %d reads and %d writes; the hook declares %d and %d", h.Action, reads, writes, len(h.Reads), len(h.Writes))
+	case writes != len(h.Writes):
+		r.fail(CodeActionArity, at(p, "writes"), "Give the action as many writes as it takes",
+			"action %s takes %d reads and %d writes; the hook declares %d and %d", h.Action, reads, writes, len(h.Reads), len(h.Writes))
+	}
+}
+
+// namedKey returns the first of state, from and to that is set, as its key.
+func namedKey(state, from, to string) string {
+	switch {
+	case state != "":
+		return "state"
+	case from != "":
+		return "from"
+	case to != "":
+		return "to"
+	}
+	return ""
+}
+
+// checkCheckHook checks a hook on: transition, a check.
+func (t *Type) checkCheckHook(r reporter, p string, h Hook, checked map[string]string) {
+	j := t.transitionIndex(h.From, h.To)
+	if j < 0 {
+		r.fail(CodeUnknownTransition, at(p, "to"), "Declare the transition, or attach the check to one that is declared",
+			"there is no transition %s -> %s", h.From, h.To)
+		return
+	}
+	tr := t.Transitions[j]
+	if h.Kind != HookCheck {
+		r.fail(CodeInvalidValue, at(p, "kind"), "Use kind: check here, or attach the hook on entering a state",
+			"a hook on a transition must be kind check, not %q: enrich and action belong on entering a state", h.Kind)
+	}
+	if tr.Escape {
+		r.fail(CodeHeldTransition, p, "Check another transition: an escape may not be held",
+			"transition %s -> %s is an escape: it cancels a hold, so it may not open one", h.From, h.To)
+	}
+	name := h.From + " -> " + h.To
+	if other, dup := checked[name]; dup {
+		r.fail(CodeOnlyOneAllowed, p, "Merge the two checks into one, or remove one",
+			"transition %s already has the check %q", name, other)
+		return
+	}
+	checked[name] = h.ID
+	// The correction travels with the move out of the from-state: it may
+	// not write what that state freezes (else every resolution would be
+	// refused FIELD_FROZEN).
+	if from, ok := t.State(h.From); ok {
+		for k, id := range h.Writes {
+			if slices.Contains(from.Frozen, id) {
+				r.fail(CodeWritesFrozenField, at(p, "writes", k), "Write another field, or stop freezing it in the from-state",
+					"it writes %s, which state %s freezes: its correction leaves %s with the move", id, h.From, h.From)
+			}
+		}
+	}
+	// A check's correction is the transition's patch, applied by
+	// ResolveHold: like any patch of the transition, it may not write a
+	// field the transition's `allowed` names.
+	for k, id := range h.Writes {
+		if slices.Contains(tr.Allowed, AllowedFieldPrefix+id) {
+			r.fail(CodeConflict, at(p, "writes", k), "Write another field: the check may not choose who may make the move",
+				"it writes %s, which the transition's allowed names (field:%s): "+
+					"a transition's patch may not choose who may make it", id, id)
+		}
+	}
+	// The hold applies the requester's transition: `allowed` is checked
+	// against the requester. A hook named there could approve on its own
+	// authority.
+	for k, entry := range tr.Allowed {
+		if who, ok := strings.CutPrefix(entry, AllowedPrincipalPrefix); ok && item.IsKind(who, item.KindHook) {
+			r.fail(CodeConflict, at("transitions", j, "allowed", k), "Remove the hook from allowed: a check decides through its hold",
+				"the checked transition's allowed entry %q names a hook; "+
+					"a hook never makes a checked move on its own authority", entry)
+		}
+	}
+}
+
+// checkFallback checks an enrich hook's fallback values.
+func (t *Type) checkFallback(r reporter, p string, h Hook) {
+	if len(h.Fallback) == 0 {
+		return
+	}
+	if h.Kind != HookEnrich {
+		r.fail(CodeKeyNotApplicable, at(p, "fallback"), "Remove the fallback: only an enrich hook has one",
+			"only an enrich hook has a fallback: there is no default for a side effect")
+		return
+	}
+	ids := make([]string, 0, len(h.Fallback))
+	for id := range h.Fallback {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids) // Go randomizes map order; problems come in a stable one
+	bad := false
+	for _, id := range ids {
+		if !slices.Contains(h.Writes, id) {
+			r.fail(CodeKeyNotApplicable, at(p, "fallback", id), "Give a fallback only for a field the hook writes",
+				"fallback for %q, a field the hook does not write", id)
+			bad = true
+		}
+	}
+	if bad {
+		return
+	}
+	if err := t.CheckFields(h.Fallback, false); err != nil {
+		r.fail(CodeInvalidValue, at(p, "fallback"), "Give each fallback a value of its field's type", "fallback: %v", err)
+	}
 }
 
 // checkActing validates the states' acting timers against the hooks: each
 // names an action hook on: timer, and each such hook is named by exactly one
 // acting timer. It fills the parsed durations.
-func (t *Type) checkActing() error {
+func (t *Type) checkActing(r reporter) {
 	named := map[string]string{} // hook -> "state/timer" naming it
 	for i := range t.States {
-		s := &t.States[i]
 		ids := map[string]bool{}
-		for j := range s.Acting {
-			a := &s.Acting[j]
-			fail := func(format string, args ...any) error {
-				return fmt.Errorf("typedef %s v%d: state %s: acting timer %q: %s",
-					t.ID, t.Version, s.ID, a.ID, fmt.Sprintf(format, args...))
-			}
-			// The ID is part of the runs' idempotency keys (':' separated).
-			if a.ID == "" || strings.ContainsAny(a.ID, ":@") {
-				return fail("not a valid acting timer ID: it must be non-empty, without ':' or '@'")
-			}
-			if ids[a.ID] {
-				return fail("duplicate acting timer ID in the state")
-			}
-			ids[a.ID] = true
-			if a.At != "" {
-				// At an instant: no schedule; sets, a hook, or both.
-				if err := t.checkActingAt(s, a, fail); err != nil {
-					return err
-				}
-				if a.Hook == "" {
-					continue
-				}
-			} else if a.When != "" || len(a.Sets) > 0 {
-				return fail("when and sets are for a timer at an instant (at)")
-			} else if a.Max < 1 {
-				return fail("needs `max`, the total number of runs, at least 1")
-			}
-			if a.At == "" {
-				if a.After == "" {
-					return fail("needs `after`, such as 48h")
-				}
-				d, err := time.ParseDuration(a.After)
-				if err != nil {
-					return fail("`after`: %v", err)
-				}
-				if d <= 0 {
-					return fail("`after` must be more than zero")
-				}
-				a.AfterDuration = d
-				a.EveryDuration = 0
-				if a.Max > 1 && a.Every == "" {
-					return fail("runs %d times, so it needs `every`, the interval between runs", a.Max)
-				}
-			}
-			if a.At == "" && a.Every != "" {
-				e, err := time.ParseDuration(a.Every)
-				if err != nil {
-					return fail("`every`: %v", err)
-				}
-				if e <= 0 {
-					return fail("`every` must be more than zero")
-				}
+		for j := range t.States[i].Acting {
+			t.checkActingTimer(r, i, j, ids, named)
+		}
+	}
+	for k, h := range t.Hooks {
+		if h.On == OnTimer && named[h.ID] == "" {
+			r.fail(CodeMissingCounterpart, at("hooks", k), "Run it from a state's acting timer, or remove it",
+				"hook %q (on: timer): no acting timer runs it", h.ID)
+		}
+	}
+}
+
+func (t *Type) checkActingTimer(r reporter, i, j int, ids map[string]bool, named map[string]string) {
+	s := &t.States[i]
+	a, p := &s.Acting[j], at("states", i, "acting", j)
+	r = r.within("state %s: acting timer %q: ", s.ID, a.ID)
+	// The ID is part of the runs' idempotency keys (':' separated).
+	if a.ID == "" || strings.ContainsAny(a.ID, ":@") {
+		r.fail(CodeInvalidName, at(p, "id"), "Give the timer an id without ':' or '@', such as remind",
+			"not a valid acting timer ID: it must be non-empty, without ':' or '@'")
+		return
+	}
+	if ids[a.ID] {
+		r.fail(CodeDuplicate, at(p, "id"), "Rename one of the two timers", "duplicate acting timer ID in the state")
+		return
+	}
+	ids[a.ID] = true
+	if a.At != "" {
+		// At an instant: no schedule; sets, a hook, or both.
+		t.checkActingAt(r, p, s, a)
+		if a.Hook == "" {
+			return
+		}
+	} else {
+		switch {
+		case a.When != "":
+			r.fail(CodeKeyNotApplicable, at(p, "when"), "Remove when, or act at an instant (at)", "when and sets are for a timer at an instant (at)")
+		case len(a.Sets) > 0:
+			r.fail(CodeKeyNotApplicable, at(p, "sets"), "Remove sets, or act at an instant (at)", "when and sets are for a timer at an instant (at)")
+		case a.Max < 1:
+			r.fail(CodeRequired, at(p, "max"), "Give max, the number of runs, 1 or more", "needs `max`, the total number of runs, at least 1")
+		}
+		switch d, err := time.ParseDuration(a.After); {
+		case a.After == "":
+			r.fail(CodeRequired, at(p, "after"), "Give after as a duration, such as 48h", "needs `after`, such as 48h")
+		case err != nil:
+			r.fail(CodeInvalidValue, at(p, "after"), "Write a duration such as 90s, 4h or 48h", "`after`: %v", err)
+		case d <= 0:
+			r.fail(CodeInvalidValue, at(p, "after"), "Give a duration of more than zero", "`after` must be more than zero")
+		default:
+			a.AfterDuration = d
+		}
+		a.EveryDuration = 0
+		if a.Max > 1 && a.Every == "" {
+			r.fail(CodeRequired, at(p, "every"), "Give every, the interval between runs, such as 24h",
+				"runs %d times, so it needs `every`, the interval between runs", a.Max)
+		}
+		if a.Every != "" {
+			switch e, err := time.ParseDuration(a.Every); {
+			case err != nil:
+				r.fail(CodeInvalidValue, at(p, "every"), "Write a duration such as 90s, 4h or 48h", "`every`: %v", err)
+			case e <= 0:
+				r.fail(CodeInvalidValue, at(p, "every"), "Give a duration of more than zero", "`every` must be more than zero")
+			default:
 				a.EveryDuration = e
 			}
-			h, ok := t.Hook(a.Hook)
-			if !ok {
-				return fail("unknown hook %q", a.Hook)
-			}
-			if h.On != OnTimer {
-				return fail("hook %q is not on: timer", a.Hook)
-			}
-			here := s.ID + "/" + a.ID
-			if other, dup := named[a.Hook]; dup {
-				return fail("hook %q is already run by acting timer %s: each timer hook belongs to one timer", a.Hook, other)
-			}
-			named[a.Hook] = here
 		}
 	}
-	for _, h := range t.Hooks {
-		if h.On == OnTimer && named[h.ID] == "" {
-			return fmt.Errorf("typedef %s v%d: hook %q (on: timer): no acting timer runs it", t.ID, t.Version, h.ID)
-		}
+	h, ok := t.Hook(a.Hook)
+	if !ok {
+		r.fail(CodeUnknownHook, at(p, "hook"), "Name a hook of this Type with on: timer", "unknown hook %q", a.Hook)
+		return
 	}
-	return nil
+	if h.On != OnTimer {
+		r.fail(CodeInvalidValue, at(p, "hook"), "Name a hook with on: timer", "hook %q is not on: timer", a.Hook)
+		return
+	}
+	if other, dup := named[a.Hook]; dup {
+		r.fail(CodeOnlyOneAllowed, at(p, "hook"), "Give each timer its own hook",
+			"hook %q is already run by acting timer %s: each timer hook belongs to one timer", a.Hook, other)
+		return
+	}
+	named[a.Hook] = s.ID + "/" + a.ID
 }

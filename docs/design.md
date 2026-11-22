@@ -951,6 +951,79 @@ A rule's refusal answers with its code; every kernel rejection carries one
 | The call ran out of time | `DEADLINE_EXCEEDED` | `DEADLINE_EXCEEDED` |
 | anything else | `INTERNAL` | `INTERNAL` |
 
+### Type problems
+
+A Type definition is checked in full when it loads (`typedef.Parse`,
+`FromJSON`, `ParseDir`), and every problem comes back as data
+(Ventoux item 2a), not as the first one in a string:
+`{source, path, line, column, severity, code, message}`.
+
+- `path` points into the YAML: `transitions[3].allowed[0]`,
+  `accepts_reactions["part:finish"]`. `line` and `column` are the key's
+  when the path ends in a key, the item's when it ends in an index, and
+  the nearest enclosing node's when the path names something missing (0
+  when unknown: a stored definition, a syntax error's column).
+- `code` is stable and documented below; tools match on it. Codes are the
+  kernel's, not declared in Type YAML.
+- `message` says what is wrong, then what to do. Unlike a refusal's, it
+  may name fields, states and Types: a definition holds no personal data.
+- `severity` is `ERROR` for now; warnings (Ventoux item 3) will not stop
+  a load.
+
+Checking runs in three stages, and a stage runs only when the ones
+before it found nothing:
+
+1. **The YAML**: syntax, unknown keys, values of the wrong shape.
+2. **Each Type on its own**: every declaration is checked, and a
+   declaration with a problem still counts as declared, so nothing that
+   only follows from it is reported.
+3. **The Types together** (`ParseDir`): links, inverses, reactions and
+   consent, shapes across versions, a version declared twice. **This stage
+   runs only when every Type is sound on its own**: a tool repairing a
+   draft fixes the single-Type problems first, then sees these.
+
+As a log line, a problem reads
+`<source>:<line>:<col>: <CODE> typedef <id> v<n>: <message>`.
+
+| Code | Stage | Meaning |
+| --- | --- | --- |
+| `YAML_SYNTAX` | 1 | The file is not YAML |
+| `UNKNOWN_KEY` | 1 | A key the Type format does not have (often a typo) |
+| `WRONG_SHAPE` | 1 | A value of the wrong kind: text for a number, a map for a list |
+| `REQUIRED` | 2 | Something that must be there is missing (an ID, a link's inverse) |
+| `DUPLICATE` | 2 | Declared twice: a field, a state, a transition, an ID, a list entry |
+| `RESERVED_NAME` | 2 | A name the kernel keeps (today, caller, links, ...) |
+| `INVALID_NAME` | 2 | A name or ID that is not well formed (lower case, digits and _) |
+| `INVALID_VALUE` | 2 | A value outside what the key allows (a category, a field type, a version below 1, a duration that is not positive) |
+| `KEY_NOT_APPLICABLE` | 2 | A key that does not apply here (options on a string field, a fallback on a check) |
+| `UNKNOWN_FIELD` | 2 | Names a field the Type does not declare |
+| `UNKNOWN_STATE` | 2 | Names a state the Type does not declare |
+| `UNKNOWN_TRANSITION` | 2 | Names a transition the Type does not declare |
+| `UNKNOWN_LINK` | 2 | Names a link the Type cannot read |
+| `UNKNOWN_HOOK` | 2 | Names a hook the Type does not declare |
+| `UNKNOWN_REACTION` | 2, 3 | Names a reaction that does not exist (or reaches nothing) |
+| `UNKNOWN_ACTION` | 2 | A hook's action is not registered (`internal/hooks`) |
+| `ACTION_ARITY` | 2 | A hook's reads or writes do not match its action's |
+| `WRONG_FIELD_TYPE` | 2, 3 | A field of the wrong type for this use (an at-timer on a string) |
+| `EXPRESSION_INVALID` | 2, 3 | A CEL expression that does not compile, or a form not allowed (a computed principal) |
+| `EXPRESSION_TYPE` | 2, 3 | A CEL expression that yields the wrong type (a guard that is not a bool) |
+| `READ_NOT_ALLOWED` | 2, 3 | An expression or reaction reads what it may not read here |
+| `WRITES_FROZEN_FIELD` | 2 | Something writes a field a state freezes |
+| `WRITES_KERNEL_FIELD` | 2 | Something other than a hook writes a field only the kernel writes |
+| `HELD_TRANSITION` | 2, 3 | A held transition, or a move into one, does what a hold forbids |
+| `CONFLICT` | 2 | Two declarations contradict each other (requires and clears a field) |
+| `ONLY_ONE_ALLOWED` | 2 | A second one where only one is allowed (two checks on a transition) |
+| `MISSING_COUNTERPART` | 2, 3 | A declaration needs another that is missing (a kernel field no hook writes, a held reaction with no undo) |
+| `TIMER_NOT_ALLOWED` | 2 | A timer's transition does not allow `principal:system:timer` |
+| `UNKNOWN_TYPE` | 3 | Names a Type, or a Type version, that is not loaded |
+| `CONSENT_MISSING` | 3 | A reaction moves, creates or writes Items of a Type that does not consent (`accepts_reactions`) |
+| `INVERSE_CHANGED` | 3 | A link name has another inverse in another version (reported on the later one) |
+| `INVERSE_MISMATCH` | 3 | An incoming declaration does not match the link it names |
+| `SHAPE_CHANGED` | 3 | A field holds one value in one version and several in another |
+| `REACTION_CYCLE` | 3 | Reactions form a cycle (reported on the first reaction of the cycle, one cycle at a time) |
+| `DUPLICATE_VERSION` | 3 | Two files declare the same Type version (reported on the second) |
+| `FOLDER_TOO_DEEP` | 3 | A folder more than one level below the Types folder |
+
 ### Versioning
 
 `kernel.v1` only grows: new operations, optional fields, enum values, reasons
@@ -1523,6 +1596,17 @@ in the journal.
 | Jira 2.4 (**done**) | Customers as principals and public or internal comments (4a); the access request with N-of-M approvers (4b: the building blocks, then the Types) | Scenarios C and E run through pli. **Done 2026-11-22**: "Jira 2.4b, PR 2 as built" below, and the journal |
 | Hook protocol (**done**) | `pli.hooks/v1`: the envelope, outcomes, error classes, Standard Webhooks signing, the descriptor and the major check, a connectors file the worker follows; the HR directory moved out of the worker as the first remote connector | The vacation scenario passes unchanged against the remote HR; its HR tests pass against it; a conformance test any connector runs; HR 1.4 switched to 1.5 while a request waits, with no restart and no Type change. **Done 2026-11-22**: "Hook protocol (pli.hooks/v1), as built" below, and the journal |
 | Bonita | The company's real Bonita processes, mapped against the BPMN pattern table, then rebuilt | Planned after Jira 2 |
+
+## Ideas from Ventoux build order
+
+See `docs/plans/ideas-from-ventoux.md`.
+
+| Step | Build | Done when |
+| --- | --- | --- |
+| V1 | Action contracts: each hook action declares `name@version`, typed reads and writes, side effect, risk, idempotency and the reason codes it may answer; hooks name `action@version`; the catalogue is readable through the API. The hook protocol work (`pli.hooks/v1`: the descriptor and the compiled-in declaration `hr.manager_of@1`) is the first version of these contracts | Settled in its Phase A |
+| V2a | Every problem of a Type or a folder of Types as data: `{source, path, line, column, severity, code, message}`, in three stages (the YAML, each Type, the Types together), with no cascades; the codes in "Type problems" | Each code has a case with its exact path and position; a folder reports every file's problems at once; a source walk finds no problem without a code and a what-to-do; every test written before V2a passes unchanged |
+| V2b | `ValidateTypes`: draft Types checked against every registered version, nothing written; `pli types validate`; exempt from `policy.Project` like `ListTypes`; users and agents (in a session), not customers; 256 KiB and 50 sources at most | A draft with problems is a successful call listing them; an identical registered `id@version` passes, a different one is `VERSION_CHANGED`; pli prints `source:line:col: CODE message` and exits non-zero on errors |
+| V2c | The Type format as JSON Schema, by hand, in a checked-in file; checked with `santhosh-tekuri/jsonschema/v6` (test only) | Every file in `types/` validates; every key the schema allows is a key `typedef` knows; the schema is never stricter than `typedef` |
 
 ## Jira proof of concept
 

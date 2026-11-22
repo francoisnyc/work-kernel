@@ -5,7 +5,6 @@
 package typedef
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -325,31 +324,57 @@ const (
 const ContainerOfferPrefix = "container:"
 
 // Parse reads a Type from YAML and checks it. Unknown keys are errors, so a
-// typo in a Type file is caught at load time.
+// typo in a Type file is caught at load time. The error, if any, is
+// Problems: every problem found, positioned in the YAML.
 func Parse(data []byte) (*Type, error) {
-	var t Type
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
-	if err := dec.Decode(&t); err != nil {
-		return nil, fmt.Errorf("typedef: parse YAML: %w", err)
+	t, _, ps := parseDoc(data)
+	if len(ps) > 0 {
+		return nil, ps
 	}
-	if err := t.check(); err != nil {
-		return nil, err
+	return t, nil
+}
+
+// parseDoc runs stages (a) and (b) on one YAML document. It returns the
+// document too, so ParseDir can place the problems of stage (c).
+func parseDoc(data []byte) (*Type, *yaml.Node, Problems) {
+	doc, ps := readYAML(data)
+	if len(ps) == 0 {
+		var t *Type
+		if t, ps = decodeType(doc); len(ps) == 0 {
+			ps = t.problems()
+			position(ps, doc)
+			if len(ps) == 0 {
+				return t, doc, nil
+			}
+		}
+	}
+	sortProblems(ps)
+	return nil, doc, ps
+}
+
+// FromJSON reads a Type from the JSON form produced by json.Marshal, which
+// is how the item service stores it in Postgres. Its problems have paths
+// but no positions.
+func FromJSON(data []byte) (*Type, error) {
+	var t Type
+	if err := json.Unmarshal(data, &t); err != nil {
+		var ps Problems
+		newReporter(&ps, "", 0).fail(CodeWrongShape, "", "Store the definition json.Marshal produced",
+			"typedef: parse JSON: %v", err)
+		return nil, ps
+	}
+	if ps := t.problems(); len(ps) > 0 {
+		sortProblems(ps)
+		return nil, ps
 	}
 	return &t, nil
 }
 
-// FromJSON reads a Type from the JSON form produced by json.Marshal, which
-// is how the item service stores it in Postgres.
-func FromJSON(data []byte) (*Type, error) {
-	var t Type
-	if err := json.Unmarshal(data, &t); err != nil {
-		return nil, fmt.Errorf("typedef: parse JSON: %w", err)
-	}
-	if err := t.check(); err != nil {
-		return nil, err
-	}
-	return &t, nil
+// problems runs stage (b), the checks on this Type alone.
+func (t *Type) problems() Problems {
+	var ps Problems
+	errors.As(t.check(), &ps)
+	return ps
 }
 
 // Field returns the field with the given ID. The second value reports
@@ -384,302 +409,370 @@ func (t *Type) Transition(from, to string) (Transition, bool) {
 }
 
 // check validates the definition, parses every guard, and gives a Type
-// without states its one implicit state.
+// without states its one implicit state. It reports every problem of the
+// Type (stage b) as Problems. A declaration with a problem still counts as
+// declared, so what only follows from it is not reported again.
 func (t *Type) check() error {
+	var ps Problems
+	r := newReporter(&ps, t.ID, t.Version)
 	if t.ID == "" {
-		return errors.New("typedef: id is required")
-	}
-	// Errors below start with the Type's name so the message stands on its own.
-	fail := func(format string, args ...any) error {
-		return fmt.Errorf("typedef %s v%d: %s", t.ID, t.Version, fmt.Sprintf(format, args...))
+		r.fail(CodeRequired, "id", "Name the Type, such as id: ticket", "id is required")
 	}
 	if t.Version < 1 {
-		return fail("version must be 1 or more")
+		r.fail(CodeInvalidValue, "version", "Number the first version 1, and each new version one more", "version must be 1 or more")
 	}
 
 	seen := map[string]bool{}
-	for _, f := range t.Fields {
-		if f.ID == "" {
-			return fail("a field has no id")
-		}
-		if seen[f.ID] {
-			return fail("duplicate field %q", f.ID)
-		}
-		seen[f.ID] = true
-		if slices.Contains(reservedNames, f.ID) {
-			return fail("field %s: %q is a reserved name (guard variables, creator attributes, links)", f.ID, f.ID)
-		}
-		switch f.WritableBy {
-		case WritableByAnyone, WritableByKernel:
-		default:
-			return fail("field %s: writable_by %q: the only value is kernel", f.ID, f.WritableBy)
-		}
-		if err := f.checkRoles(); err != nil {
-			return fail("%v", err)
-		}
-		switch f.Type {
-		case String, Int, Bool, Principal, Date, DateTime:
-			if len(f.Options) > 0 {
-				return fail("field %s: only enum fields take options", f.ID)
-			}
-		case Enum:
-			if len(f.Options) == 0 {
-				return fail("field %s: an enum needs options", f.ID)
-			}
-		default:
-			return fail("field %s: unknown type %q", f.ID, f.Type)
-		}
-		// A set of values: for types whose values are text. One value or
-		// several is part of what a field is (a new field ID to change it).
-		switch {
-		case f.Multiple && f.Type != String && f.Type != Enum && f.Type != Principal && f.Type != Date:
-			return fail("field %s: multiple is for string, enum, principal and date fields, not %s", f.ID, f.Type)
-		case f.Max < 0:
-			return fail("field %s: max cannot be negative", f.ID)
-		case f.Max > 0 && !f.Multiple:
-			return fail("field %s: max is for a multiple field", f.ID)
-		}
+	for i := range t.Fields {
+		t.checkField(r, i, seen)
 	}
 
-	if len(t.States) == 0 {
+	noStates := len(t.States) == 0
+	if noStates {
 		// No lifecycle: naming an initial state or a transition is a mistake.
 		if t.InitialState != "" {
-			return fail("initial_state %q is set but the Type declares no states", t.InitialState)
+			r.fail(CodeKeyNotApplicable, "initial_state", "Remove initial_state, or declare the states",
+				"initial_state %q is set but the Type declares no states", t.InitialState)
 		}
 		if len(t.Transitions) > 0 {
-			return fail("transitions are declared but the Type declares no states")
+			r.fail(CodeKeyNotApplicable, "transitions", "Remove the transitions, or declare the states",
+				"transitions are declared but the Type declares no states")
 		}
 		t.States = []State{{ID: ImplicitState, Category: ImplicitStateCategory}}
 		t.InitialState = ImplicitState
 	}
 	seen = map[string]bool{}
-	for _, s := range t.States {
-		if s.ID == "" {
-			return fail("a state has no id")
-		}
-		if seen[s.ID] {
-			return fail("duplicate state %q", s.ID)
-		}
-		seen[s.ID] = true
-		if !slices.Contains(categories, s.Category) {
-			return fail("state %s: unknown category %q", s.ID, s.Category)
-		}
-		frozen := map[string]bool{}
-		for _, id := range s.Frozen {
-			if _, ok := t.Field(id); !ok {
-				return fail("state %s: frozen field %q is not declared", s.ID, id)
-			}
-			if frozen[id] {
-				return fail("state %s: frozen field %q is listed twice", s.ID, id)
-			}
-			frozen[id] = true
-		}
+	for i := range t.States {
+		t.checkState(r, i, seen)
 	}
 	if _, ok := t.State(t.InitialState); !ok {
-		return fail("initial_state %q is not a declared state", t.InitialState)
+		if t.InitialState == "" {
+			r.fail(CodeRequired, "initial_state", "Name the state Items start in",
+				"initial_state %q is not a declared state", t.InitialState)
+		} else {
+			r.fail(CodeUnknownState, "initial_state", "Name one of the declared states",
+				"initial_state %q is not a declared state", t.InitialState)
+		}
 	}
 
-	if err := t.checkLinks(fail); err != nil {
-		return err
-	}
-	if err := t.checkKernelLinks(fail); err != nil {
-		return err
-	}
+	t.checkLinks(r)
+	t.checkKernelLinks(r)
 	// Before the guards: they may read the incoming names.
-	if err := t.checkIncoming(fail); err != nil {
-		return err
-	}
-	if err := t.checkRollups(fail); err != nil {
-		return err
-	}
+	t.checkIncoming(r)
+	t.checkRollups(r)
 	guards, err := newGuardEnv(t)
 	if err != nil {
-		return fail("%v", err)
+		// celFields leaves out what would break the environment; anything
+		// else is reported once, on the fields.
+		r.fail(CodeExpressionInvalid, "fields", "Fix the fields the message names", "%s", err.Error())
 	}
-	seen = map[string]bool{}
-	// Range copies each element, so index into the slice to store Program.
-	for i := range t.Transitions {
-		tr := &t.Transitions[i]
-		name := tr.From + " -> " + tr.To
-		for _, s := range []string{tr.From, tr.To} {
-			if _, ok := t.State(s); !ok {
-				return fail("transition %s: unknown state %q", name, s)
-			}
+	if !noStates {
+		seen = map[string]bool{}
+		for i := range t.Transitions {
+			t.checkTransition(r, i, seen, guards)
 		}
-		if seen[name] {
-			return fail("duplicate transition %s", name)
-		}
-		seen[name] = true
-		for _, id := range tr.Required {
-			if _, ok := t.Field(id); !ok {
-				return fail("transition %s: required field %q is not declared", name, id)
-			}
-		}
-		for _, entry := range tr.Allowed {
-			if entry == AllowedCreator {
-				continue
-			}
-			// nobody: no person, agent or customer passes; only a reaction,
-			// by consent, makes the move. It stands alone.
-			if entry == AllowedNobody {
-				if len(tr.Allowed) > 1 {
-					return fail("transition %s: allowed entry %s stands alone: no one else may be named beside it", name, AllowedNobody)
-				}
-				continue
-			}
-			if id, ok := strings.CutPrefix(entry, AllowedFieldPrefix); ok {
-				f, declared := t.Field(id)
-				if id == "" || !declared || f.Type != Principal {
-					return fail("transition %s: allowed entry %q must name a declared principal field", name, entry)
-				}
-				continue
-			}
-			// CutPrefix returns the rest of the string and whether the prefix was there.
-			who, ok := strings.CutPrefix(entry, AllowedRolePrefix)
-			if !ok {
-				who, ok = strings.CutPrefix(entry, AllowedPrincipalPrefix)
-			}
-			if !ok {
-				return fail("transition %s: allowed entry %q must be role:<name>, principal:<id>, field:<id>, creator or nobody",
-					name, entry)
-			}
-			if who == "" {
-				return fail("transition %s: allowed entry %q names nothing", name, entry)
-			}
-			// A principal entry names a typed principal ID that may act.
-			if strings.HasPrefix(entry, AllowedPrincipalPrefix) &&
-				!item.IsKind(who, item.KindUser, item.KindAgent, item.KindSystem, item.KindHook) {
-				return fail("transition %s: allowed entry %q must name user:<id>, agent:<id>, system:<id> "+
-					"or hook:<type>:<hook-id>", name, entry)
-			}
-			// A hook acts only on Items of its own Type, so another Type's
-			// hook could never pass this list: naming it is a mistake.
-			if hookType, _, ok := item.HookParts(who); ok && strings.HasPrefix(entry, AllowedPrincipalPrefix) &&
-				hookType != t.ID {
-				return fail("transition %s: allowed entry %q names a hook of Type %q; a hook acts only on its own Type",
-					name, entry, hookType)
-			}
-		}
-		for _, entry := range tr.Except {
-			if entry != AllowedCreator && entry != AllowedContainerCreator {
-				return fail("transition %s: except entry %q: except takes creator or %s", name, entry, AllowedContainerCreator)
-			}
-		}
-		prg, reads, err := compileGuard(guards, tr.Guard)
-		if err != nil {
-			return fail("transition %s: guard %q: %v", name, tr.Guard, err)
-		}
-		tr.Program, tr.GuardLinks = prg, reads.links
-		tr.GuardContainer, tr.GuardChildren = reads.container, reads.children
 	}
 
 	// Timers come last: each must name a transition checked above.
 	for i := range t.States {
-		s := &t.States[i]
-		if s.Timer == nil {
-			continue
-		}
-		if s.Timer.After == "" {
-			return fail("state %s: timer needs `after`, such as 4h", s.ID)
-		}
-		d, err := time.ParseDuration(s.Timer.After)
-		if err != nil {
-			return fail("state %s: timer `after`: %v", s.ID, err)
-		}
-		if d <= 0 {
-			return fail("state %s: timer `after` must be more than zero", s.ID)
-		}
-		if s.Timer.To == "" {
-			return fail("state %s: timer needs `to`, the state to move to", s.ID)
-		}
-		// A timer may only make a move the Type already allows from this
-		// state, so it can never do what a person could not.
-		if _, ok := t.Transition(s.ID, s.Timer.To); !ok {
-			return fail("state %s: timer moves to %q, but there is no transition %s -> %s",
-				s.ID, s.Timer.To, s.ID, s.Timer.To)
-		}
-		// The timer acts as TimerPrincipal and is subject to `allowed` like
-		// anyone else. A list that leaves it out would make the timer fire
-		// and be forbidden every time, so the Type is refused instead.
-		tr, _ := t.Transition(s.ID, s.Timer.To)
-		timer := AllowedPrincipalPrefix + TimerPrincipal
-		if len(tr.Allowed) > 0 && !slices.Contains(tr.Allowed, timer) {
-			return fail("state %s: its timer uses transition %s -> %s, whose `allowed` list must include %s",
-				s.ID, s.ID, s.Timer.To, timer)
-		}
-		s.Timer.Duration = d
+		t.checkTimer(r, i)
 	}
-	if err := t.checkAtTimers(fail); err != nil {
-		return err
-	}
+	t.checkAtTimers(r)
 
 	// Hooks last: they name states, transitions and fields checked above.
-	if err := t.checkOffers(); err != nil {
-		return err
-	}
-	if err := t.checkCustomers(); err != nil {
-		return err
-	}
-	if err := t.checkHooks(); err != nil {
-		return err
-	}
+	t.checkOffers(r)
+	t.checkCustomers(r)
+	t.checkHooks(r)
 	// Then what names hooks and fields: reactions, invariants, consents.
-	if err := t.checkReactions(fail); err != nil {
-		return err
-	}
-	if err := t.checkInvariants(fail); err != nil {
-		return err
-	}
-	if err := t.checkAccepts(fail); err != nil {
-		return err
-	}
-	if err := t.checkMultiUses(fail); err != nil {
-		return err
-	}
-	if err := t.checkReadable(fail); err != nil {
-		return err
-	}
-	if err := t.checkJira24b(fail); err != nil {
-		return err
-	}
+	t.checkReactions(r)
+	t.checkInvariants(r)
+	t.checkAccepts(r)
+	t.checkMultiUses(r)
+	t.checkReadable(r)
+	t.checkJira24b(r)
 	// Clears name fields, and may not sit on a held transition.
-	if err := t.checkClears(fail); err != nil {
-		return err
-	}
+	t.checkClears(r)
 	// Computed effects: the same, and each expression compiles to a value
 	// of its field.
-	if err := t.checkSets(fail); err != nil {
-		return err
-	}
+	t.checkSets(r)
+
 	// A field only the kernel writes needs a writer: a hook that writes it,
 	// or another Type's reaction this Type accepts for it.
-	for _, f := range t.Fields {
-		if f.WritableBy != WritableByKernel {
-			continue
-		}
-		written := slices.ContainsFunc(t.Hooks, func(h Hook) bool { return slices.Contains(h.Writes, f.ID) })
-		for _, a := range t.AcceptsReactions {
-			// A reaction that may write it, or set it on the Items it creates.
-			// Or a set reaction of a contained Item may set it.
-			written = written || slices.Contains(a.Fields, f.ID) || slices.Contains(a.Creates, f.ID) || slices.Contains(a.Sets, f.ID)
-		}
-		// Or an acting timer at an instant sets it.
-		for _, s := range t.States {
-			for _, a := range s.Acting {
-				_, set := a.Sets[f.ID]
-				written = written || set
-			}
-		}
-		// Or a transition computes it (`sets`): the Type itself writes it.
-		for _, tr := range t.Transitions {
-			_, set := tr.Sets[f.ID]
-			written = written || set
-		}
-		if !written {
-			return fail("field %s is writable_by kernel, but no hook writes it", f.ID)
+	for i, f := range t.Fields {
+		if f.WritableBy == WritableByKernel && !t.kernelFieldWritten(f.ID) {
+			r.fail(CodeMissingCounterpart, at("fields", i, "writable_by"),
+				"Add a hook or a computed effect that writes it, accept a reaction for it, or remove writable_by: kernel",
+				"field %s is writable_by kernel, but no hook writes it", f.ID)
 		}
 	}
+	if len(ps) > 0 {
+		return ps
+	}
 	return nil
+}
+
+// checkField checks fields[i]. seen holds the IDs declared before it.
+func (t *Type) checkField(r reporter, i int, seen map[string]bool) {
+	f, p := t.Fields[i], at("fields", i)
+	if f.ID == "" {
+		r.fail(CodeRequired, at(p, "id"), "Give the field an id, such as f_title", "a field has no id")
+		return
+	}
+	if seen[f.ID] {
+		r.fail(CodeDuplicate, at(p, "id"), "Rename one of the two, or remove the second", "duplicate field %q", f.ID)
+		return
+	}
+	seen[f.ID] = true
+	if slices.Contains(reservedNames, f.ID) {
+		r.fail(CodeReservedName, at(p, "id"), "Choose another id; field ids usually start with f_",
+			"field %s: %q is a reserved name (guard variables, creator attributes, links)", f.ID, f.ID)
+	}
+	switch f.WritableBy {
+	case WritableByAnyone, WritableByKernel:
+	default:
+		r.fail(CodeInvalidValue, at(p, "writable_by"), "Write writable_by: kernel, a list of role:<name>, or leave it out",
+			"field %s: writable_by %q: the only value is kernel", f.ID, f.WritableBy)
+	}
+	f.checkRoles(r, p)
+	switch f.Type {
+	case String, Int, Bool, Principal, Date, DateTime:
+		if len(f.Options) > 0 {
+			r.fail(CodeKeyNotApplicable, at(p, "options"), "Remove options, or make the field an enum",
+				"field %s: only enum fields take options", f.ID)
+		}
+	case Enum:
+		if len(f.Options) == 0 {
+			r.fail(CodeRequired, at(p, "options"), "List the enum's values under options", "field %s: an enum needs options", f.ID)
+		}
+	default:
+		r.fail(CodeInvalidValue, at(p, "type"), "Use string, int, bool, enum, principal, date or datetime",
+			"field %s: unknown type %q", f.ID, f.Type)
+	}
+	// A set of values: for types whose values are text. One value or
+	// several is part of what a field is (a new field ID to change it).
+	switch {
+	case f.Multiple && f.Type != String && f.Type != Enum && f.Type != Principal && f.Type != Date:
+		r.fail(CodeKeyNotApplicable, at(p, "multiple"), "Remove multiple, or use a string, enum, principal or date field",
+			"field %s: multiple is for string, enum, principal and date fields, not %s", f.ID, f.Type)
+	case f.Max < 0:
+		r.fail(CodeInvalidValue, at(p, "max"), "Give max as 0 (no limit) or more", "field %s: max cannot be negative", f.ID)
+	case f.Max > 0 && !f.Multiple:
+		r.fail(CodeKeyNotApplicable, at(p, "max"), "Remove max, or make the field multiple", "field %s: max is for a multiple field", f.ID)
+	}
+}
+
+// checkState checks states[i], but not its timers.
+func (t *Type) checkState(r reporter, i int, seen map[string]bool) {
+	s, p := t.States[i], at("states", i)
+	if s.ID == "" {
+		r.fail(CodeRequired, at(p, "id"), "Give the state an id, such as open", "a state has no id")
+		return
+	}
+	if seen[s.ID] {
+		r.fail(CodeDuplicate, at(p, "id"), "Rename one of the two, or remove the second", "duplicate state %q", s.ID)
+		return
+	}
+	seen[s.ID] = true
+	if !slices.Contains(categories, s.Category) {
+		r.fail(CodeInvalidValue, at(p, "category"), "Use triage, backlog, todo, active, waiting, done, canceled or none",
+			"state %s: unknown category %q", s.ID, s.Category)
+	}
+	frozen := map[string]bool{}
+	for j, id := range s.Frozen {
+		if _, ok := t.Field(id); !ok {
+			r.fail(CodeUnknownField, at(p, "frozen", j), "Declare the field, or remove it from frozen",
+				"state %s: frozen field %q is not declared", s.ID, id)
+			continue
+		}
+		if frozen[id] {
+			r.fail(CodeDuplicate, at(p, "frozen", j), "Remove the second one", "state %s: frozen field %q is listed twice", s.ID, id)
+		}
+		frozen[id] = true
+	}
+}
+
+// checkTransition checks transitions[i] and compiles its guard. guards is
+// nil if the guard environment could not be built (reported once).
+func (t *Type) checkTransition(r reporter, i int, seen map[string]bool, guards *cel.Env) {
+	tr, p := &t.Transitions[i], at("transitions", i)
+	name := tr.From + " -> " + tr.To
+	if _, ok := t.State(tr.From); !ok {
+		r.fail(CodeUnknownState, at(p, "from"), "Declare the state, or name one that is declared",
+			"transition %s: unknown state %q", name, tr.From)
+	}
+	if _, ok := t.State(tr.To); !ok {
+		r.fail(CodeUnknownState, at(p, "to"), "Declare the state, or name one that is declared",
+			"transition %s: unknown state %q", name, tr.To)
+	}
+	if seen[name] {
+		r.fail(CodeDuplicate, p, "Remove one of the two: one transition per pair of states", "duplicate transition %s", name)
+		return
+	}
+	seen[name] = true
+	for j, id := range tr.Required {
+		if _, ok := t.Field(id); !ok {
+			r.fail(CodeUnknownField, at(p, "required", j), "Declare the field, or remove it from required",
+				"transition %s: required field %q is not declared", name, id)
+		}
+	}
+	for j, entry := range tr.Allowed {
+		t.checkAllowedEntry(r, at(p, "allowed", j), name, tr.Allowed, entry)
+	}
+	for j, entry := range tr.Except {
+		if entry != AllowedCreator && entry != AllowedContainerCreator {
+			r.fail(CodeInvalidValue, at(p, "except", j), "Write creator or container_creator",
+				"transition %s: except entry %q: except takes creator or %s", name, entry, AllowedContainerCreator)
+		}
+	}
+	if guards == nil {
+		return
+	}
+	prg, reads, err := compileGuard(guards, tr.Guard)
+	var ee exprError
+	switch {
+	case err == nil:
+		tr.Program, tr.GuardLinks = prg, reads.links
+		tr.GuardContainer, tr.GuardChildren = reads.container, reads.children
+	case errors.As(err, &ee) && ee.code == CodeExpressionType:
+		r.fail(CodeExpressionType, at(p, "guard"), "Write a condition that is true or false, such as f_count > 0",
+			"transition %s: guard %q: %v", name, tr.Guard, err)
+	case errors.As(err, &ee) && ee.code == CodeReadNotAllowed:
+		r.fail(CodeReadNotAllowed, at(p, "guard"), "Read only what the message says a guard may read",
+			"transition %s: guard %q: %v", name, tr.Guard, err)
+	default:
+		r.fail(CodeExpressionInvalid, at(p, "guard"), "Fix the CEL expression; it reads fields by their ids",
+			"transition %s: guard %q: %v", name, tr.Guard, err)
+	}
+}
+
+// checkAllowedEntry checks one entry of a transition's allowed list.
+func (t *Type) checkAllowedEntry(r reporter, p, name string, allowed []string, entry string) {
+	if entry == AllowedCreator {
+		return
+	}
+	// nobody: no person, agent or customer passes; only a reaction, by
+	// consent, makes the move. It stands alone.
+	if entry == AllowedNobody {
+		if len(allowed) > 1 {
+			r.fail(CodeConflict, p, "Leave nobody alone in allowed, or remove it",
+				"transition %s: allowed entry %s stands alone: no one else may be named beside it", name, AllowedNobody)
+		}
+		return
+	}
+	if id, ok := strings.CutPrefix(entry, AllowedFieldPrefix); ok {
+		f, declared := t.Field(id)
+		switch {
+		case id == "" || !declared:
+			r.fail(CodeUnknownField, p, "Name a declared principal field after field:",
+				"transition %s: allowed entry %q must name a declared principal field", name, entry)
+		case f.Type != Principal:
+			r.fail(CodeWrongFieldType, p, "Name a principal field after field:",
+				"transition %s: allowed entry %q must name a declared principal field", name, entry)
+		}
+		return
+	}
+	// CutPrefix returns the rest of the string and whether the prefix was there.
+	who, ok := strings.CutPrefix(entry, AllowedRolePrefix)
+	if !ok {
+		who, ok = strings.CutPrefix(entry, AllowedPrincipalPrefix)
+	}
+	if !ok {
+		r.fail(CodeInvalidValue, p, "Write role:<name>, principal:<id>, field:<id>, creator or nobody",
+			"transition %s: allowed entry %q must be role:<name>, principal:<id>, field:<id>, creator or nobody", name, entry)
+		return
+	}
+	if who == "" {
+		r.fail(CodeInvalidValue, p, "Name the role or the principal after the colon",
+			"transition %s: allowed entry %q names nothing", name, entry)
+		return
+	}
+	// A principal entry names a typed principal ID that may act.
+	if strings.HasPrefix(entry, AllowedPrincipalPrefix) &&
+		!item.IsKind(who, item.KindUser, item.KindAgent, item.KindSystem, item.KindHook) {
+		r.fail(CodeInvalidValue, p, "Write principal: followed by user:<id>, agent:<id>, system:<id> or hook:<type>:<hook-id>",
+			"transition %s: allowed entry %q must name user:<id>, agent:<id>, system:<id> "+
+				"or hook:<type>:<hook-id>", name, entry)
+		return
+	}
+	// A hook acts only on Items of its own Type, so another Type's hook
+	// could never pass this list: naming it is a mistake.
+	if hookType, _, ok := item.HookParts(who); ok && strings.HasPrefix(entry, AllowedPrincipalPrefix) && hookType != t.ID {
+		r.fail(CodeInvalidValue, p, "Name a hook of this Type, or remove the entry",
+			"transition %s: allowed entry %q names a hook of Type %q; a hook acts only on its own Type", name, entry, hookType)
+	}
+}
+
+// checkTimer checks states[i].timer, once the transitions are known.
+func (t *Type) checkTimer(r reporter, i int) {
+	s := &t.States[i]
+	if s.Timer == nil {
+		return
+	}
+	p := at("states", i, "timer")
+	switch d, err := time.ParseDuration(s.Timer.After); {
+	case s.Timer.After == "":
+		r.fail(CodeRequired, at(p, "after"), "Give after as a duration, such as 4h", "state %s: timer needs `after`, such as 4h", s.ID)
+	case err != nil:
+		r.fail(CodeInvalidValue, at(p, "after"), "Write a duration such as 90s, 4h or 48h", "state %s: timer `after`: %v", s.ID, err)
+	case d <= 0:
+		r.fail(CodeInvalidValue, at(p, "after"), "Give a duration of more than zero", "state %s: timer `after` must be more than zero", s.ID)
+	default:
+		s.Timer.Duration = d
+	}
+	if s.Timer.To == "" {
+		r.fail(CodeRequired, at(p, "to"), "Name the state the timer moves to", "state %s: timer needs `to`, the state to move to", s.ID)
+		return
+	}
+	// A timer may only make a move the Type already allows from this
+	// state, so it can never do what a person could not.
+	j := t.transitionIndex(s.ID, s.Timer.To)
+	if j < 0 {
+		r.fail(CodeUnknownTransition, at(p, "to"), "Declare the transition from this state, or move to another state",
+			"state %s: timer moves to %q, but there is no transition %s -> %s", s.ID, s.Timer.To, s.ID, s.Timer.To)
+		return
+	}
+	// The timer acts as TimerPrincipal and is subject to `allowed` like
+	// anyone else. A list that leaves it out would make the timer fire and
+	// be forbidden every time, so the Type is refused instead.
+	timer := AllowedPrincipalPrefix + TimerPrincipal
+	if tr := t.Transitions[j]; len(tr.Allowed) > 0 && !slices.Contains(tr.Allowed, timer) {
+		r.fail(CodeTimerNotAllowed, at("transitions", j, "allowed"), "Add principal:system:timer to the transition's allowed list",
+			"state %s: its timer uses transition %s -> %s, whose `allowed` list must include %s", s.ID, s.ID, s.Timer.To, timer)
+	}
+}
+
+// transitionIndex is the index of the transition from -> to, or -1.
+func (t *Type) transitionIndex(from, to string) int {
+	return slices.IndexFunc(t.Transitions, func(tr Transition) bool { return tr.From == from && tr.To == to })
+}
+
+// kernelFieldWritten reports whether something writes a kernel-written
+// field: a hook, a reaction this Type accepts for it, an acting timer at an
+// instant, or a transition's computed effect.
+func (t *Type) kernelFieldWritten(id string) bool {
+	if slices.ContainsFunc(t.Hooks, func(h Hook) bool { return slices.Contains(h.Writes, id) }) {
+		return true
+	}
+	for _, a := range t.AcceptsReactions {
+		// A reaction that may write it, or set it on the Items it creates.
+		// Or a set reaction of a contained Item may set it.
+		if slices.Contains(a.Fields, id) || slices.Contains(a.Creates, id) || slices.Contains(a.Sets, id) {
+			return true
+		}
+	}
+	for _, s := range t.States {
+		for _, a := range s.Acting {
+			if _, set := a.Sets[id]; set {
+				return true
+			}
+		}
+	}
+	for _, tr := range t.Transitions {
+		if _, set := tr.Sets[id]; set {
+			return true
+		}
+	}
+	return false
 }
 
 // isDate reports whether s is an ISO 8601 calendar date, YYYY-MM-DD, of a

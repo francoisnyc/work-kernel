@@ -138,11 +138,11 @@ func takeContainerFields(expr string) (string, []string, error) {
 	for _, m := range containerFieldRef.FindAllStringSubmatchIndex(expr, -1) {
 		name := expr[m[2]:m[3]]
 		if rest := expr[m[1]:]; strings.HasPrefix(rest, ".") || strings.HasPrefix(rest, "[") || strings.HasPrefix(rest, "(") {
-			return "", nil, fmt.Errorf("%s is no read of a container's field (container.<field>)", expr[m[0]:m[1]]+rest)
+			return "", nil, exprError{CodeReadNotAllowed, fmt.Errorf("%s is no read of a container's field (container.<field>)", expr[m[0]:m[1]]+rest)}
 		}
 		if name == GuardKeyState || name == GuardKeyCategory || name == "linked" {
-			return "", nil, fmt.Errorf("container.%s: an effect reads the container's fields (container.<field>); "+
-				"its state and category are a guard's", name)
+			return "", nil, exprError{CodeReadNotAllowed, fmt.Errorf("container.%s: an effect reads the container's fields (container.<field>); "+
+				"its state and category are a guard's", name)}
 		}
 		if !slices.Contains(fields, name) {
 			fields = append(fields, name)
@@ -198,18 +198,18 @@ func checkCopy(f Field, expr string, own *Type) (PlainRef, error) {
 	}
 	ref, ok := plainRef(expr)
 	if !ok {
-		return ref, fmt.Errorf("%s is %s: it is set by a plain reference only (container.<field>, a field, or each), not %q",
-			f.ID, what, expr)
+		return ref, exprError{CodeExpressionInvalid, fmt.Errorf("%s is %s: it is set by a plain reference only (container.<field>, a field, or each), not %q",
+			f.ID, what, expr)}
 	}
 	if ref.Container || ref.Each || ref.Linked {
 		return ref, nil
 	}
 	src, declared := own.Field(ref.Field)
 	if !declared {
-		return ref, fmt.Errorf("%s: %q is not a declared field", f.ID, ref.Field)
+		return ref, exprError{CodeUnknownField, fmt.Errorf("%s: %q is not a declared field", f.ID, ref.Field)}
 	}
 	if src.Multiple != f.Multiple || !sameStoredType(src, f) {
-		return ref, fmt.Errorf("%s is %s: %s is not a field of its shape", f.ID, what, ref.Field)
+		return ref, exprError{CodeWrongFieldType, fmt.Errorf("%s is %s: %s is not a field of its shape", f.ID, what, ref.Field)}
 	}
 	return ref, nil
 }
@@ -235,53 +235,63 @@ func memberCELType(f Field) *cel.Type {
 
 // checkJira24b validates what a Type declares of 2.4b that check does not
 // reach elsewhere: unique_among_siblings and placement_writable_by.
-func (t *Type) checkJira24b(fail func(string, ...any) error) error {
-	for _, f := range t.Fields {
+func (t *Type) checkJira24b(r reporter) {
+	for i, f := range t.Fields {
 		if f.UniqueAmongSiblings == nil {
 			continue
 		}
+		p := at("fields", i, "unique_among_siblings")
 		switch {
 		case len(f.UniqueAmongSiblings) == 0:
-			return fail("field %s: unique_among_siblings names the states in which its value is unique; leave it out for none", f.ID)
+			r.fail(CodeInvalidValue, p, "Name the states, or leave unique_among_siblings out",
+				"field %s: unique_among_siblings names the states in which its value is unique; leave it out for none", f.ID)
+			continue
 		case f.Type != Principal || f.Multiple:
-			return fail("field %s: unique_among_siblings is for a single principal field, not a %s field", f.ID, f.Type)
+			r.fail(CodeKeyNotApplicable, p, "Remove it, or use it on a single principal field",
+				"field %s: unique_among_siblings is for a single principal field, not a %s field", f.ID, f.Type)
 		}
 		seen := map[string]bool{}
-		for _, s := range f.UniqueAmongSiblings {
+		for j, s := range f.UniqueAmongSiblings {
 			if _, ok := t.State(s); !ok {
-				return fail("field %s: unique_among_siblings names %q, which is not a declared state", f.ID, s)
-			}
-			if seen[s] {
-				return fail("field %s: unique_among_siblings names %s twice", f.ID, s)
+				r.fail(CodeUnknownState, at(p, j), "Name a declared state",
+					"field %s: unique_among_siblings names %q, which is not a declared state", f.ID, s)
+			} else if seen[s] {
+				r.fail(CodeDuplicate, at(p, j), "Remove the second one", "field %s: unique_among_siblings names %s twice", f.ID, s)
 			}
 			seen[s] = true
 		}
 	}
-	if t.PlacementWritableBy != nil {
-		p := t.PlacementWritableBy
-		if len(p) == 0 {
-			return fail("placement_writable_by is an empty list; leave it out for anyone who sees the Item")
+	if t.PlacementWritableBy == nil {
+		return
+	}
+	pw := t.PlacementWritableBy
+	if len(pw) == 0 {
+		r.fail(CodeInvalidValue, "placement_writable_by", "Name kernel or roles, or leave placement_writable_by out",
+			"placement_writable_by is an empty list; leave it out for anyone who sees the Item")
+		return
+	}
+	seen := map[string]bool{}
+	for j, e := range pw {
+		p := at("placement_writable_by", j)
+		if seen[e] {
+			r.fail(CodeDuplicate, p, "Remove the second one", "placement_writable_by names an entry twice")
+			continue
 		}
-		for _, e := range p {
-			if e == PlacementKernel {
-				if len(p) > 1 {
-					return fail("placement_writable_by: %s stands alone (no person places the Items)", PlacementKernel)
-				}
-				continue
+		seen[e] = true
+		if e == PlacementKernel {
+			if len(pw) > 1 {
+				r.fail(CodeConflict, p, "Write kernel alone, or name roles without it",
+					"placement_writable_by: %s stands alone (no person places the Items)", PlacementKernel)
 			}
-			name, ok := strings.CutPrefix(e, AllowedRolePrefix)
-			if !ok {
-				return fail("placement_writable_by entry %q: want %s or role:<name>", e, PlacementKernel)
-			}
-			if !roleNameRe.MatchString(name) {
-				return fail("placement_writable_by entry %q: not a role name", e)
-			}
+			continue
 		}
-		if len(slices.Compact(slices.Sorted(slices.Values(p)))) != len(p) {
-			return fail("placement_writable_by names an entry twice")
+		name, ok := strings.CutPrefix(e, AllowedRolePrefix)
+		if !ok {
+			r.fail(CodeInvalidValue, p, "Write kernel or role:<name>", "placement_writable_by entry %q: want %s or role:<name>", e, PlacementKernel)
+		} else if !roleNameRe.MatchString(name) {
+			r.fail(CodeInvalidName, p, "Name the role in lower case, digits, _ and -", "placement_writable_by entry %q: not a role name", e)
 		}
 	}
-	return nil
 }
 
 // PlacementRoles returns the roles that may place Items of t, and whether
@@ -315,7 +325,7 @@ func (t *Type) UniqueFields() []Field {
 // checkJira24bAcross checks, across the Types loaded together, what 2.4b
 // added: container reads, children read by guards, for_each copies, and
 // move reactions at the container.
-func checkJira24bAcross(types []*Type, byID map[string][]*Type) error {
+func checkJira24bAcross(c *crossCheck, types []*Type, byID map[string][]*Type) {
 	// readable returns the loaded fields named id that reactions may read.
 	readable := func(id string) []Field {
 		var out []Field
@@ -333,7 +343,7 @@ func checkJira24bAcross(types []*Type, byID map[string][]*Type) error {
 	copyInto := func(f Field, from string) error {
 		for _, rf := range readable(from) {
 			if rf.Multiple != f.Multiple || !sameStoredType(rf, f) {
-				return fmt.Errorf("%s is set from container.%s, which is not a value of its shape somewhere it is readable", f.ID, from)
+				return exprError{CodeWrongFieldType, fmt.Errorf("%s is set from container.%s, which is not a value of its shape somewhere it is readable", f.ID, from)}
 			}
 		}
 		return nil
@@ -344,12 +354,12 @@ func checkJira24bAcross(types []*Type, byID map[string][]*Type) error {
 		for _, x := range reads {
 			fs := readable(x)
 			if len(fs) == 0 {
-				return fmt.Errorf("%s reads container.%s, but no loaded Type lets reactions read %s (readable_by_reactions)", where, x, x)
+				return exprError{CodeReadNotAllowed, fmt.Errorf("%s reads container.%s, but no loaded Type lets reactions read %s (readable_by_reactions)", where, x, x)}
 			}
 			if principal(fs) {
 				ref, ok := plainRef(expr)
 				if !ok || !ref.Container || f == nil || f.Type != Principal {
-					return fmt.Errorf("%s reads container.%s, a principal field: it is copied by plain reference into a principal field only", where, x)
+					return exprError{CodeExpressionInvalid, fmt.Errorf("%s reads container.%s, a principal field: it is copied by plain reference into a principal field only", where, x)}
 				}
 			}
 		}
@@ -360,92 +370,117 @@ func checkJira24bAcross(types []*Type, byID map[string][]*Type) error {
 	}
 
 	for _, src := range types {
-		fail := func(format string, args ...any) error {
-			return fmt.Errorf("typedef %s v%d: %s", src.ID, src.Version, fmt.Sprintf(format, args...))
-		}
-		for _, tr := range src.Transitions {
-			name := tr.From + " -> " + tr.To
+		rep := c.on(src)
+		for i, tr := range src.Transitions {
+			p, name := at("transitions", i), tr.From+" -> "+tr.To
 			for _, ty := range tr.GuardChildren {
 				if len(byID[ty]) == 0 {
-					return fail("transition %s: its guard reads children.%s, and %s is not loaded", name, ty, ty)
+					rep.fail(CodeUnknownType, at(p, "guard"), "Load that Type too, or read the children of a loaded one",
+						"transition %s: its guard reads children.%s, and %s is not loaded", name, ty, ty)
 				}
 			}
 			for _, id := range slices.Sorted(maps.Keys(tr.Sets)) {
 				_, reads, _ := takeContainerFields(tr.Sets[id])
 				f, _ := src.Field(id)
 				if err := containerReads(fmt.Sprintf("transition %s: sets %s", name, id), reads, tr.Sets[id], &f); err != nil {
-					return fail("%v", err)
+					rep.failExpr(err, at(p, "sets", id), "%v", err)
 				}
 			}
 		}
-		for _, r := range src.Reactions {
+		for i, r := range src.Reactions {
+			p := at("reactions", i)
 			if r.Kind == ReactionCreate {
-				var created *Type
-				for _, c := range byID[r.Type] {
-					if c.Version == r.Version {
-						created = c
-					}
-				}
-				for _, id := range slices.Sorted(maps.Keys(r.Fields)) {
-					var target *Field
-					if created != nil {
-						if f, ok := created.Field(id); ok {
-							target = &f
-						}
-					}
-					_, reads, _ := takeContainerFields(stripContainerLinked(r.Fields[id]))
-					if err := containerReads(fmt.Sprintf("reaction %s: field %s", r.ID, id), reads, r.Fields[id], target); err != nil {
-						return fail("%v", err)
-					}
-					if target == nil {
-						continue
-					}
-					ref, plain := plainRef(r.Fields[id])
-					if plain && ref.Each {
-						each, _ := src.Field(r.ForEach)
-						if target.Multiple || !sameStoredType(each, *target) {
-							return fail("reaction %s: field %s of %s v%d takes each, a member of %s, which is not a value of its shape",
-								r.ID, id, created.ID, created.Version, r.ForEach)
-						}
-					}
-				}
+				checkCreateAcross(rep, p, byID, src, r, containerReads)
 			}
 			if r.Kind == ReactionMove && r.Target == TargetContainer {
-				key := ReactionKey(src.ID, r.ID)
-				consenting := 0
-				for _, tgt := range types {
-					a, _ := tgt.Consent(src.ID, r.ID, true)
-					if !slices.Contains(a.Moves, r.To) {
-						continue
-					}
-					consenting++
-					at := fmt.Sprintf("%s v%d", tgt.ID, tgt.Version)
-					if _, ok := tgt.State(r.To); !ok {
-						return fail("reaction %s moves its container into %q, which is no state of %s", r.ID, r.To, at)
-					}
-					froms := r.TargetFrom
-					if len(froms) == 0 {
-						if froms = tgt.transitionsInto(r.To); len(froms) == 0 {
-							return fail("reaction %s moves into %s, which no transition of %s enters", r.ID, r.To, at)
-						}
-					}
-					for _, from := range froms {
-						if _, ok := tgt.Transition(from, r.To); !ok {
-							return fail("reaction %s: %s has no transition %s -> %s", r.ID, at, from, r.To)
-						}
-						if h, held := tgt.heldBy(from, r.To); held {
-							return fail("reaction %s: %s holds %s -> %s by %s; a reaction may not ask for a held move", r.ID, at, from, r.To, h)
-						}
-					}
-				}
-				if consenting == 0 {
-					return fail("reaction %s moves its container into %s, but no loaded Type accepts it "+
-						"(accepts_reactions: {%s: {moves: [%s]}})", r.ID, r.To, key, r.To)
-				}
+				checkMoveContainer(rep, p, types, src, r)
 			}
 		}
 	}
-	return nil
+}
+
+// checkCreateAcross checks a create reaction's container reads and each
+// copies against the Types loaded.
+func checkCreateAcross(rep reporter, p string, byID map[string][]*Type, src *Type, r Reaction,
+	containerReads func(where string, reads []string, expr string, f *Field) error) {
+	var created *Type
+	for _, c := range byID[r.Type] {
+		if c.Version == r.Version {
+			created = c
+		}
+	}
+	for _, id := range slices.Sorted(maps.Keys(r.Fields)) {
+		q := at(p, "fields", id)
+		var target *Field
+		if created != nil {
+			if f, ok := created.Field(id); ok {
+				target = &f
+			}
+		}
+		_, reads, _ := takeContainerFields(stripContainerLinked(r.Fields[id]))
+		if err := containerReads(fmt.Sprintf("reaction %s: field %s", r.ID, id), reads, r.Fields[id], target); err != nil {
+			rep.failExpr(err, q, "%v", err)
+			return
+		}
+		if target == nil {
+			continue
+		}
+		ref, plain := plainRef(r.Fields[id])
+		if plain && ref.Each {
+			each, _ := src.Field(r.ForEach)
+			if target.Multiple || !sameStoredType(each, *target) {
+				rep.fail(CodeWrongFieldType, q, "Copy each into a field holding one value of the member's type",
+					"reaction %s: field %s of %s v%d takes each, a member of %s, which is not a value of its shape",
+					r.ID, id, created.ID, created.Version, r.ForEach)
+				return
+			}
+		}
+	}
+}
+
+// checkMoveContainer checks a move at the container against every loaded
+// Type that consents to it; one must.
+func checkMoveContainer(rep reporter, p string, types []*Type, src *Type, r Reaction) {
+	key := ReactionKey(src.ID, r.ID)
+	consenting := 0
+	for _, tgt := range types {
+		a, _ := tgt.Consent(src.ID, r.ID, true)
+		if !slices.Contains(a.Moves, r.To) {
+			continue
+		}
+		consenting++
+		tat := fmt.Sprintf("%s v%d", tgt.ID, tgt.Version)
+		if _, ok := tgt.State(r.To); !ok {
+			rep.fail(CodeUnknownState, at(p, "to"), "Move into a state every consenting Type declares",
+				"reaction %s moves its container into %q, which is no state of %s", r.ID, r.To, tat)
+			return
+		}
+		froms := r.TargetFrom
+		if len(froms) == 0 {
+			if froms = tgt.transitionsInto(r.To); len(froms) == 0 {
+				rep.fail(CodeUnknownTransition, at(p, "to"), "Move into a state a transition of the container enters",
+					"reaction %s moves into %s, which no transition of %s enters", r.ID, r.To, tat)
+				return
+			}
+		}
+		for _, from := range froms {
+			if _, ok := tgt.Transition(from, r.To); !ok {
+				rep.fail(CodeUnknownTransition, at(p, "target_from"), "Name states the container has a transition from",
+					"reaction %s: %s has no transition %s -> %s", r.ID, tat, from, r.To)
+				return
+			}
+			if h, held := tgt.heldBy(from, r.To); held {
+				rep.fail(CodeHeldTransition, at(p, "to"), "Move into a state whose transitions are not held",
+					"reaction %s: %s holds %s -> %s by %s; a reaction may not ask for a held move", r.ID, tat, from, r.To, h)
+				return
+			}
+		}
+	}
+	if consenting == 0 {
+		rep.fail(CodeConsentMissing, p, "Add the consent to the container Type's accepts_reactions",
+			"reaction %s moves its container into %s, but no loaded Type accepts it "+
+				"(accepts_reactions: {%s: {moves: [%s]}})", r.ID, r.To, key, r.To)
+	}
 }
 
 // stripContainerLinked replaces container.linked.<link>.<field> reads, so
