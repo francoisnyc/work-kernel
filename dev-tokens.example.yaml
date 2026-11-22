@@ -13,13 +13,15 @@ tokens:
   # leave balance and its allowance (role hr_admin). lea runs the IT service
   # desk: she alone links a desk to its calendar and its SLA policy, and
   # writes the policy's targets (role sla_admin). lea and sam answer the
-  # desk's customers (role desk_agent).
+  # desk's customers (role desk_agent). lea also sets up the resources
+  # people ask access to: who approves and how many must (role
+  # access_admin).
   - {name: ana, token: dev-ana-not-a-secret, principal: "user:ana", namespace: acme}
   - {name: bob, token: dev-bob-not-a-secret, principal: "user:bob", namespace: acme, roles: [approver]}
   - {name: dana, token: dev-dana-not-a-secret, principal: "user:dana", namespace: acme}
   - {name: erin, token: dev-erin-not-a-secret, principal: "user:erin", namespace: acme}
   - {name: hana, token: dev-hana-not-a-secret, principal: "user:hana", namespace: acme, roles: [hr_admin]}
-  - {name: lea, token: dev-lea-not-a-secret, principal: "user:lea", namespace: acme, roles: [sla_admin, desk_agent]}
+  - {name: lea, token: dev-lea-not-a-secret, principal: "user:lea", namespace: acme, roles: [sla_admin, desk_agent, access_admin]}
   - {name: sam, token: dev-sam-not-a-secret, principal: "user:sam", namespace: acme, roles: [desk_agent]}
   # Two customers of the IT desk (Jira part 2, step 4a): they open incidents
   # in its portal and see their own, and nothing else. A customer never
