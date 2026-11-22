@@ -57,15 +57,7 @@ func (a *Accepted) UnmarshalYAML(n *yaml.Node) error {
 	if n.Kind == yaml.SequenceNode {
 		return n.Decode(&a.Fields)
 	}
-	if n.Kind != yaml.MappingNode {
-		return fmt.Errorf("accepts_reactions: want a list of fields, or a map with fields, moves and creates")
-	}
-	// Unknown keys are errors, as everywhere in a Type file.
-	for i := 0; i < len(n.Content); i += 2 {
-		if k := n.Content[i].Value; k != "fields" && k != "moves" && k != "creates" && k != "sets" {
-			return fmt.Errorf("accepts_reactions: unknown key %q (want fields, moves, creates or sets)", k)
-		}
-	}
+	// The map form; stage (a) has checked its keys (shape.go).
 	var d acceptedDoc
 	if err := n.Decode(&d); err != nil {
 		return err

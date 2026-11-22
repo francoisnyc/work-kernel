@@ -10,7 +10,6 @@ package typedef
 //   - A link's writable_by takes a list of roles, as a field's.
 
 import (
-	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -152,52 +151,13 @@ func (l LinkType) checkRoles(r reporter, p string) {
 // WritableByRoles without the prefix.
 func (l *LinkType) UnmarshalYAML(n *yaml.Node) error {
 	type plain LinkType // no methods: decoding it does not recurse here
-	var wb *yaml.Node
-	rest := *n
-	if n.Kind == yaml.MappingNode {
-		rest.Content = nil
-		for i := 0; i+1 < len(n.Content); i += 2 {
-			switch key := n.Content[i].Value; key {
-			case "writable_by":
-				wb = n.Content[i+1]
-				continue
-			case "name", "inverse", "targets", "max", "inverse_max", "resolve":
-			default:
-				// Node.Decode does not carry the decoder's KnownFields.
-				return fmt.Errorf("line %d: field %s not found in type typedef.LinkType", n.Content[i].Line, key)
-			}
-			rest.Content = append(rest.Content, n.Content[i], n.Content[i+1])
-		}
-	}
+	rest, wb := withoutKey(n, "writable_by")
 	var p plain
 	if err := rest.Decode(&p); err != nil {
 		return err
 	}
 	*l = LinkType(p)
-	if wb == nil {
-		return nil
-	}
-	switch wb.Kind {
-	case yaml.ScalarNode:
-		l.WritableBy = WritableBy(wb.Value)
-	case yaml.SequenceNode:
-		var entries []string
-		if err := wb.Decode(&entries); err != nil {
-			return err
-		}
-		if len(entries) == 0 {
-			return fmt.Errorf("link %s: writable_by is an empty list; leave it out for anyone", l.Name)
-		}
-		for _, e := range entries {
-			name, ok := strings.CutPrefix(e, AllowedRolePrefix)
-			if !ok {
-				return fmt.Errorf("link %s: writable_by entry %q: a list takes role:<name> entries only "+
-					"(kernel stands alone: writable_by: kernel)", l.Name, e)
-			}
-			l.WritableByRoles = append(l.WritableByRoles, name) // check validates the name
-		}
-	default:
-		return fmt.Errorf("link %s: writable_by must be kernel or a list of role:<name>", l.Name)
-	}
-	return nil
+	by, roles, err := decodeWritableBy(wb)
+	l.WritableBy, l.WritableByRoles = by, roles
+	return err
 }

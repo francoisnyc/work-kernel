@@ -38,10 +38,11 @@ Ideas noted during the spike, not built yet.
 - Type problems: a reaction, and a consent across Types, still stop at
   their first problem (every other one is checked); a reaction cycle is
   reported one at a time. Finer when a tool needs it. (Ventoux 2a)
-- The custom YAML decoders of Field, LinkType and Accepted still validate
-  what stage (a) now checks first; unreachable, kept as a backstop (a
-  failure there is WRONG_SHAPE). Remove when the JSON Schema (V2c) lands.
-  (Ventoux 2a)
+- V2c (the JSON Schema): it must validate a Type file after its YAML merge
+  keys (`<<: *anchor`) are expanded, as the sla package uses them
+  (sla_goal), or say how it handles them; a schema run on the raw YAML
+  would read `<<` as an unknown key. Stage (a) of typedef expands them
+  (mappingPairs in shape.go). (Ventoux 2a review)
 - **High, before real use: move Items to a new Type version.** The kernel
   has no such operation, so every Item created before a hardening keeps its
   version's rules: an incident@2 is still narrowed by its requester, its
@@ -2896,4 +2897,5 @@ need Docker, which this container lacks. Read by hand: their only dependency on 
 `TestRegisterType_LinkInverseAgreesAcrossVersions`, whose four names are all still in the new message.
 CI decides.
 
-**Open:** the three Later entries above. **Next session:** CI on the PR, then V2b (`ValidateTypes`).
+**Open:** the Later entries above (the custom YAML decoders' checks, unreachable once stage (a) runs, were removed
+after review). **Next session:** CI on the PR, then V2b (`ValidateTypes`).

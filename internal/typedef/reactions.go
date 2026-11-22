@@ -745,57 +745,56 @@ func (t *Type) RoleWritten(ids []string) []string {
 
 // UnmarshalYAML reads a field. writable_by takes a scalar (kernel) or a
 // list of role:<name> entries, stored as WritableByRoles without the
-// prefix. (The rules on the list are check's.)
+// prefix. Stage (a) has checked the keys and writable_by's form (shape.go);
+// the rules on the list are check's.
 func (f *Field) UnmarshalYAML(n *yaml.Node) error {
 	type plain Field // no methods: decoding it does not recurse here
-	var wb *yaml.Node
-	rest := *n
-	if n.Kind == yaml.MappingNode {
-		// Take writable_by out of a copy; decode the rest as usual.
-		rest.Content = nil
-		for i := 0; i+1 < len(n.Content); i += 2 {
-			switch key := n.Content[i].Value; key {
-			case "writable_by":
-				wb = n.Content[i+1]
-				continue
-			case "id", "type", "options", "multiple", "max", "unique_among_siblings":
-			default:
-				// Node.Decode does not carry the decoder's KnownFields, so
-				// unknown keys are refused here, as everywhere else.
-				return fmt.Errorf("line %d: field %s not found in type typedef.Field", n.Content[i].Line, key)
-			}
-			rest.Content = append(rest.Content, n.Content[i], n.Content[i+1])
-		}
-	}
+	rest, wb := withoutKey(n, "writable_by")
 	var p plain
 	if err := rest.Decode(&p); err != nil {
 		return err
 	}
 	*f = Field(p)
+	by, roles, err := decodeWritableBy(wb)
+	f.WritableBy, f.WritableByRoles = by, roles
+	return err
+}
+
+// withoutKey returns a copy of mapping n without key, and key's value
+// (nil if absent).
+func withoutKey(n *yaml.Node, key string) (*yaml.Node, *yaml.Node) {
+	rest := *n
+	if n.Kind != yaml.MappingNode {
+		return &rest, nil
+	}
+	var v *yaml.Node
+	rest.Content = nil
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == key {
+			v = n.Content[i+1]
+			continue
+		}
+		rest.Content = append(rest.Content, n.Content[i], n.Content[i+1])
+	}
+	return &rest, v
+}
+
+// decodeWritableBy reads writable_by: kernel (a scalar), or a list of
+// role:<name> entries, returned without the prefix.
+func decodeWritableBy(wb *yaml.Node) (WritableBy, []string, error) {
 	if wb == nil {
-		return nil
+		return WritableByAnyone, nil, nil
 	}
-	switch wb.Kind {
-	case yaml.ScalarNode:
-		f.WritableBy = WritableBy(wb.Value)
-	case yaml.SequenceNode:
-		var entries []string
-		if err := wb.Decode(&entries); err != nil {
-			return err
-		}
-		if len(entries) == 0 {
-			return fmt.Errorf("field %s: writable_by is an empty list; leave it out for anyone", f.ID)
-		}
-		for _, e := range entries {
-			name, ok := strings.CutPrefix(e, AllowedRolePrefix)
-			if !ok {
-				return fmt.Errorf("field %s: writable_by entry %q: a list takes role:<name> entries only "+
-					"(kernel stands alone: writable_by: kernel)", f.ID, e)
-			}
-			f.WritableByRoles = append(f.WritableByRoles, name) // check validates the name
-		}
-	default:
-		return fmt.Errorf("field %s: writable_by must be kernel or a list of role:<name>", f.ID)
+	if wb.Kind == yaml.ScalarNode {
+		return WritableBy(wb.Value), nil, nil
 	}
-	return nil
+	var entries []string
+	if err := wb.Decode(&entries); err != nil {
+		return WritableByAnyone, nil, err
+	}
+	roles := make([]string, len(entries))
+	for i, e := range entries {
+		roles[i] = strings.TrimPrefix(e, AllowedRolePrefix)
+	}
+	return WritableByAnyone, roles, nil
 }
