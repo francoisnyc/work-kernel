@@ -95,8 +95,8 @@ export async function seedDesk(baseURL: string, run: string, name: string, targe
 // due instants its goals copy onto it.
 export async function seedRequest(baseURL: string, customer: string, desk: Item, title: string, priority: string): Promise<Item> {
   const as = api(baseURL, customer);
-  const incident = await createItem(as, type("incident", 2), { f_title: title, f_priority: priority }, desk.name);
-  await createItem(as, type("reply", 1), { f_body: `About ${title}: please help.` }, incident.name);
+  const incident = await createItem(as, type("incident", 3), { f_title: title, f_priority: priority }, desk.name);
+  await createItem(as, type("reply", 2), { f_body: `About ${title}: please help.` }, incident.name);
   return dueInstants(baseURL, incident);
 }
 

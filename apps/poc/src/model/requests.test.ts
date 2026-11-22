@@ -38,7 +38,7 @@ describe("openRequest", () => {
     const [second] = createItem.mock.calls[1]!;
     expect(first).toMatchObject({
       parent: NS,
-      type: typeName("incident", 2),
+      type: typeName("incident", 3),
       container: desk,
       fields: { f_title: "Printer jam", f_priority: "P2" },
     });
@@ -46,7 +46,7 @@ describe("openRequest", () => {
     expect(first.fields).not.toHaveProperty("f_impact");
     expect(second).toMatchObject({
       parent: NS,
-      type: typeName("reply", 1),
+      type: typeName("reply", 2),
       container: out.request.name,
       fields: { f_body: "It eats paper." },
     });
@@ -63,7 +63,7 @@ describe("openRequest", () => {
   test("the request stands when its description could not be saved", async () => {
     const { api } = fakeApi(2);
     const out = await openRequest(api, NS, desk, form);
-    expect(out.request.type).toBe(typeName("incident", 2));
+    expect(out.request.type).toBe(typeName("incident", 3));
     expect(out.detailsSaved).toBe(false);
   });
 
@@ -75,12 +75,12 @@ describe("openRequest", () => {
 });
 
 describe("postMessage", () => {
-  test("a reply is a reply@1 and a note a note@1, inside the incident", async () => {
+  test("a reply is a reply@2 and a note a note@2, inside the incident", async () => {
     const { api, createItem } = fakeApi();
     const inc = itemName("inc");
     await postMessage(api, NS, inc, "reply", "We are on it.");
     await postMessage(api, NS, inc, "note", "Check the logs.");
-    expect(createItem.mock.calls[0]![0]).toMatchObject({ type: typeName("reply", 1), container: inc, fields: { f_body: "We are on it." } });
-    expect(createItem.mock.calls[1]![0]).toMatchObject({ type: typeName("note", 1), container: inc, fields: { f_body: "Check the logs." } });
+    expect(createItem.mock.calls[0]![0]).toMatchObject({ type: typeName("reply", 2), container: inc, fields: { f_body: "We are on it." } });
+    expect(createItem.mock.calls[1]![0]).toMatchObject({ type: typeName("note", 2), container: inc, fields: { f_body: "Check the logs." } });
   });
 });
