@@ -1,7 +1,7 @@
 // Who may sign in, and where each person lands.
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
-import { areasFor, groupUsers, homeFor, isCustomer, parseDevUsers, type DevUser } from "./devusers";
+import { areasFor, groupUsers, homeFor, isCustomer, parseDevUsers, seesBalances, type DevUser } from "./devusers";
 
 const file = readFileSync(new URL("../../../../dev-tokens.example.yaml", import.meta.url), "utf8");
 const byName = (name: string): DevUser => parseDevUsers(file).find((u) => u.name === name)!;
@@ -42,14 +42,25 @@ describe("groups and areas", () => {
   });
 
   test("a desk agent gets the desk first, then the tracker", () => {
-    expect(areasFor(byName("sam"))).toEqual(["desk", "tracker"]);
+    expect(areasFor(byName("sam"))).toEqual(["desk", "tracker", "requests"]);
     expect(homeFor(byName("sam"))).toBe("#/desk");
-    expect(areasFor(byName("lea"))).toEqual(["desk", "tracker"]);
+    expect(areasFor(byName("lea"))).toEqual(["desk", "tracker", "requests"]);
   });
 
   test("other staff get the tracker", () => {
     expect(isCustomer(byName("ana"))).toBe(false);
-    expect(areasFor(byName("ana"))).toEqual(["tracker"]);
+    expect(areasFor(byName("ana"))).toEqual(["tracker", "requests"]);
     expect(homeFor(byName("ana"))).toBe("#/tracker");
+  });
+
+  test("every staff member gets Requests, last: the vacation Types name no role for asking or deciding", () => {
+    for (const name of ["ana", "bob", "dana", "erin", "hana", "lea", "sam", "carol"]) expect(areasFor(byName(name)).at(-1)).toBe("requests");
+    expect(areasFor(byName("kim"))).not.toContain("requests");
+  });
+
+  test("Balances in Requests is for those who hold hr_admin (leave_balance's role)", () => {
+    expect(seesBalances(byName("hana"))).toBe(true);
+    expect(seesBalances(byName("ana"))).toBe(false);
+    expect(seesBalances(byName("bob"))).toBe(false);
   });
 });

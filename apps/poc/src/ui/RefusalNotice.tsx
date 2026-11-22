@@ -4,14 +4,16 @@ import type { ReactElement } from "react";
 import { explain, refusalOf, type ExplainContext } from "../model/refusal";
 import { Icon } from "./Icon";
 
-export function RefusalNotice({ error, ctx }: { error: unknown; ctx?: ExplainContext }): ReactElement | null {
+// text: a screen's own sentence for this refusal (the Requests area's),
+// in place of the apps' usual one; the details stay the server's answer.
+export function RefusalNotice({ error, ctx, text }: { error: unknown; ctx?: ExplainContext; text?: string }): ReactElement | null {
   if (error === undefined || error === null) return null;
   const r = refusalOf(error);
   return (
     <div className="notice notice-danger" role="alert">
       <p className="notice-text">
         <Icon name="alert" />
-        <span>{explain(r, ctx)}</span>
+        <span>{text ?? explain(r, ctx)}</span>
       </p>
       <details className="notice-details">
         <summary>Details</summary>

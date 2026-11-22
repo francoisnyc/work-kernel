@@ -1,0 +1,14 @@
+# For exploring by hand, on top of docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f compose.demo.yaml up
+#
+# The stack's worker runs vacation_request on a dev clock where a day lasts
+# 2 s, for the scenario and the journeys: a submitted request expires 10 s
+# after it is sent, too soon to switch to the approver by hand. Here a day
+# lasts 2 minutes: the approver is reminded after 4 and 6 minutes, and a
+# request nobody decides expires after 10. Still DEV ONLY: every other
+# Type, every hook budget and every other timeout keep real time.
+services:
+  worker:
+    command: ["--dev-time-scale", "2m", "--dev-clock-i-know-this-is-not-production",
+              "--dev-time-scale-types", "vacation_request"]

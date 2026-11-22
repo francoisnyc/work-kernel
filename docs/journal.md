@@ -39,6 +39,29 @@ Ideas noted during the spike, not built yet.
   `reaction_skipped` records staff see). (PoC apps)
 - Issue keys from the kernel: the PoC apps show the space's key and the last
   8 characters of the Item's ID as a stand-in. (PoC apps)
+- **Needed for Bonita: hooks in `GetType`** (id, trigger, kind, action,
+  state). A process map shows a check unnamed and no emails at all: an
+  action on entering a state is invisible until it has run. (PoC apps,
+  Requests: design.md, its gap 1)
+- **Needed for Bonita: a balance check at submit, and a reservation for
+  pending days.** The vacation request checks the balance only when an
+  approval deducts it: the form can only warn, and two requests that do not
+  both fit can both wait for approval. (PoC apps, Requests: gap 2)
+- **Needed for Bonita: readers derived from a field** (an approver joins the
+  readers of the request and of the requester's balance), with the 2.4b
+  Later item on groups as readers. Today an approver sees a balance only if
+  HR adds them, and every staff member reads every request. (PoC apps,
+  Requests: gaps 6 and 7)
+- **Needed for Bonita: a decision field only the approver may write.** The
+  app writes the approver's comment as a `comment@1` inside the request, a
+  second write after the decision. (PoC apps, Requests: gap 3)
+- A filter on the creator ("my requests"), and an Item's time in its state
+  (or `update_time`): the Requests app reads everyone's requests to find a
+  person's, and one history per inbox row to order it. (PoC apps, Requests:
+  gaps 4 and 5)
+- The vacation request in a new version: no deduction for unpaid leave, and
+  `f_days` checked against the dates (a working-day calendar). (PoC apps,
+  Requests: gaps 9 and 10)
 
 - ~~**Next, before Jira 2.4: the etag changes only when something a caller
   could overwrite changes.**~~ Done in the etag step (2026-11-20): see its
@@ -2641,3 +2664,55 @@ journeys.
 
 **Open:** the two high Later items (placement for the other Types, sla_goal@1). **Next session:** PR 2, the
 access request (resource, access_request, approval, fulfilment_task, scenario E), after PR 1 merges.
+
+## 2026-11-22 — PoC apps: Requests, a process app on the vacation request (finished)
+
+**Built:** a fourth area of `apps/poc`, Requests, on `vacation_request@3` and `leave_balance@1`, to see how a
+BPM-style app feels on the kernel before the Bonita processes: My leave (the balance, my requests and where each
+stands), Request time off (a draft, then the move to submitted; refusals in plain words, the draft kept), Waiting
+for you (oldest first, how long each has waited), a decision screen (the request, the requester's balance, their
+other requests in the period; approve or reject with a comment, under the etag read), a case page with a process
+map drawn from `GetType` and a timeline, and Balances for `hr_admin`. Every staff member sees the area (the Types
+name no role for asking or deciding). `compose.demo.yaml`: a dev day of 2 minutes for exploring by hand. No kernel,
+proto or Type change. design.md: "PoC apps as built", the Requests area, with its twelve gaps and their cost.
+
+**The process map** is generic: one column per state category (the end states share the last), right-angled
+arrows with their own ports, lanes and tracks, system steps numbered from what `GetType` declares (checks, timers,
+acting timers, kernel-set links, reactions). A geometry test holds five Types to it: no arrow crosses a box, two
+arrows that share no end never run along each other, labels apart, everything inside the map.
+
+**Tests:** 148 new vitest (the map, the inbox, the form and its refusals, deciding, the moves offered, the
+timeline, `nobody`), 408 in all; a fourth journey with axe on six screens: ana requests, a refusal for dates that
+make no sense, bob approves from his inbox within the request's 10 s, the balance drops, a request past the
+balance is refused when bob approves and he rejects it, the case page at Approved, hana's balances.
+
+**Decided during the step, each agreed:** the decision carries the etag (a request recalled, edited and sent again
+meanwhile is `STALE`); the days follow the dates only until typed, then the count is a hint; the decision screen's
+axe check runs on the first request, so the second's 10 s hold only the refused approval and the rejection.
+**Test changes, each agreed, each in a commit of its own:** those three (Phase B), and the journey waits for My
+leave's heading before reading its table (`cellOf` reads the headers at once; the case page was still showing).
+`devusers.test.ts`: Requests appended to two expectations (agreed in Phase A).
+
+**Verified against the stack:** two reminders and a refused approval leave the request's etag as it was (no kernel
+bug: the etag step holds); on `compose.demo.yaml`, a request sent 4.3 minutes earlier still waited, with exactly one
+reminder. **Rebased on main after PR #38** (Jira 2.4b): `allowed: [nobody]` is now a move no person makes in every
+reader of `allowed` in the apps (one predicate, `isSystemOnly`, as web/ does), with a test of its own.
+
+**Surprises:** `GetType` marks Approve as checked: the held deduction holds it, not a check hook. An email's
+`hook_ran` carries the root human as `on_behalf_of`. `order_by` refuses a principal field. A balance write's
+`causation_id` names the request's event, so the case ties the deduction (the approval's ask) and the refund (the
+withdrawal) to itself. The whole journey runs in about 6 s, well inside each request's 10 s.
+
+**Two local workarounds, outside the repository (nothing committed):** Docker builds in this container cannot use
+the HTTPS proxy's CA, so a compose override in the scratchpad served Go modules from the host's module cache
+(`GOPROXY=http://127.0.0.1:8899`, `build.network: host`) and built the two nginx images from host-built sites
+(`dockerfile_inline`); and the pinned Playwright (1.65.1) wants a newer Chromium than this container's, so a local
+config, excluded from git, pointed `executablePath` at `/opt/pw-browsers/chromium`. CI builds the real images and
+runs the pinned browser.
+
+**Numbers.** On the rebased tree: scenario passed on the stack; vitest 408; the four journeys twice in a row, 27
+and 28 s; `go vet` clean; `go test ./...` green (no Go changed).
+
+**Open:** the four Later items needed for Bonita, and the API gaps. **Next session:** Jira 2.4b, PR 2, or the
+Bonita processes. Heads-up: 2.4b's next PR gives lea `access_admin` in the dev-token file, which
+`devusers.test.ts` reads; whichever PR merges second rebases and updates that expectation.

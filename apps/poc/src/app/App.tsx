@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { areasFor, homeFor, parseDevUsers, type Area, type DevUser } from "../model/devusers";
 import { DeskRoutes } from "../pages/desk/DeskRoutes";
 import { PortalRoutes } from "../pages/portal/PortalRoutes";
+import { RequestsRoutes } from "../pages/requests/RequestsRoutes";
 import { SignIn } from "../pages/SignIn";
 import { TrackerRoutes } from "../pages/tracker/TrackerRoutes";
 import { Empty } from "../ui/Page";
@@ -107,6 +108,8 @@ export function App(): ReactElement {
             <DeskRoutes route={route.slice(1)} />
           ) : area === "portal" ? (
             <PortalRoutes route={route.slice(1)} />
+          ) : area === "requests" ? (
+            <RequestsRoutes route={route.slice(1)} />
           ) : (
             <TrackerRoutes route={route.slice(1)} />
           )}
