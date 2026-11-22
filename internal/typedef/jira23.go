@@ -540,138 +540,132 @@ func (t *Type) ActingAtFields() []string {
 // checkStep3Across checks, across the Types loaded together, what step 3
 // added: the children a reaction moves, the fields a create reaction reads
 // from linked Items, and the set reactions a Type accepts.
-func checkStep3Across(types []*Type, byID map[string][]*Type) error {
-	someVersion := func(id string, ok func(*Type) bool) bool { return slices.ContainsFunc(byID[id], ok) }
+func checkStep3Across(c *crossCheck, types []*Type, byID map[string][]*Type) {
 	for _, src := range types {
-		fail := func(format string, args ...any) error {
-			return fmt.Errorf("typedef %s v%d: %s", src.ID, src.Version, fmt.Sprintf(format, args...))
+		rep := c.on(src)
+		for i, r := range src.Reactions {
+			checkStep3AcrossOne(rep, at("reactions", i), types, byID, src, r)
 		}
-		for _, r := range src.Reactions {
-			if r.Kind == ReactionMove && r.Children != nil {
-				for _, of := range r.Children.Of {
-					if len(byID[of]) == 0 {
-						return fail("reaction %s moves contained Items of %s, which is not loaded", r.ID, of)
-					}
-					for _, f := range r.Children.Reads {
-						if !someVersion(of, func(c *Type) bool { _, ok := c.Field(f); return ok }) {
-							return fail("reaction %s: children.when reads child.%s, which no version of %s declares", r.ID, f, of)
-						}
-					}
-					for _, tgt := range byID[of] {
-						at := fmt.Sprintf("%s v%d", tgt.ID, tgt.Version)
-						if _, ok := tgt.State(r.To); !ok {
-							return fail("reaction %s moves into %q, which is no state of %s", r.ID, r.To, at)
-						}
-						froms := r.TargetFrom
-						if len(froms) == 0 {
-							if froms = tgt.transitionsInto(r.To); len(froms) == 0 {
-								return fail("reaction %s moves into %s, which no transition of %s enters", r.ID, r.To, at)
-							}
-						}
-						for _, from := range froms {
-							if _, ok := tgt.Transition(from, r.To); !ok {
-								return fail("reaction %s: %s has no transition %s -> %s", r.ID, at, from, r.To)
-							}
-							if h, held := tgt.heldBy(from, r.To); held {
-								return fail("reaction %s: %s holds %s -> %s by %s; a reaction may not ask for a held move", r.ID, at, from, r.To, h)
-							}
-						}
-						// Moving a child reaches it through containment:
-						// a consent by reaction ID counts.
-						if a, _ := tgt.Consent(src.ID, r.ID, true); !slices.Contains(a.Moves, r.To) {
-							return fail("reaction %s moves contained Items of %s into %s, which does not accept it "+
-								"(accepts_reactions: {'*:%s': {moves: [%s]}})", r.ID, at, r.To, r.ID, r.To)
-						}
-					}
+	}
+	for _, tgt := range types {
+		rep := c.on(tgt)
+		for _, key := range slices.Sorted(maps.Keys(tgt.AcceptsReactions)) {
+			checkSetConsent(rep, at("accepts_reactions", key), byID, tgt, key)
+		}
+	}
+}
+
+// checkStep3AcrossOne checks one reaction's children, linked reads and
+// created fields against the Types loaded; its first problem stops it.
+func checkStep3AcrossOne(rep reporter, p string, types []*Type, byID map[string][]*Type, src *Type, r Reaction) error {
+	someVersion := func(id string, ok func(*Type) bool) bool { return slices.ContainsFunc(byID[id], ok) }
+	if r.Kind == ReactionMove && r.Children != nil {
+		for j, of := range r.Children.Of {
+			if len(byID[of]) == 0 {
+				return rep.fail(CodeUnknownType, at(p, "children", "of", j), "Load that Type too, or name a loaded one",
+					"reaction %s moves contained Items of %s, which is not loaded", r.ID, of)
+			}
+			for _, f := range r.Children.Reads {
+				if !someVersion(of, func(c *Type) bool { _, ok := c.Field(f); return ok }) {
+					return rep.fail(CodeUnknownField, at(p, "children", "when"), "Read a field some version of the Type declares",
+						"reaction %s: children.when reads child.%s, which no version of %s declares", r.ID, f, of)
 				}
 			}
-			for _, lr := range r.LinkedReads {
-				name := LinkedPrefix + lr.Link + "." + lr.Field
-				// The Types the link may point to let reactions read the field.
-				readable := func(l LinkType) bool {
-					return l.SourceSingle() && slices.ContainsFunc(l.Targets, func(target string) bool {
-						return someVersion(target, func(c *Type) bool { return c.ReadableByReaction(lr.Field) })
-					})
+			for _, tgt := range byID[of] {
+				if err := checkMoveInto(rep, p, r, tgt); err != nil {
+					return err
 				}
-				if !lr.Container {
-					if l, _ := src.Link(lr.Link); !readable(l) {
-						return fail("reaction %s reads %s, but no Type link %s points to lets reactions read %s (readable_by_reactions)",
-							r.ID, name, lr.Link, lr.Field)
-					}
-					continue
-				}
-				// What contains the Item is not known until it is created:
-				// some loaded Type must be able to be that container.
-				if !slices.ContainsFunc(types, func(c *Type) bool { l, ok := c.Link(lr.Link); return ok && readable(l) }) {
-					return fail("reaction %s reads container.%s, but no loaded Type that could be the container declares "+
-						"a max-one link %s to a Type that lets reactions read %s (readable_by_reactions)", r.ID, name, lr.Link, lr.Field)
-				}
-			}
-			// A field copied whole from a linked Item must be one of the
-			// created field's type; anything computed is judged at the write.
-			if r.Kind == ReactionCreate {
-				for _, id := range slices.Sorted(maps.Keys(r.Fields)) {
-					if !soleLinkedRead(r.Fields[id]) {
-						continue
-					}
-					reads, _, _ := linkedReads(r.Fields[id])
-					for _, created := range byID[r.Type] {
-						cf, ok := created.Field(id)
-						if created.Version != r.Version || !ok {
-							continue
-						}
-						for _, c := range types {
-							rf, declared := c.Field(reads[0].Field)
-							if declared && c.ReadableByReaction(reads[0].Field) && (rf.Multiple != cf.Multiple || !sameStoredType(rf, cf)) {
-								return fail("reaction %s: field %s: %s of %s is not a value of a %s field of %s",
-									r.ID, id, reads[0].Field, c.ID, cf.Type, created.ID)
-							}
-						}
-					}
+				if a, _ := tgt.Consent(src.ID, r.ID, true); !slices.Contains(a.Moves, r.To) {
+					return rep.fail(CodeConsentMissing, p, "Add the consent to the contained Type's accepts_reactions",
+						"reaction %s moves contained Items of %s v%d into %s, which does not accept it "+
+							"(accepts_reactions: {'*:%s': {moves: [%s]}})", r.ID, tgt.ID, tgt.Version, r.To, r.ID, r.To)
 				}
 			}
 		}
 	}
-	// What a Type accepts of set reactions: named exactly, the reaction
-	// exists, is a set, and sets only fields the consent lists, with
-	// values of their types.
-	for _, tgt := range types {
-		fail := func(format string, args ...any) error {
-			return fmt.Errorf("typedef %s v%d: %s", tgt.ID, tgt.Version, fmt.Sprintf(format, args...))
+	for _, lr := range r.LinkedReads {
+		name := LinkedPrefix + lr.Link + "." + lr.Field
+		readable := func(l LinkType) bool {
+			return l.SourceSingle() && slices.ContainsFunc(l.Targets, func(target string) bool {
+				return someVersion(target, func(c *Type) bool { return c.ReadableByReaction(lr.Field) })
+			})
 		}
-		for _, key := range slices.Sorted(maps.Keys(tgt.AcceptsReactions)) {
-			acc := tgt.AcceptsReactions[key]
-			typeID, id, _ := strings.Cut(key, ":")
-			if len(acc.Sets) == 0 || typeID == WildcardType {
+		if !lr.Container {
+			if l, _ := src.Link(lr.Link); !readable(l) {
+				return rep.fail(CodeReadNotAllowed, at(p, "fields"), "List the field under readable_by_reactions in the linked Type",
+					"reaction %s reads %s, but no Type link %s points to lets reactions read %s (readable_by_reactions)",
+					r.ID, name, lr.Link, lr.Field)
+			}
+			continue
+		}
+		if !slices.ContainsFunc(types, func(c *Type) bool { l, ok := c.Link(lr.Link); return ok && readable(l) }) {
+			return rep.fail(CodeReadNotAllowed, at(p, "fields"), "Declare the link on the container's Type, and list the field under readable_by_reactions",
+				"reaction %s reads container.%s, but no loaded Type that could be the container declares "+
+					"a max-one link %s to a Type that lets reactions read %s (readable_by_reactions)", r.ID, name, lr.Link, lr.Field)
+		}
+	}
+	if r.Kind != ReactionCreate {
+		return nil
+	}
+	for _, id := range slices.Sorted(maps.Keys(r.Fields)) {
+		if !soleLinkedRead(r.Fields[id]) {
+			continue
+		}
+		reads, _, _ := linkedReads(r.Fields[id])
+		for _, created := range byID[r.Type] {
+			cf, ok := created.Field(id)
+			if created.Version != r.Version || !ok {
 				continue
 			}
-			found := false
-			for _, src := range byID[typeID] {
-				r, ok := src.Reaction(id)
-				if !ok || r.Kind != ReactionSet {
-					continue
+			for _, c := range types {
+				rf, declared := c.Field(reads[0].Field)
+				if declared && c.ReadableByReaction(reads[0].Field) && (rf.Multiple != cf.Multiple || !sameStoredType(rf, cf)) {
+					return rep.fail(CodeWrongFieldType, at(p, "fields", id), "Copy a field of the same type and shape",
+						"reaction %s: field %s: %s of %s is not a value of a %s field of %s", r.ID, id, reads[0].Field, c.ID, cf.Type, created.ID)
 				}
-				found = true
-				for _, f := range slices.Sorted(maps.Keys(r.Set)) {
-					tf, declared := tgt.Field(f)
-					switch {
-					case !slices.Contains(acc.Sets, f):
-						return fail("accepts_reactions %s: the reaction sets %s, which the consent does not list (sets)", key, f)
-					case !declared:
-						return fail("accepts_reactions %s: the reaction sets %s, which is not declared", key, f)
-					case tf.Type == Principal || tf.Multiple:
-						return fail("accepts_reactions %s: the reaction sets %s, a field a reaction may not set", key, f)
-					}
-					if out := r.setTypes[f]; out != nil && !celType(tf.Type).IsAssignableType(out) {
-						return fail("accepts_reactions %s: the reaction sets %s to %q, which yields %s, not a value of a %s field",
-							key, f, r.Set[f], out, tf.Type)
-					}
-				}
-			}
-			if !found {
-				return fail("accepts_reactions names %s for sets, which is no set reaction of %s", key, typeID)
 			}
 		}
+	}
+	return nil
+}
+
+// checkSetConsent checks tgt's consent key to set reactions: each field the
+// reaction sets is listed, declared and settable, with a value of its type.
+func checkSetConsent(rep reporter, p string, byID map[string][]*Type, tgt *Type, key string) error {
+	acc := tgt.AcceptsReactions[key]
+	typeID, id, _ := strings.Cut(key, ":")
+	if len(acc.Sets) == 0 || typeID == WildcardType {
+		return nil
+	}
+	found := false
+	for _, src := range byID[typeID] {
+		r, ok := src.Reaction(id)
+		if !ok || r.Kind != ReactionSet {
+			continue
+		}
+		found = true
+		for _, f := range slices.Sorted(maps.Keys(r.Set)) {
+			tf, declared := tgt.Field(f)
+			switch {
+			case !slices.Contains(acc.Sets, f):
+				return rep.fail(CodeConsentMissing, at(p, "sets"), "List the field under sets in the consent",
+					"accepts_reactions %s: the reaction sets %s, which the consent does not list (sets)", key, f)
+			case !declared:
+				return rep.fail(CodeUnknownField, at(p, "sets"), "Declare the field, or ask the reaction to set another",
+					"accepts_reactions %s: the reaction sets %s, which is not declared", key, f)
+			case tf.Type == Principal || tf.Multiple:
+				return rep.fail(CodeWrongFieldType, at(p, "sets"), "Let the reaction set a field holding one value that is not a principal",
+					"accepts_reactions %s: the reaction sets %s, a field a reaction may not set", key, f)
+			}
+			if out := r.setTypes[f]; out != nil && !celType(tf.Type).IsAssignableType(out) {
+				return rep.fail(CodeExpressionType, at(p, "sets"), "Have the reaction compute a value of the field's type",
+					"accepts_reactions %s: the reaction sets %s to %q, which yields %s, not a value of a %s field", key, f, r.Set[f], out, tf.Type)
+			}
+		}
+	}
+	if !found {
+		return rep.fail(CodeUnknownReaction, p, "Name a set reaction of that Type, or remove the consent",
+			"accepts_reactions names %s for sets, which is no set reaction of %s", key, typeID)
 	}
 	return nil
 }

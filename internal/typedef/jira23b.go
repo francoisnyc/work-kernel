@@ -88,6 +88,7 @@ func (t *Type) OfferReads() []string {
 // offer what those Items' hooks read. Any other container is only known
 // when the hook runs, and is judged then.
 func CheckOffers(types []*Type) error {
+	var c crossCheck
 	find := func(id string, version int) *Type {
 		for _, t := range types {
 			if t.ID == id && t.Version == version {
@@ -97,7 +98,7 @@ func CheckOffers(types []*Type) error {
 		return nil
 	}
 	for _, host := range types {
-		for _, r := range host.Reactions {
+		for i, r := range host.Reactions {
 			if r.Kind != ReactionCreate {
 				continue
 			}
@@ -112,15 +113,16 @@ func CheckOffers(types []*Type) error {
 						continue
 					}
 					if _, offered := host.Offers[name]; !offered {
-						return fmt.Errorf("typedef %s v%d: reaction %s creates %s v%d inside it, whose hook %s reads %s: "+
-							"%s offers no %s (offers: {%s: <a principal field>})",
-							host.ID, host.Version, r.ID, made.ID, made.Version, h.ID, read, host.ID, name, name)
+						c.on(host).fail(CodeMissingCounterpart, at("reactions", i), "Offer it: add offers: {<name>: <a principal field>} to this Type",
+							"reaction %s creates %s v%d inside it, whose hook %s reads %s: "+
+								"%s offers no %s (offers: {%s: <a principal field>})",
+							r.ID, made.ID, made.Version, h.ID, read, host.ID, name, name)
 					}
 				}
 			}
 		}
 	}
-	return nil
+	return c.err()
 }
 
 // checkRoles validates a link type's writable_by roles.

@@ -1,7 +1,6 @@
 package typedef
 
 import (
-	"fmt"
 	"slices"
 )
 
@@ -108,17 +107,20 @@ func (t *Type) checkIncoming(r reporter) {
 // this Type among its targets, and every such declaration's inverse is the
 // incoming name. ParseDir calls it: one Type file cannot know the others.
 func CheckIncoming(types []*Type) error {
+	var c crossCheck
 	byID := map[string][]*Type{}
 	for _, t := range types {
 		byID[t.ID] = append(byID[t.ID], t)
 	}
 	for _, t := range types {
-		for _, in := range t.Incoming {
-			where := fmt.Sprintf("typedef %s v%d: incoming %s", t.ID, t.Version, in.Name)
-			for _, from := range in.From {
+		for i, in := range t.Incoming {
+			rep := c.on(t).within("incoming %s: ", in.Name)
+			for j, from := range in.From {
 				versions := byID[from]
 				if len(versions) == 0 {
-					return fmt.Errorf("%s: from Type %q is not loaded", where, from)
+					rep.fail(CodeUnknownType, at("incoming", i, "from", j), "Load that Type too, or name a loaded one",
+						"from Type %q is not loaded", from)
+					continue
 				}
 				declared := false
 				for _, v := range versions {
@@ -128,18 +130,20 @@ func CheckIncoming(types []*Type) error {
 					}
 					declared = true
 					if l.Inverse != in.Name {
-						return fmt.Errorf("%s: %s v%d declares link %s with the inverse %q; the incoming name must be that inverse",
-							where, v.ID, v.Version, in.Link, l.Inverse)
+						rep.fail(CodeInverseMismatch, at("incoming", i, "name"), "Name it as the link's inverse",
+							"%s v%d declares link %s with the inverse %q; the incoming name must be that inverse",
+							v.ID, v.Version, in.Link, l.Inverse)
+						break
 					}
 				}
 				if !declared {
-					return fmt.Errorf("%s: no version of Type %q declares a link %s that may target %s",
-						where, from, in.Link, t.ID)
+					rep.fail(CodeUnknownLink, at("incoming", i, "link"), "Name a link the Type declares, with this Type among its targets",
+						"no version of Type %q declares a link %s that may target %s", from, in.Link, t.ID)
 				}
 			}
 		}
 	}
-	return nil
+	return c.err()
 }
 
 // The two things a rollup counts by.

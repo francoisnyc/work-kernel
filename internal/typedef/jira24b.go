@@ -325,7 +325,7 @@ func (t *Type) UniqueFields() []Field {
 // checkJira24bAcross checks, across the Types loaded together, what 2.4b
 // added: container reads, children read by guards, for_each copies, and
 // move reactions at the container.
-func checkJira24bAcross(types []*Type, byID map[string][]*Type) error {
+func checkJira24bAcross(c *crossCheck, types []*Type, byID map[string][]*Type) {
 	// readable returns the loaded fields named id that reactions may read.
 	readable := func(id string) []Field {
 		var out []Field
@@ -343,7 +343,7 @@ func checkJira24bAcross(types []*Type, byID map[string][]*Type) error {
 	copyInto := func(f Field, from string) error {
 		for _, rf := range readable(from) {
 			if rf.Multiple != f.Multiple || !sameStoredType(rf, f) {
-				return fmt.Errorf("%s is set from container.%s, which is not a value of its shape somewhere it is readable", f.ID, from)
+				return exprError{CodeWrongFieldType, fmt.Errorf("%s is set from container.%s, which is not a value of its shape somewhere it is readable", f.ID, from)}
 			}
 		}
 		return nil
@@ -354,12 +354,12 @@ func checkJira24bAcross(types []*Type, byID map[string][]*Type) error {
 		for _, x := range reads {
 			fs := readable(x)
 			if len(fs) == 0 {
-				return fmt.Errorf("%s reads container.%s, but no loaded Type lets reactions read %s (readable_by_reactions)", where, x, x)
+				return exprError{CodeReadNotAllowed, fmt.Errorf("%s reads container.%s, but no loaded Type lets reactions read %s (readable_by_reactions)", where, x, x)}
 			}
 			if principal(fs) {
 				ref, ok := plainRef(expr)
 				if !ok || !ref.Container || f == nil || f.Type != Principal {
-					return fmt.Errorf("%s reads container.%s, a principal field: it is copied by plain reference into a principal field only", where, x)
+					return exprError{CodeExpressionInvalid, fmt.Errorf("%s reads container.%s, a principal field: it is copied by plain reference into a principal field only", where, x)}
 				}
 			}
 		}
@@ -370,92 +370,117 @@ func checkJira24bAcross(types []*Type, byID map[string][]*Type) error {
 	}
 
 	for _, src := range types {
-		fail := func(format string, args ...any) error {
-			return fmt.Errorf("typedef %s v%d: %s", src.ID, src.Version, fmt.Sprintf(format, args...))
-		}
-		for _, tr := range src.Transitions {
-			name := tr.From + " -> " + tr.To
+		rep := c.on(src)
+		for i, tr := range src.Transitions {
+			p, name := at("transitions", i), tr.From+" -> "+tr.To
 			for _, ty := range tr.GuardChildren {
 				if len(byID[ty]) == 0 {
-					return fail("transition %s: its guard reads children.%s, and %s is not loaded", name, ty, ty)
+					rep.fail(CodeUnknownType, at(p, "guard"), "Load that Type too, or read the children of a loaded one",
+						"transition %s: its guard reads children.%s, and %s is not loaded", name, ty, ty)
 				}
 			}
 			for _, id := range slices.Sorted(maps.Keys(tr.Sets)) {
 				_, reads, _ := takeContainerFields(tr.Sets[id])
 				f, _ := src.Field(id)
 				if err := containerReads(fmt.Sprintf("transition %s: sets %s", name, id), reads, tr.Sets[id], &f); err != nil {
-					return fail("%v", err)
+					rep.failExpr(err, at(p, "sets", id), "%v", err)
 				}
 			}
 		}
-		for _, r := range src.Reactions {
+		for i, r := range src.Reactions {
+			p := at("reactions", i)
 			if r.Kind == ReactionCreate {
-				var created *Type
-				for _, c := range byID[r.Type] {
-					if c.Version == r.Version {
-						created = c
-					}
-				}
-				for _, id := range slices.Sorted(maps.Keys(r.Fields)) {
-					var target *Field
-					if created != nil {
-						if f, ok := created.Field(id); ok {
-							target = &f
-						}
-					}
-					_, reads, _ := takeContainerFields(stripContainerLinked(r.Fields[id]))
-					if err := containerReads(fmt.Sprintf("reaction %s: field %s", r.ID, id), reads, r.Fields[id], target); err != nil {
-						return fail("%v", err)
-					}
-					if target == nil {
-						continue
-					}
-					ref, plain := plainRef(r.Fields[id])
-					if plain && ref.Each {
-						each, _ := src.Field(r.ForEach)
-						if target.Multiple || !sameStoredType(each, *target) {
-							return fail("reaction %s: field %s of %s v%d takes each, a member of %s, which is not a value of its shape",
-								r.ID, id, created.ID, created.Version, r.ForEach)
-						}
-					}
-				}
+				checkCreateAcross(rep, p, byID, src, r, containerReads)
 			}
 			if r.Kind == ReactionMove && r.Target == TargetContainer {
-				key := ReactionKey(src.ID, r.ID)
-				consenting := 0
-				for _, tgt := range types {
-					a, _ := tgt.Consent(src.ID, r.ID, true)
-					if !slices.Contains(a.Moves, r.To) {
-						continue
-					}
-					consenting++
-					at := fmt.Sprintf("%s v%d", tgt.ID, tgt.Version)
-					if _, ok := tgt.State(r.To); !ok {
-						return fail("reaction %s moves its container into %q, which is no state of %s", r.ID, r.To, at)
-					}
-					froms := r.TargetFrom
-					if len(froms) == 0 {
-						if froms = tgt.transitionsInto(r.To); len(froms) == 0 {
-							return fail("reaction %s moves into %s, which no transition of %s enters", r.ID, r.To, at)
-						}
-					}
-					for _, from := range froms {
-						if _, ok := tgt.Transition(from, r.To); !ok {
-							return fail("reaction %s: %s has no transition %s -> %s", r.ID, at, from, r.To)
-						}
-						if h, held := tgt.heldBy(from, r.To); held {
-							return fail("reaction %s: %s holds %s -> %s by %s; a reaction may not ask for a held move", r.ID, at, from, r.To, h)
-						}
-					}
-				}
-				if consenting == 0 {
-					return fail("reaction %s moves its container into %s, but no loaded Type accepts it "+
-						"(accepts_reactions: {%s: {moves: [%s]}})", r.ID, r.To, key, r.To)
-				}
+				checkMoveContainer(rep, p, types, src, r)
 			}
 		}
 	}
-	return nil
+}
+
+// checkCreateAcross checks a create reaction's container reads and each
+// copies against the Types loaded.
+func checkCreateAcross(rep reporter, p string, byID map[string][]*Type, src *Type, r Reaction,
+	containerReads func(where string, reads []string, expr string, f *Field) error) {
+	var created *Type
+	for _, c := range byID[r.Type] {
+		if c.Version == r.Version {
+			created = c
+		}
+	}
+	for _, id := range slices.Sorted(maps.Keys(r.Fields)) {
+		q := at(p, "fields", id)
+		var target *Field
+		if created != nil {
+			if f, ok := created.Field(id); ok {
+				target = &f
+			}
+		}
+		_, reads, _ := takeContainerFields(stripContainerLinked(r.Fields[id]))
+		if err := containerReads(fmt.Sprintf("reaction %s: field %s", r.ID, id), reads, r.Fields[id], target); err != nil {
+			rep.failExpr(err, q, "%v", err)
+			return
+		}
+		if target == nil {
+			continue
+		}
+		ref, plain := plainRef(r.Fields[id])
+		if plain && ref.Each {
+			each, _ := src.Field(r.ForEach)
+			if target.Multiple || !sameStoredType(each, *target) {
+				rep.fail(CodeWrongFieldType, q, "Copy each into a field holding one value of the member's type",
+					"reaction %s: field %s of %s v%d takes each, a member of %s, which is not a value of its shape",
+					r.ID, id, created.ID, created.Version, r.ForEach)
+				return
+			}
+		}
+	}
+}
+
+// checkMoveContainer checks a move at the container against every loaded
+// Type that consents to it; one must.
+func checkMoveContainer(rep reporter, p string, types []*Type, src *Type, r Reaction) {
+	key := ReactionKey(src.ID, r.ID)
+	consenting := 0
+	for _, tgt := range types {
+		a, _ := tgt.Consent(src.ID, r.ID, true)
+		if !slices.Contains(a.Moves, r.To) {
+			continue
+		}
+		consenting++
+		tat := fmt.Sprintf("%s v%d", tgt.ID, tgt.Version)
+		if _, ok := tgt.State(r.To); !ok {
+			rep.fail(CodeUnknownState, at(p, "to"), "Move into a state every consenting Type declares",
+				"reaction %s moves its container into %q, which is no state of %s", r.ID, r.To, tat)
+			return
+		}
+		froms := r.TargetFrom
+		if len(froms) == 0 {
+			if froms = tgt.transitionsInto(r.To); len(froms) == 0 {
+				rep.fail(CodeUnknownTransition, at(p, "to"), "Move into a state a transition of the container enters",
+					"reaction %s moves into %s, which no transition of %s enters", r.ID, r.To, tat)
+				return
+			}
+		}
+		for _, from := range froms {
+			if _, ok := tgt.Transition(from, r.To); !ok {
+				rep.fail(CodeUnknownTransition, at(p, "target_from"), "Name states the container has a transition from",
+					"reaction %s: %s has no transition %s -> %s", r.ID, tat, from, r.To)
+				return
+			}
+			if h, held := tgt.heldBy(from, r.To); held {
+				rep.fail(CodeHeldTransition, at(p, "to"), "Move into a state whose transitions are not held",
+					"reaction %s: %s holds %s -> %s by %s; a reaction may not ask for a held move", r.ID, tat, from, r.To, h)
+				return
+			}
+		}
+	}
+	if consenting == 0 {
+		rep.fail(CodeConsentMissing, p, "Add the consent to the container Type's accepts_reactions",
+			"reaction %s moves its container into %s, but no loaded Type accepts it "+
+				"(accepts_reactions: {%s: {moves: [%s]}})", r.ID, r.To, key, r.To)
+	}
 }
 
 // stripContainerLinked replaces container.linked.<link>.<field> reads, so

@@ -1,7 +1,6 @@
 package typedef
 
 import (
-	"fmt"
 	"slices"
 )
 
@@ -78,16 +77,23 @@ func (t *Type) CustomerSees(name string) bool { return slices.Contains(t.Custome
 // CheckCustomers checks across a set of Types that every Type named in own
 // or shared is in the set.
 func CheckCustomers(types []*Type) error {
+	var c crossCheck
 	known := map[string]bool{}
 	for _, t := range types {
 		known[t.ID] = true
 	}
 	for _, t := range types {
-		for _, id := range append(slices.Clone(t.Own), t.Shared...) {
-			if !known[id] {
-				return fmt.Errorf("typedef %s v%d: admits customers to %s, which is not loaded", t.ID, t.Version, id)
+		for _, list := range []struct {
+			key string
+			ids []string
+		}{{"own", t.Own}, {"shared", t.Shared}} {
+			for j, id := range list.ids {
+				if !known[id] {
+					c.on(t).fail(CodeUnknownType, at(list.key, j), "Load that Type too, or name a loaded one",
+						"admits customers to %s, which is not loaded", id)
+				}
 			}
 		}
 	}
-	return nil
+	return c.err()
 }

@@ -201,114 +201,124 @@ func (t *Type) Accepts(key string, fields []string) bool {
 // each resolve names a principal field and a state of its target Type.
 // Every version of a Type is checked against every version of the other.
 func CheckReactions(types []*Type) error {
+	var c crossCheck
 	byID := map[string][]*Type{}
 	for _, t := range types {
 		byID[t.ID] = append(byID[t.ID], t)
 	}
 	for _, src := range types {
-		fail := func(format string, args ...any) error {
-			return fmt.Errorf("typedef %s v%d: %s", src.ID, src.Version, fmt.Sprintf(format, args...))
-		}
-		for _, l := range src.Links {
+		rep := c.on(src)
+		for i, l := range src.Links {
 			if l.Resolve == nil {
 				continue
 			}
 			for _, tgt := range byID[l.Targets[0]] {
 				f, ok := tgt.Field(l.Resolve.Field)
 				if !ok || f.Type != Principal || f.Multiple {
-					return fail("link %s: resolve field %q is not a principal field of %s v%d",
-						l.Name, l.Resolve.Field, tgt.ID, tgt.Version)
+					rep.fail(CodeWrongFieldType, at("links", i, "resolve", "field"), "Name a principal field holding one principal, in every version of the target",
+						"link %s: resolve field %q is not a principal field of %s v%d", l.Name, l.Resolve.Field, tgt.ID, tgt.Version)
+					break
 				}
 				if _, ok := tgt.State(l.Resolve.State); !ok {
-					return fail("link %s: resolve state %q is not a state of %s v%d", l.Name, l.Resolve.State, tgt.ID, tgt.Version)
+					rep.fail(CodeUnknownState, at("links", i, "resolve", "state"), "Name a state every version of the target declares",
+						"link %s: resolve state %q is not a state of %s v%d", l.Name, l.Resolve.State, tgt.ID, tgt.Version)
+					break
 				}
 			}
 		}
-		for _, r := range src.Reactions {
+		for i, r := range src.Reactions {
 			if r.Kind == ReactionMove || r.Kind == ReactionCreate || r.Kind == ReactionSet {
 				continue // checked by checkAfterAcross, below
 			}
-			held := r
-			if r.Kind == ReactionAfter {
-				held, _ = src.Reaction(r.Undoes) // an undo writes what its held reaction wrote
-			}
-			l, _ := src.Link(held.Link)
-			fields := slices.Sorted(maps.Keys(held.Add))
-			key := ReactionKey(src.ID, r.ID)
-			for _, targetID := range l.Targets {
-				for _, tgt := range byID[targetID] {
-					for _, f := range fields {
-						tf, ok := tgt.Field(f)
-						if !ok {
-							return fail("reaction %s writes %s, which %s v%d does not declare", r.ID, f, tgt.ID, tgt.Version)
-						}
-						if tf.Type != Int {
-							return fail("reaction %s adds to %s, which is not an int in %s v%d", r.ID, f, tgt.ID, tgt.Version)
-						}
-					}
-					if !tgt.Accepts(key, fields) {
-						return fail("reaction %s writes %v of %s v%d, which does not accept %s for them (accepts_reactions)",
-							r.ID, fields, tgt.ID, tgt.Version, key)
-					}
-				}
-			}
+			checkHeldAcross(rep, at("reactions", i), src, r, byID)
 		}
 	}
-	if err := checkAfterAcross(types, byID); err != nil {
-		return err
-	}
-	if err := checkStep3Across(types, byID); err != nil {
-		return err
-	}
-	if err := checkJira24bAcross(types, byID); err != nil {
-		return err
-	}
-	if err := checkReactionCycles(types); err != nil {
-		return err
-	}
+	checkAfterAcross(&c, types, byID)
+	checkStep3Across(&c, types, byID)
+	checkJira24bAcross(&c, types, byID)
+	checkReactionCycles(&c, types)
 	// What each Type accepts must exist and point at it.
 	for _, tgt := range types {
 		for _, key := range slices.Sorted(maps.Keys(tgt.AcceptsReactions)) {
 			typeID, reactionID, _ := strings.Cut(key, ":")
-			// A consent by reaction ID names no Type: nothing has to use
-			// it for the Types to load.
+			// A consent by reaction ID names no Type: nothing has to use it
+			// for the Types to load.
 			if typeID == WildcardType {
 				continue
 			}
-			found := false
-			for _, src := range byID[typeID] {
-				r, ok := src.Reaction(reactionID)
-				if !ok {
-					continue
-				}
-				// Children it moves, or a field it sets on its container
-				// (which the Type that accepts it may be).
-				if r.Children != nil && slices.Contains(r.Children.Of, tgt.ID) || r.Kind == ReactionSet {
-					found = true
-				}
-				// A move at its container (Jira 2.4b), which the Type that
-				// accepts it may be.
-				if r.Kind == ReactionMove && r.Target == TargetContainer {
-					found = true
-				}
-				if r.Kind == ReactionAfter {
-					r, _ = src.Reaction(r.Undoes)
-				}
-				if l, ok := src.Link(r.Link); ok && slices.Contains(l.Targets, tgt.ID) {
-					found = true
-				}
-				// A create names the Type it creates, not a link.
-				if r.Kind == ReactionCreate && r.Type == tgt.ID {
-					found = true
-				}
-			}
-			if !found {
-				return fmt.Errorf("typedef %s v%d: accepts_reactions names %s, which is no reaction of a Type "+
-					"following a link to %s", tgt.ID, tgt.Version, key, tgt.ID)
+			if !consentUsed(tgt, byID[typeID], reactionID) {
+				c.on(tgt).fail(CodeUnknownReaction, at("accepts_reactions", key), "Name a reaction that reaches this Type, or remove the consent",
+					"accepts_reactions names %s, which is no reaction of a Type following a link to %s", key, tgt.ID)
 			}
 		}
 	}
-	return nil
+	return c.err()
+}
+
+// checkHeldAcross checks a held reaction, or the undo of one, against the
+// Types its link targets: the fields it adds to, and their consent.
+func checkHeldAcross(rep reporter, p string, src *Type, r Reaction, byID map[string][]*Type) {
+	held := r
+	if r.Kind == ReactionAfter {
+		held, _ = src.Reaction(r.Undoes) // an undo writes what its held reaction wrote
+	}
+	l, _ := src.Link(held.Link)
+	fields := slices.Sorted(maps.Keys(held.Add))
+	key := ReactionKey(src.ID, r.ID)
+	for _, targetID := range l.Targets {
+		for _, tgt := range byID[targetID] {
+			for _, f := range fields {
+				tf, ok := tgt.Field(f)
+				if !ok {
+					rep.fail(CodeUnknownField, p, "Add to a field every target version declares",
+						"reaction %s writes %s, which %s v%d does not declare", r.ID, f, tgt.ID, tgt.Version)
+					return
+				}
+				if tf.Type != Int {
+					rep.fail(CodeWrongFieldType, p, "Add to an int field",
+						"reaction %s adds to %s, which is not an int in %s v%d", r.ID, f, tgt.ID, tgt.Version)
+					return
+				}
+			}
+			if !tgt.Accepts(key, fields) {
+				rep.fail(CodeConsentMissing, p, "Add the consent to the target Type's accepts_reactions",
+					"reaction %s writes %v of %s v%d, which does not accept %s for them (accepts_reactions)", r.ID, fields, tgt.ID, tgt.Version, key)
+				return
+			}
+		}
+	}
+}
+
+// consentUsed reports whether a reaction reactionID of one of the versions
+// srcs reaches tgt, so that tgt's consent to it means something.
+func consentUsed(tgt *Type, srcs []*Type, reactionID string) bool {
+	for _, src := range srcs {
+		r, ok := src.Reaction(reactionID)
+		if !ok {
+			continue
+		}
+		// Children it moves, or a field it sets on its container (which the
+		// Type that accepts it may be).
+		if r.Children != nil && slices.Contains(r.Children.Of, tgt.ID) || r.Kind == ReactionSet {
+			return true
+		}
+		// A move at its container (Jira 2.4b), which the Type that accepts
+		// it may be.
+		if r.Kind == ReactionMove && r.Target == TargetContainer {
+			return true
+		}
+		if r.Kind == ReactionAfter {
+			r, _ = src.Reaction(r.Undoes)
+		}
+		if l, ok := src.Link(r.Link); ok && slices.Contains(l.Targets, tgt.ID) {
+			return true
+		}
+		// A create names the Type it creates, not a link.
+		if r.Kind == ReactionCreate && r.Type == tgt.ID {
+			return true
+		}
+	}
+	return false
 }
 
 // reactionID is the shape of a reaction or invariant ID: a code, since it

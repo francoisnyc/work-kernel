@@ -259,6 +259,20 @@ func (r reporter) within(format string, args ...any) reporter {
 	return r
 }
 
+// crossCheck collects the problems of stage (c), the Types together, each
+// on the Type it belongs to (where the fix goes).
+type crossCheck struct{ ps Problems }
+
+func (c *crossCheck) on(t *Type) reporter { return newReporter(&c.ps, t.ID, t.Version) }
+
+// err is the problems as an error, or nil.
+func (c *crossCheck) err() error {
+	if len(c.ps) == 0 {
+		return nil
+	}
+	return c.ps
+}
+
 // at builds a path into the YAML. The first part is written as it is (a
 // top-level key, or a path built before); after it, a string is a key and
 // an int an index: at("transitions", 3, "allowed", 0) is

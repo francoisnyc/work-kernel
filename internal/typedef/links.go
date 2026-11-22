@@ -173,36 +173,36 @@ func checkPrincipalValue(v any) bool {
 // names target Types that are in the set. ParseDir calls it: one Type file
 // cannot know the others.
 func CheckLinkTargets(types []*Type) error {
+	var c crossCheck
 	ids := map[string]bool{}
 	for _, t := range types {
 		ids[t.ID] = true
 	}
 	for _, t := range types {
-		for _, l := range t.Links {
-			for _, target := range l.Targets {
-				if target == AnyType {
-					continue
-				}
-				if !ids[target] {
-					return fmt.Errorf("typedef %s v%d: link %s: target Type %q is not loaded", t.ID, t.Version, l.Name, target)
+		for i, l := range t.Links {
+			for j, target := range l.Targets {
+				if target != AnyType && !ids[target] {
+					c.on(t).fail(CodeUnknownType, at("links", i, "targets", j), "Load that Type too, or name a loaded one",
+						"link %s: target Type %q is not loaded", l.Name, target)
 				}
 			}
 		}
 	}
-	return nil
+	return c.err()
 }
 
 // CheckLinkInverses checks that, within each Type, every version that
 // declares a link name gives it the same inverse, so (Type, link name)
 // names one inverse for incoming links and filters.
 func CheckLinkInverses(types []*Type) error {
+	var c crossCheck
 	type seenAt struct {
 		inverse string
 		version int
 	}
 	seen := map[string]seenAt{} // "type\x00name"
 	for _, t := range types {
-		for _, l := range t.Links {
+		for i, l := range t.Links {
 			key := t.ID + "\x00" + l.Name
 			first, ok := seen[key]
 			if !ok {
@@ -210,10 +210,11 @@ func CheckLinkInverses(types []*Type) error {
 				continue
 			}
 			if first.inverse != l.Inverse {
-				return fmt.Errorf("typedef %s: link %s has inverse %s in v%d and %s in v%d; "+
-					"a link keeps its inverse across versions", t.ID, l.Name, first.inverse, first.version, l.Inverse, t.Version)
+				c.on(t).fail(CodeInverseChanged, at("links", i, "inverse"), "Give the link the inverse its other versions give it, or a new link name",
+					"link %s has inverse %s in v%d and %s in v%d; a link keeps its inverse across versions",
+					l.Name, first.inverse, first.version, l.Inverse, t.Version)
 			}
 		}
 	}
-	return nil
+	return c.err()
 }
