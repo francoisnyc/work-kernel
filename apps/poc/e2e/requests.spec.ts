@@ -171,6 +171,7 @@ test("ana asks for time off, bob decides, hana sees the balances", async ({ brow
 
   // The refused request's page says why it was not approved.
   await ana.getByRole("link", { name: "My leave" }).click();
+  await expect(ana.getByRole("heading", { level: 1, name: "My leave" })).toBeVisible();
   const longMine = mine.getByRole("row").filter({ hasText: tooLong });
   await expect(await cellOf(mine, longMine, /^Status/)).toHaveText("Rejected");
   await longMine.getByRole("link").first().click();
