@@ -12,6 +12,8 @@
 //	ERP  POST /invoices               {"customer_id", "amount"}, header Idempotency-Key
 //	                                  → {"invoice_id": "INV-…"}
 //	HR   GET  /employees/{id}/manager → {"manager": "user:bob"}; 404 for an unknown employee
+//	HR   POST /hooks/v1, GET /.well-known/pli-connector: the same directory as a
+//	     pli.hooks/v1 connector (hr, operation manager_of; see hrhook.go)
 //	all  GET  /healthz                → 200, no body, never delayed
 //
 // An unknown customer is 404, an outage 503, an injected error 500, all
@@ -36,6 +38,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/francoisnyc/work-kernel/internal/hookproto"
 )
 
 // Customer is what the stubs know about one customer.
@@ -76,6 +80,13 @@ type Server struct {
 	dropped     int
 
 	arrivals map[string][]Arrival // customer -> requests, as they arrived
+
+	// HR as a pli.hooks/v1 connector only.
+	hrSecret  string
+	hrVersion string
+	hrStored  map[string]hrAnswer // idempotency key -> the success it answered
+	hrBusy    map[string]bool     // keys being answered now
+	hrDropped map[string]bool     // keys whose first answer SetDropFirstAnswer dropped
 
 	// Email only.
 	messages []Message          // in arrival order
@@ -128,6 +139,7 @@ func ServeERP(addr string) (*Server, error) {
 // NewHR starts a stub HR directory on a free loopback port.
 func NewHR() *Server {
 	s := newServer()
+	s.hrSecret = hookproto.GenerateSecret()
 	s.start(s.hrHandler())
 	return s
 }
@@ -146,18 +158,29 @@ func ServeHR(addr string) (*Server, error) {
 // idempotency key, its failures never.
 
 // Secret returns the HR connector's signing secret (whsec_ form). NewHR
-// generates one.
+// generates one; ServeHR starts with none, and refuses every hook request
+// until SetSecret.
 func (s *Server) Secret() string {
-	return ""
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.hrSecret
 }
 
 // SetSecret replaces the HR connector's signing secret: two instances (a
 // 1.4 and a 1.5) behind one connection share it.
-func (s *Server) SetSecret(whsec string) {}
+func (s *Server) SetSecret(whsec string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.hrSecret = whsec
+}
 
 // SetVersion sets the version the HR connector reports (descriptor and
 // answers), "1.0.0" by default.
-func (s *Server) SetVersion(version string) {}
+func (s *Server) SetVersion(version string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.hrVersion = version
+}
 
 // SetManager records who an employee's manager is, both principal IDs
 // (user:ana reports to user:bob).
@@ -230,6 +253,7 @@ func newServer() *Server {
 		customers: map[string]Customer{}, managers: map[string]string{},
 		invoices: map[string][]string{}, byKey: map[string]invoiceRec{}, seen: map[string]bool{},
 		arrivals: map[string][]Arrival{}, byMsgKey: map[string]Message{},
+		hrVersion: "1.0.0", hrStored: map[string]hrAnswer{}, hrBusy: map[string]bool{}, hrDropped: map[string]bool{},
 	}
 }
 
@@ -452,6 +476,12 @@ func (s *Server) wrap(serve func(w http.ResponseWriter, r *http.Request, id stri
 // knobs counts the call and applies latency, outage and injected errors.
 // It reports whether the request should be served; if not, it has answered.
 func (s *Server) knobs(w http.ResponseWriter, r *http.Request) bool {
+	return s.knobsWith(w, r, func(w http.ResponseWriter, status int, msg string) { http.Error(w, msg, status) })
+}
+
+// knobsWith is knobs, with fail writing a refusal's answer (a protocol
+// connector answers with a problem body).
+func (s *Server) knobsWith(w http.ResponseWriter, r *http.Request, fail func(w http.ResponseWriter, status int, msg string)) bool {
 	s.mu.Lock()
 	s.calls++
 	latency, outage, errorRate := s.latency, s.outage, s.errorRate
@@ -467,11 +497,11 @@ func (s *Server) knobs(w http.ResponseWriter, r *http.Request) bool {
 		}
 	}
 	if outage {
-		http.Error(w, "outage", http.StatusServiceUnavailable)
+		fail(w, http.StatusServiceUnavailable, "outage")
 		return false
 	}
 	if errorRate > 0 && rand.Float64() < errorRate {
-		http.Error(w, "injected error", http.StatusInternalServerError)
+		fail(w, http.StatusInternalServerError, "injected error")
 		return false
 	}
 	return true
@@ -481,6 +511,8 @@ func (s *Server) knobs(w http.ResponseWriter, r *http.Request) bool {
 func (s *Server) hrHandler() http.Handler {
 	mux := http.NewServeMux()
 	healthz(mux)
+	mux.HandleFunc("GET "+hookproto.DescriptorPath, s.hrDescriptor)
+	mux.HandleFunc("POST "+hookproto.HooksPath, s.hrHook)
 	mux.HandleFunc("GET /employees/{id}/manager", func(w http.ResponseWriter, r *http.Request) {
 		if !s.knobs(w, r) {
 			return

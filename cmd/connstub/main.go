@@ -6,10 +6,13 @@
 // the scenario; nothing outside the stack can send.
 //
 // --hr-directory is a JSON object mapping each employee to their manager,
-// both user principal IDs (deploy/hr-directory.json).
+// both user principal IDs (deploy/hr-directory.json). The HR directory is
+// also a pli.hooks/v1 connector (hr, manager_of) on the same address, its
+// requests signed with the secret in the environment variable that
+// --hr-hook-secret-env names; without it, every hook request is refused.
 //
 //	connstub [--crm-listen :8081] [--erp-listen :8082] [--erp-latency 1s] [--customers FILE]
-//	         [--hr-listen :8083 [--hr-directory FILE]]
+//	         [--hr-listen :8083 [--hr-directory FILE] [--hr-hook-secret-env NAME]]
 //	         [--email-listen :8084 [--email-read-listen :8085]]
 //	connstub --probe URL
 //
@@ -42,6 +45,7 @@ import (
 	"time"
 
 	"github.com/francoisnyc/work-kernel/internal/connstub"
+	"github.com/francoisnyc/work-kernel/internal/hookproto"
 )
 
 func main() {
@@ -72,6 +76,8 @@ func run(ctx context.Context, args []string, stderr io.Writer) error {
 	customersPath := fs.String("customers", "", "JSON file of customers by ID")
 	hrAddr := fs.String("hr-listen", "", "the HR directory's address (none: no HR directory)")
 	hrPath := fs.String("hr-directory", "", "JSON file mapping each employee to their manager (principal IDs)")
+	hrSecretEnv := fs.String("hr-hook-secret-env", "",
+		"the environment variable holding the HR connector's signing secret (whsec_...); none: every hook request is refused")
 	emailAddr := fs.String("email-listen", "", "the email service's address (none: no email service)")
 	emailReadAddr := fs.String("email-read-listen", "", "the read-only address serving the sent messages (dev only)")
 	probeURL := fs.String("probe", "", "check a running stub's /healthz URL and exit (for container health checks)")
@@ -133,15 +139,31 @@ func run(ctx context.Context, args []string, stderr io.Writer) error {
 				return err
 			}
 		}
+		secret := ""
+		if *hrSecretEnv != "" {
+			// Read and checked before the server starts: a bad secret stops
+			// connstub instead of refusing every hook later.
+			secret = os.Getenv(*hrSecretEnv)
+			if secret == "" {
+				return fmt.Errorf("--hr-hook-secret-env: %s is not set", *hrSecretEnv)
+			}
+			if _, err := hookproto.ParseSecret(secret); err != nil {
+				return fmt.Errorf("--hr-hook-secret-env: %s: %w", *hrSecretEnv, err)
+			}
+		}
 		hr, err := connstub.ServeHR(*hrAddr)
 		if err != nil {
 			return fmt.Errorf("hr: %w", err)
 		}
 		defer hr.Close()
+		hr.SetSecret(secret)
 		for employee, manager := range directory {
 			hr.SetManager(employee, manager)
 		}
-		slog.Info("connstub serving HR", "hr", *hrAddr, "employees", len(directory))
+		if secret == "" {
+			slog.Warn("connstub: no --hr-hook-secret-env, so the HR connector refuses every hook request")
+		}
+		slog.Info("connstub serving HR", "hr", *hrAddr, "employees", len(directory), "hooks", secret != "")
 	}
 	if *emailAddr != "" {
 		email, err := connstub.ServeEmail(*emailAddr)
