@@ -18,6 +18,7 @@
 import { ReactionKind, ReactionTrigger, StateCategory, type ItemEvent, type Transition, type Type } from "@gen/kernel/v1/kernel_pb";
 import { ItemEventKind } from "@gen/kernel/v1/kernel_pb";
 import { fieldLabel, humanize, stateLabel, transitionLabel, typeIdOf } from "./labels";
+import { isSystemOnly } from "./moves";
 import { personName } from "./people";
 
 export type StepKind = "check" | "timer" | "reminder" | "reaction" | "link";
@@ -89,7 +90,6 @@ function everyLabel(d: string): string {
   return l === "1 day" ? "day" : l;
 }
 
-const onlySystem = (t: Transition) => t.allowed.length > 0 && t.allowed.every((a) => a.startsWith("principal:system:"));
 
 // Who may take a move, from its allowed and except lists.
 export function whoMay(t: Transition): string {
@@ -102,7 +102,7 @@ export function whoMay(t: Transition): string {
           ? fieldLabel(a.slice("field:".length))
           : a.startsWith("role:")
             ? humanize(a.slice("role:".length))
-            : a.startsWith("principal:system:")
+            : a === "nobody" || a.startsWith("principal:system:")
               ? "System"
               : a.startsWith("principal:")
                 ? personName(a.slice("principal:".length))
@@ -446,7 +446,7 @@ export function layoutProcess(type: Type, progress?: Progress): ProcessMap {
       label: transitionLabel(type.typeId, t.fromState, t.toState),
       who: whoMay(t),
       route: routes[i]!,
-      system: onlySystem(t),
+      system: isSystemOnly(t),
       taken: progress?.taken.includes(`${t.fromState}>${t.toState}`) ?? false,
       steps: steps.edges.get(`${t.fromState}>${t.toState}`) ?? [],
       points,

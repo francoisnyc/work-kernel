@@ -7,15 +7,19 @@ import type { Audience } from "./people";
 
 export type Move = { to: string; label: string; required: string[] };
 
-// Only the system makes it: allowed names principal:system:... and nobody else.
-const systemOnly = (t: Transition) => t.allowed.length > 0 && t.allowed.every((a) => a.startsWith("principal:system:"));
+// No person makes it: allowed names only principal:system:... (the timer),
+// or nobody at all (allowed: [nobody], Jira 2.4b: only a reaction, by
+// consent).
+export function isSystemOnly(t: Transition): boolean {
+  return t.allowed.length > 0 && t.allowed.every((a) => a === "nobody" || a.startsWith("principal:system:"));
+}
 
 // The Type's transitions from `state`, in declared order, without those
-// only the system makes (allowed names only principal:system:...). A
+// no person makes (isSystemOnly: the timer's, or nobody's). A
 // customer gets only the moves whose allowed names creator.
 export function movesFrom(type: Type, state: string, audience: Audience): Move[] {
   return type.transitions
-    .filter((t) => t.fromState === state && !systemOnly(t))
+    .filter((t) => t.fromState === state && !isSystemOnly(t))
     .filter((t) => audience === "staff" || t.allowed.includes("creator"))
     .map((t) => ({ to: t.toState, label: transitionLabel(type.typeId, t.fromState, t.toState, audience), required: [...t.required] }));
 }
@@ -23,7 +27,7 @@ export function movesFrom(type: Type, state: string, audience: Audience): Move[]
 // Whether the Type declares a move from -> to that a person may ask for:
 // what a board column reads to accept a drop.
 export function declaresMove(type: Type, from: string, to: string): boolean {
-  return type.transitions.some((t) => t.fromState === from && t.toState === to && !systemOnly(t));
+  return type.transitions.some((t) => t.fromState === from && t.toState === to && !isSystemOnly(t));
 }
 
 // Who is looking: their principal and the roles the dev-token file gives
@@ -48,7 +52,7 @@ function names(entry: string, item: Item, viewer: Viewer): boolean {
 // what does not hold, and the page says why.
 export function movesFor(type: Type, item: Item, viewer: Viewer): Move[] {
   return type.transitions
-    .filter((t) => t.fromState === item.state && !systemOnly(t))
+    .filter((t) => t.fromState === item.state && !isSystemOnly(t))
     .filter((t) => t.allowed.length === 0 || t.allowed.some((a) => names(a, item, viewer)))
     .map((t) => ({ to: t.toState, label: transitionLabel(type.typeId, t.fromState, t.toState), required: [...t.required] }));
 }
