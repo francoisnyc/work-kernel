@@ -1,0 +1,20 @@
+{
+  "connector": "hr",
+  "version": "1.4.0",
+  "supportedProtocolVersions": ["pli.hooks/v1"],
+  "operations": [
+    {
+      "name": "manager_of",
+      "kinds": ["check"],
+      "inputSchema": {
+        "type": "object",
+        "properties": {"onBehalfOf": {"type": ["string", "null"]}, "createdBy": {"type": ["string", "null"]}},
+        "additionalProperties": false
+      },
+      "outputSchema": {"type": "object", "properties": {"manager": {"type": ["string"]}}},
+      "sideEffects": "none",
+      "async": "forbidden",
+      "errors": ["unknown_employee", "no_eligible_approver"]
+    }
+  ]
+}

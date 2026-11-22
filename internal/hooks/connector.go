@@ -91,3 +91,9 @@ func (c *Connectors) WithConfigFile(path string) (*Connectors, error) {
 func (c *Connectors) Connector(connectorAtMajor string) (Connector, error) {
 	return nil, errStub
 }
+
+// declareRemote adds a remote operation's declaration to the catalog:
+// <connector>.<operation>@<major> (no major: 1), the kinds it serves, and
+// its input and output names in the order hooks map reads and writes to
+// them. Only package code and tests (export_test.go) call it.
+func declareRemote(action string, kinds []hookproto.Kind, inputs, outputs []string) {}

@@ -1,0 +1,2 @@
+{"protocol": "pli.hooks/v1", "requestId": "6b1f4c1e-2d8a-4f0e-9a51-0c3b7d9e2f10", "outcome": "correct",
+ "patch": {"manager": "user:bob"}, "connectorVersion": "1.4.0"}
