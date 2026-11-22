@@ -18,34 +18,35 @@ import (
 // checkCustomers validates the Type's own declarations: Type IDs in own and
 // shared (each once, never in both), and customer_fields naming its own
 // fields, link names and rollups (each once).
-func (t *Type) checkCustomers() error {
-	fail := func(format string, args ...any) error {
-		return fmt.Errorf("typedef %s v%d: %s", t.ID, t.Version, fmt.Sprintf(format, args...))
-	}
+func (t *Type) checkCustomers(r reporter) {
 	for _, list := range []struct {
 		name string
 		ids  []string
 	}{{"own", t.Own}, {"shared", t.Shared}} {
 		for i, id := range list.ids {
 			if !linkName.MatchString(id) {
-				return fail("%s: %q is not a Type ID", list.name, id)
-			}
-			if slices.Contains(list.ids[:i], id) {
-				return fail("%s names %s twice", list.name, id)
+				r.fail(CodeInvalidName, at(list.name, i), "Name a Type by its id (lower case letters, digits and _)",
+					"%s: %q is not a Type ID", list.name, id)
+			} else if slices.Contains(list.ids[:i], id) {
+				r.fail(CodeDuplicate, at(list.name, i), "Remove the second one", "%s names %s twice", list.name, id)
 			}
 		}
 	}
-	for _, id := range t.Own {
+	for i, id := range t.Own {
 		if slices.Contains(t.Shared, id) {
-			return fail("%s is both own and shared: a customer sees their own, or all of them, not both", id)
+			r.fail(CodeConflict, at("own", i), "List the Type under own or shared, not both",
+				"%s is both own and shared: a customer sees their own, or all of them, not both", id)
 		}
 	}
 	for i, name := range t.CustomerFields {
+		p := at("customer_fields", i)
 		if name == "" {
-			return fail("customer_fields: an empty name")
+			r.fail(CodeInvalidValue, p, "Name a field, a link or a rollup, or remove the empty entry", "customer_fields: an empty name")
+			continue
 		}
 		if slices.Contains(t.CustomerFields[:i], name) {
-			return fail("customer_fields names %s twice", name)
+			r.fail(CodeDuplicate, p, "Remove the second one", "customer_fields names %s twice", name)
+			continue
 		}
 		if _, ok := t.Field(name); ok {
 			continue
@@ -53,20 +54,21 @@ func (t *Type) checkCustomers() error {
 		if _, ok := t.Link(name); ok {
 			continue
 		}
-		if i := slices.IndexFunc(t.Rollups, func(r Rollup) bool { return r.ID == name }); i >= 0 {
+		if j := slices.IndexFunc(t.Rollups, func(ru Rollup) bool { return ru.ID == name }); j >= 0 {
 			// A rollup counts over a link: listed without its link, its
 			// count would tell a customer that hidden links exist (review
 			// of 2026-11-21). An incoming name is never this version's to
 			// list, so a rollup over one is never listed.
-			over := t.Rollups[i].Over
+			over := t.Rollups[j].Over
 			if _, own := t.Link(over); !own || !slices.Contains(t.CustomerFields, over) {
-				return fail("customer_fields: rollup %s counts over %s, which customer_fields does not list", name, over)
+				r.fail(CodeMissingCounterpart, p, "List the link it counts over too, or leave the rollup out",
+					"customer_fields: rollup %s counts over %s, which customer_fields does not list", name, over)
 			}
 			continue
 		}
-		return fail("customer_fields: %s is none of this version's fields, link names or rollups", name)
+		r.fail(CodeUnknownField, p, "Name a field, a link or a rollup of this version",
+			"customer_fields: %s is none of this version's fields, link names or rollups", name)
 	}
-	return nil
 }
 
 // CustomerSees reports whether a customer sees the field, link name or

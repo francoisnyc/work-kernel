@@ -252,15 +252,20 @@ func StoredSet(members []string) []any {
 // checkMultiUses refuses the uses of a multi-value field that are not
 // designed for sets: a hook reading or writing one. (`sets`, `at` and a
 // link's resolve field are refused where they are checked.)
-func (t *Type) checkMultiUses(fail func(string, ...any) error) error {
-	for _, h := range t.Hooks {
-		for _, id := range slices.Concat(h.Reads, h.Writes) {
-			if f, ok := t.Field(id); ok && f.Multiple {
-				return fail("hook %q reads or writes %s, a multi-value field; hooks take single values", h.ID, id)
+func (t *Type) checkMultiUses(r reporter) {
+	for i, h := range t.Hooks {
+		for _, list := range []struct {
+			key string
+			ids []string
+		}{{"reads", h.Reads}, {"writes", h.Writes}} {
+			for j, id := range list.ids {
+				if f, ok := t.Field(id); ok && f.Multiple {
+					r.fail(CodeWrongFieldType, at("hooks", i, list.key, j), "Give the hook a field holding one value",
+						"hook %q reads or writes %s, a multi-value field; hooks take single values", h.ID, id)
+				}
 			}
 		}
 	}
-	return nil
 }
 
 // CheckFieldShapes checks, across the versions of each Type loaded

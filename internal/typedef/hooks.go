@@ -356,7 +356,7 @@ func (t *Type) checkActingTimer(r reporter, i, j int, ids map[string]bool, named
 	ids[a.ID] = true
 	if a.At != "" {
 		// At an instant: no schedule; sets, a hook, or both.
-		t.checkActingAt(s, a, r.legacy())
+		t.checkActingAt(r, p, s, a)
 		if a.Hook == "" {
 			return
 		}

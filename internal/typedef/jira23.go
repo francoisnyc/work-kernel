@@ -317,21 +317,20 @@ func soleLinkedRead(expr string) bool {
 }
 
 // checkReadable validates readable_by_reactions.
-func (t *Type) checkReadable(fail func(string, ...any) error) error {
+func (t *Type) checkReadable(r reporter) {
 	seen := map[string]bool{}
-	for _, id := range t.ReadableByReactions {
+	for i, id := range t.ReadableByReactions {
 		_, ok := t.Field(id)
-		switch {
+		switch p := at("readable_by_reactions", i); {
 		case !ok:
-			return fail("readable_by_reactions: field %q is not declared", id)
+			r.fail(CodeUnknownField, p, "Declare the field, or remove it", "readable_by_reactions: field %q is not declared", id)
 		case seen[id]:
-			return fail("readable_by_reactions names %s twice", id)
+			r.fail(CodeDuplicate, p, "Remove the second one", "readable_by_reactions names %s twice", id)
 		}
-		// A principal field may be read too (Jira 2.4b): a reader copies
-		// it by plain reference only, into a principal field (ParseDir).
+		// A principal field may be read too (Jira 2.4b): a reader copies it
+		// by plain reference only, into a principal field (ParseDir).
 		seen[id] = true
 	}
-	return nil
 }
 
 // --- children ---
@@ -418,68 +417,85 @@ func (t *Type) checkSetReaction(r *Reaction, where string, fail func(string, ...
 
 // checkActingAt validates and compiles an acting timer at an instant. The
 // caller checks its ID and its hook.
-func (t *Type) checkActingAt(s *State, a *ActingTimer, fail func(string, ...any) error) error {
-	switch {
-	case a.After != "":
-		return fail("has `at`, so no `after`: it acts at an instant, not after a delay")
-	case a.Every != "":
-		return fail("has `at`, so no `every`: it acts once for each instant")
-	case a.Max != 0:
-		return fail("has `at`, so no `max`: it acts once for each instant")
+func (t *Type) checkActingAt(r reporter, p string, s *State, a *ActingTimer) {
+	for _, k := range []struct {
+		key, set, msg string
+	}{
+		{"after", a.After, "has `at`, so no `after`: it acts at an instant, not after a delay"},
+		{"every", a.Every, "has `at`, so no `every`: it acts once for each instant"},
+	} {
+		if k.set != "" {
+			r.fail(CodeKeyNotApplicable, at(p, k.key), "Remove it: a timer at an instant has no schedule", "%s", k.msg)
+		}
+	}
+	if a.Max != 0 {
+		r.fail(CodeKeyNotApplicable, at(p, "max"), "Remove it: a timer at an instant has no schedule",
+			"has `at`, so no `max`: it acts once for each instant")
 	}
 	f, ok := t.Field(a.At)
 	switch {
 	case !ok:
-		return fail("at: %q is not a declared field", a.At)
+		r.fail(CodeUnknownField, at(p, "at"), "Name a declared datetime field", "at: %q is not a declared field", a.At)
 	case f.Type != DateTime || f.Multiple:
-		return fail("at: %s is not a datetime field holding one instant", a.At)
-	case len(a.Sets) == 0 && a.Hook == "":
-		return fail("does nothing: it needs sets, a hook, or both")
+		r.fail(CodeWrongFieldType, at(p, "at"), "Name a datetime field holding one instant", "at: %s is not a datetime field holding one instant", a.At)
+	}
+	if len(a.Sets) == 0 && a.Hook == "" {
+		r.fail(CodeRequired, p, "Give it sets, a hook, or both", "does nothing: it needs sets, a hook, or both")
 	}
 	env, err := newSetsEnv(t)
 	if err != nil {
-		return fail("environment: %v", err)
+		r.fail(CodeExpressionInvalid, p, "Fix the fields the message names", "environment: %v", err)
+		return
 	}
 	a.WhenProgram = nil
 	if a.When != "" {
 		prg, _, out, err := compileFields(env, a.When)
-		if err != nil {
-			return fail("when %q: %v", a.When, err)
+		switch {
+		case err != nil:
+			r.failExpr(err, at(p, "when"), "when %q: %v", a.When, err)
+		case !out.IsExactType(cel.BoolType):
+			r.fail(CodeExpressionType, at(p, "when"), "Write a condition that is true or false", "when %q must yield a bool, not %s", a.When, out)
+		default:
+			a.WhenProgram = prg
 		}
-		if !out.IsExactType(cel.BoolType) {
-			return fail("when %q must yield a bool, not %s", a.When, out)
-		}
-		a.WhenProgram = prg
 	}
 	a.SetPrograms = map[string]cel.Program{}
 	for _, id := range slices.Sorted(maps.Keys(a.Sets)) {
+		q := at(p, "sets", id)
 		sf, ok := t.Field(id)
 		switch {
 		case !ok:
-			return fail("sets %q, which is not a declared field", id)
+			r.fail(CodeUnknownField, q, "Declare the field, or remove it from sets", "sets %q, which is not a declared field", id)
+			continue
 		case id == a.At:
-			return fail("sets %s, the field it waits for: it would arm itself again", id)
+			r.fail(CodeConflict, q, "Set another field: the timer waits for this one", "sets %s, the field it waits for: it would arm itself again", id)
+			continue
 		case slices.Contains(s.Frozen, id):
-			return fail("sets %s, which its state freezes", id)
+			r.fail(CodeWritesFrozenField, q, "Set another field, or stop freezing it in this state", "sets %s, which its state freezes", id)
+			continue
 		case sf.Type == Principal:
-			return fail("sets %s, a principal field; a timer may not set who", id)
+			r.fail(CodeWrongFieldType, q, "Set a field that is not a principal: a timer never chooses who", "sets %s, a principal field; a timer may not set who", id)
+			continue
 		case sf.Multiple:
-			return fail("sets %s, a multi-value field; an effect on a set is not built", id)
+			r.fail(CodeWrongFieldType, q, "Set a field holding one value", "sets %s, a multi-value field; an effect on a set is not built", id)
+			continue
 		}
 		ast, iss := env.Compile(a.Sets[id])
 		if iss.Err() != nil {
-			return fail("sets %s: %q: %v", id, a.Sets[id], iss.Err())
+			r.fail(CodeExpressionInvalid, q, "Fix the CEL expression; it reads fields by their ids", "sets %s: %q: %v", id, a.Sets[id], iss.Err())
+			continue
 		}
 		if out := ast.OutputType(); !celType(sf.Type).IsAssignableType(out) {
-			return fail("sets %s: %q yields %s, not a value of a %s field", id, a.Sets[id], out, sf.Type)
+			r.fail(CodeExpressionType, q, "Compute a value of the field's type", "sets %s: %q yields %s, not a value of a %s field", id, a.Sets[id], out, sf.Type)
+			continue
 		}
 		prg, err := env.Program(ast)
 		if err != nil {
-			return fail("sets %s: %v", id, err)
+			r.fail(CodeExpressionInvalid, q, "Fix the CEL expression", "sets %s: %v", id, err)
+			continue
 		}
 		a.SetPrograms[id] = prg
 	}
-	return nil
 }
 
 // ActingAtFields returns the fields the Type's acting timers at an instant

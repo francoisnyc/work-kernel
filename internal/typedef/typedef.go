@@ -499,15 +499,15 @@ func (t *Type) check() error {
 	t.checkAtTimers(r)
 
 	// Hooks last: they name states, transitions and fields checked above.
-	legacyErr(t.checkOffers())
-	legacyErr(t.checkCustomers())
+	t.checkOffers(r)
+	t.checkCustomers(r)
 	t.checkHooks(r)
 	// Then what names hooks and fields: reactions, invariants, consents.
 	legacyErr(t.checkReactions(legacy))
 	legacyErr(t.checkInvariants(legacy))
 	legacyErr(t.checkAccepts(legacy))
-	legacyErr(t.checkMultiUses(legacy))
-	legacyErr(t.checkReadable(legacy))
+	t.checkMultiUses(r)
+	t.checkReadable(r)
 	t.checkJira24b(r)
 	// Clears name fields, and may not sit on a held transition.
 	t.checkClears(r)
