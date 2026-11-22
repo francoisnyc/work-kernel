@@ -59,7 +59,8 @@ For exploring by hand: `docker compose -f docker-compose.yml -f compose.demo.yam
 - **relay** delivers the outbox (what changed) to Temporal; **worker** runs the
   Item workflows and their hooks, which call **connstub**'s CRM, ERP, HR
   directory (`deploy/hr-directory.json`) and email service, and
-  write back through the item service. The relay and the worker have no health
+  write back through the item service. The HR directory is reached over the
+  hook protocol (`pli.hooks/v1`, signed): `deploy/connectors.yaml` says where. The relay and the worker have no health
   check: they serve no port and nothing waits on them; they start once
   Postgres, Temporal (and, for the worker, connstub and the item service,
   whose loaded Types its dev clock checks) are healthy.

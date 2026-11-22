@@ -10,5 +10,6 @@
 # Type, every hook budget and every other timeout keep real time.
 services:
   worker:
-    command: ["--dev-time-scale", "2m", "--dev-clock-i-know-this-is-not-production",
+    command: ["--connectors", "/etc/worker/connectors.yaml",
+              "--dev-time-scale", "2m", "--dev-clock-i-know-this-is-not-production",
               "--dev-time-scale-types", "vacation_request"]

@@ -22,6 +22,12 @@ name: pli
 x-database: &database
   DATABASE_URL: postgres://kernel:kernel@postgres:5432/kernel?sslmode=disable
 
+# DEV ONLY: the secret the worker signs its hook protocol requests to the
+# HR connector with (Standard Webhooks, whsec_), and the HR connector
+# verifies them with. A real deployment keeps it in a secret store.
+x-hr-hook-secret: &hr-hook-secret
+  HR_HOOK_SECRET: "whsec_fevc5BcBsz9Qr6vHidUsK2uBHqMkiTWPCXqKlRqwkO4="
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -139,15 +145,20 @@ services:
     build: {context: ., target: worker}
     # DEV ONLY: vacation_request's declared timers on a scaled clock (a day
     # lasts 2 s); every other Type, and every budget, keeps real time.
-    command: ["--dev-time-scale", "2s", "--dev-clock-i-know-this-is-not-production",
+    # The connectors file says which connector is a remote service (hr@1,
+    # the HR directory, over the hook protocol); the worker reads it again
+    # whenever it changes. The others are compiled in, at these URLs.
+    command: ["--connectors", "/etc/worker/connectors.yaml",
+              "--dev-time-scale", "2s", "--dev-clock-i-know-this-is-not-production",
               "--dev-time-scale-types", "vacation_request"]
     environment:
-      <<: *database
+      <<: [*database, *hr-hook-secret]
       TEMPORAL_ADDRESS: temporal:7233
       CRM_URL: http://connstub:8081
       ERP_URL: http://connstub:8082
-      HR_URL: http://connstub:8083
       EMAIL_URL: http://connstub:8084
+    volumes:
+      - ./deploy/connectors.yaml:/etc/worker/connectors.yaml:ro
     depends_on:
       migrate: {condition: service_completed_successfully}
       temporal: {condition: service_healthy}
@@ -157,7 +168,9 @@ services:
 
   # Stub CRM (8081) and ERP (8082) for the ticket's hooks. The ERP answers
   # after 1 s, so a held approve stays held long enough to see. The stub HR
-  # directory (8083), for the vacation request's HR check, answers at once.
+  # directory (8083), for the vacation request's HR check, answers at once;
+  # it is a hook protocol connector (pli.hooks/v1), verifying the worker's
+  # signature with HR_HOOK_SECRET.
   # The email stub (8084) records the vacation request's emails; its
   # read-only port (8085, GET /messages?item=) is published for the
   # scenario, dev only: nothing outside the stack can send.
@@ -166,7 +179,9 @@ services:
     command: ["--crm-listen", ":8081", "--erp-listen", ":8082", "--erp-latency", "1s",
               "--customers", "/etc/connstub/customers.json",
               "--hr-listen", ":8083", "--hr-directory", "/etc/connstub/hr-directory.json",
+              "--hr-hook-secret-env", "HR_HOOK_SECRET",
               "--email-listen", ":8084", "--email-read-listen", ":8085"]
+    environment: *hr-hook-secret
     ports:
       - "127.0.0.1:8085:8085" # dev only: the sent emails, read-only, local only
     volumes:
