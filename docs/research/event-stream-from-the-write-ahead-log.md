@@ -150,6 +150,19 @@ wake on `LISTEN/NOTIFY` as an interim step, several relays with
 3. Does Watch's first version need outside delivery (option B), or only the
    kernel's own API?
 
+### Answers so far (2026-11-22)
+
+- **Its own Postgres:** yes. The kernel runs on its own native (self-managed)
+  Postgres instance, so `wal_level = logical` is a setting in
+  `postgresql.conf` and a restart, not a provider flag.
+- **`wal_level = logical` on that instance:** to be confirmed at work.
+- **An existing Postgres to BigQuery pipeline:** yes. Such pipelines usually
+  read the replication stream (Datastream and Debezium both do), so logical
+  decoding is likely already accepted elsewhere; which tool it uses is the
+  next thing to ask. BigQuery is a destination for analytics, never the
+  kernel's own store: its mutating transactions take table-level locks, where
+  the kernel locks one Item's row per write.
+
 ## Sources
 
 - Gunnar Morling, "Revisiting the outbox pattern": https://www.morling.dev/blog/revisiting-the-outbox-pattern/
