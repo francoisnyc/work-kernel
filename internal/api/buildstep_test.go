@@ -233,7 +233,9 @@ func TestBuildStep_GetType(t *testing.T) {
 			drops++
 		}
 	}
-	// Six separate lines, one per state before done: no from-list form.
+	// Six X->dropped transitions, one from each state before done, each
+	// allowed exactly [field:f_owner] (checked in the table above). GetType
+	// shows transitions expanded, so this cannot tell how the YAML spells them.
 	if drops != 6 {
 		t.Errorf("%d transitions into dropped, want 6", drops)
 	}
@@ -396,17 +398,19 @@ func TestBuildStep_FrozenPerState(t *testing.T) {
 		{"in_review", []string{"f_questions", "f_tests_ref", "f_owner", "f_pr_url"}},
 		{"done", []string{"f_questions", "f_tests_ref", "f_owner", "f_pr_url", "f_journal"}},
 	}
+	// One subtest, and one fresh step, per (state, field): every freeze is
+	// its own test.
 	for _, s := range frozen {
-		t.Run(s.state, func(t *testing.T) {
-			name := stepIn(t, s.state)
-			for _, f := range s.fields {
+		for _, f := range s.fields {
+			t.Run(s.state+"/"+f, func(t *testing.T) {
+				name := stepIn(t, s.state)
 				err := stepUpdate(t, as("ana"), name, map[string]any{f: values[f]})
 				ce := apiError(t, "ana writes "+f+" in "+s.state, err, connect.CodeFailedPrecondition, "FIELD_FROZEN")
 				if md := metadata(t, ce); md["fields"] != f || md["state"] != s.state {
 					t.Errorf("metadata = %v, want fields %s, state %s", md, f, s.state)
 				}
-			}
-		})
+			})
+		}
 	}
 }
 
@@ -440,8 +444,11 @@ func TestBuildStep_FrozenControls(t *testing.T) {
 
 	t.Run("f_owner in tests_proposed", func(t *testing.T) {
 		name := stepIn(t, "tests_proposed")
-		if err := stepUpdate(t, as("ana"), name, map[string]any{"f_owner": "user:ana"}); err != nil {
-			t.Errorf("ana writes f_owner in tests_proposed: %v", err)
+		if err := stepUpdate(t, as("ana"), name, map[string]any{"f_owner": "user:bob"}); err != nil {
+			t.Fatalf("ana writes f_owner in tests_proposed: %v", err)
+		}
+		if got := get(t, "ana", name).Fields.AsMap()["f_owner"]; got != "user:bob" {
+			t.Errorf("f_owner = %v after the write, want user:bob", got)
 		}
 	})
 
