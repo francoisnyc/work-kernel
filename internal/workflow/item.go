@@ -1006,11 +1006,7 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 				logHookEnd(log, hin, err)
 				return
 			}
-			reason := "budget_exhausted"
-			var appErr *temporal.ApplicationError
-			if errors.As(err, &appErr) && appErr.Type() == ErrTypeHookFailed {
-				reason = "check_failed"
-			}
+			reason := checkFailure(err)
 			err = workflow.ExecuteActivity(gctx, ActivityResolveHold,
 				ResolveInput{Hook: hin, Verdict: "error", Reason: reason}).Get(gctx, nil)
 			logHookEnd(log, hin, err)
@@ -1656,13 +1652,36 @@ func actionFailure(err error) (reason string, failed bool) {
 			return "", false
 		case ErrTypeKeyConflict:
 			return "key_conflict", true
-		case ErrTypeHookFailed, ErrTypeRejected, ErrTypeInvalid, ErrTypeStale, ErrTypeHeld:
+		case ErrTypeHookFailed, ErrTypeRejected, ErrTypeInvalid, ErrTypeStale, ErrTypeHeld,
+			ErrTypeConnectorUnconfigured, ErrTypeConnectorUnauthorized, ErrTypeConnectorMismatch:
 			// Failed for good, or the kernel refused the write-back:
-			// retrying the same request cannot help.
+			// retrying the same request cannot help. (hook_failed takes
+			// four reasons; a misconfigured connector is action_failed.)
 			return "action_failed", true
 		}
 	}
 	return "budget_exhausted", true
+}
+
+// checkFailure is the reason a check's hold records when the check gave
+// up: its budget ran out, it failed for good, or (the hook protocol) its
+// connector is misconfigured, which has a reason of its own.
+func checkFailure(err error) string {
+	var appErr *temporal.ApplicationError
+	if !errors.As(err, &appErr) {
+		return "budget_exhausted"
+	}
+	switch appErr.Type() {
+	case ErrTypeHookFailed:
+		return "check_failed"
+	case ErrTypeConnectorUnconfigured:
+		return ReasonConnectorUnconfigured
+	case ErrTypeConnectorUnauthorized:
+		return ReasonConnectorUnauthorized
+	case ErrTypeConnectorMismatch:
+		return ReasonConnectorMismatch
+	}
+	return "budget_exhausted"
 }
 
 func logHookEnd(log interface{ Info(string, ...any) }, in HookInput, err error) {
