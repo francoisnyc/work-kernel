@@ -61,10 +61,11 @@ describe("inView", () => {
   const v2 = item("a", typeName("incident", 2));
   const v1 = item("old", typeName("incident", 1));
   const b = item("b", typeName("incident", 2));
+  const v3 = item("c", typeName("incident", 3));
   const idx = breachedIndex([goal("g", "b", "running", { f_metric: "resolution", f_breached_at: "2026-11-21T09:00:00.000000Z" })]);
 
-  test("incident@2 only: older versions are left to the admin UI", () => {
-    expect(inView([v2, v1, b], "open", idx).map((i) => i.name)).toEqual([v2.name, b.name]);
+  test("incident@2 and @3 together: incident@1 is left to the admin UI", () => {
+    expect(inView([v2, v1, b, v3], "open", idx).map((i) => i.name)).toEqual([v2.name, b.name, v3.name]);
   });
 
   test("breached keeps the incidents with a breached open goal", () => {

@@ -2630,6 +2630,48 @@ the generic web Inbox: approval@1's decisions name `field:f_approver`, so
 the Inbox asks for "approvals in pending whose f_approver is me", with no
 code that knows the access request.
 
+### Hardening after Jira 2.4, as built: who places Items, and goals no person moves (2026-11-22)
+
+The two high-priority holes Jira 2.4b left on the Later list, closed in new
+Type versions, with **no kernel change**: any principal who saw an incident,
+a reply, a note, a comment or a goal could move it or narrow it (hiding it
+from the desk, or a reply from its conversation), and anyone who saw a goal
+under sla_goal@1 could complete it by hand, as met.
+
+**Which versions carry a placement rule (`placement_writable_by`), and why:**
+
+| Version | Placed by | Why |
+|---|---|---|
+| incident@3 | `role:desk_agent` | Agents move an incident to another desk and narrow it; its requester does not (a customer never updates anyway). Otherwise incident@2. |
+| reply@2, note@2 | `kernel` | A reply or a note stays in the incident it was written in, with the incident's readers. |
+| comment@3 | `kernel` | The same for a comment, wherever it was written. |
+| sla_goal@3 | `kernel` | A goal stays in its host, with its host's readers: no one hides a goal from the desk. Otherwise sla_goal@2: every move `allowed: [nobody]`, `metric_missing`. |
+
+incident@3 starts sla_goal@3 goals. sla_goal@3 accepts every reaction the
+incident aims at its goals (its starts, and its pause, resume, stop,
+cancel and answered moves) by reaction ID through containment, and the
+incident accepts each of the goal's set reactions for exactly the field it
+sets; a load test checks both. PLAT's work Items (story, bug, task, epic,
+sprint, space) are unchanged: who places them, and whether narrowing an
+Item at its creation is placement, are open (Later).
+
+**Existing Items keep their version's rules.** The kernel has no operation
+that moves an Item to another Type version: an incident@2 created before
+this step is still narrowed by its requester, its sla_goal@1 goals are
+still completed by hand by anyone who sees them, and a reply@1 is still
+moved. Moving Items to a new version is a kernel change (Later, before
+real use).
+
+**Which version a client creates.** A client names the version it
+creates. The **generic web UI creates the latest version** of the Type
+chosen (staff may pick another in its Version list), so it went to
+incident@3, reply@2 and note@2 with no code change. The PoC apps, the
+scenario (C) and the web e2e tests pin versions, and were switched:
+apps/poc creates incident@3, reply@2 and note@2, and its queue lists
+incident@2 and @3 together (incident@1 is left to the admin UI). It reads
+goals by Type ID whatever their version, so its Breached view and SLA panel
+needed no change. Scenario B keeps the @1 Types.
+
 ## Web UI as built (2026-11-18)
 
 A generic web UI for playing with the proof of concept, in `web/`. It is

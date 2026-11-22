@@ -47,7 +47,7 @@ async function seedPortal(baseURL: string) {
   }
   const lee = api(baseURL, "lee");
   const leesIncident = (
-    await lee.createItem({ parent: NS, requestId: randomUUID(), type: type("incident", 2), container: portal.name,
+    await lee.createItem({ parent: NS, requestId: randomUUID(), type: type("incident", 3), container: portal.name,
       fields: { f_title: `lee's ${run}`, f_priority: "P3" } })
   ).item!;
   return { portal, leesIncident };
@@ -80,14 +80,14 @@ test("kim, a customer: her portal, her incident, its replies, and nothing else",
 
   // Staff answer, and write a note.
   const sam = api(baseURL!, "sam");
-  await sam.createItem({ parent: NS, requestId: randomUUID(), type: type("reply", 1), container: incident, fields: { f_body: `on it ${run}` } });
-  await sam.createItem({ parent: NS, requestId: randomUUID(), type: type("note", 1), container: incident, fields: { f_body: `internal ${run}` } });
+  await sam.createItem({ parent: NS, requestId: randomUUID(), type: type("reply", 2), container: incident, fields: { f_body: `on it ${run}` } });
+  await sam.createItem({ parent: NS, requestId: randomUUID(), type: type("note", 2), container: incident, fields: { f_body: `internal ${run}` } });
   await sam.updateItem({ name: incident, requestId: randomUUID(), fields: { f_assignee: "user:sam" } });
 
   await page.reload();
   const contained = page.getByRole("list", { name: "Contained Items" }).getByRole("listitem");
   await expect(contained).toHaveCount(1);
-  await expect(contained).toContainText("reply@1");
+  await expect(contained).toContainText("reply@2");
   const fields = page.getByRole("region", { name: "Fields" });
   await expect(fields).not.toContainText("f_assignee");
   await expect(fields).not.toContainText("f_due_");
@@ -106,7 +106,7 @@ test("kim, a customer: her portal, her incident, its replies, and nothing else",
   await actAs(page, "sam");
   await page.goto(`/#/items/${incidentId}`);
   const all = page.getByRole("list", { name: "Contained Items" }).getByRole("listitem");
-  await expect(all.filter({ hasText: "sla_goal@1" })).toHaveCount(2);
-  await expect(all.filter({ hasText: "note@1" })).toHaveCount(1);
+  await expect(all.filter({ hasText: "sla_goal@3" })).toHaveCount(2);
+  await expect(all.filter({ hasText: "note@2" })).toHaveCount(1);
   await expect(page.getByRole("region", { name: "Fields" })).toContainText("f_assignee");
 });

@@ -54,7 +54,7 @@ func TestSLAPackage_LoadsWithoutAHost(t *testing.T) {
 	for _, ty := range types {
 		got = append(got, fmt.Sprintf("%s@%d", ty.ID, ty.Version))
 	}
-	if want := "calendar@1 sla_goal@1 sla_goal@2 sla_policy@1 sla_policy@2"; strings.Join(got, " ") != want {
+	if want := "calendar@1 sla_goal@1 sla_goal@2 sla_goal@3 sla_policy@1 sla_policy@2"; strings.Join(got, " ") != want {
 		t.Errorf("types/sla holds %v, want %s", got, want)
 	}
 	// No Type of the package names a Type outside it.

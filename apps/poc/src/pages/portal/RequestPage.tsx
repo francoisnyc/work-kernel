@@ -93,7 +93,7 @@ export function RequestPage({ id, detailsUnsaved }: { id: string; detailsUnsaved
                   )}
                 </div>
                 <ReplyBox draft={draft} setDraft={setDraft} onSend={async (body) => {
-                  await s.api.createItem({ parent: s.ns, requestId: crypto.randomUUID(), type: s.typeName("reply", 1), container: name, fields: { f_body: body } });
+                  await s.api.createItem({ parent: s.ns, requestId: crypto.randomUUID(), type: s.typeName("reply", 2), container: name, fields: { f_body: body } });
                   load.reload();
                 }} />
               </section>

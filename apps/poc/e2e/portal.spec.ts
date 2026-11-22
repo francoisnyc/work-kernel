@@ -93,8 +93,8 @@ test("kim opens a request and sees only the public conversation", async ({ page,
   const incident = await dueInstants(baseURL!, found[0]!);
   const dues = [String(incident.fields!.f_due_first_response), String(incident.fields!.f_due_resolution)];
   await transition(sam, incident.name, "in_progress");
-  await createItem(sam, type("note", 1), { f_body: note }, incident.name);
-  await createItem(sam, type("reply", 1), { f_body: reply }, incident.name);
+  await createItem(sam, type("note", 2), { f_body: note }, incident.name);
+  await createItem(sam, type("reply", 2), { f_body: reply }, incident.name);
   await update(sam, incident.name, { f_assignee: "user:bob" });
   await transition(sam, incident.name, "waiting_for_customer");
 

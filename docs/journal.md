@@ -6,15 +6,23 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
-- **High: any principal who sees an Item may move it or narrow it.** Apply
-  `placement_writable_by` (Jira 2.4b) to incident, reply, note, the hosts
-  of sla_goal@1 and the PLAT Types, each in a new version. Until then a
-  requester can narrow their incident or move a reply out of it. Only
-  desk@3 is fixed. (Jira 2.4b, Phase A)
-- **High: a goal under sla_goal@1 can be completed by hand, as met,** by any
-  staff member who sees it, and a bare goal (no metric) can be made by
-  hand. sla_goal@2 fixes both (`allowed: [nobody]`, `metric_missing`); move
-  the incident to it in a new version. (Jira 2.4b, Phase A)
+- **High, before real use: move Items to a new Type version.** The kernel
+  has no such operation, so every Item created before a hardening keeps its
+  version's rules: an incident@2 is still narrowed by its requester, its
+  sla_goal@1 goals still completed by hand, a reply@1 still moved. A kernel
+  change. (Hardening after Jira 2.4)
+- A `plat_admin` role to place PLAT's work Items (story, bug, task, epic,
+  sprint, space), which anyone who sees them may move or narrow today; with
+  the open question of a narrow at creation (sam's private task) against
+  moves and narrowing afterwards: placement_writable_by refuses both today.
+  (Hardening after Jira 2.4)
+- vacation_request and ticket have no placement rules either: a requester
+  could narrow a request away from its approver. (Hardening after Jira 2.4)
+- ~~**High: any principal who sees an Item may move it or narrow it**~~, and
+  ~~**a goal under sla_goal@1 can be completed by hand**~~: done in the
+  hardening step (incident@3, reply@2, note@2, comment@3, sla_goal@3;
+  design.md, "Hardening after Jira 2.4, as built"), for Items of the new
+  versions.
 - A reaction leaves the workflow's queue with only a log line when
   `ActivityAfterReactionFailed` itself fails (or the Item is gone): no
   record on the Item, the reaction vanishes. Keep it queued and retry the
@@ -2752,4 +2760,29 @@ cannot be built here); CI builds it and runs its journeys.
 
 **Open:** the Later list (placement for the other Types, sla_goal@1; groups as readers; excludes; the dropped
 reaction). **Next session:** Bonita, or the high Later items.
+
+## 2026-11-22 — Hardening after Jira 2.4: who places Items, and goals no person moves (Phase D)
+
+**Built:** five Type versions, **no kernel change**: incident@3 (placed by desk agents; its goals on sla_goal@3),
+reply@2 and note@2 (placed by the kernel: they stay in their incident), comment@3 (likewise), sla_goal@3 (sla_goal@2
+placed by the kernel). apps/poc creates incident@3, reply@2 and note@2, and its queue lists incident@2 and @3
+together; scenario C, its new step C13 and the web customer test run on the new versions (B keeps @1).
+design.md: "Hardening after Jira 2.4, as built" (which versions, why; existing Items keep their version's rules;
+the generic web UI creates the latest version).
+
+**Tests:** 1 typedef test (the five files, and every goal reaction the incident uses accepted by sla_goal@3), 4
+item service tests (who places each, no hand move of a goal, the older versions unchanged); the five Type lists
+grew (pli 45 → 50); apps/poc's queue and request tests. **Test change, agreed, in a commit of its own:** the web
+customer test's goals are `sla_goal@3` (kim's incident is made in the web UI, which creates the latest version).
+
+**Surprises:** the web UI moved to the new versions by itself (it creates the latest one), which is what found
+the stale expectation. Nothing in apps/poc pinned a goal version.
+
+**Numbers.** `go test -race ./...` green (item service 145 s, workflow suite 330 s). Scenario: twice on a fresh
+stack, 104 s each. Web Playwright 9 in 8.3 s. **apps/poc's four journeys passed locally for the first time** (32.5
+s), against a poc image served from a bundle built on the host (the real image's `npm ci` cannot run in this
+container); vitest 408 and typecheck. CI builds the real images.
+
+**Open:** the Later list: version migration before real use, plat_admin and narrow-at-creation, vacation_request
+and ticket placement. **Next session:** Bonita (an exported process, then the packages design pass).
 
