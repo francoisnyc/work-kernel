@@ -25,7 +25,6 @@ import (
 	"github.com/google/uuid"
 	"go.temporal.io/sdk/temporal"
 
-	"github.com/francoisnyc/work-kernel/internal/hooks"
 	"github.com/francoisnyc/work-kernel/internal/item"
 	"github.com/francoisnyc/work-kernel/internal/itemservice"
 	"github.com/francoisnyc/work-kernel/internal/typedef"
@@ -224,7 +223,7 @@ func TestE2E_Leave_TwoApprovalsRace(t *testing.T) {
 func (s *leaveStack) startHRWorker() {
 	s.t.Helper()
 	s.worker = wf.NewWorker(tc, s.queue, s.k, wf.WorkerOptions{
-		Connectors: hooks.NewConnectors(s.crm.URL, s.erp.URL).WithHR(s.hr.URL), HookBudget: testBudget,
+		Connectors: s.remoteHR(), HookBudget: testBudget,
 	})
 	if err := s.worker.Start(); err != nil {
 		s.t.Fatalf("start worker: %v", err)
