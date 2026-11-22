@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,6 +25,13 @@ var errRetry = errors.New("itemservice: retry the transaction")
 
 // maxRetries bounds how often write reruns a transaction (see retryable).
 const maxRetries = 3
+
+// deadlockRetries counts the write transactions Postgres aborted as a
+// deadlock (40P01), which write then ran again. Tests read it
+// (export_test.go) to hold the lock order to "never deadlocks": a retried
+// deadlock is otherwise invisible. One atomic add per deadlock; nothing on
+// the normal path (Jira 2.4b).
+var deadlockRetries atomic.Int64
 
 // write runs one write operation in one transaction, wrapped in the
 // idempotency protocol shared by every operation:
@@ -96,6 +104,9 @@ func (k *Service) write(ctx context.Context, p item.Principal, key, hash string,
 	var err error
 	for attempt := 0; ; attempt++ {
 		err = pgx.BeginFunc(ctx, k.pool, run)
+		if isDeadlock(err) {
+			deadlockRetries.Add(1)
+		}
 		if !retryable(err) || attempt == maxRetries {
 			break
 		}

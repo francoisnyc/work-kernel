@@ -3180,8 +3180,11 @@ type Type struct {
 	// this version, and may set at creation. Anything else is hidden from a
 	// customer, a field added in a later version included.
 	CustomerFields []string `protobuf:"bytes,18,rep,name=customer_fields,json=customerFields,proto3" json:"customer_fields,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Jira 2.4b: who may move or narrow Items of this version: "kernel"
+	// (nobody) or role:<name> entries; empty is anyone who sees the Item.
+	PlacementWritableBy []string `protobuf:"bytes,19,rep,name=placement_writable_by,json=placementWritableBy,proto3" json:"placement_writable_by,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *Type) Reset() {
@@ -3336,6 +3339,13 @@ func (x *Type) GetShared() []string {
 func (x *Type) GetCustomerFields() []string {
 	if x != nil {
 		return x.CustomerFields
+	}
+	return nil
+}
+
+func (x *Type) GetPlacementWritableBy() []string {
+	if x != nil {
+		return x.PlacementWritableBy
 	}
 	return nil
 }
@@ -3639,7 +3649,11 @@ type Reaction struct {
 	// SET: field ID of the target -> a CEL expression over this Item's
 	// fields, plus cause.at. Its value is set on the target; null unsets it.
 	// The target's Type must accept it (AcceptedReaction.sets).
-	SetFields     map[string]string `protobuf:"bytes,19,rep,name=set_fields,json=setFields,proto3" json:"set_fields,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	SetFields map[string]string `protobuf:"bytes,19,rep,name=set_fields,json=setFields,proto3" json:"set_fields,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Jira 2.4b: a create reaction's for_each (a multi-value field of the
+	// source: one Item per member) and a move reaction's on_guard ("skip").
+	ForEach       string `protobuf:"bytes,20,opt,name=for_each,json=forEach,proto3" json:"for_each,omitempty"`
+	OnGuard       string `protobuf:"bytes,21,opt,name=on_guard,json=onGuard,proto3" json:"on_guard,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3805,6 +3819,20 @@ func (x *Reaction) GetSetFields() map[string]string {
 		return x.SetFields
 	}
 	return nil
+}
+
+func (x *Reaction) GetForEach() string {
+	if x != nil {
+		return x.ForEach
+	}
+	return ""
+}
+
+func (x *Reaction) GetOnGuard() string {
+	if x != nil {
+		return x.OnGuard
+	}
+	return ""
 }
 
 // A reaction another Type may run on Items of this Type.
@@ -4113,9 +4141,11 @@ type Field struct {
 	Multiple bool `protobuf:"varint,6,opt,name=multiple,proto3" json:"multiple,omitempty"`
 	// Multi-value fields: the most members the set may have; 0 is no limit.
 	// More is FAILED_PRECONDITION / TOO_MANY_VALUES.
-	Max           int32 `protobuf:"varint,7,opt,name=max,proto3" json:"max,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Max int32 `protobuf:"varint,7,opt,name=max,proto3" json:"max,omitempty"`
+	// Jira 2.4b: the states in which no two siblings hold the same value.
+	UniqueAmongSiblings []string `protobuf:"bytes,8,rep,name=unique_among_siblings,json=uniqueAmongSiblings,proto3" json:"unique_among_siblings,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *Field) Reset() {
@@ -4195,6 +4225,13 @@ func (x *Field) GetMax() int32 {
 		return x.Max
 	}
 	return 0
+}
+
+func (x *Field) GetUniqueAmongSiblings() []string {
+	if x != nil {
+		return x.UniqueAmongSiblings
+	}
+	return nil
 }
 
 type State struct {
@@ -5337,7 +5374,7 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\rvalidate_only\x18\x05 \x01(\bR\fvalidateOnly\x12+\n" +
 	"\x11expected_audience\x18\x06 \x01(\tR\x10expectedAudience\"2\n" +
 	"\x14ApproveWidenResponse\x12\x1a\n" +
-	"\baudience\x18\x01 \x01(\tR\baudience\"\xf9\x05\n" +
+	"\baudience\x18\x01 \x01(\tR\baudience\"\xad\x06\n" +
 	"\x04Type\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x17\n" +
 	"\atype_id\x18\x02 \x01(\tR\x06typeId\x12\x18\n" +
@@ -5360,7 +5397,8 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\x06offers\x18\x0f \x03(\v2\x10.kernel.v1.OfferR\x06offers\x12\x10\n" +
 	"\x03own\x18\x10 \x03(\tR\x03own\x12\x16\n" +
 	"\x06shared\x18\x11 \x03(\tR\x06shared\x12'\n" +
-	"\x0fcustomer_fields\x18\x12 \x03(\tR\x0ecustomerFields\"1\n" +
+	"\x0fcustomer_fields\x18\x12 \x03(\tR\x0ecustomerFields\x122\n" +
+	"\x15placement_writable_by\x18\x13 \x03(\tR\x13placementWritableBy\"1\n" +
 	"\x05Offer\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05field\x18\x02 \x01(\tR\x05field\"J\n" +
@@ -5374,7 +5412,7 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\bcount_by\x18\x03 \x01(\tR\acountBy\"/\n" +
 	"\tInvariant\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04rule\x18\x02 \x01(\tR\x04rule\"\xf1\x06\n" +
+	"\x04rule\x18\x02 \x01(\tR\x04rule\"\xa7\a\n" +
 	"\bReaction\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12+\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x17.kernel.v1.ReactionKindR\x04kind\x12\x14\n" +
@@ -5398,7 +5436,9 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\rchildren_when\x18\x11 \x01(\tR\fchildrenWhen\x12\x16\n" +
 	"\x06target\x18\x12 \x01(\tR\x06target\x12A\n" +
 	"\n" +
-	"set_fields\x18\x13 \x03(\v2\".kernel.v1.Reaction.SetFieldsEntryR\tsetFields\x1a6\n" +
+	"set_fields\x18\x13 \x03(\v2\".kernel.v1.Reaction.SetFieldsEntryR\tsetFields\x12\x19\n" +
+	"\bfor_each\x18\x14 \x01(\tR\aforEach\x12\x19\n" +
+	"\bon_guard\x18\x15 \x01(\tR\aonGuard\x1a6\n" +
 	"\bAddEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a?\n" +
@@ -5429,7 +5469,7 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\bon_enter\x18\x01 \x01(\tR\aonEnter\x12\x14\n" +
 	"\x05field\x18\x02 \x01(\tR\x05field\x12\x16\n" +
 	"\x06equals\x18\x03 \x01(\tR\x06equals\x12\x14\n" +
-	"\x05state\x18\x04 \x01(\tR\x05state\"\xee\x01\n" +
+	"\x05state\x18\x04 \x01(\tR\x05state\"\xa2\x02\n" +
 	"\x05Field\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12(\n" +
 	"\x04type\x18\x02 \x01(\x0e2\x14.kernel.v1.FieldTypeR\x04type\x12\x18\n" +
@@ -5438,7 +5478,8 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"writableBy\x12*\n" +
 	"\x11writable_by_roles\x18\x05 \x03(\tR\x0fwritableByRoles\x12\x1a\n" +
 	"\bmultiple\x18\x06 \x01(\bR\bmultiple\x12\x10\n" +
-	"\x03max\x18\a \x01(\x05R\x03max\"\xe6\x01\n" +
+	"\x03max\x18\a \x01(\x05R\x03max\x122\n" +
+	"\x15unique_among_siblings\x18\b \x03(\tR\x13uniqueAmongSiblings\"\xe6\x01\n" +
 	"\x05State\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x124\n" +
 	"\bcategory\x18\x02 \x01(\x0e2\x18.kernel.v1.StateCategoryR\bcategory\x12\x16\n" +

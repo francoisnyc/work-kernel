@@ -1048,6 +1048,8 @@ Accepted: a rule must hold for everyone.
   start the transaction again (`errRetry`) if it changed. FOR SHARE blocks
   every state change of a linked Item until the commit. `write()` also
   retries Postgres deadlocks (40P01) and serialization failures (40001).
+  Since Jira 2.4b this pass is step 2 of three: the container first, the
+  children last ("Jira 2.4b, PR 1 as built", Locks).
 - Links that were not read fail safe: a guard that reads links does not hold.
 
 **Search.** A link condition `{link_type, direction, item}` names the link as
@@ -2389,6 +2391,147 @@ reopens a resolved one, staff with `role:desk_agent`; a customer sees and
 sets the title, priority and impact, and sees the resolution), reply@1,
 note@1. Scenario B runs on the `@1` Types, unchanged; scenario C1 runs the
 customers.
+
+### Jira 2.4b, PR 1 as built: the building blocks (2026-11-22)
+
+What the access request (PR 2) needs, built and tested on test Types (a rack
+holds jars, a jar holds beans; a crate holds peas). **Eleven kernel changes**
+(journal); `kernel.v1` only grew (`Reaction.for_each`, `Reaction.on_guard`,
+`Field.unique_among_siblings`, `Type.placement_writable_by`); no migration;
+nothing in the kernel is named request, approval or resource. The Phase A
+and its answers: `docs/proposals/2026-11-21-jira-2-4b-phase-a.md` (on its
+own branch).
+
+**1. `container.<field>` in `sets` and create reactions.** A transition's
+`sets` and a create reaction's fields read the container's own fields, as
+`container.<field>`. A field reads as its value only if the container's
+Type version lists it in `readable_by_reactions`; any other field, and
+every field at the top level, reads as unset. At load: some loaded Type must
+list the field; `container.state` and `.category` are a guard's, not an
+effect's. For a create reaction, the container is the source's container
+(the rack, for the beans a jar makes). The container is locked FOR SHARE
+while it is read.
+
+**2. Who, by plain reference only.** A principal field, and any field
+holding a set, is set only by a plain reference to a field of its shape:
+`container.<field>`, one of the Item's own fields, `each`, or one linked
+read. Never computed, never a literal. Three parts:
+- `sets` may now write a principal field, and a multi-value field (both
+  were refused), by plain reference;
+- `readable_by_reactions` may list a principal field (it was refused); a
+  reader copies it by plain reference into a principal field only;
+- a create reaction may set a principal field of the Item it makes (it was
+  refused), by plain reference.
+One value or a set, and the type, are judged across the Types loaded
+together.
+
+**3. `for_each`.** A create reaction with `for_each: <multi-value field>`
+makes one Item per member, which its fields read as `each`. Each Item has a
+key of its own (`<reaction>:<source>:<cause>:create:<hash of the member>`:
+a member may be free text, so only its hash is written) and a record of its
+own on the source; every record but the last says `more`, as a children
+move does. More than `MaxReactionTargets` (8) members: none is made,
+`too_many_targets`. A principal member is copied as it is, never computed.
+
+**4. Guards read the container and its children.** `container` is
+`{state, category}` (null at the top level); `children.<type>` is the list
+of the contained Items of that Type, each `{state, category}`. Nothing else
+of them: a guard that reads a child's field, or the container's, is refused
+at load. **No visibility filter**: a guard judges the data, not the reader,
+so a narrowed child still counts (a refusal can tell someone that something
+they cannot see blocks the move, as with links). A guard reading them with
+nothing read does not hold (fail safe).
+
+**5. A move at the container.** A move reaction with `target: container`
+(on: enter) moves the Item's container, which must consent
+(`accepts_reactions: {<type>:<id>: {moves: [...]}}`, or `*:<id>` through
+containment). At the top level: `reaction_skipped no_target`.
+
+**6. `on_guard: skip`.** On a move reaction, opt-in: a target guard that
+does not hold yet is recorded as `reaction_skipped guard_false` instead of
+`reaction_failed guard_failed`. "Any move when ready": the first N−1
+decisions' reactions skip, the N-th moves. The default is unchanged.
+
+**7. `except: [container_creator]`.** Refuses anyone who took part in
+creating the Item's container (`policy.TookPartInCreation` on the
+container's creator): the requester never decides an approval inside their
+own request. In `except` only.
+
+**9. `unique_among_siblings: [states]`.** On a single principal field: no
+two Items of the Type in one container, both in one of those states, hold
+the same value. Judged on create, transition, update and a hold's allow,
+under the container's lock (FOR NO KEY UPDATE), so two hand-overs to one
+person at once are judged in turn and one lands. Refused:
+`FAILED_PRECONDITION / NOT_UNIQUE`.
+
+**10. `placement_writable_by`.** Who may move or narrow (or un-narrow) Items
+of a Type version: `[kernel]` (no person; they stay where they were made) or
+a list of `role:<name>` (an agent and the user it acts for must both hold
+one). Leaving it out keeps the old rule: anyone who sees the Item. Checked
+after visibility, so a hidden Item stays `NOT_FOUND`. Refused:
+`PERMISSION_DENIED / PLACEMENT_NOT_WRITABLE`. desk@3 uses it; the existing
+hole for every other Type is on the Later list.
+
+**11. A hand-over.** A transition's `sets` may write a field its own
+`allowed` names (`field:f_holder`), by plain reference only:
+`waiting -> waiting`, `sets: {f_holder: 'f_next'}`. `allowed` is judged on
+the value stored before the write, so only the holder hands over.
+
+**12. `allowed: [nobody]`.** No person, agent, customer, nor the kernel's own
+actors (the timer included) passes it; only a reaction, which stands in for
+`allowed` by consent, makes the move. It stands alone in `allowed` and is
+not an `except` entry. **Why the word `nobody`:** it is not a principal
+(`principal:system:timer` was a principal no person can be, a kludge that
+also let the timer in); it says what it means; it cannot collide with a
+role, principal or field entry, which all have a prefix. sla_goal@1 keeps
+its gap (anyone who sees a goal may complete it, as met); sla_goal@2 uses
+`nobody` on every move. The web greys such a move out, like a timer's.
+
+**Not built: #8 (`excludes` on a field) and #13 (reading two levels up).**
+**A documented weakness (#8 and Q4c together):** an approval handed over to
+the requester, or created for a requester who is also an approver, cannot be
+decided (`except: [container_creator]`) until `access_admin` reassigns it.
+With N = M such a request cannot be approved until then.
+
+**Locks.** One order everywhere, container before child:
+1. the container, FOR SHARE, when the write reads it (a guard reads its
+   state, an effect its fields), or FOR NO KEY UPDATE when a field of the
+   Item is unique among siblings;
+2. the Item together with its linked rows, in one pass in UUID order, as
+   before (and the resolution candidates);
+3. its children, FOR SHARE, in UUID order, when a guard reads them.
+- A container read before its lock is read again after the Item's lock: if
+  the Item moved in between, the transaction starts again (`errRetry`).
+  Children cannot be created in, nor moved into, a container locked FOR
+  UPDATE (both take its key share); a child moved out between the read and
+  its lock starts the transaction again.
+- A set reaction takes its target (the container) FOR UPDATE, then the
+  source FOR SHARE, whatever the IDs' order (before: in UUID order, which
+  could deadlock against a child's decision).
+- A set reaction copies the source's fields **as they are when it writes**,
+  with the time of its cause (`cause.at`): a goal paused again before its
+  `show_*` runs writes null, and the `hide_*` queued behind it does too.
+- A children move picks its targets on a state read without a lock
+  (`target_from`); the transition checks the state again after its lock
+  (`not_in_from`), so this is safe.
+- **Rows both linked to and contained in each other** can still deadlock:
+  the link pass locks them in UUID order, containment container first.
+  Postgres breaks the deadlock and `write()` runs the transaction again.
+- `write()` counts the deadlocks it retried (`deadlockRetries`); three
+  concurrency tests (decisions, set reactions on older children, Items
+  linked both ways with a child decided) want the count unchanged.
+
+**The Types.** desk@3 (desk@2, placed by `role:sla_admin` only: under
+desk@2 anyone who sees a desk may narrow it and hide every request under
+it). sla_policy@2 (an approval target, `f_approval_s`, `sla_admin`'s).
+sla_goal@2 (the `approval` metric and its four set reactions for a host's
+`f_due_approval`; every move `allowed: [nobody]`; the invariant
+`metric_missing` refuses a goal with no metric). The `@1` versions are
+unchanged.
+
+**The API.** GetType shows `for_each`, `on_guard`, `unique_among_siblings`,
+`placement_writable_by` and `nobody`. Two reasons: `PLACEMENT_NOT_WRITABLE`
+(PERMISSION_DENIED) and `NOT_UNIQUE` (FAILED_PRECONDITION).
 
 ## Web UI as built (2026-11-18)
 

@@ -73,7 +73,8 @@ const (
 
 // reservedNames may not be field IDs: guard variables, the creator
 // attributes a hook may read, and the links prefix.
-var reservedNames = []string{VarToday, VarCaller, VarCallerOnBehalfOf, AttrCreatedBy, AttrCreatedOnBehalfOf, AttrCreator, "links", "cause"}
+var reservedNames = []string{VarToday, VarCaller, VarCallerOnBehalfOf, AttrCreatedBy, AttrCreatedOnBehalfOf, AttrCreator, "links", "cause",
+	ContainerVar, ChildrenVar, EachVar}
 
 // IsAttribute reports whether name is an Item attribute a hook may read
 // besides its fields: created_by or created_on_behalf_of.
@@ -152,6 +153,10 @@ type Field struct {
 	// may have.
 	Multiple bool `yaml:"multiple" json:"multiple,omitempty"`
 	Max      int  `yaml:"max" json:"max,omitempty"`
+	// UniqueAmongSiblings (Jira 2.4b, kernel change 9), on a principal
+	// field: no two Items of this Type in the same container, both in one
+	// of these states, hold the same value. Phase B stub: parsed only.
+	UniqueAmongSiblings []string `yaml:"unique_among_siblings" json:"unique_among_siblings,omitempty"`
 }
 
 // State is one lifecycle state. Every state has a category.
@@ -243,6 +248,13 @@ type Transition struct {
 	// SetPrograms are the Sets expressions compiled, by field ID; filled
 	// when the Type is loaded. Package lifecycle evaluates them.
 	SetPrograms map[string]cel.Program `yaml:"-" json:"-"`
+	// Jira 2.4b, filled when the Type is loaded: whether the guard reads
+	// the container (container.state, .category); the Types of contained
+	// Items it reads (children.<type>), sorted; the container's fields the
+	// Sets read (container.<field>), sorted.
+	GuardContainer bool     `yaml:"-" json:"-"`
+	GuardChildren  []string `yaml:"-" json:"-"`
+	SetsContainer  []string `yaml:"-" json:"-"`
 }
 
 // Type is one version of a Type definition.
@@ -285,7 +297,28 @@ type Type struct {
 	Own            []string `yaml:"own" json:"own,omitempty"`
 	Shared         []string `yaml:"shared" json:"shared,omitempty"`
 	CustomerFields []string `yaml:"customer_fields" json:"customer_fields,omitempty"`
+	// PlacementWritableBy (Jira 2.4b, kernel change 10): who may move or
+	// narrow Items of this version: [kernel] (no person) or a list of
+	// role:<name>. Empty is anyone who sees the Item, as before. Phase B
+	// stub: parsed only.
+	PlacementWritableBy []string `yaml:"placement_writable_by" json:"placement_writable_by,omitempty"`
 }
+
+// Jira 2.4b keywords. AllowedNobody (kernel change 12) is the `allowed`
+// entry no person, agent or customer passes: only what passes by its own
+// rule (a reaction by consent) makes the move. AllowedContainerCreator
+// (kernel change 7), in `except`, matches whoever took part in creating
+// the Item's container. OnGuardSkip (kernel change 6) is a move
+// reaction's on_guard value: a target guard that does not hold is a skip
+// (guard_false), not a failure. Phase B stubs: declared only.
+const (
+	AllowedNobody           = "nobody"
+	AllowedContainerCreator = "container_creator"
+	OnGuardSkip             = "skip"
+	// EachVar is the CEL name of the member a for_each create reaction is
+	// creating one Item for (kernel change 3).
+	EachVar = "each"
+)
 
 // ContainerOfferPrefix starts a hook read that names an offer of the
 // Item's container: container:<offer>.
@@ -486,6 +519,14 @@ func (t *Type) check() error {
 			if entry == AllowedCreator {
 				continue
 			}
+			// nobody: no person, agent or customer passes; only a reaction,
+			// by consent, makes the move. It stands alone.
+			if entry == AllowedNobody {
+				if len(tr.Allowed) > 1 {
+					return fail("transition %s: allowed entry %s stands alone: no one else may be named beside it", name, AllowedNobody)
+				}
+				continue
+			}
 			if id, ok := strings.CutPrefix(entry, AllowedFieldPrefix); ok {
 				f, declared := t.Field(id)
 				if id == "" || !declared || f.Type != Principal {
@@ -499,7 +540,7 @@ func (t *Type) check() error {
 				who, ok = strings.CutPrefix(entry, AllowedPrincipalPrefix)
 			}
 			if !ok {
-				return fail("transition %s: allowed entry %q must be role:<name>, principal:<id>, field:<id> or creator",
+				return fail("transition %s: allowed entry %q must be role:<name>, principal:<id>, field:<id>, creator or nobody",
 					name, entry)
 			}
 			if who == "" {
@@ -520,15 +561,16 @@ func (t *Type) check() error {
 			}
 		}
 		for _, entry := range tr.Except {
-			if entry != AllowedCreator {
-				return fail("transition %s: except entry %q: except takes only creator for now", name, entry)
+			if entry != AllowedCreator && entry != AllowedContainerCreator {
+				return fail("transition %s: except entry %q: except takes creator or %s", name, entry, AllowedContainerCreator)
 			}
 		}
-		prg, links, err := compileGuard(guards, tr.Guard)
+		prg, reads, err := compileGuard(guards, tr.Guard)
 		if err != nil {
 			return fail("transition %s: guard %q: %v", name, tr.Guard, err)
 		}
-		tr.Program, tr.GuardLinks = prg, links
+		tr.Program, tr.GuardLinks = prg, reads.links
+		tr.GuardContainer, tr.GuardChildren = reads.container, reads.children
 	}
 
 	// Timers come last: each must name a transition checked above.
@@ -595,6 +637,9 @@ func (t *Type) check() error {
 		return err
 	}
 	if err := t.checkReadable(fail); err != nil {
+		return err
+	}
+	if err := t.checkJira24b(fail); err != nil {
 		return err
 	}
 	// Clears name fields, and may not sit on a held transition.

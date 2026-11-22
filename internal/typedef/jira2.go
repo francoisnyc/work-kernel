@@ -164,10 +164,16 @@ func newSetsEnv(t *Type) (*cel.Env, error) {
 // refused at load:
 //   - the field is required or cleared by the same transition;
 //   - the state the move leaves freezes it;
-//   - the transition's own `allowed` names it (field:<id>);
-//   - it is a principal field (who acted is identity, not data);
+//   - a principal field, or a multi-value field, is set other than by a
+//     plain reference (container.<field>, or a field of its shape): who
+//     acted is identity, not data, and is never computed (Jira 2.4b);
+//   - the transition's own `allowed` names it (field:<id>), unless it is
+//     set by plain reference: a hand-over (Jira 2.4b, kernel change 11;
+//     `allowed` is judged on the value before the write);
 //   - the expression does not compile, or does not yield a value of the
 //     field's type (or null, which unsets);
+//   - it reads the container other than as container.<field> (its state
+//     and category are a guard's);
 //   - the transition is held by a check or a held reaction (as for clears).
 //
 // A field only the kernel or a role writes may be set: the Type writes it,
@@ -176,12 +182,13 @@ func (t *Type) checkSets(fail func(string, ...any) error) error {
 	var env *cel.Env
 	for i := range t.Transitions {
 		tr := &t.Transitions[i]
+		tr.SetsContainer = nil
 		if len(tr.Sets) == 0 {
 			continue
 		}
 		if env == nil {
 			var err error
-			if env, err = newSetsEnv(t); err != nil {
+			if env, err = newTransitionSetsEnv(t); err != nil {
 				return fail("sets environment: %v", err)
 			}
 		}
@@ -200,18 +207,35 @@ func (t *Type) checkSets(fail func(string, ...any) error) error {
 				return fail("transition %s: clears and sets %q; to unset it, set it to null", name, id)
 			case slices.Contains(from.Frozen, id):
 				return fail("transition %s: sets %q, which state %s freezes", name, id, tr.From)
-			case slices.Contains(tr.Allowed, AllowedFieldPrefix+id):
-				return fail("transition %s: sets %q, which its own allowed list names", name, id)
-			case f.Type == Principal:
-				return fail("transition %s: sets %q, a principal field; an effect may not set who", name, id)
-			case f.Multiple:
-				return fail("transition %s: sets %q, a multi-value field; an effect on a set is not built", name, id)
+			}
+			ref, err := checkCopy(f, tr.Sets[id], t)
+			if err != nil {
+				return fail("transition %s: sets %v", name, err)
+			}
+			if ref.Each {
+				return fail("transition %s: sets %s from each, which only a create reaction with for_each reads", name, id)
+			}
+			_, plain := plainRef(tr.Sets[id])
+			if slices.Contains(tr.Allowed, AllowedFieldPrefix+id) && !plain {
+				return fail("transition %s: sets %q, which its own allowed list names; only a plain reference may hand it over", name, id)
+			}
+			rest, reads, err := takeContainerFields(tr.Sets[id])
+			if err != nil {
+				return fail("transition %s: sets %s: %v", name, id, err)
+			}
+			if linkedWord.MatchString(rest) {
+				return fail("transition %s: sets %s: %q: an effect reads the container as container.<field>; linked Items are a create reaction's", name, id, tr.Sets[id])
+			}
+			for _, r := range reads {
+				if !slices.Contains(tr.SetsContainer, r) {
+					tr.SetsContainer = append(tr.SetsContainer, r)
+				}
 			}
 			ast, iss := env.Compile(tr.Sets[id])
 			if iss.Err() != nil {
 				return fail("transition %s: sets %s: %q: %v", name, id, tr.Sets[id], iss.Err())
 			}
-			if out := ast.OutputType(); !celType(f.Type).IsAssignableType(out) {
+			if out := ast.OutputType(); !out.IsExactType(cel.DynType) && !fieldCELType(f).IsAssignableType(out) {
 				return fail("transition %s: sets %s: %q yields %s, not a value of a %s field", name, id, tr.Sets[id], out, f.Type)
 			}
 			prg, err := env.Program(ast)
@@ -220,6 +244,7 @@ func (t *Type) checkSets(fail func(string, ...any) error) error {
 			}
 			tr.SetPrograms[id] = prg
 		}
+		slices.Sort(tr.SetsContainer)
 		for _, h := range t.Hooks {
 			if h.Kind == HookCheck && h.From == tr.From && h.To == tr.To {
 				return fail("transition %s: it sets fields and is held by the check %s; a held transition may not set fields",

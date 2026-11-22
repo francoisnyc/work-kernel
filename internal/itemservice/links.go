@@ -368,22 +368,49 @@ func (s linkSet) ids() []uuid.UUID {
 //
 // Guards read linked Items whoever the caller is (a rule must hold for
 // everyone), but only their state and category.
+//
+// Jira 2.4b: around that pass, the container comes first and the children
+// last (lockAround, jira24b.go): the container FOR SHARE when a guard into
+// `to` reads its state or an effect its fields (FOR NO KEY UPDATE when a
+// field is unique among siblings); then the Item and its linked rows as
+// above; then the children a guard reads, FOR SHARE, in UUID order. What
+// was read of them comes back in the aroundView.
 func (k *Service) lockForTransition(ctx context.Context, tx pgx.Tx, ns string, id uuid.UUID,
-	to string) (lockedItem, lifecycle.Links, []linkResolution, error) {
+	to string) (lockedItem, lifecycle.Links, []linkResolution, aroundView, error) {
 	var typeID string
 	var version int
 	err := tx.QueryRow(ctx, `select type_id, type_version from items where id = $1 and namespace_id = $2`,
 		id, ns).Scan(&typeID, &version)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return lockedItem{}, nil, nil, ErrNotFound
+		return lockedItem{}, nil, nil, aroundView{}, ErrNotFound
 	}
 	if err != nil {
-		return lockedItem{}, nil, nil, fmt.Errorf("read item: %w", err)
+		return lockedItem{}, nil, nil, aroundView{}, fmt.Errorf("read item: %w", err)
 	}
 	ty, err := k.loadType(ctx, tx, typeID, version) // a Type version never changes
 	if err != nil {
-		return lockedItem{}, nil, nil, err
+		return lockedItem{}, nil, nil, aroundView{}, err
 	}
+	check, err := k.lockAround(ctx, tx, ns, id, ty, to)
+	if err != nil {
+		return lockedItem{}, nil, nil, aroundView{}, err
+	}
+	it, links, res, err := k.lockItemAndLinks(ctx, tx, ns, id, ty, to)
+	if err != nil {
+		return lockedItem{}, nil, nil, aroundView{}, err
+	}
+	view, err := check(it)
+	if err != nil {
+		return lockedItem{}, nil, nil, aroundView{}, err
+	}
+	return it, links, res, view, nil
+}
+
+// lockItemAndLinks is lockForTransition's middle step: the Item with its
+// linked rows and resolution candidates, in one UUID-ordered pass.
+func (k *Service) lockItemAndLinks(ctx context.Context, tx pgx.Tx, ns string, id uuid.UUID, ty *typedef.Type,
+	to string) (lockedItem, lifecycle.Links, []linkResolution, error) {
+	var err error
 	names := guardLinkNames(ty, to)
 	if len(names) == 0 && len(resolvedOn(ty, to)) == 0 {
 		it, err := lockItem(ctx, tx, ns, id)
@@ -675,6 +702,13 @@ func (k *Service) inverseOf(ctx context.Context, typeID, name string) (string, e
 // lost race it backed out of (errRetry), a deadlock Postgres broke (40P01)
 // or a serialization failure (40001). Lock order rules out deadlocks among
 // the kernel's own writes; this is the backstop.
+// isDeadlock reports whether Postgres aborted the transaction to break a
+// deadlock (40P01).
+func isDeadlock(err error) bool {
+	var pe *pgconn.PgError
+	return errors.As(err, &pe) && pe.Code == "40P01"
+}
+
 func retryable(err error) bool {
 	if errors.Is(err, errRetry) {
 		return true

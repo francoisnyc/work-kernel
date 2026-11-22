@@ -6,6 +6,28 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
+- **High: any principal who sees an Item may move it or narrow it.** Apply
+  `placement_writable_by` (Jira 2.4b) to incident, reply, note, the hosts
+  of sla_goal@1 and the PLAT Types, each in a new version. Until then a
+  requester can narrow their incident or move a reply out of it. Only
+  desk@3 is fixed. (Jira 2.4b, Phase A)
+- **High: a goal under sla_goal@1 can be completed by hand, as met,** by any
+  staff member who sees it, and a bare goal (no metric) can be made by
+  hand. sla_goal@2 fixes both (`allowed: [nobody]`, `metric_missing`); move
+  the incident to it in a new version. (Jira 2.4b, Phase A)
+- A reaction leaves the workflow's queue with only a log line when
+  `ActivityAfterReactionFailed` itself fails (or the Item is gone): no
+  record on the Item, the reaction vanishes. Keep it queued and retry the
+  record with backoff; a test makes the activity fail and wants the
+  reaction recorded once recording works again. (Walkthrough of the reply
+  path, 2026-11-21)
+- Groups as readers, or a named approver who joins the readers: today the
+  whole namespace sees who asked for what access (PR 2's requests are not
+  narrowed). (Jira 2.4b, Q8a)
+- `excludes:` on a principal field (Jira 2.4b's #8, not built): an
+  approval handed over to the requester cannot be decided until
+  `access_admin` reassigns it (design.md, the weakness). (Jira 2.4b)
+
 - **API candidates from the PoC apps** (design.md, "PoC apps as built:
   what the API lacked", says what each cost the apps): search within a
   container; links in search and list results; `update_time` on an Item,
@@ -2572,3 +2594,50 @@ the journeys ran on this container's Chromium, against the poc container. CI bui
 the pinned Playwright's browser.
 
 **Open:** the twelve API gaps (Later). **Next session:** Jira 2.4b.
+
+## 2026-11-22 — Jira 2.4b, PR 1: the building blocks (Phase D)
+
+**Built:** what the access request needs, on test Types (rack, jar, bean; crate, pea; duo; errand), and three
+Type versions. **Eleven kernel changes** (design.md, "Jira 2.4b, PR 1 as built"):
+1. `container.<field>` in `sets` and create reactions (with `readable_by_reactions`' consent);
+2. who, by plain reference only, in three parts: `sets` may write a principal field and a multi-value field;
+   `readable_by_reactions` may list a principal field; a create reaction may set a principal field. Each only
+   as a plain reference (`container.<field>`, a field of its shape, `each`, one linked read), never computed;
+3. `for_each` on create reactions (`each`; a key and a record per member);
+4. guards read `container.{state,category}` and `children.<type>`, with no visibility filter;
+5. a move reaction with `target: container`;
+6. `on_guard: skip` (`reaction_skipped guard_false`), opt-in;
+7. `except: [container_creator]`;
+9. `unique_among_siblings` (`NOT_UNIQUE`);
+10. `placement_writable_by` (`PLACEMENT_NOT_WRITABLE`);
+11. a hand-over: `sets` writes a field its own `allowed` names, by plain reference;
+12. `allowed: [nobody]`.
+Not built: #8 (`excludes`, dropped: a documented weakness with Q4c) and #13 (two levels up). The lock order:
+the container (FOR SHARE, or FOR NO KEY UPDATE for a unique field), then the Item with its linked rows in one
+UUID pass, then children in UUID order; a set reaction takes the container first. `write()` counts the
+deadlocks it retries. desk@3, sla_goal@2, sla_policy@2. `kernel.v1` grew four fields; no migration.
+
+**Tests:** 13 typedef tests, 16 item service tests (three of them concurrency tests that want no deadlock
+retried), 2 API tests, 1 vitest. **Test changes, each agreed, in a commit of their own:** two cases of
+TestJira24b_2 judged across Types (one Type alone cannot know whether the container's field holds a set);
+`rack4b("")`; two step-3 cases turned into the boundaries of changes 1 and 2; four lists of the repository's
+Types grew (typedef twice, the API's ListTypes, pli's type list); the API's 2.4b test Types registered once in
+TestMain; TestJira24b_10's agent asked before the rack is narrowed (and `NOT_FOUND` after); the 2.4b test jar's
+Type ID is `urn` (another test registers a `jar`).
+
+**Surprises:** a guard's children got a CEL type of their own (`map(string, dyn)`): giving them a linked
+Item's type would have refused, at load, existing link guards that read a field (they fail when they run). The
+two Phase B test Type IDs that collided only showed once the fixtures loaded. A set reaction's old UUID order was
+exactly the deadlock the new order removes.
+
+**Numbers.** `go test -race ./...` green (item service 122 s, workflow suite 323 s, with the replay test and the
+property tests). Scenario: twice on a fresh stack, about 95 s each. Playwright: 9 tests in 8.4 s. vitest: 463.
+The stack ran from host-built binaries as before, **without the `poc` service**: its image cannot be built in
+this container (`npm ci` fails), and the scenario does not use it; CI builds every image and runs the PoC
+journeys.
+
+**From the walkthrough of the reply path:** a dropped reaction (Later); a children move's unlocked
+`target_from` read is safe, since the transition checks again after its lock (design.md, Locks).
+
+**Open:** the two high Later items (placement for the other Types, sla_goal@1). **Next session:** PR 2, the
+access request (resource, access_request, approval, fulfilment_task, scenario E), after PR 1 merges.

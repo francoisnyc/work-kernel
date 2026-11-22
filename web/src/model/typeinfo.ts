@@ -71,8 +71,10 @@ export function mayWrite(
 // from the Type, not a check of who is calling).
 export type TransitionView = { transition: Transition; systemOnly: boolean };
 
+// A move no person makes: only the timer (principal:system:*), or nobody
+// at all (allowed: [nobody]: only a reaction, by consent).
 export function isSystemOnly(t: Transition): boolean {
-  return t.allowed.length > 0 && t.allowed.every((a) => a.startsWith("principal:system:"));
+  return t.allowed.length > 0 && t.allowed.every((a) => a === "nobody" || a.startsWith("principal:system:"));
 }
 
 export function transitionsFrom(type: Type, state: string): TransitionView[] {

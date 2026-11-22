@@ -61,6 +61,10 @@ func newGuardEnv(t *Type) (*cel.Env, error) {
 	for _, name := range t.guardLinks() {
 		opts = append(opts, cel.Variable(LinksPrefix+name, linkedItems))
 	}
+	// Jira 2.4b (kernel change 4): the container, as {state, category} or
+	// null at the top level, and the contained Items by Type. See
+	// checkGuardReads.
+	opts = append(opts, cel.Variable(ContainerVar, cel.DynType), cel.Variable(ChildrenVar, guardChildren))
 	env, err := cel.NewEnv(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("guard environment: %w", err)
@@ -68,20 +72,33 @@ func newGuardEnv(t *Type) (*cel.Env, error) {
 	return env, nil
 }
 
-// compileGuard checks and compiles one guard, and returns the link names
-// it reads, sorted. An empty guard always holds and compiles to nil.
-func compileGuard(env *cel.Env, guard string) (cel.Program, []string, error) {
+// guardReads is what a guard reads beyond the Item's own fields: link
+// names, sorted; whether it reads the container; the Types of children it
+// reads, sorted.
+type guardReads struct {
+	links     []string
+	container bool
+	children  []string
+}
+
+// compileGuard checks and compiles one guard, and returns what it reads.
+// An empty guard always holds and compiles to nil.
+func compileGuard(env *cel.Env, guard string) (cel.Program, guardReads, error) {
 	if guard == "" {
-		return nil, nil, nil
+		return nil, guardReads{}, nil
 	}
 	// Compile returns "issues" rather than a plain error; Err() is nil
 	// when there are none.
 	ast, iss := env.Compile(guard)
 	if iss.Err() != nil {
-		return nil, nil, iss.Err()
+		return nil, guardReads{}, iss.Err()
 	}
 	if !ast.OutputType().IsExactType(cel.BoolType) {
-		return nil, nil, fmt.Errorf("a guard must yield a bool, not %s", ast.OutputType())
+		return nil, guardReads{}, fmt.Errorf("a guard must yield a bool, not %s", ast.OutputType())
+	}
+	container, children, err := checkGuardReads(ast.NativeRep())
+	if err != nil {
+		return nil, guardReads{}, err
 	}
 	// The checker resolved every identifier; the ones under links. are
 	// the link names this guard reads.
@@ -97,7 +114,7 @@ func compileGuard(env *cel.Env, guard string) (cel.Program, []string, error) {
 	}
 	sort.Strings(links)
 	prg, err := env.Program(ast)
-	return prg, links, err
+	return prg, guardReads{links: links, container: container, children: children}, err
 }
 
 // fieldCELType is a field's CEL type: its type's, or for a multi-value

@@ -119,6 +119,8 @@ func TestListTypes_EveryVersionInOrder(t *testing.T) {
 		}
 	}
 	want := []string{
+		"namespaces/globex/types/apibean/versions/1",
+		"namespaces/globex/types/apijar/versions/1",
 		"namespaces/globex/types/bug/versions/1",
 		"namespaces/globex/types/bug/versions/2",
 		"namespaces/globex/types/bug/versions/3",
@@ -129,6 +131,7 @@ func TestListTypes_EveryVersionInOrder(t *testing.T) {
 		"namespaces/globex/types/comment/versions/2",
 		"namespaces/globex/types/desk/versions/1",
 		"namespaces/globex/types/desk/versions/2",
+		"namespaces/globex/types/desk/versions/3",
 		"namespaces/globex/types/epic/versions/1",
 		"namespaces/globex/types/incident/versions/1",
 		"namespaces/globex/types/incident/versions/2",
@@ -137,7 +140,9 @@ func TestListTypes_EveryVersionInOrder(t *testing.T) {
 		"namespaces/globex/types/note/versions/1",
 		"namespaces/globex/types/reply/versions/1",
 		"namespaces/globex/types/sla_goal/versions/1",
+		"namespaces/globex/types/sla_goal/versions/2",
 		"namespaces/globex/types/sla_policy/versions/1",
+		"namespaces/globex/types/sla_policy/versions/2",
 		"namespaces/globex/types/space/versions/1",
 		"namespaces/globex/types/sprint/versions/1",
 		"namespaces/globex/types/sprint/versions/2",

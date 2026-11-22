@@ -30,6 +30,7 @@ var messages = map[string]string{
 	"NOT_ALLOWED":            "the caller may not do this",
 	"NEEDS_APPROVAL":         "the agent session needs its user's approval to write there",
 	"APPROVAL_UNAVAILABLE":   "an agent acting for a customer cannot be approved",
+	"PLACEMENT_NOT_WRITABLE": "the caller may not move or narrow Items of this Type",
 	"STALE":                  "the Item has changed since it was read",
 	"HELD":                   "a check is holding the Item",
 	"IDEMPOTENCY_KEY_REUSED": "the request_id was used for a different request",
@@ -56,6 +57,7 @@ var messages = map[string]string{
 	"INVARIANT_FAILED":    "the write would break one of the Type's invariants",
 	"LINK_NOT_WRITABLE":   "the caller may not set links of this type",
 	"LINK_UNRESOLVED":     "entering the state sets a link, and no single target was found",
+	"NOT_UNIQUE":          "another Item in the same container already holds that value",
 }
 
 // ReasonMessage returns the one fixed message of an ErrorInfo reason, and
@@ -140,12 +142,13 @@ func errorWith(err error, item, readersPath, ns string) *connect.Error {
 	// first; a bad session is also invalid, so SESSION_INVALID comes before
 	// INVALID_REQUEST.
 	var (
-		held     *itemservice.HeldError
-		invalid  *itemservice.InvalidError
-		rejected *itemservice.RejectedError
-		approval *itemservice.NeedsApprovalError
-		fieldNW  *itemservice.FieldNotWritableError
-		linkNW   *itemservice.LinkNotWritableError
+		held        *itemservice.HeldError
+		invalid     *itemservice.InvalidError
+		rejected    *itemservice.RejectedError
+		approval    *itemservice.NeedsApprovalError
+		fieldNW     *itemservice.FieldNotWritableError
+		linkNW      *itemservice.LinkNotWritableError
+		placementNW *itemservice.PlacementNotWritableError
 	)
 	switch {
 	case errors.As(err, &held):
@@ -192,6 +195,8 @@ func errorWith(err error, item, readersPath, ns string) *connect.Error {
 	case errors.As(err, &linkNW):
 		return apiError(connect.CodePermissionDenied, "LINK_NOT_WRITABLE",
 			map[string]string{"link_type": linkNW.LinkType})
+	case errors.As(err, &placementNW):
+		return apiError(connect.CodePermissionDenied, "PLACEMENT_NOT_WRITABLE", nil)
 	case errors.Is(err, itemservice.ErrForbidden):
 		return apiError(connect.CodePermissionDenied, "NOT_ALLOWED", nil)
 	// A rule's refusal answers with its code. One without a code is a bug

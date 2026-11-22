@@ -527,7 +527,6 @@ func TestLinkedReads_RefusedAtLoad(t *testing.T) {
 		{"the Item's own link is not declared", start("f_zone: 'linked.l_nope.f_zone'"), "l_nope"},
 		{"a link alone, without a field", start("f_zone: 'linked.backup'"), "backup"},
 		{"links, the guards' list", start("f_zone: 'links.backup[0].state'"), "links"},
-		{"the container's own field", start("f_zone: 'container.f_name'"), "container"},
 		{"two links away", start("f_zone: 'linked.backup.linked.other.f_zone'"), "linked"},
 	}
 	for _, c := range cases {
@@ -553,6 +552,19 @@ func TestLinkedReads_RefusedAtLoad(t *testing.T) {
 		mustRefuse(t, "linked in a guard", src, "container")
 	})
 
+	// The container's own field (Jira 2.4b, kernel change 1): one Type
+	// alone loads; across Types, the read is accepted where a loaded Type
+	// lists the field in readable_by_reactions, and refused where none does
+	// (hours declares f_name but does not list it).
+	fromContainer := start("f_zone: 'container.f_name'")
+	mustParse(t, fromContainer)
+	readable := replaced("job.yaml", fromContainer)
+	readable["yard.yaml"] = strings.Replace(yardSrc, "links:", "readable_by_reactions: [f_name]\nlinks:", 1)
+	if err := parseSet(t, readable); err != nil {
+		t.Errorf("container.f_name, which yard lets reactions read: %v", err)
+	}
+	mustRefuseSet(t, "container.f_name, which no loaded Type lets reactions read", replaced("job.yaml", fromContainer), "f_name")
+
 	// The Item's own link works like the container's.
 	own := mustParse(t, start("f_zone: 'linked.backup.f_zone', f_week: 'container.linked.hours.f_week'"))
 	r, _ := own.Reaction("start")
@@ -566,11 +578,14 @@ func TestReadableByReactions_RefusedAtLoad(t *testing.T) {
 	for name, list := range map[string]string{
 		"an unknown field": "[f_week, f_nope]",
 		"a field twice":    "[f_week, f_week]",
-		// Who someone is does not travel through a reaction's read.
-		"a principal field": "[f_week, f_owner]",
 	} {
 		mustRefuse(t, name, strings.Replace(hoursSrc, "[f_week, f_days_off, f_zone]", list, 1), "")
 	}
+	// A principal field may be listed (Jira 2.4b, kernel change 2): who
+	// someone is travels only as a copy by plain reference into a
+	// principal field; a computed or literal principal stays refused
+	// (TestJira24b_2_APrincipalByPlainReferenceOnly).
+	mustParse(t, strings.Replace(hoursSrc, "[f_week, f_days_off, f_zone]", "[f_week, f_owner]", 1))
 }
 
 func TestParseDir_LinkedReads(t *testing.T) {

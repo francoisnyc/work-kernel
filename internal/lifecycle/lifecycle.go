@@ -58,6 +58,14 @@ type Input struct {
 	// Linked (Jira part 2, step 3) is what a create reaction's fields read
 	// as linked.<link>.<field> and container.linked.<link>.<field>.
 	Linked LinkedFields
+	// Jira 2.4b (see jira24b.go): what a guard reads around the Item (nil:
+	// not read), what an effect reads of the container, and the member a
+	// for_each create reaction is making an Item for (EachField is the
+	// for_each field, for the member's type).
+	Around    *Around
+	Container ContainerFields
+	Each      string
+	EachField typedef.Field
 }
 
 func (r *Rejection) Error() string { return r.Reason }
@@ -146,7 +154,7 @@ func TransitionWith(t *typedef.Type, current string, in Input, to string) (Resul
 		}
 	}
 
-	if !guardHolds(t, tr, fields, links, in.Today) {
+	if !guardHolds(t, tr, fields, links, in.Around, in.Today) {
 		return Result{}, &Rejection{
 			Code: GuardFailed, From: current, To: to,
 			Reason: fmt.Sprintf("transition from %q to %q: guard not satisfied: %s", current, to, tr.Guard),
@@ -199,6 +207,9 @@ func evalSets(t *typedef.Type, tr typedef.Transition, in Input) (map[string]any,
 	// midnight the two can be different days.)
 	vars[typedef.VarToday] = dateOf(in.CauseAt)
 	addFieldVars(vars, t, in.Fields)
+	if len(tr.SetsContainer) > 0 {
+		vars[typedef.ContainerVar] = containerVars(in.Container, tr.SetsContainer)
+	}
 
 	out := make(map[string]any, len(tr.Sets))
 	// Sorted: a map iterates in random order, and the first failure named
@@ -274,12 +285,16 @@ func dateOf(today time.Time) any {
 //
 // The reason given for a failed guard is the guard's own text, never the
 // values it saw: those may be personal data.
-func guardHolds(t *typedef.Type, tr typedef.Transition, fields map[string]any, links Links, today time.Time) bool {
+func guardHolds(t *typedef.Type, tr typedef.Transition, fields map[string]any, links Links, around *Around, today time.Time) bool {
 	if tr.Program == nil {
 		return true // no guard
 	}
 	// Links the guard reads but nobody read: fail safe.
 	if len(tr.GuardLinks) > 0 && links == nil {
+		return false
+	}
+	// The container or children it reads, unread: the same.
+	if GuardReadsAround(tr) && around == nil {
 		return false
 	}
 	vars := make(map[string]any, len(t.Fields)+len(tr.GuardLinks)+1)
@@ -293,6 +308,9 @@ func guardHolds(t *typedef.Type, tr typedef.Transition, fields map[string]any, l
 			list = append(list, map[string]string{"state": li.State, "category": li.Category})
 		}
 		vars[typedef.LinksPrefix+name] = list
+	}
+	if around != nil {
+		aroundVars(vars, tr, around)
 	}
 	addFieldVars(vars, t, fields)
 	out, _, err := tr.Program.Eval(vars)
