@@ -54,6 +54,12 @@ func calls(c kernelv1connect.ItemServiceClient, item string) map[string]func(con
 			_, err := c.ListTypes(ctx, connect.NewRequest(&kernelv1.ListTypesRequest{Parent: "namespaces/acme"}))
 			return err
 		},
+		"ValidateTypes": func(ctx context.Context) error {
+			_, err := c.ValidateTypes(ctx, connect.NewRequest(&kernelv1.ValidateTypesRequest{
+				Parent: "namespaces/acme", Sources: []*kernelv1.TypeSource{{Name: "memo.yaml", Content: "id: memo\nversion: 1\n"}},
+			}))
+			return err
+		},
 		// Step 0, part 2.
 		"ListItems": func(ctx context.Context) error {
 			_, err := c.ListItems(ctx, connect.NewRequest(&kernelv1.ListItemsRequest{Parent: item}))
