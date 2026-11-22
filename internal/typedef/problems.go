@@ -226,9 +226,25 @@ func newReporter(list *Problems, typeID string, version int) reporter {
 func (r reporter) fail(code Code, at, todo, format string, args ...any) error {
 	*r.list = append(*r.list, Problem{
 		Path: at, TypeID: r.typeID, Version: r.version, Severity: SeverityError, Code: code,
-		Message: r.prefix + fmt.Sprintf(format, args...) + ". " + todo,
+		Message: oneLine(r.prefix+fmt.Sprintf(format, args...)) + ". " + todo,
 	})
 	return errReported
+}
+
+// oneLine keeps a message on one line, so Error() is one line per problem.
+// CEL's errors quote the expression with a caret on lines of their own
+// (" | ..."); its <input>:line:col already says where, so those go.
+func oneLine(msg string) string {
+	if !strings.Contains(msg, "\n") {
+		return msg
+	}
+	var keep []string
+	for _, line := range strings.Split(msg, "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(line), "|") && strings.TrimSpace(line) != "" {
+			keep = append(keep, strings.TrimSpace(line))
+		}
+	}
+	return strings.Join(keep, " ")
 }
 
 // failExpr reports an expression's problem under the code its exprError
