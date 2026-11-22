@@ -21,6 +21,9 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"sync"
+
+	"github.com/google/uuid"
 
 	"github.com/francoisnyc/work-kernel/internal/hookproto"
 	"github.com/francoisnyc/work-kernel/internal/item"
@@ -60,17 +63,36 @@ func permanent(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrPermanent, fmt.Sprintf(format, args...))
 }
 
-// action is one registered action: how many values it reads and writes,
-// whether it changes the outside world, and its code. An action with a side
-// effect gets the hook's idempotency key and must pass it to the connector.
+// action is one declared action: the hook protocol operation
+// <connector>.<operation>@<major>, the kinds it serves, its input and
+// output names (a hook's reads and writes map to them by position),
+// whether it changes the outside world, and, when it is compiled in, its
+// code. A remote action has no code here: configuration says where its
+// connector is. An action with a side effect gets the hook's idempotency
+// key and must pass it to the connector.
 type action struct {
-	reads, writes int
-	sideEffect    bool
-	run           func(ctx context.Context, c *Connectors, key string, args []any) (Result, error)
+	reads, writes   int
+	inputs, outputs []string
+	kinds           []hookproto.Kind
+	sideEffect      bool
+	remote          bool // no code here: a connector service, by configuration
+	run             func(ctx context.Context, c *Connectors, key string, args []any) (Result, error)
 	// runCall, when set, is used instead of run: the action needs to know
 	// which hook of which Item runs it (a message names both).
 	runCall func(ctx context.Context, c *Connectors, key string, args []any, call Call) (Result, error)
 }
+
+// declared builds a catalog entry; reads and writes are the names' counts.
+func declared(kinds []hookproto.Kind, inputs, outputs []string, a action) action {
+	a.kinds, a.inputs, a.outputs, a.reads, a.writes = kinds, inputs, outputs, len(inputs), len(outputs)
+	return a
+}
+
+var (
+	check  = []hookproto.Kind{hookproto.KindCheck}
+	enrich = []hookproto.Kind{hookproto.KindEnrich}
+	effect = []hookproto.Kind{hookproto.KindAction}
+)
 
 // Call says which hook of which Item runs an action. email.notify sends the
 // hook's ID as the message's template and the Item's ID with it.
@@ -92,50 +114,74 @@ type Call struct {
 	Attempt       int
 }
 
-// catalog is every action a Type may name. A package-level map is fine here:
-// it is filled once, at startup, and only read afterwards.
-var catalog = map[string]action{
-	"crm.get_plan":          {reads: 1, writes: 1, run: getPlan},
-	"erp.get_credit_status": {reads: 1, writes: 1, run: getCreditStatus},
-	"erp.check_credit":      {reads: 2, writes: 1, run: checkCredit},
-	"erp.create_invoice":    {reads: 2, writes: 1, sideEffect: true, run: createInvoice},
-	"hr.manager_of":         {reads: 2, writes: 1, run: managerOf},
-	// email.notify (Step 2, part 3): one message to one principal, through
-	// the email stub. It reads the recipient and writes nothing: the
-	// hook_ran event records that it ran.
-	"email.notify": {reads: 1, writes: 0, sideEffect: true, runCall: notify},
+// catalog is every action a Type may name, by <connector>.<operation>@<major>.
+// It is filled at startup (and by tests, through declareRemote), then read:
+// catalogMu guards it.
+var (
+	catalogMu sync.RWMutex
+	catalog   = map[string]action{
+		"crm.get_plan@1":          declared(enrich, []string{"customerId"}, []string{"plan"}, action{run: getPlan}),
+		"erp.get_credit_status@1": declared(enrich, []string{"customerId"}, []string{"onHold"}, action{run: getCreditStatus}),
+		"erp.check_credit@1":      declared(check, []string{"customerId", "amount"}, []string{"costCenter"}, action{run: checkCredit}),
+		"erp.create_invoice@1": declared(effect, []string{"customerId", "amount"}, []string{"invoiceId"},
+			action{sideEffect: true, run: createInvoice}),
+		// The HR check (proof of concept, Step 2, part 1) is a remote
+		// connector since the hook protocol: the HR directory decides, the
+		// worker only declares what it takes and returns.
+		"hr.manager_of@1": declared(check, []string{"onBehalfOf", "createdBy"}, []string{"manager"}, action{remote: true}),
+		// email.notify (Step 2, part 3): one message to one principal, through
+		// the email stub. It reads the recipient and writes nothing: the
+		// hook_ran event records that it ran.
+		"email.notify@1": declared(effect, []string{"to"}, nil, action{sideEffect: true, runCall: notify}),
+	}
+)
+
+// lookup returns the declared action an action name names.
+func lookup(name string) (actionRef, action, bool) {
+	ref, ok := parseAction(name)
+	if !ok {
+		return actionRef{}, action{}, false
+	}
+	catalogMu.RLock()
+	defer catalogMu.RUnlock()
+	a, ok := catalog[ref.key()]
+	return ref, a, ok
 }
 
 // Arity reports how many reads and writes an action takes. ok is false for
-// an action that does not exist.
+// an action that does not exist, at the major named (none means 1).
 func Arity(name string) (reads, writes int, ok bool) {
-	a, ok := catalog[name]
+	_, a, ok := lookup(name)
 	return a.reads, a.writes, ok
 }
 
-// Connectors calls the CRM, the ERP and the HR directory. In the product
-// each would be a Connection with its own credential; in the spike, a base
-// URL.
+// Connectors runs a Type's actions: the compiled-in ones (the CRM, the ERP
+// and the email service, each at a base URL in the spike) and the remote
+// connectors configuration names (WithConnection, WithConfigFile).
+//
+// The With methods return a changed copy; the copies share the descriptor
+// cache and the connectors file.
 type Connectors struct {
 	crm, erp string
-	hr       string // the HR directory; set with WithHR
 	email    string // the email service; set with WithEmail
 	http     *http.Client
-	noKeys   bool // the control run: never send the idempotency key
+	noKeys   bool                  // the control run: never send the idempotency key
+	conns    map[string]Connection // connector@major -> remote connection (WithConnection)
+	file     *configFile           // the connectors file (WithConfigFile), or nil
+	shared   *shared
 }
 
 // NewConnectors returns connectors for the CRM and ERP at these base URLs.
 func NewConnectors(crmURL, erpURL string) *Connectors {
 	// No client timeout: every call follows its context's deadline, which
 	// the activity sets.
-	return &Connectors{crm: crmURL, erp: erpURL, http: &http.Client{}}
+	return &Connectors{crm: crmURL, erp: erpURL, http: newClient(nil), shared: newShared()}
 }
 
-// WithHR returns connectors that also call the HR directory at this base URL.
-func (c *Connectors) WithHR(hrURL string) *Connectors {
-	withHR := *c
-	withHR.hr = hrURL
-	return &withHR
+// newClient never follows a redirect: a connector answers, or fails.
+func newClient(transport http.RoundTripper) *http.Client {
+	return &http.Client{Transport: transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
 
 // WithEmail returns connectors that also send messages through the email
@@ -162,7 +208,7 @@ func (c *Connectors) WithoutKeys() *Connectors {
 // caller and the retry is a new Temporal attempt. Bench and tests only.
 func (c *Connectors) WithoutResend() *Connectors {
 	fresh := *c
-	fresh.http = &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+	fresh.http = newClient(&http.Transport{DisableKeepAlives: true})
 	return &fresh
 }
 
@@ -174,10 +220,17 @@ func (c *Connectors) Run(ctx context.Context, name, key string, args []any) (Res
 	return c.RunCall(ctx, name, key, args, Call{})
 }
 
-// RunCall is Run for a given hook of a given Item: actions that send a
-// message need both.
+// RunCall is Run for a given hook of a given Item. It builds the hook
+// protocol's envelope (the args by the action's input names), gives it to
+// the connector the action's connector@major resolves to (a configured
+// remote one, else the compiled-in one), and reads the answer back as a
+// Result (the patch by the action's output names, in order).
+//
+// A read-only action called without a key (tests, the bench) gets its
+// request ID as the key: nothing to replay. The worker always passes the
+// hook's real key.
 func (c *Connectors) RunCall(ctx context.Context, name, key string, args []any, call Call) (Result, error) {
-	a, ok := catalog[name]
+	ref, a, ok := lookup(name)
 	if !ok {
 		return Result{}, permanent("unknown action %q", name)
 	}
@@ -187,13 +240,93 @@ func (c *Connectors) RunCall(ctx context.Context, name, key string, args []any, 
 	if a.sideEffect && key == "" {
 		return Result{}, permanent("%s has a side effect and needs an idempotency key", name)
 	}
-	if c.noKeys {
-		key = ""
+	conn, connRef, err := c.resolve(ref.connectorAtMajor())
+	if err != nil {
+		return Result{}, err
 	}
-	if a.runCall != nil {
-		return a.runCall(ctx, c, key, args, call)
+	req := c.envelope(ref, a, key, args, call, connRef)
+	if deadline, ok := ctx.Deadline(); ok {
+		req.Deadline = deadline
 	}
-	return a.run(ctx, c, key, args)
+	res, err := conn.Handle(ctx, req)
+	if err != nil {
+		return Result{}, err
+	}
+	return result(name, a, res)
+}
+
+// envelope builds the request for one call.
+func (c *Connectors) envelope(ref actionRef, a action, key string, args []any, call Call, connRef string) hookproto.Request {
+	requestID := uuid.NewString()
+	if key == "" {
+		key = requestID
+	}
+	kind := call.Kind
+	if kind == "" {
+		kind = a.kinds[0]
+	}
+	attempt := call.Attempt
+	if attempt == 0 {
+		attempt = 1
+	}
+	inputs := make(map[string]any, len(a.inputs))
+	for i, name := range a.inputs {
+		inputs[name] = args[i]
+	}
+	req := hookproto.Request{
+		Protocol: hookproto.Protocol, Kind: kind, RequestID: requestID, IdempotencyKey: key, Attempt: attempt,
+		Hook: hookproto.HookRef{Binding: fmt.Sprintf("%s@%d#%s", call.TypeID, call.TypeVersion, call.HookID),
+			Connector: ref.connectorAtMajor(), Operation: ref.operation},
+		Event:      hookproto.Event{ID: call.EventID, Type: call.EventType},
+		Item:       hookproto.ItemRef{ID: call.ItemID, Type: call.TypeID, TypeVersion: call.TypeVersion},
+		Inputs:     inputs,
+		Trace:      hookproto.Trace{CorrelationID: call.CorrelationID, CausationID: call.EventID},
+		Connection: hookproto.ConnectionRef{Slot: ref.connector, Ref: connRef},
+	}
+	if call.ItemID != "" {
+		req.Event.Subject = "item/" + call.ItemID
+	}
+	if call.From != "" || call.To != "" {
+		req.Transition = &hookproto.Transition{From: call.From, To: call.To}
+	}
+	return req
+}
+
+// result reads an answer back as a Result: the outcome as a verdict, the
+// patch as values in the order of the action's outputs (the hook's
+// writes). An answer missing an output is permanent: it cannot be written.
+func result(name string, a action, res hookproto.Response) (Result, error) {
+	values := func() ([]any, error) {
+		if len(a.outputs) == 0 {
+			return nil, nil
+		}
+		out := make([]any, len(a.outputs))
+		for i, o := range a.outputs {
+			v, ok := res.Patch[o]
+			if !ok {
+				return nil, permanent("%s answered %s without the output %s", name, res.Outcome, o)
+			}
+			out[i] = v
+		}
+		return out, nil
+	}
+	switch res.Outcome {
+	case hookproto.OutcomeAllow:
+		return Result{Verdict: Allow}, nil
+	case hookproto.OutcomeDeny:
+		code := ""
+		if res.Reason != nil {
+			code = res.Reason.Code
+		}
+		return Result{Verdict: Deny, Reason: code}, nil
+	case hookproto.OutcomeCorrect:
+		v, err := values()
+		return Result{Verdict: Correct, Values: v}, err
+	case hookproto.OutcomeOK:
+		v, err := values()
+		return Result{Values: v}, err
+	}
+	return Result{}, permanent("%s answered outcome %q, which v1 does not take", name, res.Outcome)
 }
 
 // notify sends one message: the recipient (a principal), the template (the
@@ -303,52 +436,6 @@ func createInvoice(ctx context.Context, c *Connectors, key string, args []any) (
 		return Result{}, errors.New("erp.create_invoice: the answer names no invoice")
 	}
 	return Result{Values: []any{body.InvoiceID}}, nil
-}
-
-// managerOf is the HR check. It reads who the request was created for and
-// who created it (created_on_behalf_of, created_by): the requester is the
-// first if set, else the second. It answers correct with the requester's
-// manager (for the hook's one write, the approver), or deny:
-// unknown_employee when HR does not know the requester (an agent acting for
-// itself included), no_eligible_approver when the requester manages
-// themselves. The manager is HR's data; who may approve stays the Type's
-// rule (except: [creator]).
-func managerOf(ctx context.Context, c *Connectors, _ string, args []any) (Result, error) {
-	if c.hr == "" {
-		return Result{}, permanent("hr.manager_of: no HR directory is configured")
-	}
-	onBehalfOf, ok := args[0].(string)
-	if args[0] != nil && !ok {
-		return Result{}, permanent("hr.manager_of: created_on_behalf_of must be a principal ID")
-	}
-	createdBy, ok := args[1].(string)
-	if args[1] != nil && !ok {
-		return Result{}, permanent("hr.manager_of: created_by must be a principal ID")
-	}
-	requester := onBehalfOf
-	if requester == "" {
-		requester = createdBy
-	}
-	if requester == "" {
-		return Result{}, permanent("hr.manager_of: no requester")
-	}
-	var body struct {
-		Manager string `json:"manager"`
-	}
-	err := c.call(ctx, "", http.MethodGet, c.hr+"/employees/"+url.PathEscape(requester)+"/manager", nil, &body)
-	if errors.Is(err, errNotFound) {
-		return Result{Verdict: Deny, Reason: "unknown_employee"}, nil
-	}
-	if err != nil {
-		return Result{}, err
-	}
-	if body.Manager == "" {
-		return Result{}, errors.New("hr.manager_of: the answer names no manager")
-	}
-	if body.Manager == requester {
-		return Result{Verdict: Deny, Reason: "no_eligible_approver"}, nil
-	}
-	return Result{Verdict: Correct, Values: []any{body.Manager}}, nil
 }
 
 // --- plumbing ---

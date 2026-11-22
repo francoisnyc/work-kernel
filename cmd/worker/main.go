@@ -75,13 +75,20 @@ func run() error {
 	}
 	defer c.Close()
 
-	// The hooks' connectors: in the spike, base URLs of the CRM, ERP, HR
-	// directory and email service (stubs from internal/connstub).
-	opts := workflow.WorkerOptions{
-		Connectors: hooks.NewConnectors(env("CRM_URL", "http://localhost:8081"), env("ERP_URL", "http://localhost:8082")).
-			WithHR(env("HR_URL", "http://localhost:8083")).WithEmail(env("EMAIL_URL", "http://localhost:8084")),
-		DevDay: cfg.DevDay, DevTypes: cfg.DevTypes,
+	// The hooks' connectors. Compiled in: the CRM, the ERP and the email
+	// service, at base URLs (stubs from internal/connstub in the spike).
+	// Remote (the hook protocol): whatever the connectors file names, hr@1
+	// in the stack; it is read again whenever it changes.
+	connectors := hooks.NewConnectors(env("CRM_URL", "http://localhost:8081"), env("ERP_URL", "http://localhost:8082")).
+		WithEmail(env("EMAIL_URL", "http://localhost:8084"))
+	if cfg.Connectors != "" {
+		if connectors, err = connectors.WithConfigFile(cfg.Connectors); err != nil {
+			return fmt.Errorf("--%s: %w", flagConnectors, err)
+		}
+	} else {
+		slog.Warn("no --" + flagConnectors + " file: every remote connector (hr@1) is unconfigured")
 	}
+	opts := workflow.WorkerOptions{Connectors: connectors, DevDay: cfg.DevDay, DevTypes: cfg.DevTypes}
 	if b := os.Getenv("HOOK_BUDGET"); b != "" {
 		// A Go duration such as 15m or 30s.
 		if opts.HookBudget, err = time.ParseDuration(b); err != nil {
@@ -162,6 +169,7 @@ func parseConfig(args []string) (config, error) {
 		"DEV ONLY: how long a day of the Types' declared timers lasts (needs --"+flagDevClock+" and --"+flagTimeScaleTypes+")")
 	ack := fs.Bool(flagDevClock, false, "acknowledge that a scaled clock is not for production")
 	types := fs.String(flagTimeScaleTypes, "", "DEV ONLY: the Types the scale applies to, comma separated")
+	connectors := fs.String(flagConnectors, "", "the connectors file: which connector@major is a remote service, and where")
 	if err := fs.Parse(args); err != nil {
 		return config{}, err
 	}
@@ -170,12 +178,15 @@ func parseConfig(args []string) (config, error) {
 	}
 	set := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	if set[flagConnectors] && *connectors == "" {
+		return config{}, fmt.Errorf("--%s with no file", flagConnectors)
+	}
 
 	if !set[flagTimeScale] {
 		if set[flagTimeScaleTypes] {
 			return config{}, fmt.Errorf("--%s without --%s", flagTimeScaleTypes, flagTimeScale)
 		}
-		return config{}, nil // real time; the acknowledgment alone changes nothing
+		return config{Connectors: *connectors}, nil // real time; the acknowledgment alone changes nothing
 	}
 	if !*ack {
 		return config{}, fmt.Errorf("--%s is for development only: it also needs --%s", flagTimeScale, flagDevClock)
@@ -196,7 +207,7 @@ func parseConfig(args []string) (config, error) {
 			names = append(names, name)
 		}
 	}
-	return config{DevDay: *scale, DevTypes: names}, nil
+	return config{DevDay: *scale, DevTypes: names, Connectors: *connectors}, nil
 }
 
 // clockWarning is what the worker logs on every start that runs on a scaled
