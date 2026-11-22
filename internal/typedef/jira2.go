@@ -153,7 +153,7 @@ func (t *Type) checkAtTimers(fail func(string, ...any) error) error {
 func newSetsEnv(t *Type) (*cel.Env, error) {
 	opts := calendarFunctions()
 	opts = append(opts, cel.Variable(VarToday, cel.TimestampType), cel.Variable(VarCauseAt, cel.TimestampType))
-	for _, f := range t.Fields {
+	for _, f := range t.celFields() {
 		opts = append(opts, cel.Variable(f.ID, fieldCELType(f)))
 	}
 	return cel.NewEnv(opts...)

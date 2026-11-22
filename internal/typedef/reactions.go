@@ -319,22 +319,26 @@ var reactionID = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
 var roleNameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 
 // checkRoles validates a field's writable_by roles.
-func (f Field) checkRoles() error {
+func (f Field) checkRoles(r reporter, p string) error {
 	if len(f.WritableByRoles) == 0 {
 		return nil
 	}
 	if f.WritableBy != WritableByAnyone {
-		return fmt.Errorf("field %s: writable_by is either kernel or a list of roles, not both", f.ID)
+		return r.fail(CodeConflict, at(p, "writable_by"), "Write writable_by: kernel, or a list of roles, not both",
+			"field %s: writable_by is either kernel or a list of roles, not both", f.ID)
 	}
 	seen := map[string]bool{}
-	for _, r := range f.WritableByRoles {
-		if !roleNameRe.MatchString(r) {
-			return fmt.Errorf("field %s: writable_by role %q is not a role name (lower case, digits, _ and -)", f.ID, r)
+	for i, role := range f.WritableByRoles {
+		if !roleNameRe.MatchString(role) {
+			r.fail(CodeInvalidName, at(p, "writable_by", i), "Name the role in lower case, digits, _ and -",
+				"field %s: writable_by role %q is not a role name (lower case, digits, _ and -)", f.ID, role)
+			continue
 		}
-		if seen[r] {
-			return fmt.Errorf("field %s: writable_by names role %s twice", f.ID, r)
+		if seen[role] {
+			r.fail(CodeDuplicate, at(p, "writable_by", i), "Remove the second one",
+				"field %s: writable_by names role %s twice", f.ID, role)
 		}
-		seen[r] = true
+		seen[role] = true
 	}
 	return nil
 }
@@ -396,7 +400,7 @@ func (t *Type) checkKernelLinks(fail func(string, ...any) error) error {
 // an Item's own fields, true at any time and whatever other Items say.
 func newFieldEnv(t *Type) (*cel.Env, error) {
 	opts := calendarFunctions()
-	for _, f := range t.Fields {
+	for _, f := range t.celFields() {
 		opts = append(opts, cel.Variable(f.ID, fieldCELType(f)))
 	}
 	return cel.NewEnv(opts...)

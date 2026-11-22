@@ -2,6 +2,7 @@ package typedef
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -55,7 +56,7 @@ func newGuardEnv(t *Type) (*cel.Env, error) {
 	opts := calendarFunctions()
 	// today is a date (00:00 UTC), set by the caller; never null.
 	opts = append(opts, cel.Variable(VarToday, cel.TimestampType))
-	for _, f := range t.Fields {
+	for _, f := range t.celFields() {
 		opts = append(opts, cel.Variable(f.ID, fieldCELType(f)))
 	}
 	for _, name := range t.guardLinks() {
@@ -71,6 +72,34 @@ func newGuardEnv(t *Type) (*cel.Env, error) {
 	}
 	return env, nil
 }
+
+// celFields are the fields an expression environment declares as
+// variables: each ID once (its first declaration), leaving out a missing or
+// reserved ID. Those are reported where they are declared; declaring them
+// would break every expression of the Type, a cascade.
+func (t *Type) celFields() []Field {
+	var out []Field
+	seen := map[string]bool{}
+	for _, f := range t.Fields {
+		if f.ID == "" || seen[f.ID] || slices.Contains(reservedNames, f.ID) {
+			continue
+		}
+		seen[f.ID] = true
+		out = append(out, f)
+	}
+	return out
+}
+
+// exprError is an expression's problem with its code: EXPRESSION_INVALID
+// (it does not compile), EXPRESSION_TYPE (the wrong type of value) or
+// READ_NOT_ALLOWED (it reads what it may not read here).
+type exprError struct {
+	code Code
+	err  error
+}
+
+func (e exprError) Error() string { return e.err.Error() }
+func (e exprError) Unwrap() error { return e.err }
 
 // guardReads is what a guard reads beyond the Item's own fields: link
 // names, sorted; whether it reads the container; the Types of children it
@@ -91,14 +120,14 @@ func compileGuard(env *cel.Env, guard string) (cel.Program, guardReads, error) {
 	// when there are none.
 	ast, iss := env.Compile(guard)
 	if iss.Err() != nil {
-		return nil, guardReads{}, iss.Err()
+		return nil, guardReads{}, exprError{CodeExpressionInvalid, iss.Err()}
 	}
 	if !ast.OutputType().IsExactType(cel.BoolType) {
-		return nil, guardReads{}, fmt.Errorf("a guard must yield a bool, not %s", ast.OutputType())
+		return nil, guardReads{}, exprError{CodeExpressionType, fmt.Errorf("a guard must yield a bool, not %s", ast.OutputType())}
 	}
 	container, children, err := checkGuardReads(ast.NativeRep())
 	if err != nil {
-		return nil, guardReads{}, err
+		return nil, guardReads{}, exprError{CodeReadNotAllowed, err}
 	}
 	// The checker resolved every identifier; the ones under links. are
 	// the link names this guard reads.
