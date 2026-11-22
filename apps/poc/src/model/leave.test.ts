@@ -2,7 +2,9 @@
 // a balance in numbers, a person's requests, the form, sending it, the
 // approver's decision, and every refusal in plain words. The app judges
 // no guard and no invariant: it explains what the server answered.
+import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
+import { ErrorInfoSchema } from "@gen/google/rpc/error_details_pb";
 import { TransitionOutcome, type Item } from "@gen/kernel/v1/kernel_pb";
 import { describe, expect, test, vi } from "vitest";
 import type { Api } from "../app/api";
@@ -24,12 +26,13 @@ import {
   requestStatus,
   requesterOf,
   sendRequest,
+  suggestDays,
   unpaidNote,
   validateDecision,
   weekdays,
   type LeaveForm,
 } from "./leave";
-import type { Refusal } from "./refusal";
+import { refusalOf, type Refusal } from "./refusal";
 
 const vr = typeName("vacation_request", 3);
 const lb = typeName("leave_balance", 1);
@@ -159,6 +162,21 @@ describe("the form", () => {
     expect(weekdays("", "2026-11-23")).toBe(0);
   });
 
+  test("the days field follows the dates while the person has not typed in it", () => {
+    expect(suggestDays("2026-11-23", "2026-11-27", "", false)).toEqual({ days: "5" });
+    expect(suggestDays("2026-11-23", "2026-11-25", "5", false)).toEqual({ days: "3" });
+    expect(suggestDays("2026-11-21", "2026-11-22", "3", false)).toEqual({ days: "0" });
+    expect(suggestDays("2026-11-27", "2026-11-23", "3", false)).toEqual({ days: "" });
+    expect(suggestDays("", "2026-11-23", "3", false)).toEqual({ days: "" });
+  });
+
+  test("once typed in, a date change leaves the days and shows the suggestion as a hint", () => {
+    expect(suggestDays("2026-11-23", "2026-11-27", "3", true)).toEqual({ days: "3", hint: "5 weekdays" });
+    expect(suggestDays("2026-11-23", "2026-11-23", "3", true)).toEqual({ days: "3", hint: "1 weekday" });
+    expect(suggestDays("2026-11-21", "2026-11-22", "1", true)).toEqual({ days: "1", hint: "0 weekdays" });
+    expect(suggestDays("2026-11-27", "2026-11-23", "3", true)).toEqual({ days: "3" });
+  });
+
   test("only blanks are checked before sending; the dates' sense is the server's", () => {
     expect(blanks({ start: "", end: "", days: " ", leaveType: "", reason: "" })).toEqual({
       start: "Choose the first day.",
@@ -264,12 +282,11 @@ describe("decide: the approver's move, then the comment", () => {
     expect(validateDecision("approved", "")).toEqual({});
   });
 
-  test("approved: the move waits up to 5 s for the deduction, without an etag; then the comment inside the request", async () => {
+  test("approved: the move carries the etag the approver saw and waits up to 5 s for the deduction; then the comment inside the request", async () => {
     const { api, createItem, transitionItem } = fakeApi();
     const out = await decide(api, NS, req, "approved", "  Enjoy  ");
     const asked = transitionItem.mock.calls[0]![0];
-    expect(asked).toMatchObject({ name: req.name, toState: "approved", wait: { seconds: 5n } });
-    expect(asked).not.toHaveProperty("etag");
+    expect(asked).toMatchObject({ name: req.name, toState: "approved", etag: req.etag, wait: { seconds: 5n } });
     expect(asked).not.toHaveProperty("fields");
     expect(createItem).toHaveBeenCalledTimes(1);
     expect(createItem.mock.calls[0]![0]).toMatchObject({ parent: NS, type: typeName("comment", 1), container: req.name, fields: { f_body: "Enjoy" } });
@@ -297,6 +314,26 @@ describe("decide: the approver's move, then the comment", () => {
   test("the decision stands when its comment fails", async () => {
     const { api } = fakeApi({ commentError: new Error("down") });
     expect(await decide(api, NS, req, "rejected", "Offsite")).toMatchObject({ kind: "applied", commentSaved: false, item: { state: "rejected" } });
+  });
+
+  test("the request changed since the approver opened it (recalled, edited, sent again): STALE, nothing applied, no comment", async () => {
+    const stale = new ConnectError("stale", Code.Aborted, undefined, [
+      { desc: ErrorInfoSchema, value: create(ErrorInfoSchema, { reason: "STALE", domain: "pli.francoisnyc.github.io" }) },
+    ]);
+    const createItem = vi.fn();
+    // The request as it is now: ana recalled it, changed the dates and sent it again.
+    const now = { ...req, etag: "c4" };
+    const transitionItem = vi.fn(async (r: Record<string, any>) => {
+      if (r.etag !== now.etag) throw stale;
+      return { item: now, itemSeq: 5n, commitSeq: 9n, outcome: TransitionOutcome.APPLIED, reason: "", hold: "" };
+    });
+    const api = { createItem, transitionItem } as unknown as Pick<Api, "createItem" | "transitionItem">;
+    const err = await decide(api, NS, req, "approved", "Enjoy").catch((e: unknown) => e);
+    expect(err).toBe(stale);
+    expect(createItem).not.toHaveBeenCalled();
+    expect(refusalSentence(refusalOf(err), { viewer: "user:bob", requester: "user:ana" })).toBe(
+      "This request changed since you opened it. It has been reloaded: check it, then decide again.",
+    );
   });
 
   test("a refusal by a rule is thrown, as every other write's", async () => {

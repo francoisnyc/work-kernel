@@ -18,7 +18,9 @@
 // The stack runs vacation_request on a dev clock (a day lasts 2 s): a
 // submitted request expires after 10 s, so bob's tab is open before ana
 // sends, and he decides at once. A slow machine can lose that race; the
-// expiry then shows as "Expired" where "Approved" was expected.
+// expiry then shows as "Expired" where "Approved" was expected. The
+// second request's 10 s hold only the refused approval and the
+// rejection: every axe check runs elsewhere.
 //
 // Run against the stack: docker compose up -d --build --wait (or make
 // scenario), then `npm run e2e` in apps/poc.
@@ -70,10 +72,12 @@ test("ana asks for time off, bob decides, hana sees the balances", async ({ brow
   await expect(ana.getByRole("alert")).toContainText("The last day is before the first day.");
   await expectAccessible(ana, "the form, with a refusal");
 
-  // Fixed: Monday to Wednesday, three days (the suggestion).
+  // Fixed: Monday to Wednesday. She typed the days, so they stay; the
+  // weekday count is a hint.
   await ana.getByLabel("First day").fill(week.monday);
   await ana.getByLabel("Last day").fill(week.plus(2));
   await expect(ana.getByLabel("Days")).toHaveValue("3");
+  await expect(ana.getByText("3 weekdays")).toBeVisible();
   await ana.getByRole("button", { name: "Send for approval" }).click();
   await expect(ana.getByRole("heading", { level: 1, name: "Leave request" })).toBeVisible();
   await refreshUntil(ana, async () => {
@@ -94,6 +98,7 @@ test("ana asks for time off, bob decides, hana sees the balances", async ({ brow
   await expect(bob.getByRole("heading", { level: 1, name: "ana's request" })).toBeVisible();
   await expect(bob.getByRole("region", { name: "ana's leave balance" })).toContainText("10 days left");
   await expect(bob.getByRole("region", { name: "ana's other requests in this period" })).toContainText("None");
+  await expectAccessible(bob, "the decision screen");
   await bob.getByLabel("Comment").fill(`Enjoy ${run}`);
   await bob.getByRole("button", { name: "Approve" }).click();
   await expect(bob.getByRole("status").filter({ hasText: "You approved ana's request." })).toBeVisible();
@@ -113,7 +118,7 @@ test("ana asks for time off, bob decides, hana sees the balances", async ({ brow
   await ana.getByRole("link", { name: "Request time off" }).click();
   await ana.getByLabel("First day").fill(week.plus(7));
   await ana.getByLabel("Last day").fill(week.plus(18));
-  await expect(ana.getByLabel("Days")).toHaveValue("10");
+  await expect(ana.getByLabel("Days")).toHaveValue("10"); // a new form: the suggestion
   await ana.getByLabel("Reason (optional)").fill(tooLong);
   await expect(ana.getByText("That's more than the 7 days you have left.")).toBeVisible();
   await ana.getByRole("button", { name: "Send for approval" }).click();
@@ -131,7 +136,6 @@ test("ana asks for time off, bob decides, hana sees the balances", async ({ brow
   await expect(bob.getByRole("alert")).toContainText(
     "ana doesn't have enough days left: this asks for 10 and ana has 7. Reject it, or ask HR to add days.",
   );
-  await expectAccessible(bob, "the decision screen, with a refusal");
   await bob.getByLabel("Comment").fill("Not enough days left");
   await bob.getByRole("button", { name: "Reject" }).click();
   await expect(bob.getByRole("status").filter({ hasText: "You rejected ana's request." })).toBeVisible();
