@@ -46,6 +46,8 @@ The stack is for development. Its worker runs `vacation_request` on a **dev
 clock**: a day of that Type's declared timers (reminders, expiry) lasts 2 s,
 and the worker warns so on every start. Every other Type, hook budgets and
 other timeouts keep real time. A production worker never gets these flags.
+For exploring by hand: `docker compose -f docker-compose.yml -f compose.demo.yaml up`
+(a day lasts 2 minutes: a request waits 10 minutes before it expires).
 
 ## How it fits together
 
