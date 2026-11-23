@@ -20,6 +20,22 @@ small; everything product-specific is a Type or an app.
 - Say "the item service" for the program and "the kernel" for the layer.
   In code: `cmd/itemservice` and `internal/itemservice` (type `Service`).
 
+## Architecture style
+
+- **Current state plus an event log, not event sourcing.** The Item row is the
+  truth. `item_events` records every accepted operation, for history, audit and
+  notification; state is never rebuilt from it, and events carry shapes and
+  opaque IDs, never field values.
+- **A modular monolith.** The item service owns every rule. Every other process
+  (relay, worker, and later the event reader) exists for a technical reason
+  (durable timers, ordered delivery), never to split the domain.
+- **A reporting database apart from the operational one.** Analytics read a
+  copy (a warehouse fed by change data capture), never the kernel's Postgres
+  directly, and the copy is held to the same erasure rule.
+- **A semantic model apart from its syntax.** The `typedef` structs are what a
+  Type means. YAML, a builder or plain English are ways of writing one; checks,
+  readings and the semantic diff work on the model, whichever wrote it.
+
 ## Item
 
 Seven parts:
