@@ -72,8 +72,17 @@ func ReasonMessage(reason string) (string, bool) {
 // story's "-> refused REASON" is held to it (internal/story), so a story
 // and the API never name a refusal differently.
 func Refusal(err error) string {
-	_ = err
-	return "" // stub
+	if err == nil {
+		return ""
+	}
+	for _, d := range errorWith(err, "", "readers", "").Details() {
+		if v, derr := d.Value(); derr == nil {
+			if ei, ok := v.(*errdetails.ErrorInfo); ok {
+				return ei.Reason
+			}
+		}
+	}
+	return "INTERNAL"
 }
 
 // apiError builds an error with a standard code and an ErrorInfo carrying a
