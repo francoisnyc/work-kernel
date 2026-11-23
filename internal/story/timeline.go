@@ -120,6 +120,7 @@ func (h *harness) ensureNamed(ctx context.Context) {
 		taken[name] = true
 		h.mu.Lock()
 		h.names[it.id] = name
+		h.ids[name] = it.id
 		h.mu.Unlock()
 	}
 }

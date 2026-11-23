@@ -376,6 +376,13 @@ func (h *harness) step(ctx context.Context, i int) error {
 	h.current = i
 	h.mu.Unlock()
 	st := h.steps[i]
+	// An Item the kernel created has a name (a name rule) only once the
+	// harness has looked: look before a step names one, so the step
+	// reaches it instead of no Item at all.
+	if (st.Item != "" && h.id(st.Item) == uuid.Nil) || (st.Target != "" && h.id(st.Target) == uuid.Nil) ||
+		(st.In != "" && h.id(st.In) == uuid.Nil) {
+		h.ensureNamed(ctx)
+	}
 	given := i < len(h.story.Given)
 	p := h.principal(st.Actor)
 	key := "story-" + uuid.NewString()
