@@ -1635,6 +1635,7 @@ See `docs/plans/ideas-from-ventoux.md`.
 | V2a | Every problem of a Type or a folder of Types as data: `{source, path, line, column, severity, code, message}`, in three stages (the YAML, each Type, the Types together), with no cascades; the codes in "Type problems" | Each code has a case with its exact path and position; a folder reports every file's problems at once; a source walk finds no problem without a code and a what-to-do; every test written before V2a passes unchanged |
 | V2b (**done**) | `ValidateTypes`: draft Types checked against every registered version, nothing written; `pli type validate`; exempt from `policy.Project` like `ListTypes`; users and agents (in a session), not customers; 256 KiB and 50 sources at most | A draft with problems is a successful call listing them; an identical registered `id@version` passes, a different one is `VERSION_CHANGED`; pli prints `source:line:col: CODE message` and exits non-zero on errors. **Done 2026-11-22**: "Ventoux V2b and V2c, as built" below, and the journal |
 | V2c (**done**) | The Type format as JSON Schema, by hand, in a checked-in file; checked with `santhosh-tekuri/jsonschema/v6` (test only) | Every file in `types/` validates; every key the schema allows is a key `typedef` knows; the schema is never stricter than `typedef`. **Done 2026-11-22**: "Ventoux V2b and V2c, as built" below |
+| V5 (**done**) | Stories in simulated time (item 5): a walkthrough as data (the Types, the people and their roles, a fake for every action from its contract, a timeline of one-line steps, the whole expected timeline), run as a Go test against the real Item workflow and item service in Temporal's test environment; `make stories`; the runner's `Parse`, `Check`, `Run` and `Compare` for item 6's witnesses | The vacation request (approve, expiry, refund, the HR outage and a denial) and the incident desk (reopen on a reply with a paused goal, breach) run in seconds; any unexpected event, call, refusal or read fails a story with a report a person can read; a fake cannot answer what its contract forbids; continue-as-new and a validator's refusal behave in the harness as on the server. **Done 2026-11-23**: "Ventoux V5, as built" below, and the journal |
 
 ## Jira proof of concept
 
@@ -3680,6 +3681,222 @@ on inputs only), `side_effects`, `risk`, `reasons` and `digest`.
   side effects; its description; each input and output with its type, an
   enum with its values, "or null" when nullable; each input's trust; its
   reasons), or the response.
+
+## Ventoux V5, as built: stories in simulated time (2026-11-23)
+
+Item 5 of `docs/plans/ideas-from-ventoux.md`. A **story** is a walkthrough
+of one or more Types as data, run as an ordinary Go test in simulated time:
+no stack, no dev clock. Stories live in `stories/<domain>/<name>.yaml`;
+the runner is `internal/story`, a test harness no binary links (a test
+checks it). Stories are written or approved by people, never generated
+alongside the Type they test: each says who in `author:` (the first six
+say "approval pending" until the owner reads them), and nothing ever
+writes expected lines into a story (there is no `-update`). They
+complement `scripts/scenario.sh`, which runs the real stack.
+
+**The runner's four exports**, for item 6's witnesses: `Parse` (a story
+file into the model, every problem at once with its line), `Check` (the
+model against the Types and the action contracts), `Run` (returns what
+happened as data: the timeline, every fake call, the failures), `Compare`
+(the expected lines against the seen ones). YAML is one way of writing a
+story; a witness builds the same `Story` in Go.
+
+### The file and its grammar
+
+```yaml
+story: an approved request takes its days from the balance, once
+author: drafted by Claude from vacation_request@3's comments; approval pending
+day1: 2026-12-07                  # day 1; every time is UTC
+observer: <person>                # whose reads make the timeline; default observer
+people:
+  alice: {}                       # user:alice
+  hana: {roles: [hr_admin]}       # roles in the story's namespace
+  kim: {customer: true}           # customer:kim; customers hold no roles
+names:                            # the Items the kernel creates
+  first: sla_goal in inc where f_metric = first_response
+hide_values:                      # values left out of lines; the field stays
+  sla_goal: [f_week, f_days_off, f_zone]
+show_skipped: false               # reaction_skipped lines (below)
+fakes:
+  hr.manager_of@1:
+    - "when createdBy = alice: correct manager = bob"
+  email.notify@1:
+    - ok
+given:                            # setup at day 1 00:00; its own events are not compared
+  - hana creates balance as leave_balance@1 with f_owner = alice, f_allowance = 20
+steps:
+  - day 1 09:00 alice creates request as vacation_request@3 with f_start = day 15, f_days = 5
+until: day 10 00:00               # default: a year after the last step
+expect:
+  - "day 1 09:00 request: alice created it in draft"
+```
+
+Steps, fake rules, name rules and expected lines are one-line strings in
+a closed grammar:
+
+```
+time   = day N HH:MM[:SS]
+value  = INT | true | false | null | "text" | word | day N | day N HH:MM[:SS] | [value, ...]
+values = field = value, field = value, ...
+
+step   = time person creates ITEM as TYPE@V [in ITEM] [with values]
+       | time person updates ITEM with values
+       | time person moves ITEM to STATE [with values]
+       | time person links ITEM LINK ITEM | time person unlinks ITEM LINK ITEM
+       | time person sees ITEM with values             (each field holds that value)
+       | time person sees ITEM fields f, f, ...        (exactly the fields set and visible)
+       | time person cannot see ITEM
+       a write may end in "-> refused REASON" (the API's reason: NOT_ALLOWED, ...)
+
+rule   = [when input = value, ...] [from time] [until time]: answer
+answer = allow | deny REASON | correct values | ok [values]
+       | fail transient | invalid | unauthorized | key_conflict
+
+name   = TYPE [in ITEM] [where field = value]
+
+line   = time ITEM: sentence
+       | between time and time ITEM: sentence
+```
+
+A word takes its meaning from the field, input or output it is given to:
+an enum option, a person (for a principal), or text. **A sentence** says
+who did what; who is a person, `timer`, a hook's ID or a reaction's ID,
+then `for PERSON` when it acted for someone else:
+
+| Event | Sentence |
+| --- | --- |
+| create | `who created it in STATE[ inside ITEM][: values]` |
+| transition | `who moved it FROM -> TO[: values][; linked LINK to ITEM]` |
+| transition_requested | `who asked FROM -> TO[: values]` |
+| transition_denied / _failed | `who denied FROM -> TO: REASON` / `who failed FROM -> TO: REASON` |
+| update | `who updated it[ (TIMER)]: values` |
+| link_added / _removed | `who linked LINK to ITEM` / `who unlinked LINK from ITEM` |
+| hook_ran / hook_failed | `who ran[ (TIMER[ run N])]` / `who failed[ (TIMER[ run N])]: REASON` |
+| reaction_applied / _failed | `who applied to ITEM` / `who failed on ITEM: REASON` |
+| reaction_skipped | `who skipped: REASON` (with `show_skipped: true` only) |
+| a side effect a fake made | `CONNECTOR: OPERATION for ITEM (HOOK): inputs[ -> outputs]` |
+
+Values are `field = value`, sorted by field ID, a reaction's addition as
+`field +N = value`, a hidden value as `field = ...`; a step's own event
+leaves out the values the step sent. A side effect is one line per
+idempotency key, so a retry adds none. The package documentation
+(`internal/story/doc.go`) holds the full grammar; item 6's readings can
+reuse its wording.
+
+**Comparing.** Lines are grouped by instant, to the second. The order of
+instants is strict; within one, lines compare as a multiset, because
+Items' workflows work concurrently. **The window form** (`between TIME and
+TIME ITEM: sentence`) matches one line seen within it, both ends included,
+once the exact lines are matched. It is only for timing the kernel does
+not promise: when a check gives up within its budget depends on its
+retries' rhythm (the HR outage story uses it, and nothing else). A failing
+story prints its failures with their lines, then, instant by instant, the
+lines expected and missing (`-`) and those seen and not expected (`+`).
+
+**Skipped reactions are hidden.** Every move of an Item records a
+`reaction_skipped` for each of its reactions whose condition did not hold
+(two or three on every goal move of an incident), which would swamp a
+story. Nothing is lost by hiding them: a reaction that should have applied
+and was skipped leaves its effect's line missing, and the story fails on
+that. `show_skipped: true` shows them.
+
+**Fakes** answer by their rules, in order; a call no rule matches fails
+the story. `Check` holds every answer to its action's contract (its kinds,
+its reasons, every output and its type, the inputs a rule matches on), and
+the worker holds it again when the fake answers, as it holds any
+connector (`hooks.result`). Every action the story's Types' hooks may
+call, those of the Types their reactions create included, has a fake.
+`fail transient` is retried within the hook's real budget, in simulated
+time; `invalid`, `unauthorized` and `key_conflict` map to the worker's
+permanent errors.
+
+**Reads and refusals** go through the item service's public reads as the
+person (`Get`, so `policy.Project`); a write's refusal is named as the API
+names it (`api.Refusal`). A write refused that the story did not expect,
+or expected and not refused, a read that sees something else, a call no
+rule answers: each fails the story at its line and stops the run. The
+timeline is read through `ListEvents` as the observer; an observer who
+cannot see an Item of the story fails it.
+
+### How a story runs, and where that differs from production
+
+- **The same code:** the real `ItemWorkflow` and its activities, registered
+  by `workflow.Register` exactly as the worker registers them; the item
+  service on Postgres (testcontainers), with every Type of `types/`; the
+  real relay's `RunOnce`. Each run has a namespace of its own.
+- **Simulated time:** Temporal's in-process test environment, whose clock
+  skips ahead whenever nothing is working. The item service stamps writes
+  with that clock (`itemservice.Options.Clock`, tests only), so a timer
+  counted from an event's time fires at the right simulated instant.
+- **Fakes in process:** each faked connector is a `hooks.Connector` reached
+  through `hooks.Connectors.WithConnector`, the Go binding, ahead of remote
+  and compiled-in code.
+- **Differs from production:** a **driver workflow** (harness code) starts
+  each Item's workflow as its child: it stands in for the server's
+  Update-With-Start. The **relay runs inside a settle step** the driver
+  runs after every step, and again whenever one of the kernel's activities
+  ends: it delivers until the outbox is empty and none of the kernel's
+  activities is scheduled or running. While it runs, simulated time cannot
+  move, so everything a step causes happens at the step's instant (an
+  activity waiting to retry does not hold time: its retry comes later in
+  story time). Each delivery attempt has an update ID of its own (the test
+  environment would never answer a refused ID again; the workflow's
+  `lastAppliedSeq` still drops a duplicate). An email fake does not apply
+  the compiled-in email code's own rule (only users and agents get mail):
+  contracts cannot say it yet (Later).
+- **scripts/scenario.sh still covers the real path:** the Temporal server,
+  Update-With-Start, the relay as its own process, the worker's connectors
+  over HTTP, the dev clock. Stories do not replace it.
+
+**Counting the kernel's activities** is what makes a settle exact: a
+workflow interceptor counts each activity when it is scheduled, a wrapper
+counts each attempt while it runs, and the cancel listener clears one
+canceled before its first attempt.
+
+**The two risks Phase A named**, each with a test: a continue-as-new
+(100 failed undo attempts) carries the refund into the new run, which then
+happens once (the test environment reruns a child that continued as new
+without reporting its completion; the harness counts a start while the
+workflow runs as one); and a delivery the workflow's validator refuses (a
+gap in `item_seq`) reaches the relay as an error, and the harness reports
+it as the story's failure instead of waiting.
+
+**Two harness bugs, found and fixed in Phase C:**
+- *Settling too early.* An update's answer can reach the settle step while
+  the test environment is still in the workflow task that handled it,
+  before that task has scheduled the activity it starts: a step at the same
+  instant then ran before the reaction (seen once in a full `-race` run: a
+  read saw the balance before its deduction). When the outbox is empty and
+  nothing runs, settle now lets the environment finish its task (a round
+  trip through its main loop), then looks again.
+- *A stalled delivery.* An update sent to an Item's workflow that completes
+  before handling it is never answered in the test environment (the server
+  would refuse it): a delivery waited out its 30 s timeout (seen once). A
+  delivery now notices that its workflow completed meanwhile and treats it
+  as not listening, as the server's answer would.
+
+**The first stories:**
+
+| Story | What it shows |
+| --- | --- |
+| `vacation/approve` | HR names the approver; no self-approval; the approval takes the days once and emails the requester; no reminder, no expiry |
+| `vacation/expiry` | Two reminders (48 h, then 24 h later), expiry at 120 h, the email; nothing taken |
+| `vacation/refund` | Withdrawing an approved request refunds once, records it, emails it |
+| `vacation/hr_outage_and_denial` | The check fails closed within its budget while HR is down; asking again succeeds; HR not knowing someone denies |
+| `incident/reopen_on_reply` | A P3 in a portal on office hours: first response met; waiting pauses resolution over a weekend; the customer's reply resumes it; reopening starts a new goal; the timer closes it |
+| `incident/breach` | Each goal breached at its due instant, the assignee at that moment emailed once; both goals missed; the customer sees her fields only |
+
+Each runs in under a second under `-race` (30 rounds of the whole package:
+no failure; the slowest run, `incident/reopen_on_reply`, 0.84 s).
+
+**pli:** tests only (`make stories`, `STORY=vacation/approve` for one): a
+story runs the worker in process, and pli links nothing of the kernel. A
+`pli story run` against a server would need a simulation API (Later).
+
+**Kernel changes (four seams):** `itemservice.Options.Clock` (tests only;
+a guard test reads the module's source), `hooks.Connectors.WithConnector`,
+`workflow.Register` (pulled out of `NewWorker`, no behaviour change), and
+`api.Refusal`. No schema, proto or write-path change.
 
 ## Out of scope for the spike
 
