@@ -15,6 +15,7 @@
 //	  type get TYPE
 //	  type list
 //	  type validate [--json] PATH...
+//	  action list [--json]
 //	  agent start [--for USER] --scopes S,S --powers P,P
 //	  agent approve SESSION SCOPE [--expect-audience A] [--yes] [--request-id ID]  (run it --as the user who approves)
 //
@@ -118,6 +119,7 @@ const usage = `usage: pli [--server URL] [--tokens FILE] --as NAME [--session ID
   type get TYPE
   type list
   type validate [--json] PATH...  (draft Types, files or folders, checked against the registered ones; nothing registered)
+  action list [--json]            (the actions a Type's hooks may name, with their contracts)
   agent start [--for USER] --scopes S,S --powers P,P
   agent approve SESSION SCOPE [--expect-audience A] [--yes] [--request-id ID]  (run it --as the user who approves)
 
@@ -203,6 +205,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		"type get":        c.typeGet,
 		"type list":       c.typeList,
 		"type validate":   c.typeValidate,
+		"action list":     c.actionList,
 	}
 	name := rest[0] + " " + rest[1]
 	cmd, ok := commands[name]

@@ -196,6 +196,9 @@ func TestProblemCodes_EachHasACase(t *testing.T) {
 	for _, c := range checkCases { // Ventoux V2b: codes only Check can have
 		tested[string(c.code)] = true
 	}
+	for _, c := range contractCases { // Ventoux V1: hooks against their actions' contracts
+		tested[string(c.code)] = true
+	}
 	for _, code := range declaredCodes(t) {
 		if !tested[code] {
 			t.Errorf("code %s has no case", code)

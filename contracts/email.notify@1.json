@@ -1,0 +1,17 @@
+{
+  "connector": "email",
+  "major": 1,
+  "name": "notify",
+  "description": "Sends one message to one person or agent; the hook's ID names the message, and the Item goes with it.",
+  "kinds": ["action"],
+  "inputs": ["to"],
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "to": {"type": "string", "format": "pli-principal", "description": "Who gets the message: a user or an agent.", "x-pli-trust": "trusted"}
+    }
+  },
+  "sideEffects": "some",
+  "async": "forbidden",
+  "risk": "medium"
+}

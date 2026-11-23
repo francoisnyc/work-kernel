@@ -1,0 +1,26 @@
+{
+  "connector": "hr",
+  "major": 1,
+  "name": "manager_of",
+  "description": "Finds who approves for a requester: their manager in the HR directory. The requester is onBehalfOf when set, else createdBy.",
+  "kinds": ["check"],
+  "inputs": ["onBehalfOf", "createdBy"],
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "onBehalfOf": {"type": ["string", "null"], "format": "pli-principal", "description": "Whom the Item was created for, if not its creator.", "x-pli-trust": "trusted"},
+      "createdBy": {"type": ["string", "null"], "format": "pli-principal", "description": "Who created the Item.", "x-pli-trust": "trusted"}
+    }
+  },
+  "outputs": ["manager"],
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "manager": {"type": "string", "format": "pli-principal", "description": "The requester's manager, who approves."}
+    }
+  },
+  "sideEffects": "none",
+  "async": "forbidden",
+  "errors": ["unknown_employee", "no_eligible_approver"],
+  "risk": "low"
+}

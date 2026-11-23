@@ -24,7 +24,9 @@
 # added scenario C1, customers: kim and lee open incidents in a portal and
 # see their own and the replies on them, nothing else; sam opens one for kim
 # on the phone; portal-bot acts for each of them. Ventoux V2b added pli
-# type validate: draft Types checked against the registered ones.
+# type validate: draft Types checked against the registered ones. Ventoux
+# V1 added action contracts: pli action list, and hooks checked against
+# their actions' types and kinds.
 #
 #   scripts/scenario.sh          (or: make scenario, which starts the stack first)
 #
@@ -1927,6 +1929,57 @@ expect "problem lines" "$(wc -l <"$tmp/out" | tr -d ' ')" 1
 grep -q "^$tmp/drafts/ticket.v1.yaml:3:1: VERSION_CHANGED typedef ticket v1: " "$tmp/out" ||
 	fail "no VERSION_CHANGED line for ticket v1:" "$(cat "$tmp/out")"
 refuse ana "NOT_FOUND NOT_FOUND" type get "${draft_id}@1"
+
+# ---------------------------------------------------------------------------
+# Ventoux V1: action contracts. The catalogue an authoring tool chooses from
+# (pli action list, ListActions), and hooks checked against it.
+# ---------------------------------------------------------------------------
+
+step "action list: the six actions, hr.manager_of@1 with its types, trust (declared, not enforced) and reasons"
+run ana action list
+[ "$rc" -eq 0 ] || fail "pli action list exited $rc, want 0" "$(cat "$tmp/err")"
+expect "actions" "$(grep -c '^[a-z]' "$tmp/out" | tr -d ' ')" 6
+for line in "hr.manager_of@1 (check; risk low; no side effects)" \
+	"  in  createdBy: principal or null; trusted (declared, not enforced until Ventoux item 4)" \
+	"  reasons: unknown_employee, no_eligible_approver" \
+	"erp.create_invoice@1 (action; risk high; side effects)"; do
+	grep -qxF "$line" "$tmp/out" || fail "pli action list has no line: $line" "$(cat "$tmp/out")"
+done
+
+step "action list --json: each digest is the one contracts/contracts.lock publishes"
+listed=$(ok ana action list --json)
+while read -r action digest; do
+	case $action in "#"* | "") continue ;; esac
+	expect "$action's digest" "$(jqx -r --arg a "$action" '.actions[] | select(.action == $a) | .digest' <<<"$listed")" "$digest"
+done <"$repo/contracts/contracts.lock"
+
+step "action list: a customer may not read the catalogue (NOT_ALLOWED)"
+refuse kim "PERMISSION_DENIED NOT_ALLOWED" action list
+
+step "type validate: a hook against its action's contract: the wrong kind (ACTION_KIND), a principal into a string input (WRONG_FIELD_TYPE)"
+rm -rf "$tmp/drafts" && mkdir -p "$tmp/drafts"
+cat >"$tmp/drafts/hooked.v1.yaml" <<YAML
+id: vt_hooked_${w}
+version: 1
+initial_state: open
+fields:
+  - {id: f_ok, type: bool}
+  - {id: f_plan, type: string}
+states:
+  - {id: open, category: todo}
+  - {id: done, category: done}
+transitions:
+  - {from: open, to: done}
+hooks:
+  - {id: plan, on: transition, from: open, to: done, kind: check, action: crm.get_plan, reads: [created_by], writes: [f_plan]}
+YAML
+run ana type validate "$tmp/drafts"
+[ "$rc" -eq 1 ] || fail "pli type validate exited $rc, want 1" "$(cat "$tmp/out")"
+expect "problem lines" "$(wc -l <"$tmp/out" | tr -d ' ')" 2
+grep -q "^$tmp/drafts/hooked.v1.yaml:13:54: ACTION_KIND typedef vt_hooked_${w} v1: " "$tmp/out" ||
+	fail "no ACTION_KIND line:" "$(cat "$tmp/out")"
+grep -q "^$tmp/drafts/hooked.v1.yaml:13:[0-9]*: WRONG_FIELD_TYPE typedef vt_hooked_${w} v1: .*created_by (principal) into input customerId of crm.get_plan@1" "$tmp/out" ||
+	fail "no WRONG_FIELD_TYPE line for created_by:" "$(cat "$tmp/out")"
 
 # ---------------------------------------------------------------------------
 # Every reason of the error table a client can cause came back once.

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"slices"
 
+	"github.com/francoisnyc/work-kernel/internal/contracts"
 	"github.com/francoisnyc/work-kernel/internal/hookproto"
 )
 
@@ -30,33 +31,31 @@ import (
 
 const hrOperation = "manager_of"
 
-// hrErrors are the deny reasons manager_of answers.
-var hrErrors = []string{"unknown_employee", "no_eligible_approver"}
-
 // hrAnswer is a stored success: what was asked (a digest), and the answer.
 type hrAnswer struct {
 	digest string
 	res    hookproto.Response
 }
 
+// hrDescriptor serves the descriptor. Its operation is the contract
+// (contracts/hr.manager_of@1.json, Ventoux V1), so the two cannot drift;
+// the stub only adds additionalProperties: false on its inputs, since it
+// refuses any other.
 func (s *Server) hrDescriptor(w http.ResponseWriter, _ *http.Request) {
 	s.mu.Lock()
 	version := s.hrVersion
 	s.mu.Unlock()
-	nullable := hookproto.Property{Type: hookproto.TypeList{"string", "null"}}
-	closed := false
-	d := hookproto.Descriptor{
-		Connector: "hr", Version: version, SupportedProtocolVersions: []string{hookproto.Protocol},
-		Operations: []hookproto.Operation{{
-			Name: hrOperation, Kinds: []hookproto.Kind{hookproto.KindCheck},
-			InputSchema: hookproto.Schema{Type: "object", AdditionalProperties: &closed,
-				Properties: map[string]hookproto.Property{"onBehalfOf": nullable, "createdBy": nullable}},
-			OutputSchema: &hookproto.Schema{Type: "object",
-				Properties: map[string]hookproto.Property{"manager": {Type: hookproto.TypeList{"string"}}}},
-			SideEffects: "none", Async: "forbidden", Errors: hrErrors,
-		}},
+	contract, ok := contracts.Default().Lookup("hr." + hrOperation + "@1")
+	if !ok {
+		panic("connstub: no contract for hr.manager_of@1")
 	}
-	writeJSON(w, d)
+	op := contract.Operation
+	closed := false
+	op.InputSchema.AdditionalProperties = &closed
+	writeJSON(w, hookproto.Descriptor{
+		Connector: "hr", Version: version, SupportedProtocolVersions: []string{hookproto.Protocol},
+		Operations: []hookproto.Operation{op},
+	})
 }
 
 // writeProblem answers a refusal with an RFC 9457 problem body.

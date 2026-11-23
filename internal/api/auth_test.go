@@ -60,6 +60,11 @@ func calls(c kernelv1connect.ItemServiceClient, item string) map[string]func(con
 			}))
 			return err
 		},
+		// Ventoux V1.
+		"ListActions": func(ctx context.Context) error {
+			_, err := c.ListActions(ctx, connect.NewRequest(&kernelv1.ListActionsRequest{Parent: "namespaces/acme"}))
+			return err
+		},
 		// Step 0, part 2.
 		"ListItems": func(ctx context.Context) error {
 			_, err := c.ListItems(ctx, connect.NewRequest(&kernelv1.ListItemsRequest{Parent: item}))

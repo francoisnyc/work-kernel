@@ -32,6 +32,27 @@ Ideas noted during the spike, not built yet.
     `acme.hr-directory@1`), with the bundle format.
   (Hook protocol spike)
 
+- **Action contracts' Later items** (Ventoux V1; design.md, "Ventoux V1,
+  as built"):
+  - `GetType` shows a Type's hooks (each with the action it pins): today
+    `kernel.v1.Type` has none, so a tool cannot see which actions a
+    registered Type uses.
+  - Connector availability in `ListActions`: whether this deployment
+    configured each action's connector (today only `connector_unconfigured`
+    at run time says so).
+  - `UNKNOWN_REASON` (a load-time problem) when a Type can first name a
+    reason, with a `business_error` routed to a transition.
+  - Nullability at load: prove a field set from the `required` of every
+    transition into a hook's state, then refuse a nullable field into an
+    input that takes no null.
+  - A description per reason code, so a UI can say what a denial means
+    (apps/poc translates them by hand today).
+  - Draft contracts in `ValidateTypes`, so an authoring tool can propose an
+    action that does not exist yet and see the Type checked against it.
+  - Contracts per namespace, with bundles (today the catalogue is the
+    kernel build's: a new remote connector still needs a release).
+  (Ventoux V1)
+
 - Serve the Type format's JSON Schema through the API (V2c checks it in as
   a file only), so an authoring tool fetches the schema of the server it
   talks to. (Ventoux 2a, answer 17)
@@ -2959,3 +2980,72 @@ pointing at this container's Chromium. CI builds the real images and runs the pi
 
 **Open:** the three new Later entries above. **Next session:** V1 (action contracts), or Ventoux item 3 (checks
 that prove properties), which would add warnings to the same `{path, code, message}` problems.
+
+## 2026-11-23 — Ventoux V1: action contracts (Phase D)
+
+**Built:** every action a hook may name has a contract, one JSON file per operation in `contracts/`,
+compiled into the item service and the worker: typed inputs and outputs in hook order, kinds, side effects,
+risk, the reasons a check may deny with, a description everywhere, and each input's trust (declared, not
+enforced until Ventoux item 4). `contracts/contracts.lock` freezes each published contract's machine digest
+(descriptions left out, as agreed); CI refuses a changed or removed line against the base branch
+(`contractsfrozen`). A hook of the wrong kind, or reading or writing a field of the wrong type, is refused at
+load; every connector's answers are held to its contract at run time; `ListActions` and `pli action list`
+serve the catalogue. design.md: "Ventoux V1, as built: action contracts", the V1 row (done), the
+`ACTION_KIND` and `ListActions` rows, pointers from the Type and hook protocol sections. No Type file changed.
+
+**Kernel changes (four, counted):** (1) contracts as frozen data: `contracts/` and `internal/contracts`
+(format rules, digest, lock checked both ways at start), and the CI freeze step; (2) typedef checks hooks
+against the catalogue: `ACTION_KIND` (new code), `WRONG_FIELD_TYPE` on reads and writes, with no cascades;
+typedef no longer links the worker's connector code; (3) the worker's catalog is the contracts, with code
+attached: compiled-in answers' reasons and every output's type are checked (`connector_mismatch`), and a
+remote descriptor must fit the contract; connstub's HR descriptor is the contract; (4) `ListActions` in
+`kernel.v1` (one operation, three messages, three enums; `buf breaking` green). No schema change, no item
+service write path touched, no new direct dependency.
+
+**Decided in Phase A, each agreed:** per-operation JSON contracts embedded in both binaries, the single
+source of truth; the descriptor's format reused (`hookproto.Operation` plus `inputs`/`outputs` order,
+`description`, `risk`, `format`, `enum`, `x-pli-trust`); majors as built; the lock with a Go test and the
+CI step; the digest covers the machine contract only (the owner's change); the type table and rules,
+`WRONG_FIELD_TYPE` reused, `ACTION_KIND` added, no reason code until a Type can name one; run-time checks
+for compiled-in reasons and output types; risk as data (low, medium, high); `ListActions` only, users and
+agents in a session, exempt from Project; trust declarable now with kind-based defaults; strict rules, with
+the fixtures fixed in a commit of their own.
+
+**Tests:** 38 new Go tests (contracts 19, typedef 5, hooks 5, API 5, pli 3, contractsfrozen 1), many
+table-driven (44 format rules, 8 single-problem cases with PyYAML positions), and four scenario steps.
+**Test changes, agreed, each in its own commit:** (a) Phase B's fixture commit: fixtures that used real
+actions as stand-ins now fit their contracts (7 files, no assertion changed); checked by putting the strict
+checks in temporarily before the commit. The `duty` fixture's tests still exercise what they were written for:
+`stamp` still writes `f_owner` (now an `hr.manager_of` check on a new `open -> review`, the only kind of
+action that writes a principal) and is refused on the internal door, and `gate` still holds `open ->
+checked` (now `erp.check_credit`, reading `f_note` and a new `f_amount`). (b) `EachHasACase` counts the
+contract cases; (c) `TestHR_Descriptor` wants the contract's operation; (d) the API's operation list and
+`calls()` gain `ListActions`, whose name is exempt from the "looks like the internal door" check by name
+only; (e) Phase C: HR answers `group:hr` instead of `bob` in the two `correction_refused` tests, since the
+worker now stops `bob` (not a principal) as `connector_mismatch` before ResolveHold sees it; `group:hr` is a
+principal no principal field holds, so ResolveHold still refuses the correction.
+
+**Surprises:** typedef never checked a hook's kind against its action's, and tests used `crm.get_plan` as a
+check in hundreds of parses: the strict rules broke 37 tests in 7 files, all fixtures, none of `types/`.
+`TestContract_OnlyPublicOperations` refuses any method named like the internal door, "Action" included. The
+run-time output check moved a correction test's path, as above. Load's own error message ("publish it with
+<action> <digest>") turned out to be the easiest way to write the lock.
+
+**Seen once, not reproduced:** `cmd/connstub`'s tests failed once in Phase C, in a run where several
+packages tested in parallel; the output was not kept. Not reproduced in 16 runs on its own (with
+`internal/connstub` and `internal/hookproto`), nor in the two full `-race` runs after. If CI shows it, stop.
+
+**Numbers.** `go test -race ./...` green: workflow suite with the replay tests 328 s, item service 150 s.
+Scenario twice on a fresh stack: 104 and 104 s. Web Playwright 9 in 8.4 s; apps/poc's journeys 4 in 37.4 s.
+Web 464 and apps/poc 408 unit tests.
+
+**Local workarounds, outside the repository (nothing committed):** dockerd run by hand as a background
+process (started from an ordinary shell call it stopped twice); Go modules for the image builds served from
+this machine's module cache (`go mod download` first; go.sum unchanged; `python3 -m http.server` as the
+GOPROXY, builds on the host network); the web and poc images built from sites built on this machine with
+`VITE_DEV_USERS=1`, through a compose override in the scratchpad; Playwright through a local config
+(excluded from git) pointing at this container's Chromium. Docker Hub did not rate-limit this time. CI
+builds the real images and runs the pinned browser.
+
+**Open:** the action contracts' Later items (top of this file). **Next session:** Ventoux item 6
+(plain-language readings with witnesses) or item 3 (checks that prove properties, which can read risk).

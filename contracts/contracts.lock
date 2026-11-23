@@ -1,0 +1,10 @@
+# Published action contracts: <connector>.<operation>@<major> sha256:<hex>,
+# the digest of the machine contract (everything but the descriptions).
+# A line is never changed or removed: CI compares this file with the base
+# branch's. A change to a contract is a new major, with a new line.
+crm.get_plan@1 sha256:1afc1752373338a571198daec00dbf97122aca8ddedc2464941b586b8880a3c0
+email.notify@1 sha256:dd9ff3cb2402b9399ae12071982ed9642f8692b1b5bf3d01fccfad11055e50fc
+erp.check_credit@1 sha256:0de2c0e27495884e9735ed91984c938e3aecc024b6a60b342579cd25dbb78674
+erp.create_invoice@1 sha256:6dc48d67f4cbd18f76ad49a06e11894f0b8c2f435600e4ec6e5b9531b5da1fda
+erp.get_credit_status@1 sha256:f2a4f6d3e64b54b4d64c271bbdfd0441898c7a81fa422c07b84a3300885959ff
+hr.manager_of@1 sha256:2312edf3dfdcef5467f1967d576162f61c365d8d2e531fecb55a13721b90a711

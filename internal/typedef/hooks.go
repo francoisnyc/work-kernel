@@ -6,7 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/francoisnyc/work-kernel/internal/hooks"
+	"github.com/francoisnyc/work-kernel/internal/contracts"
+	"github.com/francoisnyc/work-kernel/internal/hookproto"
 	"github.com/francoisnyc/work-kernel/internal/item"
 )
 
@@ -196,7 +197,7 @@ func (t *Type) checkHook(r reporter, i int, seen map[string]bool, checked map[st
 		r.fail(CodeRequired, at(p, "writes"), "Name the fields the hook writes", "an enrich hook writes at least one field")
 	}
 	// Only a known action says whether it may write nothing.
-	if _, writes, ok := hooks.Arity(h.Action); ok && h.Kind == HookAction && len(h.Writes) == 0 && writes != 0 {
+	if c, ok := contracts.Default().Lookup(h.Action); ok && h.Kind == HookAction && len(h.Writes) == 0 && len(c.Outputs) != 0 {
 		r.fail(CodeRequired, at(p, "writes"), "Name the field that records what the action made",
 			"an action hook writes at least one field: what it made records that it ran")
 	}
@@ -206,17 +207,135 @@ func (t *Type) checkHook(r reporter, i int, seen map[string]bool, checked map[st
 		r.fail(CodeRequired, at(p, "action"), "Name the action the hook runs", "no action")
 		return
 	}
-	reads, writes, ok := hooks.Arity(h.Action)
+	c, ok := contracts.Default().Lookup(h.Action)
+	reads, writes := len(c.Inputs), len(c.Outputs)
 	switch {
 	case !ok:
-		r.fail(CodeUnknownAction, at(p, "action"), "Name an action the kernel registers (internal/hooks)", "unknown action %q", h.Action)
+		r.fail(CodeUnknownAction, at(p, "action"), "Name an action of the catalogue (contracts/, ListActions)", "unknown action %q", h.Action)
 	case reads != len(h.Reads):
 		r.fail(CodeActionArity, at(p, "reads"), "Give the action as many reads as it takes",
 			"action %s takes %d reads and %d writes; the hook declares %d and %d", h.Action, reads, writes, len(h.Reads), len(h.Writes))
 	case writes != len(h.Writes):
 		r.fail(CodeActionArity, at(p, "writes"), "Give the action as many writes as it takes",
 			"action %s takes %d reads and %d writes; the hook declares %d and %d", h.Action, reads, writes, len(h.Reads), len(h.Writes))
+	default:
+		t.checkContract(r, p, h, c)
 	}
+}
+
+// checkContract checks a hook against its action's contract (Ventoux V1):
+// the hook's kind is one the action serves, each read goes into an input
+// of its type, and each output into a field of its type. A read or write
+// that is already a problem (an unknown field, a multi-value field, a write
+// of a kernel attribute or an offer) is left alone: no cascades.
+func (t *Type) checkContract(r reporter, p string, h Hook, c contracts.Contract) {
+	switch h.Kind {
+	case HookCheck, HookEnrich, HookAction: // an unknown kind is already a problem
+		if !slices.Contains(c.Kinds, hookproto.Kind(h.Kind)) {
+			kinds := make([]string, len(c.Kinds))
+			for i, k := range c.Kinds {
+				kinds[i] = string(k)
+			}
+			r.fail(CodeActionKind, at(p, "kind"), "Use a kind the action serves, or name an action for this kind of hook",
+				"action %s is for %s hooks, not %s", c.Action(), strings.Join(kinds, " or "), h.Kind)
+		}
+	}
+	inputs, outputs := c.InputValues(), c.OutputValues()
+	for k, id := range h.Reads {
+		ft, opts, ok := t.hookValueType(id)
+		in := inputs[k]
+		if !ok || in.Type == "" || readFits(ft, opts, in) {
+			continue
+		}
+		r.fail(CodeWrongFieldType, at(p, "reads", k), "Read a field of the type the input takes, or name another action",
+			"reads %s (%s) into input %s of %s, which takes %s", id, ft, in.Name, c.Action(), valueTypeName(in))
+	}
+	for k, id := range h.Writes {
+		if _, offer := OfferOf(id); offer || IsAttribute(id) {
+			continue
+		}
+		ft, opts, ok := t.hookValueType(id)
+		out := outputs[k]
+		if !ok || out.Type == "" {
+			continue
+		}
+		switch missing := writeMisses(ft, opts, out); {
+		case missing == "":
+		case ft == Enum && out.Type == contracts.TypeEnum:
+			r.fail(CodeWrongFieldType, at(p, "writes", k), "Give the field every value the output may hold, or write it to a string field",
+				"writes output %s of %s (enum: %s) into %s, which does not have %s",
+				out.Name, c.Action(), strings.Join(out.Options, ", "), id, missing)
+		default:
+			r.fail(CodeWrongFieldType, at(p, "writes", k), "Write the output to a field of its type, or name another action",
+				"writes output %s of %s (%s) into %s (%s)", out.Name, c.Action(), out.Type, id, ft)
+		}
+	}
+}
+
+// hookValueType is the type of what a hook reads or writes: a field's,
+// or principal for the creator attributes and a container's offer. ok is
+// false for what is already a problem (undeclared, multi-value).
+func (t *Type) hookValueType(id string) (ft FieldType, options []string, ok bool) {
+	if _, offer := OfferOf(id); offer || IsAttribute(id) {
+		return Principal, nil, true
+	}
+	f, declared := t.Field(id)
+	if !declared || f.Multiple {
+		return "", nil, false
+	}
+	return f.Type, f.Options, true
+}
+
+// readFits: a string input takes a string or an enum field; an enum input
+// an enum field whose options are all among its values; otherwise the types
+// are equal.
+func readFits(ft FieldType, options []string, in contracts.Value) bool {
+	switch in.Type {
+	case contracts.TypeString:
+		return ft == String || ft == Enum
+	case contracts.TypeEnum:
+		if ft != Enum {
+			return false
+		}
+		for _, o := range options {
+			if !slices.Contains(in.Options, o) {
+				return false
+			}
+		}
+		return true
+	}
+	return string(ft) == in.Type
+}
+
+// writeMisses says why an output does not fit a field: "" when it fits; for
+// an enum into an enum, the first value the field lacks; else "type".
+func writeMisses(ft FieldType, options []string, out contracts.Value) string {
+	switch {
+	case out.Type == contracts.TypeEnum && ft == String:
+		return ""
+	case out.Type == contracts.TypeEnum && ft == Enum:
+		for _, v := range out.Options {
+			if !slices.Contains(options, v) {
+				return v
+			}
+		}
+		return ""
+	case string(ft) == out.Type:
+		return ""
+	}
+	return "type"
+}
+
+// valueTypeName is an input's type in a message: "a string", "an int",
+// "an enum (a, b)".
+func valueTypeName(v contracts.Value) string {
+	switch v.Type {
+	case contracts.TypeEnum:
+		return "an enum (" + strings.Join(v.Options, ", ") + ")"
+	case contracts.TypeInt:
+		return "an int"
+	}
+	return "a " + v.Type
 }
 
 // namedKey returns the first of state, from and to that is set, as its key.

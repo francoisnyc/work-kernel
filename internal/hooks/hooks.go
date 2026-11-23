@@ -1,7 +1,9 @@
 // Package hooks holds the code that a Type's hooks name: the actions. A
 // Type never contains code; it names an action (crm.get_plan) and says which
-// fields it reads and writes. Each action registers its arity, and a Type
-// whose hook disagrees is refused when it loads (package typedef asks Arity).
+// fields it reads and writes. Each action has a contract (package
+// contracts, the catalogue): a Type whose hook does not fit it is refused
+// when it loads (package typedef reads the same catalogue), and every
+// connector's answers are held to it here.
 //
 // An action knows positions, not field IDs: it gets the values of the hook's
 // `reads`, in order, and returns values for its `writes`, in order. So the
@@ -21,10 +23,12 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"slices"
 	"sync"
 
 	"github.com/google/uuid"
 
+	"github.com/francoisnyc/work-kernel/internal/contracts"
 	"github.com/francoisnyc/work-kernel/internal/hookproto"
 	"github.com/francoisnyc/work-kernel/internal/item"
 )
@@ -63,14 +67,15 @@ func permanent(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrPermanent, fmt.Sprintf(format, args...))
 }
 
-// action is one declared action: the hook protocol operation
-// <connector>.<operation>@<major>, the kinds it serves, its input and
-// output names (a hook's reads and writes map to them by position),
-// whether it changes the outside world, and, when it is compiled in, its
-// code. A remote action has no code here: configuration says where its
-// connector is. An action with a side effect gets the hook's idempotency
-// key and must pass it to the connector.
+// action is one declared action: its contract (package contracts, the
+// catalogue: <connector>.<operation>@<major>, its kinds, its inputs and
+// outputs in the order a hook's reads and writes map to, whether it
+// changes the outside world), and, when it is compiled in, its code. A
+// remote action has no code here: configuration says where its connector
+// is. An action with a side effect gets the hook's idempotency key and must
+// pass it to the connector.
 type action struct {
+	contract        contracts.Contract
 	reads, writes   int
 	inputs, outputs []string
 	kinds           []hookproto.Kind
@@ -82,17 +87,15 @@ type action struct {
 	runCall func(ctx context.Context, c *Connectors, key string, args []any, call Call) (Result, error)
 }
 
-// declared builds a catalog entry; reads and writes are the names' counts.
-func declared(kinds []hookproto.Kind, inputs, outputs []string, a action) action {
-	a.kinds, a.inputs, a.outputs, a.reads, a.writes = kinds, inputs, outputs, len(inputs), len(outputs)
-	return a
+// fromContract builds a catalog entry from a contract, with code or none.
+func fromContract(c contracts.Contract, code action) action {
+	code.contract = c
+	code.kinds, code.inputs, code.outputs = c.Kinds, c.Inputs, c.Outputs
+	code.reads, code.writes = len(c.Inputs), len(c.Outputs)
+	code.sideEffect = c.SideEffects == hookproto.SideEffectsSome
+	code.remote = code.run == nil && code.runCall == nil
+	return code
 }
-
-var (
-	check  = []hookproto.Kind{hookproto.KindCheck}
-	enrich = []hookproto.Kind{hookproto.KindEnrich}
-	effect = []hookproto.Kind{hookproto.KindAction}
-)
 
 // Call says which hook of which Item runs an action. email.notify sends the
 // hook's ID as the message's template and the Item's ID with it.
@@ -114,27 +117,40 @@ type Call struct {
 	Attempt       int
 }
 
-// catalog is every action a Type may name, by <connector>.<operation>@<major>.
-// It is filled at startup (and by tests, through declareRemote), then read:
-// catalogMu guards it.
+// code is the worker's code for the compiled-in actions. Everything else
+// about an action is its contract (contracts/): the HR check, since the
+// hook protocol a remote connector, has a contract and no code here.
+var code = map[string]action{
+	"crm.get_plan@1":          {run: getPlan},
+	"erp.get_credit_status@1": {run: getCreditStatus},
+	"erp.check_credit@1":      {run: checkCredit},
+	"erp.create_invoice@1":    {run: createInvoice},
+	// email.notify (Step 2, part 3): one message to one principal, through
+	// the email stub. It reads the recipient and writes nothing: the
+	// hook_ran event records that it ran.
+	"email.notify@1": {runCall: notify},
+}
+
+// catalog is every action a Type may name, by <connector>.<operation>@<major>:
+// each contract of the catalogue, with its code when it is compiled in.
+// Tests may add to it (export_test.go); catalogMu guards it.
 var (
 	catalogMu sync.RWMutex
-	catalog   = map[string]action{
-		"crm.get_plan@1":          declared(enrich, []string{"customerId"}, []string{"plan"}, action{run: getPlan}),
-		"erp.get_credit_status@1": declared(enrich, []string{"customerId"}, []string{"onHold"}, action{run: getCreditStatus}),
-		"erp.check_credit@1":      declared(check, []string{"customerId", "amount"}, []string{"costCenter"}, action{run: checkCredit}),
-		"erp.create_invoice@1": declared(effect, []string{"customerId", "amount"}, []string{"invoiceId"},
-			action{sideEffect: true, run: createInvoice}),
-		// The HR check (proof of concept, Step 2, part 1) is a remote
-		// connector since the hook protocol: the HR directory decides, the
-		// worker only declares what it takes and returns.
-		"hr.manager_of@1": declared(check, []string{"onBehalfOf", "createdBy"}, []string{"manager"}, action{remote: true}),
-		// email.notify (Step 2, part 3): one message to one principal, through
-		// the email stub. It reads the recipient and writes nothing: the
-		// hook_ran event records that it ran.
-		"email.notify@1": declared(effect, []string{"to"}, nil, action{sideEffect: true, runCall: notify}),
-	}
+	catalog   = buildCatalog()
 )
+
+func buildCatalog() map[string]action {
+	out := map[string]action{}
+	for _, c := range contracts.Default().All() {
+		out[c.Action()] = fromContract(c, code[c.Action()])
+	}
+	for name := range code {
+		if _, ok := out[name]; !ok {
+			panic("hooks: compiled-in action " + name + " has no contract in contracts/")
+		}
+	}
+	return out
+}
 
 // lookup returns the declared action an action name names.
 func lookup(name string) (actionRef, action, bool) {
@@ -295,16 +311,25 @@ func (c *Connectors) envelope(ref actionRef, a action, key string, args []any, c
 // result reads an answer back as a Result: the outcome as a verdict, the
 // patch as values in the order of the action's outputs (the hook's
 // writes). An answer missing an output is permanent: it cannot be written.
+// The contract holds every connector, compiled in or remote (Ventoux V1):
+// an output of another type, or a deny reason it does not declare, is
+// ErrConnectorMismatch.
 func result(name string, a action, res hookproto.Response) (Result, error) {
 	values := func() ([]any, error) {
 		if len(a.outputs) == 0 {
 			return nil, nil
 		}
+		types := a.contract.OutputValues()
 		out := make([]any, len(a.outputs))
 		for i, o := range a.outputs {
 			v, ok := res.Patch[o]
 			if !ok {
 				return nil, permanent("%s answered %s without the output %s", name, res.Outcome, o)
+			}
+			if i < len(types) {
+				if err := types[i].Check(v); err != nil {
+					return nil, fmt.Errorf("%w: %s answered %v, against its contract", ErrConnectorMismatch, name, err)
+				}
 			}
 			out[i] = v
 		}
@@ -317,6 +342,9 @@ func result(name string, a action, res hookproto.Response) (Result, error) {
 		code := ""
 		if res.Reason != nil {
 			code = res.Reason.Code
+		}
+		if !slices.Contains(a.contract.Errors, code) {
+			return Result{}, fmt.Errorf("%w: %s denied with %q, which its contract does not declare", ErrConnectorMismatch, name, code)
 		}
 		return Result{Verdict: Deny, Reason: code}, nil
 	case hookproto.OutcomeCorrect:

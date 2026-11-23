@@ -50,10 +50,17 @@ func TestContract_OnlyPublicOperations(t *testing.T) {
 		"LinkItems", "UnlinkItems"} // proof of concept Step 1
 	// Ventoux V2b, after ListTypes.
 	want = slices.Insert(want, slices.Index(want, "ListTypes")+1, "ValidateTypes")
+	// Ventoux V1, after ValidateTypes.
+	want = slices.Insert(want, slices.Index(want, "ValidateTypes")+1, "ListActions")
 	if !slices.Equal(got, want) {
 		t.Errorf("ItemService methods = %v, want %v", got, want)
 	}
 	for _, m := range got {
+		// ListActions reads the action catalogue (Ventoux V1); it runs no
+		// action and is not the internal door.
+		if m == "ListActions" {
+			continue
+		}
 		for _, internal := range []string{"Resolve", "Hook", "Internal", "Action"} {
 			if strings.Contains(m, internal) {
 				t.Errorf("method %s looks like the internal door", m)

@@ -60,6 +60,12 @@ service ItemService {
   // lists them. Users and agents (in a session) may call it; customers, and
   // agents acting for one, may not (PERMISSION_DENIED / NOT_ALLOWED).
   rpc ValidateTypes(ValidateTypesRequest) returns (ValidateTypesResponse);
+  // The action catalogue (Ventoux V1): every action a Type's hook may name,
+  // with its contract. The kernel's own, the same in every namespace; it
+  // says nothing of whether this deployment configured the action's
+  // connector. Users and agents (in a session) may call it; customers, and
+  // agents acting for one, may not (PERMISSION_DENIED / NOT_ALLOWED).
+  rpc ListActions(ListActionsRequest) returns (ListActionsResponse);
   // Called with an agent's token: mint a session in capability mode, with
   // the scopes it may touch and the powers it may use. Later calls carry its
   // ID in the Pli-Agent-Session header.
@@ -1058,6 +1064,96 @@ enum TypeProblemSeverity {
   TYPE_PROBLEM_SEVERITY_UNSPECIFIED = 0;
   // The Type would not load.
   TYPE_PROBLEM_SEVERITY_ERROR = 1;
+}
+
+message ListActionsRequest {
+  // namespaces/{ns}
+  string parent = 1;
+}
+
+message ListActionsResponse {
+  // Ordered by action.
+  repeated Action actions = 1;
+}
+
+// One action and its contract: what a hook naming it reads and writes, and
+// what it may do. A published contract never changes: a change is a new
+// major (docs/design.md, "Action contracts").
+message Action {
+  // namespaces/{ns}/actions/{action}
+  string name = 1;
+  // What a hook names: <connector>.<operation>@<major>, e.g.
+  // hr.manager_of@1. A hook that names no major means 1.
+  string action = 2;
+  string connector = 3;
+  string operation = 4;
+  int32 major = 5;
+  // What it does, in plain words.
+  string description = 6;
+  // The kinds of hook that may run it.
+  repeated HookKind kinds = 7;
+  // In order: a hook's reads map to them by position.
+  repeated ActionValue inputs = 8;
+  // In order: a hook's writes map to them by position.
+  repeated ActionValue outputs = 9;
+  // It changes something outside the kernel (only an action hook runs it,
+  // with an idempotency key).
+  bool side_effects = 10;
+  ActionRisk risk = 11;
+  // The reason codes a check may deny with; any other is a mismatch.
+  repeated string reasons = 12;
+  // sha256:<hex> of the machine contract (everything but the
+  // descriptions): it never changes for a published action.
+  string digest = 13;
+}
+
+// One input or output of an action.
+message ActionValue {
+  string name = 1;
+  // The type of field it matches: a hook reads a field of this type into
+  // the input, or writes the output into one.
+  FieldType type = 2;
+  // Enum values only: every value it may hold.
+  repeated string options = 3;
+  // It may be null (an unset field).
+  bool nullable = 4;
+  string description = 5;
+  // Inputs only. Declared, not enforced until Ventoux item 4: TRUSTED means
+  // the value must come from a trusted source.
+  ActionInputTrust trust = 6;
+}
+
+enum HookKind {
+  HOOK_KIND_UNSPECIFIED = 0;
+  // Decides a held transition: allow, deny or correct.
+  HOOK_KIND_CHECK = 1;
+  // Returns values the kernel writes.
+  HOOK_KIND_ENRICH = 2;
+  // A side effect outside the kernel.
+  HOOK_KIND_ACTION = 3;
+}
+
+// How much harm the action can do. Data for people and tools: no kernel
+// rule reads it yet.
+enum ActionRisk {
+  ACTION_RISK_UNSPECIFIED = 0;
+  // No effect outside the kernel.
+  ACTION_RISK_LOW = 1;
+  // An effect that can be corrected, or of low stakes (a message).
+  ACTION_RISK_MEDIUM = 2;
+  // An effect that cannot be undone (money, access).
+  ACTION_RISK_HIGH = 3;
+}
+
+// Where an input's value must come from. Declared, not enforced until
+// Ventoux item 4.
+enum ActionInputTrust {
+  // An output.
+  ACTION_INPUT_TRUST_UNSPECIFIED = 0;
+  // Any source.
+  ACTION_INPUT_TRUST_ANY = 1;
+  // A trusted source (declared, not enforced until Ventoux item 4).
+  ACTION_INPUT_TRUST_TRUSTED = 2;
 }
 
 message LinkItemsRequest {

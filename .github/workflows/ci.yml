@@ -66,6 +66,24 @@ jobs:
           git fetch --no-tags --depth=1 origin "+refs/heads/$BASE:refs/remotes/origin/$BASE"
           make breaking BREAKING_AGAINST=".git#ref=refs/remotes/origin/$BASE"
 
+      # Pull requests only: a published action contract never changes
+      # (Ventoux V1). Every line of the base branch's contracts/contracts.lock
+      # must be in this one, unchanged; a new line publishes a contract. A
+      # base branch without a lock yet has published nothing.
+      - name: Published action contracts stay frozen
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags --depth=1 origin "+refs/heads/$BASE:refs/remotes/origin/$BASE"
+          if git cat-file -e "refs/remotes/origin/$BASE:contracts/contracts.lock" 2>/dev/null; then
+            git show "refs/remotes/origin/$BASE:contracts/contracts.lock" >"$RUNNER_TEMP/base.lock"
+          else
+            echo "The base branch has no contracts.lock yet: nothing published to compare."
+            : >"$RUNNER_TEMP/base.lock"
+          fi
+          go run ./cmd/contractsfrozen "$RUNNER_TEMP/base.lock" contracts/contracts.lock
+
       - name: Vet
         run: go vet ./...
 
