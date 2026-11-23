@@ -3,7 +3,7 @@
 # reminders at most), and expires after five days, emailing the requester.
 # Nothing is taken from the balance.
 story: a request nobody decides reminds its approver twice, then expires
-author: drafted by Claude from vacation_request@3's comments; approval pending
+author: drafted by Claude from vacation_request@3's comments; approved by Francois (owner), 2026-11-23
 day1: 2026-12-07   # a Monday
 
 people:

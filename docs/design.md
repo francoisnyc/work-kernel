@@ -3689,8 +3689,8 @@ of one or more Types as data, run as an ordinary Go test in simulated time:
 no stack, no dev clock. Stories live in `stories/<domain>/<name>.yaml`;
 the runner is `internal/story`, a test harness no binary links (a test
 checks it). Stories are written or approved by people, never generated
-alongside the Type they test: each says who in `author:` (the first six
-say "approval pending" until the owner reads them), and nothing ever
+alongside the Type they test: each says who in `author:` (the first six were
+drafted by Claude and approved by the owner on 2026-11-23), and nothing ever
 writes expected lines into a story (there is no `-update`). They
 complement `scripts/scenario.sh`, which runs the real stack.
 
@@ -3705,7 +3705,7 @@ story; a witness builds the same `Story` in Go.
 
 ```yaml
 story: an approved request takes its days from the balance, once
-author: drafted by Claude from vacation_request@3's comments; approval pending
+author: drafted by Claude from vacation_request@3's comments; approved by Francois (owner), 2026-11-23
 day1: 2026-12-07                  # day 1; every time is UTC
 observer: <person>                # whose reads make the timeline; default observer
 people:

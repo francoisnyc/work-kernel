@@ -17,7 +17,7 @@
 #   reopened Tue 10:00: 16 h = Tue 7 h + Wed 8 h + Thu 1 h = Thu (day 11) 10:00;
 #     resolved Tue 11:00 after 3600 s, met; closed 120 h later, Sun (day 14) 11:00.
 story: a customer's reply brings a waiting incident back and resumes its resolution goal
-author: drafted by Claude from incident@3's comments, design.md and scenario C; approval pending
+author: drafted by Claude from incident@3's comments, design.md and scenario C; approved by Francois (owner), 2026-11-23
 day1: 2026-12-07   # a Monday
 
 people:

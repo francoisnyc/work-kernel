@@ -4,7 +4,7 @@
 # from her balance once, and she is emailed. Nothing else happens: no
 # reminder (bob decided within two days), no expiry.
 story: an approved request takes its days from the balance, once, and tells the requester
-author: drafted by Claude from vacation_request@3's comments; approval pending
+author: drafted by Claude from vacation_request@3's comments; approved by Francois (owner), 2026-11-23
 day1: 2026-12-07   # a Monday
 
 people:

@@ -8,7 +8,7 @@
 # depends on the retries' rhythm, which the kernel does not promise, so
 # the story expects it in a window: within the 15 minutes after the request.
 story: the HR check fails closed while HR is down, and denies someone HR does not know
-author: drafted by Claude from vacation_request@3's comments and design.md; approval pending
+author: drafted by Claude from vacation_request@3's comments and design.md; approved by Francois (owner), 2026-11-23
 day1: 2026-12-07   # a Monday
 
 people:
