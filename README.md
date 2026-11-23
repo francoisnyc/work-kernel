@@ -381,6 +381,22 @@ by due instant. It drives only `pli`, keeps its saved sessions in a temporary
 `XDG_CONFIG_HOME`, cleans up after itself, and stops at the first wrong
 outcome, naming the step. It can run any number of times on the same stack.
 
+## Stories
+
+```sh
+make stories                         # every story in stories/, in simulated time (needs Docker)
+make stories STORY=vacation/approve  # one
+```
+
+A story ([`stories/`](stories)) is a walkthrough of Types written as data:
+the people and their roles, a fake for every action (held to its contract),
+one-line steps (`day 2 10:00 bob moves request to approved`) and the whole
+expected timeline, so anything unexpected fails it. It runs the real Item
+workflow and item service in Temporal's test environment, where five days
+take a fraction of a second; it needs no stack. Stories complement the
+scenario, which runs the real stack. The grammar is in `docs/design.md`,
+"Ventoux V5, as built".
+
 ## Reset
 
 ```sh
