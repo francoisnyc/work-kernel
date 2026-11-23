@@ -232,7 +232,9 @@ func TestCheck_NamesAndHiddenValues(t *testing.T) {
 		{"a name rule of an unknown Type", func(s *story.Story) { s.Names[0].Type = "sla_gaol" }, 3, []string{"sla_gaol"}},
 		{"a name rule on an unknown field", func(s *story.Story) { s.Names[0].Where.Field = "f_kind" }, 3, []string{"f_kind"}},
 		{"a name rule in an unknown Item", func(s *story.Story) { s.Names[0].In = "nowhere" }, 3, []string{"nowhere"}},
-		{"a name a step also takes", func(s *story.Story) { s.Names[0].Name = "inc" }, 3, []string{"inc"}},
+		// The read that named the rule's Item reads inc instead, so the
+		// clash is the only problem (agreed in Phase C).
+		{"a name a step also takes", func(s *story.Story) { s.Names[0].Name = "inc"; s.Steps[1].Item = "inc" }, 3, []string{"inc"}},
 		{"a hidden field the Type lacks", func(s *story.Story) { s.HideValues["sla_goal"] = []string{"f_wek"} }, 0, []string{"f_wek"}},
 		{"a hidden field of an unknown Type", func(s *story.Story) { s.HideValues["goal"] = []string{"f_week"} }, 0, []string{"goal"}},
 		{"a read of a field the Type lacks", func(s *story.Story) { s.Steps[2].Fields = []string{"f_priority", "f_name"} }, 10,

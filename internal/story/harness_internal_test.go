@@ -51,6 +51,9 @@ func count(tl []Line, item, text string) int {
 // nothing failed.
 func TestHarness_ContinueAsNewCarriesTheItemsWork(t *testing.T) {
 	s := readStory(t, "../../stories/vacation/refund.yaml")
+	// Without the story's read at the withdrawal: the injected failures
+	// delay the refund past it, by design (agreed in Phase C).
+	s.Steps = s.Steps[:4]
 	res, err := run(runCtx(t), testEnv(t), s, runOptions{failActivity: map[string]int{wf.ActivityUndo: wf.UndoAttemptsPerRun}})
 	if err != nil {
 		t.Fatalf("run: %v", err)
