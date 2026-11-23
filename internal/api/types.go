@@ -208,20 +208,9 @@ const (
 	maxTypeSourceBytes = 256 << 10 // in all
 )
 
-// ValidateTypes checks draft Types against every registered version and
-// registers nothing (Ventoux V2b). Users and agents may call it; customers,
-// and agents acting for one, may not. Like ListTypes it reads no Items: a
-// Type definition holds no Item data, so nothing here goes through
-// policy.Project.
-func (s *server) ValidateTypes(ctx context.Context, req *connect.Request[kernelv1.ValidateTypesRequest]) (*connect.Response[kernelv1.ValidateTypesResponse], error) {
-	p := caller(ctx)
-	if cerr := parentNamespace(p, req.Msg.Parent); cerr != nil {
-		return nil, cerr
-	}
-	if item.IsKind(p.Actor, item.KindCustomer) || item.IsKind(p.OnBehalfOf, item.KindCustomer) {
-		return nil, apiError(connect.CodePermissionDenied, "NOT_ALLOWED", nil)
-	}
-	srcs := req.Msg.Sources
+// draftSources checks a request's draft sources against the limits: 1 to
+// 50, each named once, 256 KiB of content in all.
+func draftSources(srcs []*kernelv1.TypeSource) ([]typedef.Source, *connect.Error) {
 	if len(srcs) == 0 || len(srcs) > maxTypeSources {
 		return nil, badField("sources", fmt.Sprintf("give 1 to %d sources", maxTypeSources))
 	}
@@ -238,11 +227,13 @@ func (s *server) ValidateTypes(ctx context.Context, req *connect.Request[kernelv
 	if total > maxTypeSourceBytes {
 		return nil, badField("sources", fmt.Sprintf("send at most %d KiB of content in all", maxTypeSourceBytes>>10))
 	}
-	ps, err := s.k.ValidateTypes(ctx, sources)
-	if err != nil {
-		return nil, errorFor(err, "")
-	}
-	out := &kernelv1.ValidateTypesResponse{Problems: make([]*kernelv1.TypeProblem, 0, len(ps))}
+	return sources, nil
+}
+
+// problemsOut converts a draft's problems, named in the caller's
+// namespace, sorted by source, then position, once every source has a name.
+func problemsOut(ns string, ps typedef.Problems) []*kernelv1.TypeProblem {
+	out := make([]*kernelv1.TypeProblem, 0, len(ps))
 	for _, pr := range ps {
 		tp := &kernelv1.TypeProblem{
 			Source: pr.Source, Path: pr.Path, Line: int32(pr.Line), Column: int32(pr.Column),
@@ -250,16 +241,40 @@ func (s *server) ValidateTypes(ctx context.Context, req *connect.Request[kernelv
 			Code:     string(pr.Code), Message: pr.Message,
 		}
 		if pr.TypeID != "" {
-			tp.Type = typeName(p.Namespace, pr.TypeID, pr.Version)
+			tp.Type = typeName(ns, pr.TypeID, pr.Version)
 		}
 		if tp.Source == "" { // a registered version's: named in the caller's namespace
 			tp.Source = tp.Type
 		}
-		out.Problems = append(out.Problems, tp)
+		out = append(out, tp)
 	}
-	// Sorted by source, then position, now that every source has a name.
-	slices.SortStableFunc(out.Problems, func(a, b *kernelv1.TypeProblem) int {
+	slices.SortStableFunc(out, func(a, b *kernelv1.TypeProblem) int {
 		return cmp.Or(strings.Compare(a.Source, b.Source), cmp.Compare(a.Line, b.Line), cmp.Compare(a.Column, b.Column))
 	})
+	return out
+}
+
+// ValidateTypes checks draft Types against every registered version and
+// registers nothing (Ventoux V2b). Users and agents may call it; customers,
+// and agents acting for one, may not. Like ListTypes it reads no Items: a
+// Type definition holds no Item data, so nothing here goes through
+// policy.Project.
+func (s *server) ValidateTypes(ctx context.Context, req *connect.Request[kernelv1.ValidateTypesRequest]) (*connect.Response[kernelv1.ValidateTypesResponse], error) {
+	p := caller(ctx)
+	if cerr := parentNamespace(p, req.Msg.Parent); cerr != nil {
+		return nil, cerr
+	}
+	if item.IsKind(p.Actor, item.KindCustomer) || item.IsKind(p.OnBehalfOf, item.KindCustomer) {
+		return nil, apiError(connect.CodePermissionDenied, "NOT_ALLOWED", nil)
+	}
+	sources, cerr := draftSources(req.Msg.Sources)
+	if cerr != nil {
+		return nil, cerr
+	}
+	ps, err := s.k.ValidateTypes(ctx, sources)
+	if err != nil {
+		return nil, errorFor(err, "")
+	}
+	out := &kernelv1.ValidateTypesResponse{Problems: problemsOut(p.Namespace, ps)}
 	return connect.NewResponse(out), nil
 }
