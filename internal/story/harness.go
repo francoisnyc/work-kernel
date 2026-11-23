@@ -560,7 +560,15 @@ func (h *harness) settleAll(ctx context.Context) error {
 		refused := len(h.lastErr) > 0
 		h.mu.Unlock()
 		if pending == 0 && !busy {
-			return nil
+			// An update's answer can arrive while the main loop is still
+			// in the workflow task that handled it, before that task has
+			// scheduled what it starts. A round trip through the main loop
+			// lets the task finish; then look again.
+			h.onMain(func() {})
+			if h.quiet(ctx) {
+				return nil
+			}
+			continue
 		}
 		if pending > 0 && refused {
 			stuck++
@@ -580,6 +588,26 @@ func (h *harness) settleAll(ctx context.Context) error {
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
+}
+
+// quiet reports whether the outbox is empty and none of the kernel's
+// activities is scheduled or running.
+func (h *harness) quiet(ctx context.Context) bool {
+	var pending int
+	if err := h.env.pool.QueryRow(ctx, `select count(*) from outbox where delivered_at is null`).Scan(&pending); err != nil {
+		return false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if pending > 0 || h.executing > 0 {
+		return false
+	}
+	for _, n := range h.fresh {
+		if n > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // Deliver is the relay's Workflows, in the test environment: it starts an
