@@ -204,7 +204,8 @@ Ventoux item 4, made central.
   shows every call it makes. No "on any field changed" triggers and no exit
   hooks: if something must happen when a field changes, that change becomes
   a named transition with its own rules. (Systems that fire on any change
-  become rules triggering rules.) To record in `docs/design.md`.
+  become rules triggering rules.) Recorded in `docs/design.md`,
+  "Architecture style".
 
 ### 4. A fourth domain: security operations (SOAR), an open-ended case
 
