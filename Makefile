@@ -1,7 +1,7 @@
 # Tools run through `go run` at pinned versions, so nothing needs installing.
 BUF := go run github.com/bufbuild/buf/cmd/buf@v1.75.0
 
-.PHONY: up down reset migrate scenario gen gen-web lint breaking test vet bench
+.PHONY: up down reset migrate scenario stories gen gen-web lint breaking test vet bench
 
 up: ## build and start the whole stack, and wait until it is healthy
 	docker compose up -d --build --wait
@@ -17,6 +17,9 @@ migrate: ## apply migrations with the stack's one-shot migration service
 
 scenario: up ## run the Step 0 scenario against the stack (needs Go and jq)
 	./scripts/scenario.sh
+
+stories: ## run the stories in stories/ in simulated time (needs Docker); one: make stories STORY=vacation/approve
+	go test -count=1 -v ./internal/story -run 'TestStories/$(STORY)'
 
 gen: ## regenerate Protobuf code into gen/ (committed; CI checks it is current)
 	$(BUF) generate

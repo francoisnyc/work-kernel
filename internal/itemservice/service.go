@@ -105,6 +105,7 @@ type Service struct {
 	maxWait      time.Duration    // the longest Transition.Wait accepted
 	now          func() time.Time // the clock guards read today from
 	clockSkew    time.Duration    // tests only: see Options.ClockSkew
+	clock        func() time.Time // tests only: see Options.Clock
 }
 
 // DefaultWriteTimeout bounds every statement of a write. A write that waits
@@ -135,6 +136,13 @@ type Options struct {
 	// (TestClockSkew_NoProductionCodeSetsIt) reads the module's source and
 	// fails if anything but a test names it.
 	ClockSkew time.Duration
+	// Clock is for tests only (stories in simulated time, internal/story):
+	// when set, every write is stamped with its time instead of the
+	// database's clock (the event's created_at, cause.at), and `today`
+	// follows it when Now is nil. No flag, environment variable or config
+	// file sets it, and none may: TestClock_NoProductionCodeSetsIt reads
+	// the module's source.
+	Clock func() time.Time
 }
 
 // New returns a Service that uses the given connection pool, with the Type
@@ -146,9 +154,12 @@ func New(pool *pgxpool.Pool) *Service {
 // NewWithOptions returns a Service with the given options.
 func NewWithOptions(pool *pgxpool.Pool, opts Options) *Service {
 	k := &Service{pool: pool, writeTimeout: opts.WriteTimeout, maxWait: opts.MaxWait, now: opts.Now,
-		clockSkew: opts.ClockSkew}
+		clockSkew: opts.ClockSkew, clock: opts.Clock}
 	if k.now == nil {
 		k.now = time.Now
+		if opts.Clock != nil {
+			k.now = opts.Clock
+		}
 	}
 	if k.writeTimeout <= 0 {
 		k.writeTimeout = DefaultWriteTimeout

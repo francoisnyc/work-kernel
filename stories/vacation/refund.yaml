@@ -1,0 +1,43 @@
+# vacation_request@3: withdrawing an approved request gives its days back,
+# once, and emails the requester that the refund went through.
+story: withdrawing an approved request refunds its days once and says so
+author: drafted by Claude from vacation_request@3's comments; approved by Francois (owner), 2026-11-23
+day1: 2026-12-07   # a Monday
+
+people:
+  alice: {}
+  bob: {}
+  hana: {roles: [hr_admin]}
+
+fakes:
+  hr.manager_of@1:
+    - "when createdBy = alice: correct manager = bob"
+  email.notify@1:
+    - ok
+
+given:
+  - hana creates balance as leave_balance@1 with f_owner = alice, f_allowance = 20
+
+steps:
+  - day 1 09:00 alice creates request as vacation_request@3 with f_start = day 15, f_end = day 19, f_days = 5, f_leave_type = annual
+  - day 1 09:05 alice moves request to submitted
+  - day 2 10:00 bob moves request to approved
+  - day 3 09:00 alice moves request to withdrawn
+  - day 3 09:00 hana sees balance with f_used = 0
+
+until: day 10 00:00
+
+expect:
+  - "day 1 09:00 request: alice created it in draft"
+  - "day 1 09:05 request: alice asked draft -> submitted"
+  - "day 1 09:05 request: hr_check for alice moved it draft -> submitted: f_approver = bob; linked balance to balance"
+  - "day 2 10:00 request: bob asked submitted -> approved"
+  - "day 2 10:00 balance: deduct for bob updated it: f_used +5 = 5"
+  - "day 2 10:00 request: deduct for bob moved it submitted -> approved"
+  - "day 2 10:00 request: notify_approved for bob ran"
+  - "day 2 10:00 email: notify for request (notify_approved): to = alice"
+  - "day 3 09:00 request: alice moved it approved -> withdrawn"
+  - "day 3 09:00 balance: refund for alice updated it: f_used -5 = 0"
+  - "day 3 09:00 request: refund for alice applied to balance"
+  - "day 3 09:00 request: refund_email for alice ran"
+  - "day 3 09:00 email: notify for request (refund_email): to = alice"

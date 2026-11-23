@@ -1,0 +1,42 @@
+# vacation_request@3: approval, as its comments and design.md describe it.
+# alice asks for five days; HR names bob, her manager, as the approver; she
+# cannot approve her own request; bob approves, which takes the five days
+# from her balance once, and she is emailed. Nothing else happens: no
+# reminder (bob decided within two days), no expiry.
+story: an approved request takes its days from the balance, once, and tells the requester
+author: drafted by Claude from vacation_request@3's comments; approved by Francois (owner), 2026-11-23
+day1: 2026-12-07   # a Monday
+
+people:
+  alice: {}
+  bob: {}
+  hana: {roles: [hr_admin]}
+
+fakes:
+  hr.manager_of@1:
+    - "when createdBy = alice: correct manager = bob"
+  email.notify@1:
+    - ok
+
+given:
+  - hana creates balance as leave_balance@1 with f_owner = alice, f_allowance = 20
+
+steps:
+  - day 1 09:00 alice creates request as vacation_request@3 with f_start = day 15, f_end = day 19, f_days = 5, f_leave_type = annual
+  - day 1 09:05 alice moves request to submitted
+  - day 2 09:30 alice moves request to approved -> refused NOT_ALLOWED
+  - day 2 10:00 bob moves request to approved
+  - day 2 10:00 hana sees balance with f_used = 5
+  - day 2 10:00 alice sees request with f_approver = bob
+
+until: day 10 00:00
+
+expect:
+  - "day 1 09:00 request: alice created it in draft"
+  - "day 1 09:05 request: alice asked draft -> submitted"
+  - "day 1 09:05 request: hr_check for alice moved it draft -> submitted: f_approver = bob; linked balance to balance"
+  - "day 2 10:00 request: bob asked submitted -> approved"
+  - "day 2 10:00 balance: deduct for bob updated it: f_used +5 = 5"
+  - "day 2 10:00 request: deduct for bob moved it submitted -> approved"
+  - "day 2 10:00 request: notify_approved for bob ran"
+  - "day 2 10:00 email: notify for request (notify_approved): to = alice"

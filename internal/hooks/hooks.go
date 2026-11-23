@@ -183,6 +183,7 @@ type Connectors struct {
 	http     *http.Client
 	noKeys   bool                  // the control run: never send the idempotency key
 	conns    map[string]Connection // connector@major -> remote connection (WithConnection)
+	local    map[string]Connector  // connector@major -> a Connector in this process (WithConnector)
 	file     *configFile           // the connectors file (WithConfigFile), or nil
 	shared   *shared
 }

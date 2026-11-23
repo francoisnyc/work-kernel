@@ -398,36 +398,43 @@ type WorkerOptions struct {
 	DevTypes []string
 }
 
-// NewWorker returns a worker, not yet started, that runs Item workflows and
-// their activities from the given task queue.
-func NewWorker(c client.Client, taskQueue string, k *itemservice.Service, opts WorkerOptions) worker.Worker {
-	w := worker.New(c, taskQueue, worker.Options{})
+// Register registers the Item workflow and its activities, as NewWorker's
+// worker runs them, with r: a worker, or Temporal's test environment
+// (stories, internal/story), so both run exactly the same set.
+func Register(r worker.Registry, k *itemservice.Service, opts WorkerOptions) {
 	run := ItemWorkflow
 	if opts.CloseDelay > 0 {
 		run = func(ctx workflow.Context, in Input) error { return runItem(ctx, in, opts.CloseDelay) }
 	}
-	w.RegisterWorkflowWithOptions(run, workflow.RegisterOptions{Name: Name})
+	r.RegisterWorkflowWithOptions(run, workflow.RegisterOptions{Name: Name})
 
 	// Registered by name, because the workflow calls them by name.
 	a := &Activities{Items: k, Connectors: opts.Connectors, HookBudget: opts.HookBudget,
 		HookAttemptTimeout: opts.HookAttemptTimeout, DevDay: opts.DevDay, DevTypes: opts.DevTypes}
-	w.RegisterActivityWithOptions(a.LoadItem, activity.RegisterOptions{Name: ActivityLoadItem})
-	w.RegisterActivityWithOptions(a.FireTimer, activity.RegisterOptions{Name: ActivityFireTimer})
-	w.RegisterActivityWithOptions(a.LoadInstant, activity.RegisterOptions{Name: ActivityLoadInstant})
-	w.RegisterActivityWithOptions(a.LoadActingInstants, activity.RegisterOptions{Name: ActivityLoadActingInstants})
-	w.RegisterActivityWithOptions(a.ActAt, activity.RegisterOptions{Name: ActivityActAt})
-	w.RegisterActivityWithOptions(a.RunAfterReaction, activity.RegisterOptions{Name: ActivityRunAfterReaction})
-	w.RegisterActivityWithOptions(a.AfterReactionFailed, activity.RegisterOptions{Name: ActivityAfterReactionFailed})
-	w.RegisterActivityWithOptions(a.RunEnrich, activity.RegisterOptions{Name: ActivityRunEnrich})
-	w.RegisterActivityWithOptions(a.EnrichFallback, activity.RegisterOptions{Name: ActivityEnrichFallback})
-	w.RegisterActivityWithOptions(a.RunCheck, activity.RegisterOptions{Name: ActivityRunCheck})
-	w.RegisterActivityWithOptions(a.ResolveHold, activity.RegisterOptions{Name: ActivityResolveHold})
-	w.RegisterActivityWithOptions(a.RunAction, activity.RegisterOptions{Name: ActivityRunAction})
-	w.RegisterActivityWithOptions(a.HookFailed, activity.RegisterOptions{Name: ActivityHookFailed})
-	w.RegisterActivityWithOptions(a.RunReaction, activity.RegisterOptions{Name: ActivityRunReaction})
-	w.RegisterActivityWithOptions(a.ResolveReaction, activity.RegisterOptions{Name: ActivityResolveReaction})
-	w.RegisterActivityWithOptions(a.Undo, activity.RegisterOptions{Name: ActivityUndo})
-	w.RegisterActivityWithOptions(a.ReactionFailed, activity.RegisterOptions{Name: ActivityReactionFailed})
+	r.RegisterActivityWithOptions(a.LoadItem, activity.RegisterOptions{Name: ActivityLoadItem})
+	r.RegisterActivityWithOptions(a.FireTimer, activity.RegisterOptions{Name: ActivityFireTimer})
+	r.RegisterActivityWithOptions(a.LoadInstant, activity.RegisterOptions{Name: ActivityLoadInstant})
+	r.RegisterActivityWithOptions(a.LoadActingInstants, activity.RegisterOptions{Name: ActivityLoadActingInstants})
+	r.RegisterActivityWithOptions(a.ActAt, activity.RegisterOptions{Name: ActivityActAt})
+	r.RegisterActivityWithOptions(a.RunAfterReaction, activity.RegisterOptions{Name: ActivityRunAfterReaction})
+	r.RegisterActivityWithOptions(a.AfterReactionFailed, activity.RegisterOptions{Name: ActivityAfterReactionFailed})
+	r.RegisterActivityWithOptions(a.RunEnrich, activity.RegisterOptions{Name: ActivityRunEnrich})
+	r.RegisterActivityWithOptions(a.EnrichFallback, activity.RegisterOptions{Name: ActivityEnrichFallback})
+	r.RegisterActivityWithOptions(a.RunCheck, activity.RegisterOptions{Name: ActivityRunCheck})
+	r.RegisterActivityWithOptions(a.ResolveHold, activity.RegisterOptions{Name: ActivityResolveHold})
+	r.RegisterActivityWithOptions(a.RunAction, activity.RegisterOptions{Name: ActivityRunAction})
+	r.RegisterActivityWithOptions(a.HookFailed, activity.RegisterOptions{Name: ActivityHookFailed})
+	r.RegisterActivityWithOptions(a.RunReaction, activity.RegisterOptions{Name: ActivityRunReaction})
+	r.RegisterActivityWithOptions(a.ResolveReaction, activity.RegisterOptions{Name: ActivityResolveReaction})
+	r.RegisterActivityWithOptions(a.Undo, activity.RegisterOptions{Name: ActivityUndo})
+	r.RegisterActivityWithOptions(a.ReactionFailed, activity.RegisterOptions{Name: ActivityReactionFailed})
+}
+
+// NewWorker returns a worker, not yet started, that runs Item workflows and
+// their activities from the given task queue.
+func NewWorker(c client.Client, taskQueue string, k *itemservice.Service, opts WorkerOptions) worker.Worker {
+	w := worker.New(c, taskQueue, worker.Options{})
+	Register(w, k, opts)
 	return w
 }
 
