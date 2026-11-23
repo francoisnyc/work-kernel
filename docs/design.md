@@ -1010,6 +1010,7 @@ stage 3 then also runs with every registered version, and adds
 | `UNKNOWN_REACTION` | 2, 3 | Names a reaction that does not exist (or reaches nothing) |
 | `UNKNOWN_ACTION` | 2 | A hook's action is not registered (`internal/hooks`) |
 | `ACTION_ARITY` | 2 | A hook's reads or writes do not match its action's |
+| `ACTION_KIND` | 2 | A hook of a kind its action does not serve (a check naming an enrich action) |
 | `WRONG_FIELD_TYPE` | 2, 3 | A field of the wrong type for this use (an at-timer on a string) |
 | `EXPRESSION_INVALID` | 2, 3 | A CEL expression that does not compile, or a form not allowed (a computed principal) |
 | `EXPRESSION_TYPE` | 2, 3 | A CEL expression that yields the wrong type (a guard that is not a bool) |
