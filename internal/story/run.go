@@ -92,10 +92,3 @@ func run(ctx context.Context, env *Env, s *Story, opts runOptions) (*Result, err
 	_, _, _, _ = ctx, env, s, opts
 	return nil, errNotBuilt
 }
-
-// Report says, for a person, how a run went against its story: its
-// failures, then how the timeline differs, instant by instant.
-func Report(s *Story, r *Result, d Diff) string {
-	_, _, _ = s, r, d
-	return "" // stub
-}

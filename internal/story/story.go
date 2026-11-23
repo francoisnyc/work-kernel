@@ -195,9 +195,20 @@ func (l Line) Format(day1 time.Time) string {
 // FormatTime writes an instant in story time: day N HH:MM, with :SS when
 // the seconds are not zero.
 func FormatTime(day1, at time.Time) string {
-	_ = day1
-	_ = at
-	return "" // stub
+	at = at.UTC().Truncate(time.Second)
+	day := int(at.Sub(day1).Hours()/24) + 1
+	if at.Before(day1) {
+		day = -int(day1.Sub(at).Hours()/24) // day 0, day -1, ...
+		if !day1.AddDate(0, 0, day-1).After(at) {
+			day++
+		}
+	}
+	of := at.Sub(day1.AddDate(0, 0, day-1))
+	h, m, sec := int(of.Hours()), int(of.Minutes())%60, int(of.Seconds())%60
+	if sec != 0 {
+		return fmt.Sprintf("day %d %02d:%02d:%02d", day, h, m, sec)
+	}
+	return fmt.Sprintf("day %d %02d:%02d", day, h, m)
 }
 
 // Problem is something wrong with a story itself, found before it runs.
