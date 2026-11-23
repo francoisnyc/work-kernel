@@ -1,0 +1,27 @@
+# Witness fixture: links of every shape, a move along a link, and
+# placement kept for a role.
+id: w_part
+version: 1
+initial_state: todo
+
+fields:
+  - {id: f_size, type: int}
+
+states:
+  - {id: todo,  category: todo}
+  - {id: doing, category: active}
+  - {id: done,  category: done}
+
+transitions:
+  - {from: todo,  to: doing}
+  - {from: doing, to: done}
+
+links:
+  - {name: part_of, inverse: parts, targets: [w_epic], max: one}
+  - {name: lead_of, inverse: lead,  targets: [w_epic], inverse_max: one, writable_by: ['role:lead']}
+
+reactions:
+  - {id: wake_epic, kind: move, on: enter, state: doing, when: 'f_size > 1', link: part_of, to: active,
+     target_from: [idle]}
+
+placement_writable_by: ['role:lead']

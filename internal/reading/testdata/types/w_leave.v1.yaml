@@ -1,0 +1,29 @@
+# Witness fixture: a plain lifecycle. A guard, required fields, a computed
+# effect, a clear, a frozen state, an invariant and a final state.
+id: w_leave
+version: 1
+initial_state: draft
+
+fields:
+  - {id: f_start, type: date}
+  - {id: f_end,   type: date}
+  - {id: f_days,  type: int}
+  - {id: f_note,  type: string}
+  - {id: f_sent_at, type: datetime}
+
+states:
+  - {id: draft,     category: todo}
+  - {id: submitted, category: waiting, frozen: [f_start, f_end]}
+  - {id: done,      category: done}
+
+transitions:
+  - from: draft
+    to: submitted
+    required: [f_start, f_end]
+    guard: 'f_end >= f_start && f_start >= today'
+    sets: {f_sent_at: 'cause.at'}
+  - {from: submitted, to: draft, clears: [f_note]}
+  - {from: submitted, to: done}
+
+invariants:
+  - {id: days_negative, rule: 'f_days == null || f_days >= 0'}

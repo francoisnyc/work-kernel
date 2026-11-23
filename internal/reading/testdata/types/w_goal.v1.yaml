@@ -1,0 +1,36 @@
+# Witness fixture: a goal inside a w_case, which no person moves.
+id: w_goal
+version: 1
+initial_state: running
+
+fields:
+  - {id: f_kind,   type: enum, options: [reply, fix], writable_by: kernel}
+  - {id: f_due_at, type: datetime, writable_by: kernel}
+  - {id: f_hours,  type: int,      writable_by: kernel}
+  - {id: f_weight, type: int,      writable_by: kernel}
+
+states:
+  - {id: running, category: active}
+  - {id: paused,  category: waiting}
+  - {id: met,     category: done}
+
+transitions:
+  - {from: running, to: paused,  allowed: [nobody]}
+  - {from: paused,  to: running, allowed: [nobody]}
+  - {from: running, to: met,     allowed: [nobody]}
+
+hooks:
+  - {id: tell_contact, on: enter, state: met, kind: action, action: email.notify, reads: ['container:contact']}
+
+reactions:
+  - {id: show, kind: set, on: enter, state: running, when: 'f_kind == "reply"', target: container,
+     set: {f_due: 'f_due_at'}}
+
+accepts_reactions:
+  '*:start_reply':      {creates: [f_kind, f_due_at, f_hours, f_weight]}
+  '*:start_fix':        {creates: [f_kind, f_due_at]}
+  '*:pause_goals':      {moves: [paused]}
+  'w_case:resume_goals': {moves: [running]}
+  '*:answered':         {moves: [met]}
+
+placement_writable_by: [kernel]

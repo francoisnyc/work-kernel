@@ -1,0 +1,5 @@
+# Witness fixture: a container with no lifecycle, where customers open
+# w_who and w_plain Items (own).
+id: w_portal
+version: 1
+own: [w_who, w_plain]

@@ -1,0 +1,3 @@
+# Witness fixture: a flag inside a w_case; also a plain container.
+id: w_flag
+version: 1

@@ -1,0 +1,26 @@
+# Witness fixture: a container that asks each of its voters (for_each),
+# is carried by its votes (a move of its own, by consent, with a guard
+# that skips) and closes the votes left.
+id: w_ballot
+version: 1
+initial_state: draft
+
+fields:
+  - {id: f_voters, type: principal, multiple: true, max: 4}
+
+states:
+  - {id: draft,  category: todo}
+  - {id: open,   category: waiting}
+  - {id: passed, category: done}
+
+transitions:
+  - {from: draft, to: open, allowed: [creator], required: [f_voters]}
+  - {from: open, to: passed, allowed: [nobody], guard: 'children.w_vote.filter(c, c.state == "yes").size() >= 2'}
+
+reactions:
+  - {id: ask_voters, kind: create, on: enter, state: open, from: [draft], type: w_vote, version: 1,
+     for_each: f_voters, fields: {f_voter: 'each'}}
+  - {id: close_votes, kind: move, on: enter, state: passed, children: {of: [w_vote]}, to: closed, target_from: [pending]}
+
+accepts_reactions:
+  'w_vote:carry': {moves: [passed]}

@@ -1,0 +1,6 @@
+# Witness fixture: settings a create reaction of another Type may read.
+id: w_rules
+version: 1
+fields:
+  - {id: f_hours, type: int}
+readable_by_reactions: [f_hours]

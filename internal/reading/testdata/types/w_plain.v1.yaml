@@ -1,0 +1,5 @@
+# Witness fixture: a Type a customer may open, which shows them no field.
+id: w_plain
+version: 1
+fields:
+  - {id: f_body, type: string}

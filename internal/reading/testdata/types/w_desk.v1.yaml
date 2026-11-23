@@ -1,0 +1,5 @@
+# Witness fixture: a container of w_cases, linked to its rules.
+id: w_desk
+version: 1
+links:
+  - {name: rules, inverse: desks, targets: [w_rules], max: one}

@@ -1,0 +1,28 @@
+# Witness fixture: one vote inside a w_ballot. Its voter is unique among
+# the open votes of its ballot; its ballot's creator may not vote.
+id: w_vote
+version: 1
+initial_state: pending
+
+fields:
+  - {id: f_voter,    type: principal, writable_by: kernel, unique_among_siblings: [pending, yes]}
+  - {id: f_delegate, type: principal}
+
+states:
+  - {id: pending, category: active}
+  - {id: yes,     category: done}
+  - {id: closed,  category: canceled}
+
+transitions:
+  - {from: pending, to: yes, allowed: ['field:f_voter'], except: [container_creator]}
+  - {from: pending, to: pending, allowed: ['field:f_voter'], required: [f_delegate], sets: {f_voter: 'f_delegate'}}
+  - {from: pending, to: closed, allowed: [nobody]}
+
+reactions:
+  - {id: carry, kind: move, on: enter, state: yes, target: container, to: passed, target_from: [open], on_guard: skip}
+
+accepts_reactions:
+  'w_ballot:ask_voters':  {creates: [f_voter]}
+  'w_ballot:close_votes': {moves: [closed]}
+
+placement_writable_by: [kernel]

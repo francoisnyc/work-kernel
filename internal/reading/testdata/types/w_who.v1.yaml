@@ -1,0 +1,28 @@
+# Witness fixture: who may make a move. One state per kind of `allowed`
+# entry; a customer sees one field, and the notes inside a request of theirs.
+id: w_who
+version: 1
+initial_state: open
+
+fields:
+  - {id: f_title, type: string}
+  - {id: f_owner, type: principal}
+  - {id: f_secret, type: string}
+
+states:
+  - {id: open,         category: active}
+  - {id: by_staff,     category: active}
+  - {id: by_requester, category: active}
+  - {id: by_role,      category: active}
+  - {id: by_owner,     category: active}
+  - {id: by_root,      category: active}
+
+transitions:
+  - {from: open, to: by_staff}
+  - {from: open, to: by_requester, allowed: [creator]}
+  - {from: open, to: by_role,      allowed: ['role:lead']}
+  - {from: open, to: by_owner,     allowed: ['field:f_owner'], except: [creator]}
+  - {from: open, to: by_root,      allowed: ['principal:user:root', 'role:lead']}
+
+customer_fields: [f_title]
+shared: [w_note]

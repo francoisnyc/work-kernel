@@ -1,0 +1,43 @@
+# Witness fixture: a case that creates its goals, pauses and resumes
+# them, and reacts to what is created inside it (like incident and
+# sla_goal, without working time).
+id: w_case
+version: 1
+initial_state: new
+
+fields:
+  - {id: f_size,      type: enum, options: [small, large]}
+  - {id: f_owner,     type: principal}
+  - {id: f_target_at, type: datetime}
+  - {id: f_due,       type: datetime, writable_by: kernel}
+
+offers:
+  contact: f_owner
+
+states:
+  - {id: new,     category: triage}
+  - {id: working, category: active}
+  - {id: waiting, category: waiting}
+
+transitions:
+  - {from: new,     to: working}
+  - {from: working, to: waiting}
+  - {from: waiting, to: working}
+
+reactions:
+  - {id: start_reply, kind: create, on: enter, state: new, type: w_goal, version: 1,
+     fields: {f_kind: '"reply"', f_due_at: 'f_target_at', f_hours: 'container.linked.rules.f_hours',
+              f_weight: 'f_size == "large" ? 2 : 1'}}
+  - {id: start_fix, kind: create, on: enter, state: new, type: w_goal, version: 1,
+     fields: {f_kind: '"fix"', f_due_at: 'f_target_at'}}
+  - {id: pause_goals, kind: move, on: enter, state: waiting,
+     children: {of: [w_goal], when: 'child.f_kind == "reply"'}, to: paused, target_from: [running]}
+  - {id: resume_goals, kind: move, on: enter, state: working, from: [waiting],
+     children: {of: [w_goal]}, to: running, target_from: [paused]}
+  - {id: answered, kind: move, on: created_inside, of: [w_msg], by: not_creator,
+     children: {of: [w_goal], when: 'child.f_kind == "reply"'}, to: met, target_from: [running]}
+  - {id: back, kind: move, on: created_inside, of: [w_msg], by: creator, from: [waiting], to: working}
+  - {id: flagged, kind: move, on: created_inside, of: [w_flag], from: [new], to: working}
+
+accepts_reactions:
+  'w_goal:show': {sets: [f_due]}
