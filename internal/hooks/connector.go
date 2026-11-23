@@ -149,9 +149,13 @@ func (c *Connectors) WithConnection(connectorAtMajor string, conn Connection) *C
 // the compiled-in code; its answers are held to the action's contract like
 // every connector's.
 func (c *Connectors) WithConnector(connectorAtMajor string, conn Connector) *Connectors {
-	_, _ = connectorAtMajor, conn
 	with := *c
-	return &with // stub
+	with.local = maps.Clone(c.local)
+	if with.local == nil {
+		with.local = map[string]Connector{}
+	}
+	with.local[connectorAtMajor] = conn
+	return &with
 }
 
 // Connector returns the connector for connector@major (crm@1, hr@1): the
@@ -163,12 +167,16 @@ func (c *Connectors) Connector(connectorAtMajor string) (Connector, error) {
 }
 
 // resolve returns the connector for connector@major and its connection's
-// name. The connectors file is read again first if it changed; a
+// name. A Connector in this process (WithConnector) wins over every
+// other; the connectors file is read again first if it changed; a
 // connection named in code (WithConnection) wins over the file.
 func (c *Connectors) resolve(connectorAtMajor string) (Connector, string, error) {
 	connector, major, ok := parseConnectorAtMajor(connectorAtMajor)
 	if !ok {
 		return nil, "", fmt.Errorf("%w: %q is not <connector>@<major>", ErrConnectorUnconfigured, connectorAtMajor)
+	}
+	if local, ok := c.local[connectorAtMajor]; ok {
+		return local, connectorAtMajor, nil
 	}
 	conn, ok := c.conns[connectorAtMajor]
 	if !ok && c.file != nil {
