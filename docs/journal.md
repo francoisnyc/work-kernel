@@ -53,6 +53,21 @@ Ideas noted during the spike, not built yet.
     kernel build's: a new remote connector still needs a release).
   (Ventoux V1)
 
+- **Stories' Later items** (Ventoux V5; design.md, "Ventoux V5, as
+  built"):
+  - **contracts: principal kinds on pli-principal inputs.** A contract
+    cannot say which kinds of principal an input takes (`email.notify`'s
+    compiled-in code refuses customers, its contract does not say so), so
+    a story's fake can accept a recipient production refuses.
+  - Draft Types in a story (files beside `types/`), for slice 1: a story
+    that tests a new incident version before it is registered.
+  - `pli story run` against a server needs a simulation API; tests only
+    until then.
+  - A story's own reaction to a delivery the relay cannot make is a
+    failure after 300 refused passes (about 3 s): enough for a gap, which
+    never heals; revisit if a story needs a delivery that heals later.
+  (Ventoux V5)
+
 - Serve the Type format's JSON Schema through the API (V2c checks it in as
   a file only), so an authoring tool fetches the schema of the server it
   talks to. (Ventoux 2a, answer 17)
@@ -3049,3 +3064,66 @@ builds the real images and runs the pinned browser.
 
 **Open:** the action contracts' Later items (top of this file). **Next session:** Ventoux item 6
 (plain-language readings with witnesses) or item 3 (checks that prove properties, which can read risk).
+
+## 2026-11-23 — Ventoux V5: stories in simulated time (Phase D)
+
+**Built:** `internal/story`: a story is a YAML walkthrough of one or more Types (the people and their roles,
+a fake for every action from its contract, a timeline of one-line steps, and the **whole** expected timeline),
+run as an ordinary Go test in simulated time. `Parse`, `Check`, `Run`, `Compare` (and `Report`, `Renderer`)
+are the four exports item 6's witnesses will reuse. Six stories in `stories/`: vacation (approve, expiry,
+refund, HR outage and denial) and incident (reopen on a reply with a weekend pause, breach). `make stories`
+(`STORY=vacation/approve` runs one). design.md: "Ventoux V5, as built" (the grammar, how a run differs from
+production, the two harness bugs) and the V5 row. Each story's `author:` says "approval pending" until the
+owner reads it.
+
+**Kernel changes (four seams, counted; no production behaviour changed):** (1) `itemservice.Options.Clock`,
+tests only: a write is stamped with it, and `today` follows it; a guard test keeps it out of production
+code, another keeps `internal/story` out of every binary; (2) `hooks.Connectors.WithConnector`, the Go
+binding for any connector, ahead of remote and compiled-in ones, held to the contracts like every connector;
+(3) `workflow.Register`, pulled out of `NewWorker`, which uses it; (4) `api.Refusal`, the API's refusal
+reason for an item service error, so a story names a refusal as pli does.
+
+**Decided, each agreed:** Phase A's seven answers (YAML with one-line strings, `stories/` at the top level,
+Temporal's in-process test environment with a real item service, fakes from the contracts checked at load
+and at run time, the whole timeline with a multiset per instant, reads as a person, the first six stories,
+tests only). Phase B: the fourth seam; `reaction_skipped` lines hidden unless `show_skipped: true`
+(nothing is lost: a reaction that should have applied leaves its effect's line missing); a window form
+(`between TIME and TIME`) for timing the kernel does not promise, used only by the HR outage.
+
+**Tests:** 59 new Go test functions (story package 45, the four seams 14), with 94 table cases (parse 24
+problems, check 40, the renderer 30 events) and the six stories as subtests of `TestStories`; the two risks
+and the gap are tests of their own. **Test changes, agreed, each
+in its own commit:** in Phase B, the window form (parse, compare, the outage story); in Phase C, two of my
+Phase B tests: the continue-as-new test runs refund.yaml without its read at the withdrawal (the injected
+failures delay the refund past it, by design), and the name-clash case reads `inc`, so the clash is its
+only problem.
+
+**Surprises:** the dump of a real run showed every goal move writing two or three `reaction_skipped`
+records, hence `show_skipped`. Temporal's test environment never reports a child's continue-as-new as a
+completion: it reruns the child, so a start while running is the count. An update's answer can arrive
+before the workflow task that handled it has scheduled its activity: settle looked too early once in a full
+`-race` run (a read saw the balance before its deduction); it now round-trips the main loop and looks
+again. An update to a workflow that completes first is never answered there (seen once as a 30 s stall);
+a delivery now notices the completion. The harness's own correctness is a matter of counting the
+kernel's activities exactly: a workflow interceptor counts them when scheduled, a wrapper while an
+attempt runs, the cancel listener when one is canceled unstarted.
+
+**Numbers.** `go test -race ./...` green: workflow suite with the replay tests 331 s, item service 155 s,
+stories 17 s. Each story 0.3 to 0.9 s under `-race`; the expiry story's nine simulated days 0.26 s.
+Stability: the story package 30 times under `-race`, no failure and no race (180 story runs; the slowest,
+incident/reopen_on_reply, 0.84 s at most). Scenario twice on a fresh stack: 104 and
+104 s. Web Playwright 9 in 15.0 s; apps/poc's journeys 4 in 40.1 s.
+
+**Local workarounds, outside the repository (nothing committed):** dockerd started by hand, three times (it
+stopped mid-session and with each worker restart); Docker Hub answered 429, so the golang and nginx base
+images came from `mirror.gcr.io`, tagged with their usual names; Go modules for the image builds served
+from this machine's module cache (`go mod download` first; go.sum unchanged; `python3 -m http.server` as
+the GOPROXY, builds on the host network); the web and poc images built from sites built on this machine
+with `VITE_DEV_USERS=1`, through a compose override in the scratchpad; Playwright through local configs
+(excluded in `.git/info/exclude`) pointing at this container's Chromium. CI builds the real images and runs
+the pinned browser.
+
+**Open:** the stories' Later items (top of this file). **Next session:** the owner approves the six
+stories; then Ventoux item 6 (plain-language readings with witnesses), which reuses `Parse`, `Check`,
+`Run` and `Compare`.
+
