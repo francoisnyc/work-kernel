@@ -27,7 +27,7 @@ version: 1
 initial_state: new
 fields:
   - {id: f_customer, type: string}
-  - {id: f_plan,     type: enum, options: [free, pro, unknown]}
+  - {id: f_plan,     type: enum, options: [free, pro, enterprise, unknown]}
   - {id: f_on_hold,  type: bool}
   - {id: f_amount,   type: int}
   - {id: f_ref,      type: string}

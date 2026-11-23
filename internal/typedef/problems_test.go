@@ -230,7 +230,7 @@ states:
 		fix: [][2]string{{`  - {id: done, category: done}
 `, `  - {id: done, category: done}
 hooks:
-  - {id: nope, on: timer, kind: action, action: email.notify, reads: [f_title]}
+  - {id: nope, on: timer, kind: action, action: email.notify, reads: [creator]}
 `}},
 	},
 	{
@@ -244,12 +244,12 @@ states:
   - {id: open, category: todo}
   - {id: done, category: done}
 hooks:
-  - {id: mail, on: reaction, reaction: nope, kind: action, action: email.notify, reads: [f_title]}
+  - {id: mail, on: reaction, reaction: nope, kind: action, action: email.notify, reads: [creator]}
 `,
 		path: "hooks[0].reaction", line: 10, col: 30, typeID: "memo", version: 1,
 		old: `unknown reaction "nope"`,
 		fix: [][2]string{{`hooks:
-  - {id: mail, on: reaction, reaction: nope, kind: action, action: email.notify, reads: [f_title]}
+  - {id: mail, on: reaction, reaction: nope, kind: action, action: email.notify, reads: [creator]}
 `, ``}},
 	},
 	{
@@ -403,14 +403,14 @@ version: 1
 initial_state: open
 fields:
   - {id: f_title, type: string}
-  - {id: f_ok, type: string, writable_by: kernel}
+  - {id: f_ok, type: principal, writable_by: kernel}
 states:
   - {id: open, category: todo}
   - {id: done, category: done}
 transitions:
   - {from: open, to: done, clears: [f_title]}
 hooks:
-  - {id: credit, on: transition, from: open, to: done, kind: check, action: erp.get_credit_status, reads: [f_title], writes: [f_ok]}
+  - {id: credit, on: transition, from: open, to: done, kind: check, action: hr.manager_of, reads: [created_on_behalf_of, created_by], writes: [f_ok]}
 `,
 		path: "transitions[0].clears", line: 11, col: 28, typeID: "memo", version: 1,
 		old: `it clears fields and is held by the check credit`,
@@ -440,19 +440,19 @@ version: 1
 initial_state: open
 fields:
   - {id: f_title, type: string}
-  - {id: f_ok, type: string, writable_by: kernel}
+  - {id: f_ok, type: principal, writable_by: kernel}
 states:
   - {id: open, category: todo}
   - {id: done, category: done}
 transitions:
   - {from: open, to: done}
 hooks:
-  - {id: credit, on: transition, from: open, to: done, kind: check, action: erp.get_credit_status, reads: [f_title], writes: [f_ok]}
-  - {id: credit2, on: transition, from: open, to: done, kind: check, action: erp.get_credit_status, reads: [f_title], writes: [f_ok]}
+  - {id: credit, on: transition, from: open, to: done, kind: check, action: hr.manager_of, reads: [created_on_behalf_of, created_by], writes: [f_ok]}
+  - {id: credit2, on: transition, from: open, to: done, kind: check, action: hr.manager_of, reads: [created_on_behalf_of, created_by], writes: [f_ok]}
 `,
 		path: "hooks[1]", line: 14, col: 5, typeID: "memo", version: 1,
 		old: `already has the check "credit"`,
-		fix: [][2]string{{`  - {id: credit2, on: transition, from: open, to: done, kind: check, action: erp.get_credit_status, reads: [f_title], writes: [f_ok]}
+		fix: [][2]string{{`  - {id: credit2, on: transition, from: open, to: done, kind: check, action: hr.manager_of, reads: [created_on_behalf_of, created_by], writes: [f_ok]}
 `, ``}},
 	},
 	{
