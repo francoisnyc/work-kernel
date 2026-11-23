@@ -87,16 +87,16 @@ task. Security operations (theme 4) is then breadth, built on proven pieces.
 `docs/plans/ideas-from-ventoux.md`, in the order the "Ideas from Ventoux build
 order" in `docs/design.md` sets.
 
-- **Now:** V2b (`ValidateTypes`, `pli types validate`).
-- **Next, understanding before breadth:** plain-language readings with
+- **Done:** V2a (Type problems as data), V2b (`ValidateTypes`, `pli types
+  validate`), V2c (the Type format as JSON Schema), V1 (action contracts,
+  frozen in `contracts/` and readable through `ListActions`).
+- **Now, understanding before breadth:** plain-language readings with
   witnesses (item 6) and stories in simulated time (item 5). A kernel whose
   rules interact (guards, reactions, holds, timers) is a rules engine, and
   rules engines are hard to reason about once rules interact; for a
   non-developer author, the reading and the story are the review, and the
   safety.
-- **Then:** V1, action contracts (the hook protocol is their first version),
-  the catalogue an assistant chooses actions from; V2c (the Type format as
-  JSON Schema); a semantic diff (item 7); patterns (item 8); checks that prove
+- **Then:** a semantic diff (item 7); patterns (item 8); checks that prove
   properties (item 3).
 - **Presentation hints on the Type; screens beside it.** A Type carries
   only hints every interface can use: labels and help text for fields,
@@ -223,6 +223,12 @@ person's approval). Chosen because it proves two hard claims at once:
 Built as Types and an app, like the others, counting every kernel change it
 needs. A claims or complaints case can follow if a pilot asks for one.
 
+Its inbound half is **starting work** (`docs/plans/starting-work.md`,
+agreed 2026-11-23): who may start a workflow (a `start` block on the Type),
+and what else starts one (intakes from signed sources through a connector,
+correlation by a trusted key, timer starts). Each build step comes back for
+its own OK; the kill switch per intake comes before anything inbound.
+
 ### 5. The basics for real use
 
 Only what the domains force, in the order they force it. Likely first:
@@ -232,6 +238,9 @@ Only what the domains force, in the order they force it. Likely first:
   replaces the relay's polling rather than adding a process beside it, then
   Watch and notifications on top of it
   (`docs/research/event-stream-from-the-write-ahead-log.md`);
+- agents need the `create` power to create, and the latest version's rules
+  govern creates and placement of any version (starting work, steps 1 and
+  2b);
 - outbound webhooks on that stream for systems that only want to know
   (every event a subscriber may see, through `policy.Project`, signed like
   hooks); kept apart from hooks, which are part of the rules;
