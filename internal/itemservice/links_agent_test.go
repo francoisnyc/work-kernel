@@ -30,7 +30,7 @@ func TestLinkAgent_NeedsAWritePower(t *testing.T) {
 	_, err = w.unlink(t, reader, x, "blocks", y)
 	assertForbidden(t, err)
 
-	// Any write power is enough in v1.
+	// Any write power is enough in v1, except for a create.
 	editor := scoped(t, w.k, w.ana, []uuid.UUID{uuid.Nil}, item.PowerEditFields)
 	w.mustLink(t, editor, y, "blocks", x)
 }
