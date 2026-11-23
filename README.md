@@ -98,6 +98,7 @@ let anyone on your network call the API with a dev token.
 export PLI_TOKENS=dev-tokens.example.yaml
 pli --as ana type list
 pli --as ana type validate types/   # draft Types checked against the registered ones; nothing registered
+pli --as ana type explain vacation_request@3   # a Type in plain language, as readings/ holds it
 pli --as ana action list            # the actions a hook may name, with their contracts
 ```
 
