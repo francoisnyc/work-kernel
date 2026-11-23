@@ -173,12 +173,15 @@ Only what the domains force, in the order they force it. Likely first:
 - issue keys, totals, `update_time`, search inside a container (the PoC apps'
   list in `docs/design.md`, "PoC apps as built: what the API lacked").
 
-### 6. Tracking agents' work as a product
+### 6. The tracker as the showcase
 
-Parked. The ORI tracker stays the internal tool this kernel is built with.
-Trackers that assign work to agents already exist (Linear, Jira, GitHub, and
-many open-source ones); what the kernel adds, rules an agent cannot get
-around, is better shown in themes 2 and 3.
+The ORI tracker, used to build this kernel, is where themes 2 and 3 are
+shown: an agent that cannot pass a person's gate, injected text that changes
+nothing, a context pack anyone can inspect. Trackers that assign work to
+agents already exist (Linear, Jira, GitHub, and many open-source ones), so
+the tracker improves only where it demonstrates one of those, never toward
+feature parity with them. Whether it becomes a product is decided later, on
+evidence: whether people outside want what it shows.
 
 ## How it is tracked
 
