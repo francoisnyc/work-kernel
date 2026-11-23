@@ -12,14 +12,10 @@
 // (KeyParts, LeftOut), and a third requires every element of every Type in
 // types/ to be cited by a sentence.
 //
-// Phase B stub: the types, the closed lists and the key table are the
-// spec; Read and Text are not written yet.
+// Read renders a Type (render.go); Text lays it out for a person;
+// Condition reads one expression (expr.go). The wording of every kind is
+// in docs/design.md, "Ventoux V6, as built".
 package reading
-
-import (
-	"github.com/francoisnyc/work-kernel/internal/contracts"
-	"github.com/francoisnyc/work-kernel/internal/typedef"
-)
 
 // Part is a kind of sentence ("move"), or a clause a sentence of that kind
 // may carry ("move.guard"). A named string type keeps parts apart from
@@ -190,25 +186,4 @@ type ActionNote struct {
 	SideEffects bool
 	Risk        string
 	Description string
-}
-
-// Read renders a loaded Type. cat gives the actions' input names, reasons,
-// risk and descriptions.
-func Read(t *typedef.Type, cat *contracts.Catalog) *Reading {
-	return &Reading{} // Phase B stub
-}
-
-// Text is the reading as a person reads it: the heading, the key, the
-// fields, the numbered sentences under their sections, the actions and
-// what is not covered.
-func (r *Reading) Text() string {
-	return "" // Phase B stub
-}
-
-// Condition renders a CEL condition over the Type's fields (a guard, an
-// invariant's rule, a reaction's when) in words: the closed subset in
-// words ("`f_end` is on or after `f_start`"), anything else as "a rule
-// over {what it reads} holds".
-func Condition(t *typedef.Type, expr string) string {
-	return "" // Phase B stub
 }
