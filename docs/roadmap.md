@@ -191,8 +191,20 @@ Ventoux item 4, made central.
   (`docs/plans/build-step-type.md`) and the autonomous loop
   (`docs/plans/autonomous-loop.md`), the first users of agent tasks and their
   gates.
-- Later: action hooks and async completion, so a step's own Type starts the
-  agents it needs.
+- **Connectors: action hooks over the wire and async completion.** Today
+  a hook fires at three points: a `check` on a transition before it commits
+  (allow, deny or correct), and an `enrich` or `action` on entering a state,
+  after commit, as a durable activity. Missing: `action` over
+  `pli.hooks/v1` (built only compiled in), and the specified `pending`
+  outcome, so a long action (a scan, a person in another system, an agent
+  doing a task) completes later instead of failing as slow. Then a step's own
+  Type starts the agents it needs.
+- **A design rule to keep: hooks hang off the lifecycle, never off "any
+  change".** Hooks fire on transitions and state entry, so reading a Type
+  shows every call it makes. No "on any field changed" triggers and no exit
+  hooks: if something must happen when a field changes, that change becomes
+  a named transition with its own rules. (Systems that fire on any change
+  become rules triggering rules.) To record in `docs/design.md`.
 
 ### 4. A fourth domain: security operations (SOAR), an open-ended case
 
@@ -219,6 +231,13 @@ Only what the domains force, in the order they force it. Likely first:
   replaces the relay's polling rather than adding a process beside it, then
   Watch and notifications on top of it
   (`docs/research/event-stream-from-the-write-ahead-log.md`);
+- outbound webhooks on that stream for systems that only want to know
+  (every event a subscriber may see, through `policy.Project`, signed like
+  hooks); kept apart from hooks, which are part of the rules;
+- an open question, not a plan: recurring work outside any Item ("every
+  Monday, open a review"). Today time lives only in timers on a state; a
+  schedule may be better as an Item of its own than as a new kind of
+  trigger;
 - groups and grants, and readers taken from a field;
 - issue keys, totals, `update_time`, search inside a container (the PoC apps'
   list in `docs/design.md`, "PoC apps as built: what the API lacked").
