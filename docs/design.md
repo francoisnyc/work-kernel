@@ -35,6 +35,14 @@ small; everything product-specific is a Type or an app.
 - **A semantic model apart from its syntax.** The `typedef` structs are what a
   Type means. YAML, a builder or plain English are ways of writing one; checks,
   readings and the semantic diff work on the model, whichever wrote it.
+- **Hooks hang off the lifecycle, never off "any change".** A hook fires on a
+  transition (a `check`, before commit) or on entering a state (an `enrich` or
+  `action`, after commit), so reading a Type shows every call it makes. No
+  trigger on "any field changed" and no exit hooks: when something must happen
+  because a field changes, that change becomes a named transition with its own
+  rules. Systems that fire on any change end with rules triggering rules.
+  Outbound webhooks (`docs/roadmap.md`, theme 5) are subscribers to the event
+  stream, not hooks, and change nothing.
 
 ## Item
 

@@ -87,17 +87,26 @@ task. Security operations (theme 4) is then breadth, built on proven pieces.
 `docs/plans/ideas-from-ventoux.md`, in the order the "Ideas from Ventoux build
 order" in `docs/design.md` sets.
 
-- **Now:** V2b (`ValidateTypes`, `pli types validate`).
-- **Next, understanding before breadth:** plain-language readings with
+- **Done:** V2a (Type problems as data), V2b (`ValidateTypes`, `pli types
+  validate`), V2c (the Type format as JSON Schema), V1 (action contracts,
+  frozen in `contracts/` and readable through `ListActions`).
+- **Now, understanding before breadth:** plain-language readings with
   witnesses (item 6) and stories in simulated time (item 5). A kernel whose
   rules interact (guards, reactions, holds, timers) is a rules engine, and
   rules engines are hard to reason about once rules interact; for a
   non-developer author, the reading and the story are the review, and the
   safety.
-- **Then:** V1, action contracts (the hook protocol is their first version),
-  the catalogue an assistant chooses actions from; V2c (the Type format as
-  JSON Schema); a semantic diff (item 7); patterns (item 8); checks that prove
+- **Then:** a semantic diff (item 7); patterns (item 8); checks that prove
   properties (item 3).
+- **Presentation hints on the Type; screens beside it.** A Type carries
+  only hints every interface can use: labels and help text for fields,
+  states and moves; field order and groups; which fields summarise an Item
+  (card, list row, notification); input hints. From them every interface
+  gets a default screen the moment a Type loads. A custom screen is a
+  *view*: separate data naming a Type version. A view may hide more than
+  the Type allows, never less, and enforces nothing: moves still go through
+  the item service, visibility through `policy.Project`. Rules and screens
+  change at different speeds and are reviewed apart.
 - **Open-ended cases, as Type features:** what was built so far is mostly
   flows. Three pieces, each checkable data, in the spirit of CMMN (the ideas,
   not the notation): the work that *may* be added to a case at each point
@@ -166,6 +175,15 @@ Ventoux item 4, made central.
   - **First check before building:** whether the kernel can tell a call
     from the card (the person) from a call by the model. If it cannot,
     gated moves go through a signed link or an out-of-band step instead.
+  - **What the Type adds for chat:** each move becomes a tool whose input
+    schema comes from the Type's JSON Schema (V2c), so a move's `required`
+    fields are its form; a short "when to suggest this" line per move for
+    the model; a flag on moves with effects that can't be undone (send,
+    pay, close), shown on the card and never left to the model; fields
+    marked sensitive, never shown in the chat or given to the model, and
+    collected out of band; outside text shown on the card as from outside;
+    and which fields the model is told about after a click (the least that
+    lets it carry on).
   - **Chat is for doing and describing,** not for overviews: queues,
     boards and the roadmap stay in the tracker and the portal.
 - **A model suggesting moves on Items** (item 9).
@@ -173,8 +191,21 @@ Ventoux item 4, made central.
   (`docs/plans/build-step-type.md`) and the autonomous loop
   (`docs/plans/autonomous-loop.md`), the first users of agent tasks and their
   gates.
-- Later: action hooks and async completion, so a step's own Type starts the
-  agents it needs.
+- **Connectors: action hooks over the wire and async completion.** Today
+  a hook fires at three points: a `check` on a transition before it commits
+  (allow, deny or correct), and an `enrich` or `action` on entering a state,
+  after commit, as a durable activity. Missing: `action` over
+  `pli.hooks/v1` (built only compiled in), and the specified `pending`
+  outcome, so a long action (a scan, a person in another system, an agent
+  doing a task) completes later instead of failing as slow. Then a step's own
+  Type starts the agents it needs.
+- **A design rule to keep: hooks hang off the lifecycle, never off "any
+  change".** Hooks fire on transitions and state entry, so reading a Type
+  shows every call it makes. No "on any field changed" triggers and no exit
+  hooks: if something must happen when a field changes, that change becomes
+  a named transition with its own rules. (Systems that fire on any change
+  become rules triggering rules.) Recorded in `docs/design.md`,
+  "Architecture style".
 
 ### 4. A fourth domain: security operations (SOAR), an open-ended case
 
@@ -192,6 +223,12 @@ person's approval). Chosen because it proves two hard claims at once:
 Built as Types and an app, like the others, counting every kernel change it
 needs. A claims or complaints case can follow if a pilot asks for one.
 
+Its inbound half is **starting work** (`docs/plans/starting-work.md`,
+agreed 2026-11-23): who may start a workflow (a `start` block on the Type),
+and what else starts one (intakes from signed sources through a connector,
+correlation by a trusted key, timer starts). Each build step comes back for
+its own OK; the kill switch per intake comes before anything inbound.
+
 ### 5. The basics for real use
 
 Only what the domains force, in the order they force it. Likely first:
@@ -201,6 +238,16 @@ Only what the domains force, in the order they force it. Likely first:
   replaces the relay's polling rather than adding a process beside it, then
   Watch and notifications on top of it
   (`docs/research/event-stream-from-the-write-ahead-log.md`);
+- agents need the `create` power to create, and the latest version's rules
+  govern creates and placement of any version (starting work, steps 1 and
+  2b);
+- outbound webhooks on that stream for systems that only want to know
+  (every event a subscriber may see, through `policy.Project`, signed like
+  hooks); kept apart from hooks, which are part of the rules;
+- an open question, not a plan: recurring work outside any Item ("every
+  Monday, open a review"). Today time lives only in timers on a state; a
+  schedule may be better as an Item of its own than as a new kind of
+  trigger;
 - groups and grants, and readers taken from a field;
 - issue keys, totals, `update_time`, search inside a container (the PoC apps'
   list in `docs/design.md`, "PoC apps as built: what the API lacked").
