@@ -119,6 +119,31 @@ Ventoux item 4, made central.
   with a contract (V1): its inputs, a typed output, and that output marked
   untrusted. It proposes; the rules decide. (Ventoux's step advisor, layer 15,
   made general.)
+- **A context pack for every agent action.** What an agent is given when it
+  picks up an Item, assembled by the kernel from links, not by hand:
+  - **What it holds:** why the work exists (the parent epic and theme, the
+    design note), what "done" means (the brief and the agreed tests), where
+    it stands (fields and links), what it may do (the moves open to it now)
+    and what already happened (recent events, earlier attempts, the journal).
+  - **What it may see:** the pack goes through `policy.Project`, like every
+    outbound path.
+  - **What it may believe:** each value carries where it came from (theme
+    2), so a customer's text arrives marked untrusted and can inform but
+    never authorise.
+  - **Recorded:** the pack each action was given is kept, pinned to a
+    `commit_seq`, so "why did the agent do this?" shows what it saw, and the
+    action can be replayed after a Type or a prompt changes. It is a record
+    of what was read, never a new source of truth.
+  - **Compounding:** an agent writes back what it decided and learned onto
+    the Item (as `build_step` does with `f_journal`), and the next pack picks
+    it up.
+  - **Not yet:** search by similarity. Following links is predictable and
+    respects permissions; similarity search comes only when links are shown
+    not to be enough.
+
+  It needs specs linked at each level: the roadmap and design notes on
+  initiatives and epics, the brief and tests on each step (tracker story
+  `c732c32c`).
 - **A model suggesting moves on Items** (item 9).
 - **Agents building this kernel:** `build_step@1`
   (`docs/plans/build-step-type.md`) and the autonomous loop
