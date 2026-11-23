@@ -198,7 +198,7 @@ func FormatTime(day1, at time.Time) string {
 	at = at.UTC().Truncate(time.Second)
 	day := int(at.Sub(day1).Hours()/24) + 1
 	if at.Before(day1) {
-		day = -int(day1.Sub(at).Hours()/24) // day 0, day -1, ...
+		day = -int(day1.Sub(at).Hours() / 24) // day 0, day -1, ...
 		if !day1.AddDate(0, 0, day-1).After(at) {
 			day++
 		}
