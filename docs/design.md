@@ -4178,6 +4178,44 @@ per-create latest-version lookup; the readings' *Who starts it* and closing
 line. No schema, proto, migration or go.mod change; the JSON Schema gained
 `start`.
 
+## build_step as built (2026-11-22)
+
+`types/build_step.v1.yaml`: how one step of this repository is built, as
+a Type, so the process in `CLAUDE.md` ("How we work") is a rule the kernel
+enforces. It replaces the story for this repository's work (it keeps an
+`epic` link) and runs on the long-lived tracker stack, in `acme`, in the
+ORI space. Proposed in `docs/plans/build-step-type.md`; the loop that uses
+it is `docs/plans/autonomous-loop.md`. **No kernel, schema or API change:**
+every rule below already existed.
+
+- **Lifecycle.** questions -> answering -> writing_tests -> tests_proposed
+  -> building -> in_review -> done; building -> writing_tests when a test
+  must change; the owner drops a step from any state before done, and
+  restarts a dropped one at questions.
+- **The owner's moves.** Every approval (answering -> writing_tests,
+  tests_proposed -> building or back, in_review -> building or done, every
+  drop and restart) is `allowed: ['field:f_owner']`. A `field:` entry never
+  matches an agent, so an agent acting for the owner, whatever powers it
+  holds, gets `NOT_ALLOWED`, as does any other user.
+- **Only a maintainer creates a step.** `f_owner` is
+  `writable_by: ['role:maintainer']` and the invariant `owner_missing`
+  refuses a step without one. An agent holds no role: naming an owner is
+  `FIELD_NOT_WRITABLE`, leaving it out is `INVARIANT_FAILED`, so an agent
+  cannot create a step at all, and cannot change its owner.
+- **Required:** f_questions to answering, f_tests_ref to tests_proposed,
+  f_pr_url to in_review, f_journal to done.
+- **Frozen:** f_questions once the step has left answering (writing_tests
+  through done; not in dropped, so a restarted step can rewrite them);
+  f_tests_ref from tests_proposed on; f_owner from building on; f_pr_url
+  in in_review and done; f_journal in done. The move entering a state may
+  set what it freezes; the move leaving it may not.
+- **Six X -> dropped lines**, one per state: the loader has no `from:`
+  list (Later, with Ventoux item 8 and V2c).
+- **What it does not enforce:** the kernel governs the record, not the
+  repository: it freezes the tests' reference, not the files. Keeping the
+  two in step is CI's job (later). It holds only while no agent is given
+  `maintainer`.
+
 ## Out of scope for the spike
 
 The real UI (the generic web UI and the PoC apps above are
