@@ -98,6 +98,15 @@ order" in `docs/design.md` sets.
   the catalogue an assistant chooses actions from; V2c (the Type format as
   JSON Schema); a semantic diff (item 7); patterns (item 8); checks that prove
   properties (item 3).
+- **Presentation hints on the Type; screens beside it.** A Type carries
+  only hints every interface can use: labels and help text for fields,
+  states and moves; field order and groups; which fields summarise an Item
+  (card, list row, notification); input hints. From them every interface
+  gets a default screen the moment a Type loads. A custom screen is a
+  *view*: separate data naming a Type version. A view may hide more than
+  the Type allows, never less, and enforces nothing: moves still go through
+  the item service, visibility through `policy.Project`. Rules and screens
+  change at different speeds and are reviewed apart.
 - **Open-ended cases, as Type features:** what was built so far is mostly
   flows. Three pieces, each checkable data, in the spirit of CMMN (the ideas,
   not the notation): the work that *may* be added to a case at each point
@@ -166,6 +175,15 @@ Ventoux item 4, made central.
   - **First check before building:** whether the kernel can tell a call
     from the card (the person) from a call by the model. If it cannot,
     gated moves go through a signed link or an out-of-band step instead.
+  - **What the Type adds for chat:** each move becomes a tool whose input
+    schema comes from the Type's JSON Schema (V2c), so a move's `required`
+    fields are its form; a short "when to suggest this" line per move for
+    the model; a flag on moves with effects that can't be undone (send,
+    pay, close), shown on the card and never left to the model; fields
+    marked sensitive, never shown in the chat or given to the model, and
+    collected out of band; outside text shown on the card as from outside;
+    and which fields the model is told about after a click (the least that
+    lets it carry on).
   - **Chat is for doing and describing,** not for overviews: queues,
     boards and the roadmap stay in the tracker and the portal.
 - **A model suggesting moves on Items** (item 9).
