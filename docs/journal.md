@@ -214,6 +214,9 @@ Ideas noted during the spike, not built yet.
 - Action hooks on build_step through a pli.hooks/v1 connector: start a
   builder on entering `questions`, a reviewer on entering
   `tests_proposed`. (build_step@1)
+- A `sprint` link on a future build_step@2, so a step can join a sprint
+  like story, bug and task (build_step@1 has only `epic` and `blocks`; the
+  loop picks by `f_rank` and what nothing blocks). (build_step@1)
 - **High, before real use: move Items to a new Type version.** The kernel
   has no such operation, so every Item created before a hardening keeps its
   version's rules: an incident@2 is still narrowed by its requester, its
