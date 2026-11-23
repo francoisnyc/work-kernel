@@ -3,6 +3,7 @@ package story
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -196,19 +197,9 @@ func (l Line) Format(day1 time.Time) string {
 // the seconds are not zero.
 func FormatTime(day1, at time.Time) string {
 	at = at.UTC().Truncate(time.Second)
-	day := int(at.Sub(day1).Hours()/24) + 1
-	if at.Before(day1) {
-		day = -int(day1.Sub(at).Hours() / 24) // day 0, day -1, ...
-		if !day1.AddDate(0, 0, day-1).After(at) {
-			day++
-		}
-	}
+	day := int(math.Floor(at.Sub(day1).Hours()/24)) + 1 // day 0 is the day before day 1
 	of := at.Sub(day1.AddDate(0, 0, day-1))
-	h, m, sec := int(of.Hours()), int(of.Minutes())%60, int(of.Seconds())%60
-	if sec != 0 {
-		return fmt.Sprintf("day %d %02d:%02d:%02d", day, h, m, sec)
-	}
-	return fmt.Sprintf("day %d %02d:%02d", day, h, m)
+	return fmt.Sprintf("day %d %s", day, clockOf(of))
 }
 
 // Problem is something wrong with a story itself, found before it runs.
