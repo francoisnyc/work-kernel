@@ -111,20 +111,6 @@ func parseConnectorAtMajor(s string) (string, int, bool) {
 	return connector, n, ok
 }
 
-// declareRemote adds a remote operation's declaration to the catalog:
-// <connector>.<operation>@<major> (no major: 1), the kinds it serves, and
-// its input and output names in the order hooks map reads and writes to
-// them. Only package code and tests (export_test.go) call it.
-func declareRemote(actionName string, kinds []hookproto.Kind, inputs, outputs []string) {
-	ref, ok := parseAction(actionName)
-	if !ok {
-		panic("hooks: declareRemote: bad action name " + actionName)
-	}
-	catalogMu.Lock()
-	defer catalogMu.Unlock()
-	catalog[ref.key()] = declared(kinds, inputs, outputs, action{remote: true})
-}
-
 // --- resolving a connector ---
 
 // shared is what copies of one Connectors share.
@@ -414,20 +400,10 @@ func (r *remote) matches(d hookproto.Descriptor, a action, operation string) (ho
 	if !ok {
 		return mismatch("it has no operation %s", operation)
 	}
-	for _, k := range a.kinds {
-		if !slices.Contains(op.Kinds, k) {
-			return mismatch("%s is not a %s", operation, k)
-		}
-	}
-	if got := slices.Sorted(maps.Keys(op.InputSchema.Properties)); !slices.Equal(got, slices.Sorted(slices.Values(a.inputs))) {
-		return mismatch("%s takes %v, declared %v", operation, got, a.inputs)
-	}
-	var outputs []string
-	if op.OutputSchema != nil {
-		outputs = slices.Sorted(maps.Keys(op.OutputSchema.Properties))
-	}
-	if !slices.Equal(outputs, slices.Sorted(slices.Values(a.outputs))) {
-		return mismatch("%s returns %v, declared %v", operation, outputs, a.outputs)
+	// The operation must fit the action's contract (Ventoux V1): kinds,
+	// inputs and outputs with their types, side effects, reasons.
+	if err := a.contract.Matches(op); err != nil {
+		return mismatch("%v", err)
 	}
 	return op, nil
 }
