@@ -1,0 +1,42 @@
+# vacation_request@3: nobody decides. A submitted request reminds its
+# approver two days after it was submitted and again a day later (two
+# reminders at most), and expires after five days, emailing the requester.
+# Nothing is taken from the balance.
+story: a request nobody decides reminds its approver twice, then expires
+author: drafted by Claude from vacation_request@3's comments; approval pending
+day1: 2026-12-07   # a Monday
+
+people:
+  alice: {}
+  bob: {}
+  hana: {roles: [hr_admin]}
+
+fakes:
+  hr.manager_of@1:
+    - "when createdBy = alice: correct manager = bob"
+  email.notify@1:
+    - ok
+
+given:
+  - hana creates balance as leave_balance@1 with f_owner = alice, f_allowance = 20
+
+steps:
+  - day 1 08:55 alice creates request as vacation_request@3 with f_start = day 15, f_end = day 19, f_days = 5, f_leave_type = annual
+  - day 1 09:00 alice moves request to submitted
+  - day 6 09:00 hana sees balance with f_used = null
+
+until: day 10 00:00
+
+expect:
+  - "day 1 08:55 request: alice created it in draft"
+  - "day 1 09:00 request: alice asked draft -> submitted"
+  - "day 1 09:00 request: hr_check for alice moved it draft -> submitted: f_approver = bob; linked balance to balance"
+  # 48 hours after it entered submitted, then 24 hours later.
+  - "day 3 09:00 request: remind_approver for alice ran (remind run 1)"
+  - "day 3 09:00 email: notify for request (remind_approver): to = bob"
+  - "day 4 09:00 request: remind_approver for alice ran (remind run 2)"
+  - "day 4 09:00 email: notify for request (remind_approver): to = bob"
+  # 120 hours after it entered submitted.
+  - "day 6 09:00 request: timer for alice moved it submitted -> expired"
+  - "day 6 09:00 request: notify_expired for alice ran"
+  - "day 6 09:00 email: notify for request (notify_expired): to = alice"

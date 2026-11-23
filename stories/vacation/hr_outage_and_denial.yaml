@@ -1,0 +1,50 @@
+# vacation_request@3's HR check fails closed (design.md, "Next step:
+# incidents": checks are unchanged). While HR is down the check retries
+# within its 15-minute budget, then the request stays a draft
+# (budget_exhausted); asking again once HR is back is the requester's
+# rerun. HR not knowing someone denies their request (unknown_employee).
+#
+# The check gives up at its last retry inside the budget: retries come 1,
+# 2, 4, 8, 16 and 32 seconds apart, then every minute, so the last one is
+# 14 minutes 3 seconds after the request.
+story: the HR check fails closed while HR is down, and denies someone HR does not know
+author: drafted by Claude from vacation_request@3's comments and design.md; approval pending
+day1: 2026-12-07   # a Monday
+
+people:
+  alice: {}
+  bob: {}
+  carol: {}
+  hana: {roles: [hr_admin]}
+
+fakes:
+  hr.manager_of@1:
+    - "from day 1 09:00 until day 1 10:00: fail transient"
+    - "when createdBy = carol: deny unknown_employee"
+    - "when createdBy = alice: correct manager = bob"
+  email.notify@1:
+    - ok
+
+given:
+  - hana creates balance as leave_balance@1 with f_owner = alice, f_allowance = 20
+
+steps:
+  - day 1 09:00 alice creates request as vacation_request@3 with f_start = day 15, f_end = day 19, f_days = 5, f_leave_type = annual
+  - day 1 09:05 alice moves request to submitted
+  - day 1 09:30 alice sees request with f_approver = null
+  - day 1 10:30 alice moves request to submitted
+  - day 1 11:00 carol creates other as vacation_request@3 with f_start = day 15, f_end = day 16, f_days = 2, f_leave_type = annual
+  - day 1 11:05 carol moves other to submitted
+  - day 1 11:10 carol sees other with f_approver = null
+
+until: day 2 00:00
+
+expect:
+  - "day 1 09:00 request: alice created it in draft"
+  - "day 1 09:05 request: alice asked draft -> submitted"
+  - "day 1 09:19:03 request: hr_check for alice failed draft -> submitted: budget_exhausted"
+  - "day 1 10:30 request: alice asked draft -> submitted"
+  - "day 1 10:30 request: hr_check for alice moved it draft -> submitted: f_approver = bob; linked balance to balance"
+  - "day 1 11:00 other: carol created it in draft"
+  - "day 1 11:05 other: carol asked draft -> submitted"
+  - "day 1 11:05 other: hr_check for carol denied draft -> submitted: unknown_employee"

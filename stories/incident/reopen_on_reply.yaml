@@ -1,0 +1,113 @@
+# incident@3 in a portal (desk@2), on a calendar open Monday to Friday,
+# 09:00 to 17:00 UTC: as its comments, design.md and scenario C describe
+# it. kim, a customer, opens a P3 on a Friday afternoon (first response
+# 4 working hours, resolution 16). sam's reply meets first response;
+# waiting for kim pauses resolution over the weekend; kim's reply on Monday
+# brings the incident back in progress and resumes it; sam resolves; kim
+# reopens it, which starts a new resolution goal; sam resolves again, and
+# 120 hours later a timer closes it. kim sees her own fields only, and
+# none of the goals.
+#
+# The arithmetic, in working time:
+#   created Fri (day 5) 15:00: first response due Fri 2 h + Mon 2 h = Mon (day 8) 11:00;
+#     resolution due Fri 2 h + Mon 8 h + Tue 6 h = Tue (day 9) 15:00.
+#   paused Fri 16:30 after 1.5 h (5400 s); resumed Mon 10:00 with 14.5 h left:
+#     Mon 7 h + Tue 7.5 h = Tue (day 9) 16:30.
+#   resolved Mon 14:00: 5400 s + 4 h = 19800 s, met.
+#   reopened Tue 10:00: 16 h = Tue 7 h + Wed 8 h + Thu 1 h = Thu (day 11) 10:00;
+#     resolved Tue 11:00 after 3600 s, met; closed 120 h later, Sun (day 14) 11:00.
+story: a customer's reply brings a waiting incident back and resumes its resolution goal
+author: drafted by Claude from incident@3's comments, design.md and scenario C; approval pending
+day1: 2026-12-07   # a Monday
+
+people:
+  lea: {roles: [sla_admin, desk_agent]}
+  sam: {roles: [desk_agent]}
+  kim: {customer: true}
+
+names:
+  first: sla_goal in inc where f_metric = first_response
+  resolution: sla_goal in inc where f_metric = resolution
+
+hide_values:
+  sla_goal: [f_week, f_days_off, f_zone]
+
+fakes:
+  email.notify@1:
+    - ok
+
+given:
+  - 'lea creates cal as calendar@1 with f_name = "office hours", f_zone = "UTC", f_week = ["mon 09:00-17:00", "tue 09:00-17:00", "wed 09:00-17:00", "thu 09:00-17:00", "fri 09:00-17:00"]'
+  - lea creates policy as sla_policy@2 with f_name = "standard", f_first_response_s_p1 = 3600, f_first_response_s_p2 = 7200, f_first_response_s_p3 = 14400, f_first_response_s_p4 = 28800, f_resolution_s_p1 = 14400, f_resolution_s_p2 = 28800, f_resolution_s_p3 = 57600, f_resolution_s_p4 = 115200
+  - lea creates portal as desk@2 with f_key = "IT", f_name = "IT portal"
+  - lea links portal calendar cal
+  - lea links portal sla_policy policy
+
+steps:
+  - day 5 15:00 kim creates inc as incident@3 in portal with f_title = "Wifi keeps dropping", f_priority = P3
+  - day 5 15:00 kim sees inc fields f_priority, f_title
+  - day 5 15:00 kim cannot see first
+  - day 5 15:30 sam updates inc with f_assignee = sam
+  - day 5 15:30 sam moves inc to in_progress
+  - day 5 16:00 sam creates reply1 as reply@2 in inc with f_body = "Which client version?"
+  - day 5 16:30 sam moves inc to waiting_for_customer
+  - day 8 10:00 kim creates reply2 as reply@2 in inc with f_body = "Driver 4.2, still broken"
+  - day 8 14:00 sam moves inc to resolved with f_resolution = fixed
+  - day 9 10:00 kim moves inc to in_progress
+  - day 9 11:00 sam moves inc to resolved with f_resolution = workaround
+
+until: day 15 00:00
+
+expect:
+  # kim opens it: both goals start, and show their due instants.
+  - "day 5 15:00 inc: kim created it in new inside portal"
+  - "day 5 15:00 inc: sla_start_first_response for kim applied to first"
+  - "day 5 15:00 inc: sla_start_resolution for kim applied to resolution"
+  - "day 5 15:00 first: sla_start_first_response for kim created it in running inside inc: f_due_at = day 8 11:00, f_metric = first_response, f_started_at = day 5 15:00, f_target_s = 14400, f_week = ..., f_zone = ..."
+  - "day 5 15:00 first: show_first_response for kim applied to inc"
+  - "day 5 15:00 inc: show_first_response for kim updated it: f_due_first_response = day 8 11:00"
+  - "day 5 15:00 resolution: sla_start_resolution for kim created it in running inside inc: f_due_at = day 9 15:00, f_metric = resolution, f_started_at = day 5 15:00, f_target_s = 57600, f_week = ..., f_zone = ..."
+  - "day 5 15:00 resolution: show_resolution for kim applied to inc"
+  - "day 5 15:00 inc: show_resolution for kim updated it: f_due_resolution = day 9 15:00"
+  # sam takes it.
+  - "day 5 15:30 inc: sam updated it"
+  - "day 5 15:30 inc: sam moved it new -> in_progress"
+  # sam's reply meets first response.
+  - "day 5 16:00 reply1: sam created it in default inside inc"
+  - "day 5 16:00 inc: sla_answered for sam applied to first"
+  - "day 5 16:00 first: sla_answered for sam moved it running -> completed: f_due_at = null, f_elapsed_s = 3600, f_outcome = met"
+  - "day 5 16:00 first: clear_first_response for sam applied to inc"
+  - "day 5 16:00 inc: clear_first_response for sam updated it: f_due_first_response = null"
+  # Waiting for kim pauses resolution.
+  - "day 5 16:30 inc: sam moved it in_progress -> waiting_for_customer"
+  - "day 5 16:30 inc: sla_pause for sam applied to resolution"
+  - "day 5 16:30 resolution: sla_pause for sam moved it running -> paused: f_due_at = null, f_elapsed_s = 5400"
+  - "day 5 16:30 resolution: hide_resolution for sam applied to inc"
+  - "day 5 16:30 inc: hide_resolution for sam updated it: f_due_resolution = null"
+  # kim's reply on Monday brings it back and resumes resolution.
+  - "day 8 10:00 reply2: kim created it in default inside inc"
+  - "day 8 10:00 inc: customer_replied for kim moved it waiting_for_customer -> in_progress"
+  - "day 8 10:00 inc: customer_replied for kim applied to inc"
+  - "day 8 10:00 inc: sla_resume for kim applied to resolution"
+  - "day 8 10:00 resolution: sla_resume for kim moved it paused -> running: f_due_at = day 9 16:30, f_started_at = day 8 10:00"
+  - "day 8 10:00 resolution: show_resolution for kim applied to inc"
+  - "day 8 10:00 inc: show_resolution for kim updated it: f_due_resolution = day 9 16:30"
+  # sam resolves it.
+  - "day 8 14:00 inc: sam moved it in_progress -> resolved"
+  - "day 8 14:00 inc: sla_stop for sam applied to resolution"
+  - "day 8 14:00 resolution: sla_stop for sam moved it running -> completed: f_due_at = null, f_elapsed_s = 19800, f_outcome = met"
+  - "day 8 14:00 resolution: clear_resolution for sam applied to inc"
+  - "day 8 14:00 inc: clear_resolution for sam updated it: f_due_resolution = null"
+  # kim reopens it: a new resolution goal.
+  - "day 9 10:00 inc: kim moved it resolved -> in_progress: f_resolution = null"
+  - "day 9 10:00 inc: sla_restart_resolution for kim applied to resolution#2"
+  - "day 9 10:00 resolution#2: sla_restart_resolution for kim created it in running inside inc: f_due_at = day 11 10:00, f_metric = resolution, f_started_at = day 9 10:00, f_target_s = 57600, f_week = ..., f_zone = ..."
+  - "day 9 10:00 resolution#2: show_resolution for kim applied to inc"
+  - "day 9 10:00 inc: show_resolution for kim updated it: f_due_resolution = day 11 10:00"
+  # sam resolves it again; 120 hours later the timer closes it.
+  - "day 9 11:00 inc: sam moved it in_progress -> resolved"
+  - "day 9 11:00 inc: sla_stop for sam applied to resolution#2"
+  - "day 9 11:00 resolution#2: sla_stop for sam moved it running -> completed: f_due_at = null, f_elapsed_s = 3600, f_outcome = met"
+  - "day 9 11:00 resolution#2: clear_resolution for sam applied to inc"
+  - "day 9 11:00 inc: clear_resolution for sam updated it: f_due_resolution = null"
+  - "day 14 11:00 inc: timer for sam moved it resolved -> closed"
