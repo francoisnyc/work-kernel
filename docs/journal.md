@@ -3065,6 +3065,41 @@ builds the real images and runs the pinned browser.
 **Open:** the action contracts' Later items (top of this file). **Next session:** Ventoux item 6
 (plain-language readings with witnesses) or item 3 (checks that prove properties, which can read risk).
 
+## 2026-11-23 — Starting work: a proposal (docs only)
+
+**Built:** no code. `docs/plans/starting-work.md`, a proposal in two parts. (1) Who may start a workflow: agents
+need the `create` power for every create (today any write power is enough), then an optional `start` block on a
+Type, `{in: [container Types, top], allowed: [...]}`, judged by `policy` like a transition's `allowed`, every
+entry reading the container; the latest version's block governs creates of every version; no block, no change.
+(2) Triggers: source contracts in `contracts/`, intakes on the Type with one verdict per event type (`create`,
+`correlate`, `create_or_correlate`, `signal`), inbound `pli.hooks/v1` only through a connector, an inbox under
+the erasure rule, an `intake:` principal named in `start.allowed`, intake-written fields untrusted at load,
+`external_keys` deciding create-or-correlate races, timer starts as create reactions on a container's acting
+timer, signals specified only. Mapped to BPMN start and catch events, Bonita and Camunda. Phase A's 22 answers
+are recorded in it.
+
+**Kernel changes:** none (proposed: six steps; three need a second OK: the inbox, `external_keys`, the signal
+key table, with the `intake:` principal and `Internal().Create`).
+
+**Surprises:** `item.Writes` lets any write power create, though the brief assumed `create` was needed.
+`container_creator` existed only in `except`. A caller picking an old Type version dodges any rule added in a
+later one: the same hole placement has (to close as its own step). The vendor docs were unreachable from this session,
+so the Bonita and Camunda points not already in the connectors report are marked UNVERIFIED.
+
+**Checked:** the claim that the `create` power touches no existing test, by running it: in a throwaway worktree,
+`Create` required `create`, and `internal/itemservice`, `internal/api`, `cmd/pli` and `internal/workflow` passed
+unchanged (dockerd started by hand, as before). Not committed; the worktree was removed.
+
+**Review (2026-11-23):** one gap filled (a reopened Item's correlation key stays closed; events keep going to
+the newer case), and the eight open questions decided: reasons stay in the message; placement gets the same
+latest-version rule as its own step; an intake on a Type without a `start` block is refused at load; erasure
+reads an `x-pli-personal` flag on source outputs; a correlate on a frozen field fails; an intake kill switch is
+required before inbound; a mapped external user must pass part 1 too; the UNVERIFIED precedents are checked
+before any is relied on.
+
+**Open:** none in the proposal; each build step comes back for its own OK. **Next session:** step 1 (the
+`create` power), Phase A.
+
 ## 2026-11-23 — Ventoux V5: stories in simulated time (Phase D)
 
 **Built:** `internal/story`: a story is a YAML walkthrough of one or more Types (the people and their roles,
@@ -3126,4 +3161,3 @@ the pinned browser.
 **Open:** the stories' Later items (top of this file). **Next session:** the owner approves the six
 stories; then Ventoux item 6 (plain-language readings with witnesses), which reuses `Parse`, `Check`,
 `Run` and `Compare`.
-
