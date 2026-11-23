@@ -71,9 +71,18 @@
 //	time person moves ITEM to STATE [with values]
 //	time person links ITEM LINK ITEM
 //	time person unlinks ITEM LINK ITEM
+//	time person places ITEM in ITEM                  moves it into a container (Update with a move)
+//	time person places ITEM at the top level
+//	time person narrows ITEM to person, person, ...  sets its readers (Update with a policy change)
 //	time person sees ITEM with values                each field holds that value (null: unset or hidden)
+//	                                                 or ROLLUP.KEY = N: a rollup's count for one
+//	                                                 category or state (0: it counts nothing)
 //	time person sees ITEM fields field, field, ...   exactly the fields set and visible to the person
 //	time person cannot see ITEM
+//
+// A place that would widen who can see is sent unconfirmed, so it is
+// refused WIDEN_NOT_CONFIRMED. A step may name an Item the kernel created
+// by its name rule, before any read named it.
 //
 // A write step may end in "-> refused REASON", REASON being the API's
 // refusal reason (NOT_ALLOWED, GUARD_FAILED, ...): the write must be

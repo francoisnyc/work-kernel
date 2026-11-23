@@ -148,9 +148,26 @@ func (c *checker) step(st Step) {
 		return // its create had a problem already
 	}
 	switch st.Verb {
-	case Updates, Sees:
+	case Updates:
 		if msg := c.values(tys, st.Values); msg != "" {
 			c.fail(st.Line, "%s", msg)
+		}
+	case Sees:
+		if msg := c.seen(tys, st.Values); msg != "" {
+			c.fail(st.Line, "%s", msg)
+		}
+	case Places:
+		if !st.Top {
+			if _, ok := c.known(st.In); !ok {
+				c.fail(st.Line, "in %s: no step created %s before", st.In, st.In)
+			}
+		}
+	case Narrows:
+		for _, r := range st.Readers {
+			if !slices.ContainsFunc(c.s.People, func(p Person) bool { return p.Name == r }) {
+				c.fail(st.Line, "%s is not one of the story's people", r)
+				return
+			}
 		}
 	case Moves:
 		if !slices.ContainsFunc(tys, func(ty *typedef.Type) bool { _, ok := ty.State(st.To); return ok }) {
@@ -202,6 +219,31 @@ func fieldOf(tys []*typedef.Type, id string) (typedef.Field, bool) {
 		}
 	}
 	return typedef.Field{}, false
+}
+
+// seen checks what a read sees: field = value, or ROLLUP.KEY = N, a
+// rollup's count for one category or state (0 when it counts nothing).
+func (c *checker) seen(tys []*typedef.Type, vals []Assignment) string {
+	var fields []Assignment
+	for _, a := range vals {
+		id, key, isRollup := strings.Cut(a.Field, ".")
+		if !isRollup {
+			fields = append(fields, a)
+			continue
+		}
+		if !slices.ContainsFunc(tys, func(ty *typedef.Type) bool {
+			return slices.ContainsFunc(ty.Rollups, func(r typedef.Rollup) bool { return r.ID == id })
+		}) {
+			return fmt.Sprintf("%s has no rollup %s", typeName(tys), id)
+		}
+		if key == "" {
+			return fmt.Sprintf("%s: name the category or state it counts, such as %s.done", a.Field, id)
+		}
+		if a.Value.Kind != Int || a.Value.Int < 0 {
+			return fmt.Sprintf("%s: a rollup counts, so want a whole number", a.Field)
+		}
+	}
+	return c.values(tys, fields)
 }
 
 // values checks field = value against the Type: "" when every one fits.

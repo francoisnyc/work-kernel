@@ -546,7 +546,7 @@ func parseStep(day1 time.Time, line string, timed bool) (Step, error) {
 	if st.Actor, err = word(i, "who acts, then what they do"); err != nil {
 		return st, err
 	}
-	verb, err := word(i+1, "what "+st.Actor+" does: creates, updates, moves, links, unlinks, sees or cannot see")
+	verb, err := word(i+1, "what "+st.Actor+" does: creates, updates, moves, links, unlinks, places, narrows, sees or cannot see")
 	if err != nil {
 		return st, err
 	}
@@ -673,6 +673,54 @@ func parseStep(day1 time.Time, line string, timed bool) (Step, error) {
 		default:
 			return st, fmt.Errorf("sees %s: want with field = value, ... or fields f, f, ...", st.Item)
 		}
+	case "places":
+		st.Verb = Places
+		if st.Item, err = word(j, "the Item's name"); err != nil {
+			return st, err
+		}
+		switch {
+		case j+1 < len(toks) && toks[j+1].is("in"):
+			if st.In, err = word(j+2, "the container's name after in"); err != nil {
+				return st, err
+			}
+			if err := end(j + 3); err != nil {
+				return st, err
+			}
+		case j+3 < len(toks) && toks[j+1].is("at") && toks[j+2].is("the") && toks[j+3].is("top"):
+			if j+4 >= len(toks) || !toks[j+4].is("level") {
+				return st, fmt.Errorf("places %s: want in ITEM or at the top level", st.Item)
+			}
+			st.Top = true
+			if err := end(j + 5); err != nil {
+				return st, err
+			}
+		default:
+			return st, fmt.Errorf("places %s: want in ITEM or at the top level", st.Item)
+		}
+	case "narrows":
+		st.Verb = Narrows
+		if st.Item, err = word(j, "the Item's name"); err != nil {
+			return st, err
+		}
+		if j+1 >= len(toks) || !toks[j+1].is("to") {
+			return st, fmt.Errorf("narrows %s: want to person, person, ...", st.Item)
+		}
+		k := j + 2
+		for {
+			p, err := word(k, "a person's name")
+			if err != nil {
+				return st, err
+			}
+			st.Readers = append(st.Readers, p)
+			if k+1 < len(toks) && toks[k+1].is(",") {
+				k += 2
+				continue
+			}
+			if err := end(k + 1); err != nil {
+				return st, err
+			}
+			break
+		}
 	case "cannot":
 		if j >= len(toks) || !toks[j].is("see") {
 			return st, fmt.Errorf("want cannot see ITEM")
@@ -685,7 +733,7 @@ func parseStep(day1 time.Time, line string, timed bool) (Step, error) {
 			return st, err
 		}
 	default:
-		return st, fmt.Errorf("%q is not something a step does: creates, updates, moves, links, unlinks, sees or cannot see", verb)
+		return st, fmt.Errorf("%q is not something a step does: creates, updates, moves, links, unlinks, places, narrows, sees or cannot see", verb)
 	}
 	if st.Refused != "" && (st.Verb == Sees || st.Verb == SeesFields || st.Verb == CannotSee) {
 		return st, fmt.Errorf("only a write may be refused: a read says what it sees")
