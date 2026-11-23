@@ -32,7 +32,8 @@ Four properties follow from it:
 ## Six months from now
 
 Done when: **in each of four domains (workflow, case management, issue
-tracking, security operations), a non-developer's plain-English description
+tracking, security operations), with at least one open-ended case whose work is
+not known up front, a non-developer's plain-English description
 becomes Types the kernel checks, explains and tests; each runs with at least
 one agent task; and an injected instruction planted in its data changes
 nothing its rules do not allow.**
@@ -47,7 +48,8 @@ kernel is evidence it does not.
 ## What exists already
 
 - **Three domains proven:** the vacation request (workflow), the IT desk with
-  SLAs and a customer portal (case management), the PLAT project (issue
+  SLAs and a customer portal (case management, though mostly a flow: no
+  domain yet is a case whose work is not known up front), the PLAT project (issue
   tracking).
 - **Parts of the injection defence:** an agent never passes a gate a Type
   gives to a person (`field:` never matches an agent); an agent's write needs
@@ -96,6 +98,12 @@ order" in `docs/design.md` sets.
   the catalogue an assistant chooses actions from; V2c (the Type format as
   JSON Schema); a semantic diff (item 7); patterns (item 8); checks that prove
   properties (item 3).
+- **Open-ended cases, as Type features:** what was built so far is mostly
+  flows. Three pieces, each checkable data, in the spirit of CMMN (the ideas,
+  not the notation): the work that *may* be added to a case at each point
+  (so an agent suggests only from that list), stages that group parallel
+  work, and conditions that switch work on when the case changes. Today a
+  case can gather linked Items and carry rollups and invariants, no more.
 - **Throughout:** every way of writing a Type (YAML, a builder, plain English)
   fills in the same semantic model (`typedef`); checks, readings and the diff
   work on the model, never on one syntax.
@@ -119,6 +127,47 @@ Ventoux item 4, made central.
   with a contract (V1): its inputs, a typed output, and that output marked
   untrusted. It proposes; the rules decide. (Ventoux's step advisor, layer 15,
   made general.)
+- **A context pack for every agent action.** What an agent is given when it
+  picks up an Item, assembled by the kernel from links, not by hand:
+  - **What it holds:** why the work exists (the parent epic and theme, the
+    design note), what "done" means (the brief and the agreed tests), where
+    it stands (fields and links), what it may do (the moves open to it now)
+    and what already happened (recent events, earlier attempts, the journal).
+  - **What it may see:** the pack goes through `policy.Project`, like every
+    outbound path.
+  - **What it may believe:** each value carries where it came from (theme
+    2), so a customer's text arrives marked untrusted and can inform but
+    never authorise.
+  - **Recorded:** the pack each action was given is kept, pinned to a
+    `commit_seq`, so "why did the agent do this?" shows what it saw, and the
+    action can be replayed after a Type or a prompt changes. It is a record
+    of what was read, never a new source of truth.
+  - **Compounding:** an agent writes back what it decided and learned onto
+    the Item (as `build_step` does with `f_journal`), and the next pack picks
+    it up.
+  - **Not yet:** search by similarity. Following links is predictable and
+    respects permissions; similarity search comes only when links are shown
+    not to be enough.
+
+  It needs specs linked at each level: the roadmap and design notes on
+  initiatives and epics, the brief and tests on each step (tracker story
+  `c732c32c`).
+- **Work done from a chat.** An MCP server for the kernel, the agent's door
+  (every answer through `policy.Project`), and cards rendered in any chat
+  client that supports MCP Apps (the standard extension for interactive UI
+  in a conversation):
+  - **Cards come from the Type, never hand-built:** an Item's fields, one
+    button per move open to the caller now, a form for the move's
+    `required` fields. A Type written in plain English has its chat UI the
+    moment it loads.
+  - **The model proposes, the person clicks:** a gate that belongs to a
+    person is passed by the person's click, sent from the card to the
+    kernel, never by the model calling the same tool.
+  - **First check before building:** whether the kernel can tell a call
+    from the card (the person) from a call by the model. If it cannot,
+    gated moves go through a signed link or an out-of-band step instead.
+  - **Chat is for doing and describing,** not for overviews: queues,
+    boards and the roadmap stay in the tracker and the portal.
 - **A model suggesting moves on Items** (item 9).
 - **Agents building this kernel:** `build_step@1`
   (`docs/plans/build-step-type.md`) and the autonomous loop
@@ -127,13 +176,21 @@ Ventoux item 4, made central.
 - Later: action hooks and async completion, so a step's own Type starts the
   agents it needs.
 
-### 4. A fourth domain: security operations (SOAR)
+### 4. A fourth domain: security operations (SOAR), an open-ended case
 
-An alert arrives, is enriched by outside systems, triaged (by an agent task),
-and contained (an action with a side effect, behind a person's approval).
-The domain is chosen because it is the hardest test of theme 2: an alert's
-text is written by an attacker. Built as Types and an app, like the others,
-counting every kernel change it needs.
+An alert opens a case, and the work depends on what turns up: enrich an
+address, isolate a host, ask the user, escalate. It is outside systems,
+an agent triaging, and containment (an action with a side effect, behind a
+person's approval). Chosen because it proves two hard claims at once:
+
+- **Open-ended cases** (theme 1): an agent suggests the next piece of work
+  only from what the Type allows at that point; a person approves what
+  matters. This is what buyers otherwise go to Pega or Flowable for.
+- **Injection resistance** (theme 2): an alert's text is written by an
+  attacker.
+
+Built as Types and an app, like the others, counting every kernel change it
+needs. A claims or complaints case can follow if a pilot asks for one.
 
 ### 5. The basics for real use
 
@@ -148,12 +205,15 @@ Only what the domains force, in the order they force it. Likely first:
 - issue keys, totals, `update_time`, search inside a container (the PoC apps'
   list in `docs/design.md`, "PoC apps as built: what the API lacked").
 
-### 6. Tracking agents' work as a product
+### 6. The tracker as the showcase
 
-Parked. The ORI tracker stays the internal tool this kernel is built with.
-Trackers that assign work to agents already exist (Linear, Jira, GitHub, and
-many open-source ones); what the kernel adds, rules an agent cannot get
-around, is better shown in themes 2 and 3.
+The ORI tracker, used to build this kernel, is where themes 2 and 3 are
+shown: an agent that cannot pass a person's gate, injected text that changes
+nothing, a context pack anyone can inspect. Trackers that assign work to
+agents already exist (Linear, Jira, GitHub, and many open-source ones), so
+the tracker improves only where it demonstrates one of those, never toward
+feature parity with them. Whether it becomes a product is decided later, on
+evidence: whether people outside want what it shows.
 
 ## How it is tracked
 
