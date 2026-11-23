@@ -85,7 +85,7 @@ func (k *Service) write(ctx context.Context, p item.Principal, key, hash string,
 		}
 		// apply gets the transaction wrapped, so that the write's time can
 		// travel with it (stampWrite, appendEvent).
-		res, err = apply(&stampedTx{Tx: tx, skew: k.clockSkew})
+		res, err = apply(&stampedTx{Tx: tx, skew: k.clockSkew, clock: k.clock})
 		if err != nil {
 			return err
 		}
@@ -366,8 +366,22 @@ func sortedKeys(m map[string]any) []string {
 // place of a subclass).
 type stampedTx struct {
 	pgx.Tx
-	skew time.Duration // Options.ClockSkew; zero outside tests
-	at   *time.Time    // set by stampWrite
+	skew  time.Duration    // Options.ClockSkew; zero outside tests
+	clock func() time.Time // Options.Clock; nil outside tests
+	at    *time.Time       // set by stampWrite
+}
+
+// fromClock reads Options.Clock once for the transaction, to the
+// microsecond (what Postgres keeps). ok is false without a Clock.
+func (st *stampedTx) fromClock() (at time.Time, ok bool) {
+	if st.clock == nil {
+		return time.Time{}, false
+	}
+	if st.at == nil {
+		t := st.clock().UTC().Truncate(time.Microsecond)
+		st.at = &t
+	}
+	return *st.at, true
 }
 
 // stampWrite reads the write's time, once per transaction, and returns it:
@@ -384,6 +398,9 @@ func stampWrite(ctx context.Context, tx pgx.Tx) (time.Time, error) {
 	}
 	var skew time.Duration
 	if ok {
+		if at, set := st.fromClock(); set {
+			return at, nil
+		}
 		skew = st.skew
 	}
 	var at time.Time
@@ -401,6 +418,9 @@ func stampWrite(ctx context.Context, tx pgx.Tx) (time.Time, error) {
 // it was not called) and the clock's skew.
 func writeTimeOf(tx pgx.Tx) (*time.Time, time.Duration) {
 	if st, ok := tx.(*stampedTx); ok {
+		if at, set := st.fromClock(); set {
+			return &at, 0
+		}
 		return st.at, st.skew
 	}
 	return nil, 0
