@@ -143,6 +143,17 @@ func (c *Connectors) WithConnection(connectorAtMajor string, conn Connection) *C
 	return &with
 }
 
+// WithConnector returns connectors that reach connector@major (hr@1)
+// through c, a Connector in this process: the Go binding, for any
+// connector (stories' fakes). It wins over a remote connection and over
+// the compiled-in code; its answers are held to the action's contract like
+// every connector's.
+func (c *Connectors) WithConnector(connectorAtMajor string, conn Connector) *Connectors {
+	_, _ = connectorAtMajor, conn
+	with := *c
+	return &with // stub
+}
+
 // Connector returns the connector for connector@major (crm@1, hr@1): the
 // configured remote one, else the compiled-in one, else
 // ErrConnectorUnconfigured.

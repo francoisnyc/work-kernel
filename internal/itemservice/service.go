@@ -135,6 +135,13 @@ type Options struct {
 	// (TestClockSkew_NoProductionCodeSetsIt) reads the module's source and
 	// fails if anything but a test names it.
 	ClockSkew time.Duration
+	// Clock is for tests only (stories in simulated time, internal/story):
+	// when set, every write is stamped with its time instead of the
+	// database's clock (the event's created_at, cause.at), and `today`
+	// follows it when Now is nil. No flag, environment variable or config
+	// file sets it, and none may: TestClock_NoProductionCodeSetsIt reads
+	// the module's source.
+	Clock func() time.Time
 }
 
 // New returns a Service that uses the given connection pool, with the Type

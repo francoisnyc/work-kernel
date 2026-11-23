@@ -398,6 +398,13 @@ type WorkerOptions struct {
 	DevTypes []string
 }
 
+// Register registers the Item workflow and its activities, as NewWorker's
+// worker runs them, with r: a worker, or Temporal's test environment
+// (stories, internal/story), so both run exactly the same set.
+func Register(r worker.Registry, k *itemservice.Service, opts WorkerOptions) {
+	_, _, _ = r, k, opts // stub
+}
+
 // NewWorker returns a worker, not yet started, that runs Item workflows and
 // their activities from the given task queue.
 func NewWorker(c client.Client, taskQueue string, k *itemservice.Service, opts WorkerOptions) worker.Worker {

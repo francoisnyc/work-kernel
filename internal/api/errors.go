@@ -67,6 +67,15 @@ func ReasonMessage(reason string) (string, bool) {
 	return m, ok
 }
 
+// Refusal is the ErrorInfo reason the API answers an item service error
+// with (NOT_ALLOWED, GUARD_FAILED, ...), as pli shows it; "" for nil. A
+// story's "-> refused REASON" is held to it (internal/story), so a story
+// and the API never name a refusal differently.
+func Refusal(err error) string {
+	_ = err
+	return "" // stub
+}
+
 // apiError builds an error with a standard code and an ErrorInfo carrying a
 // stable reason (AIP-193) and the reason's fixed message. Extra details, such
 // as a BadRequest, follow it. An unknown reason is a bug: it answers INTERNAL.
