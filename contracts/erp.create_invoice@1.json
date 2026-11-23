@@ -1,0 +1,25 @@
+{
+  "connector": "erp",
+  "major": 1,
+  "name": "create_invoice",
+  "description": "Creates an invoice in the ERP for a customer and an amount, once per idempotency key.",
+  "kinds": ["action"],
+  "inputs": ["customerId", "amount"],
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "customerId": {"type": "string", "description": "The customer's ID in the ERP.", "x-pli-trust": "trusted"},
+      "amount": {"type": "integer", "description": "The amount to bill, in whole units.", "x-pli-trust": "trusted"}
+    }
+  },
+  "outputs": ["invoiceId"],
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "invoiceId": {"type": "string", "description": "The ID of the invoice the ERP made."}
+    }
+  },
+  "sideEffects": "some",
+  "async": "forbidden",
+  "risk": "high"
+}

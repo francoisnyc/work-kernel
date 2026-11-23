@@ -1,0 +1,26 @@
+{
+  "connector": "erp",
+  "major": 1,
+  "name": "check_credit",
+  "description": "Asks the ERP whether a customer may be billed an amount: allows it, denies it with a reason, or allows it with the cost center to bill.",
+  "kinds": ["check"],
+  "inputs": ["customerId", "amount"],
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "customerId": {"type": "string", "description": "The customer's ID in the ERP.", "x-pli-trust": "trusted"},
+      "amount": {"type": "integer", "description": "The amount to bill, in whole units.", "x-pli-trust": "trusted"}
+    }
+  },
+  "outputs": ["costCenter"],
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "costCenter": {"type": "string", "description": "The cost center the ERP keeps for the customer, when it corrects."}
+    }
+  },
+  "sideEffects": "none",
+  "async": "forbidden",
+  "errors": ["customer_on_hold", "over_credit_limit"],
+  "risk": "low"
+}

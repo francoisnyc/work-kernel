@@ -9,5 +9,5 @@ import "embed"
 
 // FS holds the contract files, compiled into the binary by go:embed.
 //
-//go:embed contracts.lock
+//go:embed *.json contracts.lock
 var FS embed.FS
