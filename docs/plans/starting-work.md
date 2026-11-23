@@ -1,8 +1,8 @@
 # Starting work: who may start a workflow, and what else starts one
 
 Status: proposal, 2026-11-23. Nothing here is built, and `docs/design.md`
-is unchanged. The Phase A answers (2026-11-23) are recorded as decisions
-below. A new table, a new door or a new principal kind needs a second OK
+is unchanged. The Phase A answers and the review's answers (both
+2026-11-23) are recorded as decisions below. A new table, a new door or a new principal kind needs a second OK
 before it is built, even where this proposal names it.
 
 Read with: `docs/roadmap.md` (themes 1, 2 and 4); `docs/design.md`
@@ -32,8 +32,8 @@ Work starts in Ori in two ways that must fit together.
    declares an **intake** that binds a source to one verdict: `create`,
    `correlate`, `create_or_correlate` or `signal`. An **inbox** keeps
    each delivery once. A kernel principal, `intake:<type>:<intake-id>`,
-   performs the write. If the Type has a `start` block, part 1's rule must
-   name that principal. Inbound values fill fields; they never choose a
+   performs the write. The Type must have a `start` block that names
+   that principal, or it is refused at load. Inbound values fill fields; they never choose a
    move or a recipient. Timer starts reuse acting timers and create
    reactions. Signals are specified here, not built.
 
@@ -274,9 +274,8 @@ slip through. Order:
 4. Then the session scope, the `create` power and the agent write rule, as
    now.
 
-No new error code. The two reasons go in the message only. If clients need
-them as data (an `ErrorInfo` metadata key), that is a contract change, and
-I will ask before adding it.
+No new error code, and no contract change: the two reasons go in the
+message only (decided at review, 2026-11-23).
 
 Why `in` is checked before `allowed`: it is static (Type against Type),
 and the caller sees the container, so saying "not here" leaks nothing.
@@ -298,7 +297,7 @@ need no change of their own.
 | `field:<id>` missing on a Type in `in`, or not a principal field there | `UNKNOWN_FIELD` / `WRONG_FIELD_TYPE` | 3 | `start.allowed[i]` |
 | `own`/`shared` names a Type whose `in` excludes this Type | `START_NOT_IN` (new) | 3 | `own[i]`, `shared[i]` |
 | a create reaction whose source Type the target's `in` excludes | `START_NOT_IN` (new) | 3 | `reactions[i]` |
-| an intake whose Type has a `start` block not naming it | `INTAKE_NOT_ALLOWED` (new; the intake's twin of `TIMER_NOT_ALLOWED`) | 2 | `intakes[i]` |
+| an intake on a Type with no `start` block, or whose `start.allowed` does not name it | `INTAKE_NOT_ALLOWED` (new; the intake's twin of `TIMER_NOT_ALLOWED`) | 2 | `intakes[i]` |
 
 Problem codes are strings documented in `design.md`, not a proto enum; a
 new one is still something tools match on, so each is listed here and
@@ -386,6 +385,11 @@ V1's actions are. The format reuses the operation's, with `kind: source`:
   `any`, as in V1). A source contract cannot mark free text trusted: a
   load rule refuses `x-pli-trust: trusted` on an output without an `enum`
   or a declared ID `format`, other than the dedupe and correlation keys.
+- `x-pli-personal: true` marks an output that may hold personal data (an
+  email address, a name, free text). It is part of the machine contract,
+  so it is in the digest and frozen in the lock; erasure reads it (2.5).
+  A dedupe or correlation key may not be personal (refused at start), since
+  it is stored hashed and used for matching.
 - `ListActions` serves sources too (they are contracts), with
   `kinds: [SOURCE]`: an `ActionKind`/`HookKind` enum value, so a contract
   change, asked with the build.
@@ -500,10 +504,12 @@ inbox (id uuid primary key, namespace_id, intake text,          -- 'incident/sie
   connector keeps that, under its own rules).
 - **Erasure**: the inbox is held to the **erasure rule**, not only to a
   retention period. `data` can hold personal data (an email address in an
-  alert, a user's name). Erasing a person reaches the inbox: every row
-  whose `data` names them, or whose Item is erased, has its `data` cleared
-  in the same erasure, keeping the row's shape (intake, status, dedupe
-  hash, Item ID) for audit. A retention period applies on top
+  alert, a user's name). The source contract says which outputs may: each
+  carries `x-pli-personal: true` or not, frozen in the lock (2.2).
+  Erasing a person reaches the inbox: on every row whose Item is erased,
+  and on every row whose personal outputs name the person, those outputs
+  are cleared in the same erasure, keeping the row's shape (intake,
+  status, dedupe hash, Item ID) for audit. A retention period applies on top
   (`applied` rows lose `data` after N days; parked rows keep it until
   resolved or expired). `item_events.payload` stays as it is: opaque IDs,
   field IDs, never values.
@@ -521,13 +527,23 @@ inbox (id uuid primary key, namespace_id, intake text,          -- 'incident/sie
   correlates to Items of its own Type and applies the transition its
   verdict names, or writes its mapped fields. It never narrows, moves,
   links, changes policy or writes a field outside its mapping.
-- **Part 1's rule applies to it.** With a `start` block, `allowed` must
-  name `principal:intake:<type>:<id>` (else `INTAKE_NOT_ALLOWED` at load),
-  and `in` must admit its container. Without one, it starts like anyone.
+- **Part 1's rule applies to it, and it fails closed.** An intake on a
+  Type with **no `start` block is refused at load**, as is one whose
+  `start.allowed` does not name `principal:intake:<type>:<id>` (both
+  `INTAKE_NOT_ALLOWED`). So every Type an outside system can create says
+  so explicitly. `in` must admit its container.
   A `correlate` verdict's transition must list it in `allowed`, as a timer
   must list `principal:system:timer` (else refused at load).
 - **No `on_behalf_of`** until external identities exist. The remote actor
-  (an alert's reporter) is data, untrusted, and never a principal.
+  (an alert's reporter) is data, untrusted, and never a principal. When a
+  remote actor is later mapped to a user (`external_identity`), part 1
+  judges **both** the intake and that user, and both must pass, as for an
+  agent and its user.
+- **A kill switch per intake, required before inbound is built.** The
+  settled direction's flag table (per Type version, hook or connection)
+  gains the intake. Paused: the endpoint keeps accepting into the inbox
+  (so nothing the vendor sends is lost), and the worker applies nothing
+  until it is resumed.
 - **A new internal door**: `Internal().Create`, accepting only `intake:`
   and (for timer creates) the reaction runner. Called only by the worker;
   the source test that holds `Internal()` to its callers covers it.
@@ -607,6 +623,17 @@ create unique index external_keys_one_open on external_keys (namespace_id, intak
   - `correlate`: write to the closed Item anyway (a late payment on a
     closed invoice); its transitions decide what is allowed;
   - `park`: keep the event for a person.
+- **A closed Item reopened.** Its key went `open = false` when it closed,
+  and a later event may have opened a new case for the same key since.
+  By default **the reopened Item's key stays closed**: reopening does not
+  touch `external_keys`, so events for the key keep going to the newer
+  case, and the unique index is never hit. (With no newer case, the key
+  still stays closed: the next event follows `when_closed`.) Tests, when
+  built: close a case, let an event open a second one, reopen the first;
+  the reopen succeeds, and the next event correlates to the second case.
+- **A correlate that writes a frozen field** (the Item waits on an
+  approval) is refused like any write: the inbox row is `failed`, with the
+  refusal's reason. It is not parked or retried.
 - **Unmatched** events (no open Item for the key, on a `correlate`, or an
   event type the intake does not take): per intake, `unmatched`: `park`
   (the default: kept in the inbox, replayed when a later `create` writes
@@ -691,8 +718,9 @@ so the Bonita and Camunda points below that are not already in the
 earlier reports are **UNVERIFIED**: they come from search summaries, not
 from reading the pages. The Camunda inbound points (correlation key,
 activation condition, message ID, the drain trap) were verified in
-`docs/research/connectors-for-the-item-kernel.md`. A verification pass is
-an open question.
+`docs/research/connectors-for-the-item-kernel.md`. Each UNVERIFIED point is
+checked against the vendor docs before it is relied on (decided at
+review).
 
 | BPMN | Ori | Bonita (UNVERIFIED) | Camunda 7 (UNVERIFIED) | Camunda 8 |
 | --- | --- | --- | --- | --- |
@@ -751,8 +779,9 @@ The SOC domain, in these pieces:
 | Step | Kernel change | Schema | API (`kernel.v1`) | Needs a second OK |
 | --- | --- | --- | --- | --- |
 | 1 | `create` power on `Create` | none | none | no (answer 1) |
-| 2 | `start` block; `policy.MayStart`; load checks; latest version governs | none | none (reasons in the message) | no; asks before reason metadata |
-| 3 | source contracts; intakes; the inbox; `intake:` principal; `Internal().Create`; the inbound endpoint and its conformance | `inbox` | a `SOURCE` kind in the actions' enum; the inbound endpoint is HTTP, outside `kernel.v1` | **yes**: a table, a door, a principal kind |
+| 2 | `start` block; `policy.MayStart`; load checks; latest version governs | none | none (reasons in the message only) | no |
+| 2b | the same "latest version governs" rule for placement (`placement_writable_by`), its own small step | none | none | no (review answer 2) |
+| 3 | first the intake kill switch (required before anything inbound); then source contracts (with `x-pli-personal`); intakes; the inbox; `intake:` principal; `Internal().Create`; the inbound endpoint and its conformance; the vendor precedents verified | `inbox` | a `SOURCE` kind in the actions' enum; the inbound endpoint is HTTP, outside `kernel.v1` | **yes**: a table, a door, a principal kind |
 | 4 | correlation: `external_keys`, `create_or_correlate`, `when_closed`, `unmatched` | `external_keys` | none | **yes**: a table |
 | 5 | create reaction `on: timer` | none | none | no |
 | 6 | signals | a non-unique key table | none | **yes** |
@@ -768,38 +797,30 @@ check in `Create` and its tests, and one Type that uses it: a new
 (customers keep `own`), so the desk proves it end to end. Neither needs a
 migration or a contract change.
 
-## Open questions
+## Open questions, decided at review (2026-11-23)
 
-1. **Reason metadata.** Do clients need `START_NOT_IN` /
-   `START_NOT_ALLOWED` as data, not in the message? Asked before any
-   contract change (answer 7).
-2. **Latest version governs: where else?** Placement
-   (`placement_writable_by`) has the same hole (an old version is
-   created to dodge it). Should 1.3's rule extend to it? Not proposed
-   here; noted.
-3. **Intake without a `start` block.** Should an intake be refused at load
-   on a Type with no `start` block, so that every Type an outside system
-   can create says so explicitly? Proposed default: no (today's
-   behaviour), but `pli type validate` mentions it.
-4. **Erasure in the inbox.** How does the kernel find which inbox rows
-   name a person, when `data` is typed values without provenance? Either
-   the source contract marks which outputs may hold personal data (a
-   `x-pli-personal` flag, frozen in the lock), or erasure clears `data`
-   on every row linked to an erased Item and every parked row with a
-   matching value. Leaning to the flag.
-5. **Correlate writes to a frozen field** (an approval in progress): a
-   failed row, or parked until the state is left? Proposed: failed, with
-   the refusal's reason, like any refused write.
-6. **Kill switch for intakes.** `design.md`'s settled direction has a kill
-   switch per hook and connection; an intake needs one too (pause: keep
-   accepting into the inbox, apply nothing). Same flag table, one more
-   kind.
-7. **External identities.** When `on_behalf_of` for an intake becomes a
-   mapped user (`external_identity`), does part 1 judge that user too, as
-   it judges an agent's? Leaning: yes, both must pass.
-8. **Verification.** The Bonita and Camunda points marked UNVERIFIED need
-   a pass with the vendor docs reachable, before any becomes a load-bearing
-   precedent.
+1. **Reason metadata**: no contract change; `START_NOT_IN` and
+   `START_NOT_ALLOWED` stay in the message (1.6).
+2. **Latest version governs, for placement too**: yes, closing the same
+   hole for `placement_writable_by`, as its own small step (2b in the
+   table), not in step 2.
+3. **An intake on a Type with no `start` block**: refused at load
+   (`INTAKE_NOT_ALLOWED`), fail closed (2.6, 1.7).
+4. **Erasure in the inbox**: an `x-pli-personal` flag on source outputs,
+   frozen in the lock (2.2, 2.5).
+5. **A correlate that writes a frozen field**: `failed`, with the
+   refusal's reason (2.9).
+6. **A kill switch per intake**: yes, and required before inbound is
+   built: the first part of step 3 (2.6).
+7. **A mapped external identity**: part 1 judges the intake and the user;
+   both must pass (2.6).
+8. **Verification**: the Bonita and Camunda points marked UNVERIFIED are
+   checked against the vendor docs before any is relied on, at the latest
+   as part of step 3.
+
+Also decided at review: **a reopened Item's key stays closed** (2.9).
+
+Each build step comes back for its own OK.
 
 ## Later (not proposed for building now)
 

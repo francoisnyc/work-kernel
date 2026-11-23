@@ -3068,11 +3068,19 @@ key table, with the `intake:` principal and `Internal().Create`).
 
 **Surprises:** `item.Writes` lets any write power create, though the brief assumed `create` was needed.
 `container_creator` existed only in `except`. A caller picking an old Type version dodges any rule added in a
-later one: the same hole placement has (open question 2). The vendor docs were unreachable from this session,
+later one: the same hole placement has (to close as its own step). The vendor docs were unreachable from this session,
 so the Bonita and Camunda points not already in the connectors report are marked UNVERIFIED.
 
 **Checked:** the claim that the `create` power touches no existing test, by running it: in a throwaway worktree,
 `Create` required `create`, and `internal/itemservice`, `internal/api`, `cmd/pli` and `internal/workflow` passed
 unchanged (dockerd started by hand, as before). Not committed; the worktree was removed.
 
-**Open:** the proposal's eight open questions. **Next session:** step 1 (the `create` power), Phase A.
+**Review (2026-11-23):** one gap filled (a reopened Item's correlation key stays closed; events keep going to
+the newer case), and the eight open questions decided: reasons stay in the message; placement gets the same
+latest-version rule as its own step; an intake on a Type without a `start` block is refused at load; erasure
+reads an `x-pli-personal` flag on source outputs; a correlate on a frozen field fails; an intake kill switch is
+required before inbound; a mapped external user must pass part 1 too; the UNVERIFIED precedents are checked
+before any is relied on.
+
+**Open:** none in the proposal; each build step comes back for its own OK. **Next session:** step 1 (the
+`create` power), Phase A.
