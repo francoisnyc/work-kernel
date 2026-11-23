@@ -32,7 +32,8 @@ Four properties follow from it:
 ## Six months from now
 
 Done when: **in each of four domains (workflow, case management, issue
-tracking, security operations), a non-developer's plain-English description
+tracking, security operations), with at least one open-ended case whose work is
+not known up front, a non-developer's plain-English description
 becomes Types the kernel checks, explains and tests; each runs with at least
 one agent task; and an injected instruction planted in its data changes
 nothing its rules do not allow.**
@@ -47,7 +48,8 @@ kernel is evidence it does not.
 ## What exists already
 
 - **Three domains proven:** the vacation request (workflow), the IT desk with
-  SLAs and a customer portal (case management), the PLAT project (issue
+  SLAs and a customer portal (case management, though mostly a flow: no
+  domain yet is a case whose work is not known up front), the PLAT project (issue
   tracking).
 - **Parts of the injection defence:** an agent never passes a gate a Type
   gives to a person (`field:` never matches an agent); an agent's write needs
@@ -96,6 +98,12 @@ order" in `docs/design.md` sets.
   the catalogue an assistant chooses actions from; V2c (the Type format as
   JSON Schema); a semantic diff (item 7); patterns (item 8); checks that prove
   properties (item 3).
+- **Open-ended cases, as Type features:** what was built so far is mostly
+  flows. Three pieces, each checkable data, in the spirit of CMMN (the ideas,
+  not the notation): the work that *may* be added to a case at each point
+  (so an agent suggests only from that list), stages that group parallel
+  work, and conditions that switch work on when the case changes. Today a
+  case can gather linked Items and carry rollups and invariants, no more.
 - **Throughout:** every way of writing a Type (YAML, a builder, plain English)
   fills in the same semantic model (`typedef`); checks, readings and the diff
   work on the model, never on one syntax.
@@ -168,13 +176,21 @@ Ventoux item 4, made central.
 - Later: action hooks and async completion, so a step's own Type starts the
   agents it needs.
 
-### 4. A fourth domain: security operations (SOAR)
+### 4. A fourth domain: security operations (SOAR), an open-ended case
 
-An alert arrives, is enriched by outside systems, triaged (by an agent task),
-and contained (an action with a side effect, behind a person's approval).
-The domain is chosen because it is the hardest test of theme 2: an alert's
-text is written by an attacker. Built as Types and an app, like the others,
-counting every kernel change it needs.
+An alert opens a case, and the work depends on what turns up: enrich an
+address, isolate a host, ask the user, escalate. It is outside systems,
+an agent triaging, and containment (an action with a side effect, behind a
+person's approval). Chosen because it proves two hard claims at once:
+
+- **Open-ended cases** (theme 1): an agent suggests the next piece of work
+  only from what the Type allows at that point; a person approves what
+  matters. This is what buyers otherwise go to Pega or Flowable for.
+- **Injection resistance** (theme 2): an alert's text is written by an
+  attacker.
+
+Built as Types and an app, like the others, counting every kernel change it
+needs. A claims or complaints case can follow if a pilot asks for one.
 
 ### 5. The basics for real use
 
