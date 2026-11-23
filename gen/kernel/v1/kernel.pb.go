@@ -5692,6 +5692,507 @@ func (x *ActionValue) GetTrust() ActionInputTrust {
 	return ActionInputTrust_ACTION_INPUT_TRUST_UNSPECIFIED
 }
 
+type ExplainTypeRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// A registered version: namespaces/{ns}/types/{type}/versions/{n}. Or
+	// leave it empty and give a draft: parent, sources, type_id and version.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// A draft's namespace: namespaces/{ns}.
+	Parent string `protobuf:"bytes,2,opt,name=parent,proto3" json:"parent,omitempty"`
+	// A draft's files, as ValidateTypes takes them, with the same limits.
+	Sources []*TypeSource `protobuf:"bytes,3,rep,name=sources,proto3" json:"sources,omitempty"`
+	// The draft version to read, among the sources.
+	TypeId        string `protobuf:"bytes,4,opt,name=type_id,json=typeId,proto3" json:"type_id,omitempty"`
+	Version       int32  `protobuf:"varint,5,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExplainTypeRequest) Reset() {
+	*x = ExplainTypeRequest{}
+	mi := &file_kernel_v1_kernel_proto_msgTypes[58]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExplainTypeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExplainTypeRequest) ProtoMessage() {}
+
+func (x *ExplainTypeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kernel_v1_kernel_proto_msgTypes[58]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExplainTypeRequest.ProtoReflect.Descriptor instead.
+func (*ExplainTypeRequest) Descriptor() ([]byte, []int) {
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{58}
+}
+
+func (x *ExplainTypeRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ExplainTypeRequest) GetParent() string {
+	if x != nil {
+		return x.Parent
+	}
+	return ""
+}
+
+func (x *ExplainTypeRequest) GetSources() []*TypeSource {
+	if x != nil {
+		return x.Sources
+	}
+	return nil
+}
+
+func (x *ExplainTypeRequest) GetTypeId() string {
+	if x != nil {
+		return x.TypeId
+	}
+	return ""
+}
+
+func (x *ExplainTypeRequest) GetVersion() int32 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+type ExplainTypeResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Absent when the draft has problems.
+	Reading *TypeReading `protobuf:"bytes,1,opt,name=reading,proto3" json:"reading,omitempty"`
+	// A draft's problems, as ValidateTypes lists them; empty for a
+	// registered version.
+	Problems      []*TypeProblem `protobuf:"bytes,2,rep,name=problems,proto3" json:"problems,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExplainTypeResponse) Reset() {
+	*x = ExplainTypeResponse{}
+	mi := &file_kernel_v1_kernel_proto_msgTypes[59]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExplainTypeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExplainTypeResponse) ProtoMessage() {}
+
+func (x *ExplainTypeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kernel_v1_kernel_proto_msgTypes[59]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExplainTypeResponse.ProtoReflect.Descriptor instead.
+func (*ExplainTypeResponse) Descriptor() ([]byte, []int) {
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{59}
+}
+
+func (x *ExplainTypeResponse) GetReading() *TypeReading {
+	if x != nil {
+		return x.Reading
+	}
+	return nil
+}
+
+func (x *ExplainTypeResponse) GetProblems() []*TypeProblem {
+	if x != nil {
+		return x.Problems
+	}
+	return nil
+}
+
+// A Type version in plain language. Each sentence is one claim about the
+// Type, and every kind of sentence has a witness: a test that runs the
+// engine and shows it does what the sentence says.
+type TypeReading struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// namespaces/{ns}/types/{type}/versions/{n}; for a draft, the name it
+	// would have.
+	Type string `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
+	// The terms its sentences use, defined once.
+	Key []*ReadingTerm `protobuf:"bytes,2,rep,name=key,proto3" json:"key,omitempty"`
+	// The field list: "`f_start`: a date".
+	Fields   []string          `protobuf:"bytes,3,rep,name=fields,proto3" json:"fields,omitempty"`
+	Sections []*ReadingSection `protobuf:"bytes,4,rep,name=sections,proto3" json:"sections,omitempty"`
+	// The actions its hooks call, as their contracts describe them.
+	Actions []*ReadingAction `protobuf:"bytes,5,rep,name=actions,proto3" json:"actions,omitempty"`
+	// What no reading of a Type covers.
+	NotCovered []string `protobuf:"bytes,6,rep,name=not_covered,json=notCovered,proto3" json:"not_covered,omitempty"`
+	// The whole reading as a person reads it, numbered.
+	Text          string `protobuf:"bytes,7,opt,name=text,proto3" json:"text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TypeReading) Reset() {
+	*x = TypeReading{}
+	mi := &file_kernel_v1_kernel_proto_msgTypes[60]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TypeReading) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TypeReading) ProtoMessage() {}
+
+func (x *TypeReading) ProtoReflect() protoreflect.Message {
+	mi := &file_kernel_v1_kernel_proto_msgTypes[60]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TypeReading.ProtoReflect.Descriptor instead.
+func (*TypeReading) Descriptor() ([]byte, []int) {
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{60}
+}
+
+func (x *TypeReading) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *TypeReading) GetKey() []*ReadingTerm {
+	if x != nil {
+		return x.Key
+	}
+	return nil
+}
+
+func (x *TypeReading) GetFields() []string {
+	if x != nil {
+		return x.Fields
+	}
+	return nil
+}
+
+func (x *TypeReading) GetSections() []*ReadingSection {
+	if x != nil {
+		return x.Sections
+	}
+	return nil
+}
+
+func (x *TypeReading) GetActions() []*ReadingAction {
+	if x != nil {
+		return x.Actions
+	}
+	return nil
+}
+
+func (x *TypeReading) GetNotCovered() []string {
+	if x != nil {
+		return x.NotCovered
+	}
+	return nil
+}
+
+func (x *TypeReading) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+type ReadingTerm struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Meaning       string                 `protobuf:"bytes,2,opt,name=meaning,proto3" json:"meaning,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReadingTerm) Reset() {
+	*x = ReadingTerm{}
+	mi := &file_kernel_v1_kernel_proto_msgTypes[61]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReadingTerm) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReadingTerm) ProtoMessage() {}
+
+func (x *ReadingTerm) ProtoReflect() protoreflect.Message {
+	mi := &file_kernel_v1_kernel_proto_msgTypes[61]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReadingTerm.ProtoReflect.Descriptor instead.
+func (*ReadingTerm) Descriptor() ([]byte, []int) {
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{61}
+}
+
+func (x *ReadingTerm) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ReadingTerm) GetMeaning() string {
+	if x != nil {
+		return x.Meaning
+	}
+	return ""
+}
+
+// A heading ("In short", a state, "Who sees it") and its sentences.
+type ReadingSection struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Title         string                 `protobuf:"bytes,1,opt,name=title,proto3" json:"title,omitempty"`
+	Sentences     []*ReadingSentence     `protobuf:"bytes,2,rep,name=sentences,proto3" json:"sentences,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReadingSection) Reset() {
+	*x = ReadingSection{}
+	mi := &file_kernel_v1_kernel_proto_msgTypes[62]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReadingSection) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReadingSection) ProtoMessage() {}
+
+func (x *ReadingSection) ProtoReflect() protoreflect.Message {
+	mi := &file_kernel_v1_kernel_proto_msgTypes[62]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReadingSection.ProtoReflect.Descriptor instead.
+func (*ReadingSection) Descriptor() ([]byte, []int) {
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{62}
+}
+
+func (x *ReadingSection) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *ReadingSection) GetSentences() []*ReadingSentence {
+	if x != nil {
+		return x.Sentences
+	}
+	return nil
+}
+
+type ReadingSentence struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// From 1, across the reading.
+	Number int32 `protobuf:"varint,1,opt,name=number,proto3" json:"number,omitempty"`
+	// Its kind (move, timer, ...), then the clauses it uses (move.guard,
+	// who.creator, ...): a closed list, documented in docs/design.md.
+	Kind  string   `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`
+	Parts []string `protobuf:"bytes,3,rep,name=parts,proto3" json:"parts,omitempty"`
+	Text  string   `protobuf:"bytes,4,opt,name=text,proto3" json:"text,omitempty"`
+	// The elements of the Type it reads, by path: transitions[1],
+	// states[2].timer.
+	Paths         []string `protobuf:"bytes,5,rep,name=paths,proto3" json:"paths,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReadingSentence) Reset() {
+	*x = ReadingSentence{}
+	mi := &file_kernel_v1_kernel_proto_msgTypes[63]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReadingSentence) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReadingSentence) ProtoMessage() {}
+
+func (x *ReadingSentence) ProtoReflect() protoreflect.Message {
+	mi := &file_kernel_v1_kernel_proto_msgTypes[63]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReadingSentence.ProtoReflect.Descriptor instead.
+func (*ReadingSentence) Descriptor() ([]byte, []int) {
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{63}
+}
+
+func (x *ReadingSentence) GetNumber() int32 {
+	if x != nil {
+		return x.Number
+	}
+	return 0
+}
+
+func (x *ReadingSentence) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *ReadingSentence) GetParts() []string {
+	if x != nil {
+		return x.Parts
+	}
+	return nil
+}
+
+func (x *ReadingSentence) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+func (x *ReadingSentence) GetPaths() []string {
+	if x != nil {
+		return x.Paths
+	}
+	return nil
+}
+
+type ReadingAction struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// connector.operation@major, as a hook names it.
+	Action        string     `protobuf:"bytes,1,opt,name=action,proto3" json:"action,omitempty"`
+	Kinds         []HookKind `protobuf:"varint,2,rep,packed,name=kinds,proto3,enum=kernel.v1.HookKind" json:"kinds,omitempty"`
+	SideEffects   bool       `protobuf:"varint,3,opt,name=side_effects,json=sideEffects,proto3" json:"side_effects,omitempty"`
+	Risk          ActionRisk `protobuf:"varint,4,opt,name=risk,proto3,enum=kernel.v1.ActionRisk" json:"risk,omitempty"`
+	Description   string     `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReadingAction) Reset() {
+	*x = ReadingAction{}
+	mi := &file_kernel_v1_kernel_proto_msgTypes[64]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReadingAction) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReadingAction) ProtoMessage() {}
+
+func (x *ReadingAction) ProtoReflect() protoreflect.Message {
+	mi := &file_kernel_v1_kernel_proto_msgTypes[64]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReadingAction.ProtoReflect.Descriptor instead.
+func (*ReadingAction) Descriptor() ([]byte, []int) {
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{64}
+}
+
+func (x *ReadingAction) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+func (x *ReadingAction) GetKinds() []HookKind {
+	if x != nil {
+		return x.Kinds
+	}
+	return nil
+}
+
+func (x *ReadingAction) GetSideEffects() bool {
+	if x != nil {
+		return x.SideEffects
+	}
+	return false
+}
+
+func (x *ReadingAction) GetRisk() ActionRisk {
+	if x != nil {
+		return x.Risk
+	}
+	return ActionRisk_ACTION_RISK_UNSPECIFIED
+}
+
+func (x *ReadingAction) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
 type LinkItemsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The source Item, namespaces/{ns}/items/{item}.
@@ -5711,7 +6212,7 @@ type LinkItemsRequest struct {
 
 func (x *LinkItemsRequest) Reset() {
 	*x = LinkItemsRequest{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[58]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5723,7 +6224,7 @@ func (x *LinkItemsRequest) String() string {
 func (*LinkItemsRequest) ProtoMessage() {}
 
 func (x *LinkItemsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[58]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5736,7 +6237,7 @@ func (x *LinkItemsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LinkItemsRequest.ProtoReflect.Descriptor instead.
 func (*LinkItemsRequest) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{58}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *LinkItemsRequest) GetName() string {
@@ -5786,7 +6287,7 @@ type LinkItemsResponse struct {
 
 func (x *LinkItemsResponse) Reset() {
 	*x = LinkItemsResponse{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[59]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5798,7 +6299,7 @@ func (x *LinkItemsResponse) String() string {
 func (*LinkItemsResponse) ProtoMessage() {}
 
 func (x *LinkItemsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[59]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5811,7 +6312,7 @@ func (x *LinkItemsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LinkItemsResponse.ProtoReflect.Descriptor instead.
 func (*LinkItemsResponse) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{59}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *LinkItemsResponse) GetItem() *Item {
@@ -5849,7 +6350,7 @@ type UnlinkItemsRequest struct {
 
 func (x *UnlinkItemsRequest) Reset() {
 	*x = UnlinkItemsRequest{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[60]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5861,7 +6362,7 @@ func (x *UnlinkItemsRequest) String() string {
 func (*UnlinkItemsRequest) ProtoMessage() {}
 
 func (x *UnlinkItemsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[60]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5874,7 +6375,7 @@ func (x *UnlinkItemsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnlinkItemsRequest.ProtoReflect.Descriptor instead.
 func (*UnlinkItemsRequest) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{60}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{67}
 }
 
 func (x *UnlinkItemsRequest) GetName() string {
@@ -5923,7 +6424,7 @@ type UnlinkItemsResponse struct {
 
 func (x *UnlinkItemsResponse) Reset() {
 	*x = UnlinkItemsResponse{}
-	mi := &file_kernel_v1_kernel_proto_msgTypes[61]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5935,7 +6436,7 @@ func (x *UnlinkItemsResponse) String() string {
 func (*UnlinkItemsResponse) ProtoMessage() {}
 
 func (x *UnlinkItemsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kernel_v1_kernel_proto_msgTypes[61]
+	mi := &file_kernel_v1_kernel_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5948,7 +6449,7 @@ func (x *UnlinkItemsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnlinkItemsResponse.ProtoReflect.Descriptor instead.
 func (*UnlinkItemsResponse) Descriptor() ([]byte, []int) {
-	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{61}
+	return file_kernel_v1_kernel_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *UnlinkItemsResponse) GetItem() *Item {
@@ -6395,7 +6896,43 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\aoptions\x18\x03 \x03(\tR\aoptions\x12\x1a\n" +
 	"\bnullable\x18\x04 \x01(\bR\bnullable\x12 \n" +
 	"\vdescription\x18\x05 \x01(\tR\vdescription\x121\n" +
-	"\x05trust\x18\x06 \x01(\x0e2\x1b.kernel.v1.ActionInputTrustR\x05trust\"\x8e\x01\n" +
+	"\x05trust\x18\x06 \x01(\x0e2\x1b.kernel.v1.ActionInputTrustR\x05trust\"\xa4\x01\n" +
+	"\x12ExplainTypeRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
+	"\x06parent\x18\x02 \x01(\tR\x06parent\x12/\n" +
+	"\asources\x18\x03 \x03(\v2\x15.kernel.v1.TypeSourceR\asources\x12\x17\n" +
+	"\atype_id\x18\x04 \x01(\tR\x06typeId\x12\x18\n" +
+	"\aversion\x18\x05 \x01(\x05R\aversion\"{\n" +
+	"\x13ExplainTypeResponse\x120\n" +
+	"\areading\x18\x01 \x01(\v2\x16.kernel.v1.TypeReadingR\areading\x122\n" +
+	"\bproblems\x18\x02 \x03(\v2\x16.kernel.v1.TypeProblemR\bproblems\"\x83\x02\n" +
+	"\vTypeReading\x12\x12\n" +
+	"\x04type\x18\x01 \x01(\tR\x04type\x12(\n" +
+	"\x03key\x18\x02 \x03(\v2\x16.kernel.v1.ReadingTermR\x03key\x12\x16\n" +
+	"\x06fields\x18\x03 \x03(\tR\x06fields\x125\n" +
+	"\bsections\x18\x04 \x03(\v2\x19.kernel.v1.ReadingSectionR\bsections\x122\n" +
+	"\aactions\x18\x05 \x03(\v2\x18.kernel.v1.ReadingActionR\aactions\x12\x1f\n" +
+	"\vnot_covered\x18\x06 \x03(\tR\n" +
+	"notCovered\x12\x12\n" +
+	"\x04text\x18\a \x01(\tR\x04text\";\n" +
+	"\vReadingTerm\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
+	"\ameaning\x18\x02 \x01(\tR\ameaning\"`\n" +
+	"\x0eReadingSection\x12\x14\n" +
+	"\x05title\x18\x01 \x01(\tR\x05title\x128\n" +
+	"\tsentences\x18\x02 \x03(\v2\x1a.kernel.v1.ReadingSentenceR\tsentences\"}\n" +
+	"\x0fReadingSentence\x12\x16\n" +
+	"\x06number\x18\x01 \x01(\x05R\x06number\x12\x12\n" +
+	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x14\n" +
+	"\x05parts\x18\x03 \x03(\tR\x05parts\x12\x12\n" +
+	"\x04text\x18\x04 \x01(\tR\x04text\x12\x14\n" +
+	"\x05paths\x18\x05 \x03(\tR\x05paths\"\xc2\x01\n" +
+	"\rReadingAction\x12\x16\n" +
+	"\x06action\x18\x01 \x01(\tR\x06action\x12)\n" +
+	"\x05kinds\x18\x02 \x03(\x0e2\x13.kernel.v1.HookKindR\x05kinds\x12!\n" +
+	"\fside_effects\x18\x03 \x01(\bR\vsideEffects\x12)\n" +
+	"\x04risk\x18\x04 \x01(\x0e2\x15.kernel.v1.ActionRiskR\x04risk\x12 \n" +
+	"\vdescription\x18\x05 \x01(\tR\vdescription\"\x8e\x01\n" +
 	"\x10LinkItemsRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
 	"\n" +
@@ -6496,7 +7033,7 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\x10ActionInputTrust\x12\"\n" +
 	"\x1eACTION_INPUT_TRUST_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16ACTION_INPUT_TRUST_ANY\x10\x01\x12\x1e\n" +
-	"\x1aACTION_INPUT_TRUST_TRUSTED\x10\x022\x9c\t\n" +
+	"\x1aACTION_INPUT_TRUST_TRUSTED\x10\x022\xea\t\n" +
 	"\vItemService\x12I\n" +
 	"\n" +
 	"CreateItem\x12\x1c.kernel.v1.CreateItemRequest\x1a\x1d.kernel.v1.CreateItemResponse\x12@\n" +
@@ -6510,7 +7047,8 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\aGetType\x12\x19.kernel.v1.GetTypeRequest\x1a\x1a.kernel.v1.GetTypeResponse\x12F\n" +
 	"\tListTypes\x12\x1b.kernel.v1.ListTypesRequest\x1a\x1c.kernel.v1.ListTypesResponse\x12R\n" +
 	"\rValidateTypes\x12\x1f.kernel.v1.ValidateTypesRequest\x1a .kernel.v1.ValidateTypesResponse\x12L\n" +
-	"\vListActions\x12\x1d.kernel.v1.ListActionsRequest\x1a\x1e.kernel.v1.ListActionsResponse\x12^\n" +
+	"\vListActions\x12\x1d.kernel.v1.ListActionsRequest\x1a\x1e.kernel.v1.ListActionsResponse\x12L\n" +
+	"\vExplainType\x12\x1d.kernel.v1.ExplainTypeRequest\x1a\x1e.kernel.v1.ExplainTypeResponse\x12^\n" +
 	"\x11StartAgentSession\x12#.kernel.v1.StartAgentSessionRequest\x1a$.kernel.v1.StartAgentSessionResponse\x12O\n" +
 	"\fApproveWiden\x12\x1e.kernel.v1.ApproveWidenRequest\x1a\x1f.kernel.v1.ApproveWidenResponse\x12F\n" +
 	"\tLinkItems\x12\x1b.kernel.v1.LinkItemsRequest\x1a\x1c.kernel.v1.LinkItemsResponse\x12L\n" +
@@ -6529,7 +7067,7 @@ func file_kernel_v1_kernel_proto_rawDescGZIP() []byte {
 }
 
 var file_kernel_v1_kernel_proto_enumTypes = make([]protoimpl.EnumInfo, 12)
-var file_kernel_v1_kernel_proto_msgTypes = make([]protoimpl.MessageInfo, 69)
+var file_kernel_v1_kernel_proto_msgTypes = make([]protoimpl.MessageInfo, 76)
 var file_kernel_v1_kernel_proto_goTypes = []any{
 	(LinkDirection)(0),                // 0: kernel.v1.LinkDirection
 	(TransitionOutcome)(0),            // 1: kernel.v1.TransitionOutcome
@@ -6601,43 +7139,50 @@ var file_kernel_v1_kernel_proto_goTypes = []any{
 	(*ListActionsResponse)(nil),       // 67: kernel.v1.ListActionsResponse
 	(*Action)(nil),                    // 68: kernel.v1.Action
 	(*ActionValue)(nil),               // 69: kernel.v1.ActionValue
-	(*LinkItemsRequest)(nil),          // 70: kernel.v1.LinkItemsRequest
-	(*LinkItemsResponse)(nil),         // 71: kernel.v1.LinkItemsResponse
-	(*UnlinkItemsRequest)(nil),        // 72: kernel.v1.UnlinkItemsRequest
-	(*UnlinkItemsResponse)(nil),       // 73: kernel.v1.UnlinkItemsResponse
-	nil,                               // 74: kernel.v1.Item.RollupsEntry
-	nil,                               // 75: kernel.v1.RollupValue.CountsEntry
-	nil,                               // 76: kernel.v1.Reaction.AddEntry
-	nil,                               // 77: kernel.v1.Reaction.CreateFieldsEntry
-	nil,                               // 78: kernel.v1.Reaction.SetFieldsEntry
-	nil,                               // 79: kernel.v1.ActingTimer.SetsEntry
-	nil,                               // 80: kernel.v1.Transition.SetsEntry
-	(*structpb.Struct)(nil),           // 81: google.protobuf.Struct
-	(*timestamppb.Timestamp)(nil),     // 82: google.protobuf.Timestamp
-	(*durationpb.Duration)(nil),       // 83: google.protobuf.Duration
-	(*structpb.Value)(nil),            // 84: google.protobuf.Value
+	(*ExplainTypeRequest)(nil),        // 70: kernel.v1.ExplainTypeRequest
+	(*ExplainTypeResponse)(nil),       // 71: kernel.v1.ExplainTypeResponse
+	(*TypeReading)(nil),               // 72: kernel.v1.TypeReading
+	(*ReadingTerm)(nil),               // 73: kernel.v1.ReadingTerm
+	(*ReadingSection)(nil),            // 74: kernel.v1.ReadingSection
+	(*ReadingSentence)(nil),           // 75: kernel.v1.ReadingSentence
+	(*ReadingAction)(nil),             // 76: kernel.v1.ReadingAction
+	(*LinkItemsRequest)(nil),          // 77: kernel.v1.LinkItemsRequest
+	(*LinkItemsResponse)(nil),         // 78: kernel.v1.LinkItemsResponse
+	(*UnlinkItemsRequest)(nil),        // 79: kernel.v1.UnlinkItemsRequest
+	(*UnlinkItemsResponse)(nil),       // 80: kernel.v1.UnlinkItemsResponse
+	nil,                               // 81: kernel.v1.Item.RollupsEntry
+	nil,                               // 82: kernel.v1.RollupValue.CountsEntry
+	nil,                               // 83: kernel.v1.Reaction.AddEntry
+	nil,                               // 84: kernel.v1.Reaction.CreateFieldsEntry
+	nil,                               // 85: kernel.v1.Reaction.SetFieldsEntry
+	nil,                               // 86: kernel.v1.ActingTimer.SetsEntry
+	nil,                               // 87: kernel.v1.Transition.SetsEntry
+	(*structpb.Struct)(nil),           // 88: google.protobuf.Struct
+	(*timestamppb.Timestamp)(nil),     // 89: google.protobuf.Timestamp
+	(*durationpb.Duration)(nil),       // 90: google.protobuf.Duration
+	(*structpb.Value)(nil),            // 91: google.protobuf.Value
 }
 var file_kernel_v1_kernel_proto_depIdxs = []int32{
-	81,  // 0: kernel.v1.Item.fields:type_name -> google.protobuf.Struct
+	88,  // 0: kernel.v1.Item.fields:type_name -> google.protobuf.Struct
 	16,  // 1: kernel.v1.Item.hold:type_name -> kernel.v1.Hold
-	82,  // 2: kernel.v1.Item.create_time:type_name -> google.protobuf.Timestamp
+	89,  // 2: kernel.v1.Item.create_time:type_name -> google.protobuf.Timestamp
 	7,   // 3: kernel.v1.Item.category:type_name -> kernel.v1.StateCategory
 	14,  // 4: kernel.v1.Item.links:type_name -> kernel.v1.Link
-	74,  // 5: kernel.v1.Item.rollups:type_name -> kernel.v1.Item.RollupsEntry
-	75,  // 6: kernel.v1.RollupValue.counts:type_name -> kernel.v1.RollupValue.CountsEntry
+	81,  // 5: kernel.v1.Item.rollups:type_name -> kernel.v1.Item.RollupsEntry
+	82,  // 6: kernel.v1.RollupValue.counts:type_name -> kernel.v1.RollupValue.CountsEntry
 	0,   // 7: kernel.v1.Link.direction:type_name -> kernel.v1.LinkDirection
 	15,  // 8: kernel.v1.Link.item:type_name -> kernel.v1.ItemRef
-	81,  // 9: kernel.v1.CreateItemRequest.fields:type_name -> google.protobuf.Struct
+	88,  // 9: kernel.v1.CreateItemRequest.fields:type_name -> google.protobuf.Struct
 	17,  // 10: kernel.v1.CreateItemRequest.narrow:type_name -> kernel.v1.Readers
 	12,  // 11: kernel.v1.CreateItemResponse.item:type_name -> kernel.v1.Item
 	12,  // 12: kernel.v1.GetItemResponse.item:type_name -> kernel.v1.Item
-	81,  // 13: kernel.v1.UpdateItemRequest.fields:type_name -> google.protobuf.Struct
+	88,  // 13: kernel.v1.UpdateItemRequest.fields:type_name -> google.protobuf.Struct
 	23,  // 14: kernel.v1.UpdateItemRequest.policy:type_name -> kernel.v1.PolicyChange
 	24,  // 15: kernel.v1.UpdateItemRequest.move:type_name -> kernel.v1.Move
 	17,  // 16: kernel.v1.PolicyChange.narrow:type_name -> kernel.v1.Readers
 	12,  // 17: kernel.v1.UpdateItemResponse.item:type_name -> kernel.v1.Item
-	81,  // 18: kernel.v1.TransitionItemRequest.fields:type_name -> google.protobuf.Struct
-	83,  // 19: kernel.v1.TransitionItemRequest.wait:type_name -> google.protobuf.Duration
+	88,  // 18: kernel.v1.TransitionItemRequest.fields:type_name -> google.protobuf.Struct
+	90,  // 19: kernel.v1.TransitionItemRequest.wait:type_name -> google.protobuf.Duration
 	12,  // 20: kernel.v1.TransitionItemResponse.item:type_name -> kernel.v1.Item
 	1,   // 21: kernel.v1.TransitionItemResponse.outcome:type_name -> kernel.v1.TransitionOutcome
 	30,  // 22: kernel.v1.SearchItemsRequest.filter:type_name -> kernel.v1.ItemFilter
@@ -6646,25 +7191,25 @@ var file_kernel_v1_kernel_proto_depIdxs = []int32{
 	32,  // 25: kernel.v1.ItemFilter.fields:type_name -> kernel.v1.FieldFilter
 	31,  // 26: kernel.v1.ItemFilter.links:type_name -> kernel.v1.LinkFilter
 	0,   // 27: kernel.v1.LinkFilter.direction:type_name -> kernel.v1.LinkDirection
-	84,  // 28: kernel.v1.FieldFilter.eq:type_name -> google.protobuf.Value
-	84,  // 29: kernel.v1.FieldFilter.gt:type_name -> google.protobuf.Value
-	84,  // 30: kernel.v1.FieldFilter.gte:type_name -> google.protobuf.Value
-	84,  // 31: kernel.v1.FieldFilter.lt:type_name -> google.protobuf.Value
-	84,  // 32: kernel.v1.FieldFilter.lte:type_name -> google.protobuf.Value
+	91,  // 28: kernel.v1.FieldFilter.eq:type_name -> google.protobuf.Value
+	91,  // 29: kernel.v1.FieldFilter.gt:type_name -> google.protobuf.Value
+	91,  // 30: kernel.v1.FieldFilter.gte:type_name -> google.protobuf.Value
+	91,  // 31: kernel.v1.FieldFilter.lt:type_name -> google.protobuf.Value
+	91,  // 32: kernel.v1.FieldFilter.lte:type_name -> google.protobuf.Value
 	30,  // 33: kernel.v1.ListItemsRequest.filter:type_name -> kernel.v1.ItemFilter
 	12,  // 34: kernel.v1.ListItemsResponse.items:type_name -> kernel.v1.Item
 	37,  // 35: kernel.v1.ListItemEventsResponse.events:type_name -> kernel.v1.ItemEvent
 	2,   // 36: kernel.v1.ItemEvent.kind:type_name -> kernel.v1.ItemEventKind
-	82,  // 37: kernel.v1.ItemEvent.create_time:type_name -> google.protobuf.Timestamp
-	81,  // 38: kernel.v1.ItemEvent.fields:type_name -> google.protobuf.Struct
+	89,  // 37: kernel.v1.ItemEvent.create_time:type_name -> google.protobuf.Timestamp
+	88,  // 38: kernel.v1.ItemEvent.fields:type_name -> google.protobuf.Struct
 	17,  // 39: kernel.v1.ItemEvent.readers:type_name -> kernel.v1.Readers
 	15,  // 40: kernel.v1.ItemEvent.container:type_name -> kernel.v1.ItemRef
 	15,  // 41: kernel.v1.ItemEvent.container_from:type_name -> kernel.v1.ItemRef
 	15,  // 42: kernel.v1.ItemEvent.container_to:type_name -> kernel.v1.ItemRef
 	15,  // 43: kernel.v1.ItemEvent.link_target:type_name -> kernel.v1.ItemRef
-	81,  // 44: kernel.v1.ItemEvent.added:type_name -> google.protobuf.Struct
+	88,  // 44: kernel.v1.ItemEvent.added:type_name -> google.protobuf.Struct
 	15,  // 45: kernel.v1.ItemEvent.link_replaced:type_name -> kernel.v1.ItemRef
-	81,  // 46: kernel.v1.ItemEvent.set_ops:type_name -> google.protobuf.Struct
+	88,  // 46: kernel.v1.ItemEvent.set_ops:type_name -> google.protobuf.Struct
 	15,  // 47: kernel.v1.ItemEvent.reaction_target:type_name -> kernel.v1.ItemRef
 	40,  // 48: kernel.v1.StartAgentSessionResponse.session:type_name -> kernel.v1.AgentSession
 	52,  // 49: kernel.v1.Type.fields:type_name -> kernel.v1.Field
@@ -6678,10 +7223,10 @@ var file_kernel_v1_kernel_proto_depIdxs = []int32{
 	46,  // 57: kernel.v1.Type.rollups:type_name -> kernel.v1.Rollup
 	44,  // 58: kernel.v1.Type.offers:type_name -> kernel.v1.Offer
 	4,   // 59: kernel.v1.Reaction.kind:type_name -> kernel.v1.ReactionKind
-	76,  // 60: kernel.v1.Reaction.add:type_name -> kernel.v1.Reaction.AddEntry
+	83,  // 60: kernel.v1.Reaction.add:type_name -> kernel.v1.Reaction.AddEntry
 	3,   // 61: kernel.v1.Reaction.trigger:type_name -> kernel.v1.ReactionTrigger
-	77,  // 62: kernel.v1.Reaction.create_fields:type_name -> kernel.v1.Reaction.CreateFieldsEntry
-	78,  // 63: kernel.v1.Reaction.set_fields:type_name -> kernel.v1.Reaction.SetFieldsEntry
+	84,  // 62: kernel.v1.Reaction.create_fields:type_name -> kernel.v1.Reaction.CreateFieldsEntry
+	85,  // 63: kernel.v1.Reaction.set_fields:type_name -> kernel.v1.Reaction.SetFieldsEntry
 	5,   // 64: kernel.v1.LinkType.writable_by:type_name -> kernel.v1.FieldWriter
 	51,  // 65: kernel.v1.LinkType.resolve:type_name -> kernel.v1.LinkResolve
 	6,   // 66: kernel.v1.Field.type:type_name -> kernel.v1.FieldType
@@ -6690,8 +7235,8 @@ var file_kernel_v1_kernel_proto_depIdxs = []int32{
 	56,  // 69: kernel.v1.State.acting:type_name -> kernel.v1.ActingTimer
 	54,  // 70: kernel.v1.State.timer:type_name -> kernel.v1.StateTimer
 	55,  // 71: kernel.v1.State.at:type_name -> kernel.v1.AtTimer
-	79,  // 72: kernel.v1.ActingTimer.sets:type_name -> kernel.v1.ActingTimer.SetsEntry
-	80,  // 73: kernel.v1.Transition.sets:type_name -> kernel.v1.Transition.SetsEntry
+	86,  // 72: kernel.v1.ActingTimer.sets:type_name -> kernel.v1.ActingTimer.SetsEntry
+	87,  // 73: kernel.v1.Transition.sets:type_name -> kernel.v1.Transition.SetsEntry
 	43,  // 74: kernel.v1.GetTypeResponse.type:type_name -> kernel.v1.Type
 	43,  // 75: kernel.v1.ListTypesResponse.types:type_name -> kernel.v1.Type
 	63,  // 76: kernel.v1.ValidateTypesRequest.sources:type_name -> kernel.v1.TypeSource
@@ -6704,44 +7249,55 @@ var file_kernel_v1_kernel_proto_depIdxs = []int32{
 	10,  // 83: kernel.v1.Action.risk:type_name -> kernel.v1.ActionRisk
 	6,   // 84: kernel.v1.ActionValue.type:type_name -> kernel.v1.FieldType
 	11,  // 85: kernel.v1.ActionValue.trust:type_name -> kernel.v1.ActionInputTrust
-	12,  // 86: kernel.v1.LinkItemsResponse.item:type_name -> kernel.v1.Item
-	12,  // 87: kernel.v1.UnlinkItemsResponse.item:type_name -> kernel.v1.Item
-	13,  // 88: kernel.v1.Item.RollupsEntry.value:type_name -> kernel.v1.RollupValue
-	18,  // 89: kernel.v1.ItemService.CreateItem:input_type -> kernel.v1.CreateItemRequest
-	20,  // 90: kernel.v1.ItemService.GetItem:input_type -> kernel.v1.GetItemRequest
-	22,  // 91: kernel.v1.ItemService.UpdateItem:input_type -> kernel.v1.UpdateItemRequest
-	26,  // 92: kernel.v1.ItemService.TransitionItem:input_type -> kernel.v1.TransitionItemRequest
-	28,  // 93: kernel.v1.ItemService.SearchItems:input_type -> kernel.v1.SearchItemsRequest
-	33,  // 94: kernel.v1.ItemService.ListItems:input_type -> kernel.v1.ListItemsRequest
-	35,  // 95: kernel.v1.ItemService.ListItemEvents:input_type -> kernel.v1.ListItemEventsRequest
-	58,  // 96: kernel.v1.ItemService.GetType:input_type -> kernel.v1.GetTypeRequest
-	60,  // 97: kernel.v1.ItemService.ListTypes:input_type -> kernel.v1.ListTypesRequest
-	62,  // 98: kernel.v1.ItemService.ValidateTypes:input_type -> kernel.v1.ValidateTypesRequest
-	66,  // 99: kernel.v1.ItemService.ListActions:input_type -> kernel.v1.ListActionsRequest
-	38,  // 100: kernel.v1.ItemService.StartAgentSession:input_type -> kernel.v1.StartAgentSessionRequest
-	41,  // 101: kernel.v1.ItemService.ApproveWiden:input_type -> kernel.v1.ApproveWidenRequest
-	70,  // 102: kernel.v1.ItemService.LinkItems:input_type -> kernel.v1.LinkItemsRequest
-	72,  // 103: kernel.v1.ItemService.UnlinkItems:input_type -> kernel.v1.UnlinkItemsRequest
-	19,  // 104: kernel.v1.ItemService.CreateItem:output_type -> kernel.v1.CreateItemResponse
-	21,  // 105: kernel.v1.ItemService.GetItem:output_type -> kernel.v1.GetItemResponse
-	25,  // 106: kernel.v1.ItemService.UpdateItem:output_type -> kernel.v1.UpdateItemResponse
-	27,  // 107: kernel.v1.ItemService.TransitionItem:output_type -> kernel.v1.TransitionItemResponse
-	29,  // 108: kernel.v1.ItemService.SearchItems:output_type -> kernel.v1.SearchItemsResponse
-	34,  // 109: kernel.v1.ItemService.ListItems:output_type -> kernel.v1.ListItemsResponse
-	36,  // 110: kernel.v1.ItemService.ListItemEvents:output_type -> kernel.v1.ListItemEventsResponse
-	59,  // 111: kernel.v1.ItemService.GetType:output_type -> kernel.v1.GetTypeResponse
-	61,  // 112: kernel.v1.ItemService.ListTypes:output_type -> kernel.v1.ListTypesResponse
-	64,  // 113: kernel.v1.ItemService.ValidateTypes:output_type -> kernel.v1.ValidateTypesResponse
-	67,  // 114: kernel.v1.ItemService.ListActions:output_type -> kernel.v1.ListActionsResponse
-	39,  // 115: kernel.v1.ItemService.StartAgentSession:output_type -> kernel.v1.StartAgentSessionResponse
-	42,  // 116: kernel.v1.ItemService.ApproveWiden:output_type -> kernel.v1.ApproveWidenResponse
-	71,  // 117: kernel.v1.ItemService.LinkItems:output_type -> kernel.v1.LinkItemsResponse
-	73,  // 118: kernel.v1.ItemService.UnlinkItems:output_type -> kernel.v1.UnlinkItemsResponse
-	104, // [104:119] is the sub-list for method output_type
-	89,  // [89:104] is the sub-list for method input_type
-	89,  // [89:89] is the sub-list for extension type_name
-	89,  // [89:89] is the sub-list for extension extendee
-	0,   // [0:89] is the sub-list for field type_name
+	63,  // 86: kernel.v1.ExplainTypeRequest.sources:type_name -> kernel.v1.TypeSource
+	72,  // 87: kernel.v1.ExplainTypeResponse.reading:type_name -> kernel.v1.TypeReading
+	65,  // 88: kernel.v1.ExplainTypeResponse.problems:type_name -> kernel.v1.TypeProblem
+	73,  // 89: kernel.v1.TypeReading.key:type_name -> kernel.v1.ReadingTerm
+	74,  // 90: kernel.v1.TypeReading.sections:type_name -> kernel.v1.ReadingSection
+	76,  // 91: kernel.v1.TypeReading.actions:type_name -> kernel.v1.ReadingAction
+	75,  // 92: kernel.v1.ReadingSection.sentences:type_name -> kernel.v1.ReadingSentence
+	9,   // 93: kernel.v1.ReadingAction.kinds:type_name -> kernel.v1.HookKind
+	10,  // 94: kernel.v1.ReadingAction.risk:type_name -> kernel.v1.ActionRisk
+	12,  // 95: kernel.v1.LinkItemsResponse.item:type_name -> kernel.v1.Item
+	12,  // 96: kernel.v1.UnlinkItemsResponse.item:type_name -> kernel.v1.Item
+	13,  // 97: kernel.v1.Item.RollupsEntry.value:type_name -> kernel.v1.RollupValue
+	18,  // 98: kernel.v1.ItemService.CreateItem:input_type -> kernel.v1.CreateItemRequest
+	20,  // 99: kernel.v1.ItemService.GetItem:input_type -> kernel.v1.GetItemRequest
+	22,  // 100: kernel.v1.ItemService.UpdateItem:input_type -> kernel.v1.UpdateItemRequest
+	26,  // 101: kernel.v1.ItemService.TransitionItem:input_type -> kernel.v1.TransitionItemRequest
+	28,  // 102: kernel.v1.ItemService.SearchItems:input_type -> kernel.v1.SearchItemsRequest
+	33,  // 103: kernel.v1.ItemService.ListItems:input_type -> kernel.v1.ListItemsRequest
+	35,  // 104: kernel.v1.ItemService.ListItemEvents:input_type -> kernel.v1.ListItemEventsRequest
+	58,  // 105: kernel.v1.ItemService.GetType:input_type -> kernel.v1.GetTypeRequest
+	60,  // 106: kernel.v1.ItemService.ListTypes:input_type -> kernel.v1.ListTypesRequest
+	62,  // 107: kernel.v1.ItemService.ValidateTypes:input_type -> kernel.v1.ValidateTypesRequest
+	66,  // 108: kernel.v1.ItemService.ListActions:input_type -> kernel.v1.ListActionsRequest
+	70,  // 109: kernel.v1.ItemService.ExplainType:input_type -> kernel.v1.ExplainTypeRequest
+	38,  // 110: kernel.v1.ItemService.StartAgentSession:input_type -> kernel.v1.StartAgentSessionRequest
+	41,  // 111: kernel.v1.ItemService.ApproveWiden:input_type -> kernel.v1.ApproveWidenRequest
+	77,  // 112: kernel.v1.ItemService.LinkItems:input_type -> kernel.v1.LinkItemsRequest
+	79,  // 113: kernel.v1.ItemService.UnlinkItems:input_type -> kernel.v1.UnlinkItemsRequest
+	19,  // 114: kernel.v1.ItemService.CreateItem:output_type -> kernel.v1.CreateItemResponse
+	21,  // 115: kernel.v1.ItemService.GetItem:output_type -> kernel.v1.GetItemResponse
+	25,  // 116: kernel.v1.ItemService.UpdateItem:output_type -> kernel.v1.UpdateItemResponse
+	27,  // 117: kernel.v1.ItemService.TransitionItem:output_type -> kernel.v1.TransitionItemResponse
+	29,  // 118: kernel.v1.ItemService.SearchItems:output_type -> kernel.v1.SearchItemsResponse
+	34,  // 119: kernel.v1.ItemService.ListItems:output_type -> kernel.v1.ListItemsResponse
+	36,  // 120: kernel.v1.ItemService.ListItemEvents:output_type -> kernel.v1.ListItemEventsResponse
+	59,  // 121: kernel.v1.ItemService.GetType:output_type -> kernel.v1.GetTypeResponse
+	61,  // 122: kernel.v1.ItemService.ListTypes:output_type -> kernel.v1.ListTypesResponse
+	64,  // 123: kernel.v1.ItemService.ValidateTypes:output_type -> kernel.v1.ValidateTypesResponse
+	67,  // 124: kernel.v1.ItemService.ListActions:output_type -> kernel.v1.ListActionsResponse
+	71,  // 125: kernel.v1.ItemService.ExplainType:output_type -> kernel.v1.ExplainTypeResponse
+	39,  // 126: kernel.v1.ItemService.StartAgentSession:output_type -> kernel.v1.StartAgentSessionResponse
+	42,  // 127: kernel.v1.ItemService.ApproveWiden:output_type -> kernel.v1.ApproveWidenResponse
+	78,  // 128: kernel.v1.ItemService.LinkItems:output_type -> kernel.v1.LinkItemsResponse
+	80,  // 129: kernel.v1.ItemService.UnlinkItems:output_type -> kernel.v1.UnlinkItemsResponse
+	114, // [114:130] is the sub-list for method output_type
+	98,  // [98:114] is the sub-list for method input_type
+	98,  // [98:98] is the sub-list for extension type_name
+	98,  // [98:98] is the sub-list for extension extendee
+	0,   // [0:98] is the sub-list for field type_name
 }
 
 func init() { file_kernel_v1_kernel_proto_init() }
@@ -6759,7 +7315,7 @@ func file_kernel_v1_kernel_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kernel_v1_kernel_proto_rawDesc), len(file_kernel_v1_kernel_proto_rawDesc)),
 			NumEnums:      12,
-			NumMessages:   69,
+			NumMessages:   76,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
