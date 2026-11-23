@@ -37,6 +37,53 @@ func TestLine_Format(t *testing.T) {
 	if got, want := l.Format(day1), "day 2 10:00 balance: deduct for bob updated it: f_used +5 = 5"; got != want {
 		t.Errorf("Format = %q, want %q", got, want)
 	}
+	w := window(at(1, 9, 5, 0), at(1, 9, 20, 0), "request", "hr_check for alice failed draft -> submitted: budget_exhausted")
+	if got, want := w.Format(day1),
+		"between day 1 09:05 and day 1 09:20 request: hr_check for alice failed draft -> submitted: budget_exhausted"; got != want {
+		t.Errorf("Format = %q, want %q", got, want)
+	}
+}
+
+func window(from, to time.Time, item, text string) story.Line {
+	return story.Line{At: from, To: to, Item: item, Text: text}
+}
+
+// A window matches one line seen at any instant within it, its ends
+// included, and only one.
+func TestCompare_AWindowMatchesOneLineWithinIt(t *testing.T) {
+	text := "hr_check for alice failed draft -> submitted: budget_exhausted"
+	w := window(at(1, 9, 5, 0), at(1, 9, 20, 0), "request", text)
+	for _, seenAt := range []time.Time{at(1, 9, 5, 0), at(1, 9, 19, 3), at(1, 9, 20, 0)} {
+		seen := []story.Line{line(at(1, 9, 5, 0), "request", "alice asked draft -> submitted"), line(seenAt, "request", text)}
+		expected := []story.Line{line(at(1, 9, 5, 0), "request", "alice asked draft -> submitted"), w}
+		if d := story.Compare(expected, seen); !d.Empty() || d.Matched != 2 {
+			t.Errorf("seen at %v: diff = %+v, want empty", seenAt, d)
+		}
+	}
+	// Outside it: missing, and unexpected where it was seen.
+	late := line(at(1, 9, 20, 1), "request", text)
+	d := story.Compare([]story.Line{w}, []story.Line{late})
+	if !reflect.DeepEqual(d.Missing, []story.Line{w}) || !reflect.DeepEqual(d.Unexpected, []story.Line{late}) {
+		t.Errorf("seen after the window: diff = %+v", d)
+	}
+	// Twice within it: one matches, the other is unexpected.
+	twice := []story.Line{line(at(1, 9, 10, 0), "request", text), line(at(1, 9, 15, 0), "request", text)}
+	d = story.Compare([]story.Line{w}, twice)
+	if d.Matched != 1 || len(d.Missing) != 0 || len(d.Unexpected) != 1 {
+		t.Errorf("seen twice in the window: diff = %+v, want one matched and one unexpected", d)
+	}
+}
+
+// An exact line is matched first: a window does not take a line that an
+// exact expected line needs.
+func TestCompare_ExactLinesFirst(t *testing.T) {
+	text := "remind_approver for alice ran (remind run 1)"
+	exact := line(at(3, 9, 0, 0), "request", text)
+	w := window(at(3, 8, 0, 0), at(3, 10, 0, 0), "request", text)
+	seen := []story.Line{line(at(3, 9, 0, 0), "request", text), line(at(3, 9, 30, 0), "request", text)}
+	if d := story.Compare([]story.Line{w, exact}, seen); !d.Empty() || d.Matched != 2 {
+		t.Errorf("diff = %+v, want both matched", d)
+	}
 }
 
 func TestCompare_TheSameTimeline(t *testing.T) {

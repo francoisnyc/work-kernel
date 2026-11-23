@@ -4,9 +4,9 @@
 # (budget_exhausted); asking again once HR is back is the requester's
 # rerun. HR not knowing someone denies their request (unknown_employee).
 #
-# The check gives up at its last retry inside the budget: retries come 1,
-# 2, 4, 8, 16 and 32 seconds apart, then every minute, so the last one is
-# 14 minutes 3 seconds after the request.
+# The check gives up at its last retry inside its budget. When that is
+# depends on the retries' rhythm, which the kernel does not promise, so
+# the story expects it in a window: within the 15 minutes after the request.
 story: the HR check fails closed while HR is down, and denies someone HR does not know
 author: drafted by Claude from vacation_request@3's comments and design.md; approval pending
 day1: 2026-12-07   # a Monday
@@ -42,7 +42,7 @@ until: day 2 00:00
 expect:
   - "day 1 09:00 request: alice created it in draft"
   - "day 1 09:05 request: alice asked draft -> submitted"
-  - "day 1 09:19:03 request: hr_check for alice failed draft -> submitted: budget_exhausted"
+  - "between day 1 09:05 and day 1 09:20 request: hr_check for alice failed draft -> submitted: budget_exhausted"
   - "day 1 10:30 request: alice asked draft -> submitted"
   - "day 1 10:30 request: hr_check for alice moved it draft -> submitted: f_approver = bob; linked balance to balance"
   - "day 1 11:00 other: carol created it in draft"

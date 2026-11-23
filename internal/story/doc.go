@@ -112,6 +112,12 @@
 // # Expected lines
 //
 //	line = time ITEM: sentence
+//	     | between time and time ITEM: sentence
+//
+// The second form, a window, matches one line seen at any instant from
+// the first time to the second, both included. It is only for timing the
+// kernel does not promise: when a hook gives up within its budget depends
+// on its retries' rhythm, which a story should not have to know.
 //
 // A sentence says who did what. Who is a person, timer, a hook's ID or a
 // reaction's ID, followed by "for PERSON" when it acted for someone else.
@@ -133,6 +139,12 @@
 //	readers              who narrowed it to PRINCIPAL, ... / who gave it its container's readers
 //	a side effect        CONNECTOR: OPERATION for ITEM (HOOK): inputs[ -> outputs]
 //
+// reaction_skipped lines are left out unless show_skipped is true: every
+// move of an Item writes one for each of its reactions whose condition did
+// not hold, which would swamp a story. Nothing is lost: a reaction that
+// should have applied and was skipped leaves its effect's line missing, and
+// the story fails on that.
+//
 // Values are field = value, sorted by field ID: an enum option bare, text
 // quoted, a person by name, a date as day N, an instant as day N HH:MM[:SS],
 // a list in brackets, a cleared field as null, a reaction's addition as
@@ -144,7 +156,9 @@
 //
 // Lines are grouped by instant, to the second. The order of instants is
 // strict; within an instant, lines compare as a multiset, because Items'
-// workflows work concurrently. Runs of spaces count as one.
+// workflows work concurrently. A window matches one line within it, once
+// every line at an exact instant has been matched. Runs of spaces count
+// as one.
 //
 // # How a story runs, and where that differs from production
 //

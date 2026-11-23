@@ -71,6 +71,7 @@ until: day 10 00:00
 expect:
   - "day 1 09:00 request: alice created it in draft"
   - "day 1 09:05:30 request:   alice asked draft -> submitted"
+  - "between day 1 09:05 and day 1 09:20 request: hr_check for alice failed draft -> submitted: budget_exhausted"
 `
 
 func TestParse_EveryForm(t *testing.T) {
@@ -169,6 +170,8 @@ func TestParse_EveryForm(t *testing.T) {
 	wantExpect := []story.Line{
 		{Line: 41, At: at(1, 9, 0, 0), Item: "request", Text: "alice created it in draft"},
 		{Line: 42, At: at(1, 9, 5, 30), Item: "request", Text: "alice asked draft -> submitted"},
+		{Line: 43, At: at(1, 9, 5, 0), To: at(1, 9, 20, 0), Item: "request",
+			Text: "hr_check for alice failed draft -> submitted: budget_exhausted"},
 	}
 	if !reflect.DeepEqual(s.Expect, wantExpect) {
 		t.Errorf("expect = %+v\nwant %+v", s.Expect, wantExpect)
@@ -263,6 +266,10 @@ func TestParse_Problems(t *testing.T) {
 			7, []string{"given", "time"}},
 		{"an expected line without its Item", strings.Replace(minimal(""), `"day 1 09:00 request: alice created it in draft"`,
 			`"day 1 09:00 alice created it in draft"`, 1), 9, []string{"ITEM:"}},
+		{"a window that ends before it starts", strings.Replace(minimal(""), `"day 1 09:00 request: alice created it in draft"`,
+			`"between day 1 09:20 and day 1 09:05 request: alice created it in draft"`, 1), 9, []string{"between"}},
+		{"a window without its and", strings.Replace(minimal(""), `"day 1 09:00 request: alice created it in draft"`,
+			`"between day 1 09:05 day 1 09:20 request: alice created it in draft"`, 1), 9, []string{"and"}},
 		{"an unknown answer", strings.Replace(minimal(""), "steps:", "fakes:\n  email.notify@1:\n    - maybe\nsteps:", 1),
 			8, []string{"maybe"}},
 		{"an unknown failure", strings.Replace(minimal(""), "steps:", "fakes:\n  email.notify@1:\n    - fail sometimes\nsteps:", 1),

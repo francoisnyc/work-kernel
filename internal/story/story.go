@@ -175,12 +175,20 @@ type Answer struct {
 type Line struct {
 	Line int // in the story file; 0 for a line that was seen
 	At   time.Time
+	// To, when set, makes an expected line a window: it matches one line
+	// seen at any instant from At to To, both included. Only for timing
+	// the kernel does not promise (retries, budgets).
+	To   time.Time
 	Item string // an Item's name, or a connector's
 	Text string
 }
 
-// Format writes the line as a story does: "day N HH:MM[:SS] ITEM: TEXT".
+// Format writes the line as a story does: "day N HH:MM[:SS] ITEM: TEXT",
+// or "between TIME and TIME ITEM: TEXT" for a window.
 func (l Line) Format(day1 time.Time) string {
+	if !l.To.IsZero() {
+		return "between " + FormatTime(day1, l.At) + " and " + FormatTime(day1, l.To) + " " + l.Item + ": " + l.Text
+	}
 	return FormatTime(day1, l.At) + " " + l.Item + ": " + l.Text
 }
 
