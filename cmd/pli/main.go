@@ -203,6 +203,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		"type get":        c.typeGet,
 		"type list":       c.typeList,
 		"type validate":   c.typeValidate,
+		"action list":     c.actionList,
 	}
 	name := rest[0] + " " + rest[1]
 	cmd, ok := commands[name]

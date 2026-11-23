@@ -1,0 +1,4 @@
+# Published action contracts: <connector>.<operation>@<major> sha256:<hex>,
+# the digest of the machine contract (everything but the descriptions).
+# A line is never changed or removed: CI compares this file with the base
+# branch's. A change to a contract is a new major, with a new line.
