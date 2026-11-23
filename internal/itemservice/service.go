@@ -297,11 +297,16 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 			}
 		}
 		// An agent session creates only inside its scopes (at the top level
-		// only if it covers the whole namespace), and only with a write power.
+		// only if it covers the whole namespace), and only with the create
+		// power: another write power is not enough. Both before the agent
+		// write rule, which an approval would not get past.
 		if err := checkInSession(ctx, tx, req.Principal, req.ContainerID); err != nil {
 			return WriteResult{}, err
 		}
 		if err := checkWritePower(ctx, tx, req.Principal); err != nil {
+			return WriteResult{}, err
+		}
+		if err := checkCreatePower(ctx, tx, req.Principal); err != nil {
 			return WriteResult{}, err
 		}
 		if err := checkAgentWrite(ctx, tx, req.Principal, target, req.ContainerID); err != nil {

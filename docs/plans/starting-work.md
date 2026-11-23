@@ -83,8 +83,11 @@ part 1, before any alert arrives.
 other write keeps the v1 rule (any write power), so this one commit
 changes exactly one thing. The refusal stays what a read-only session
 gets today: `ErrForbidden`, over the API `PERMISSION_DENIED` /
-`NOT_ALLOWED`. Its message names the missing power
-(`this agent session may not create`). No new code, no contract change.
+`NOT_ALLOWED`. The item service's error message names the missing
+power (`this agent session may not create`); the API returns only
+`NOT_ALLOWED`, with that reason's fixed message, so over the wire it
+reads exactly as a read-only session's refusal (step 1, Phase A,
+answer 4). No new code, no contract change.
 
 It applies everywhere: to staff Types and customer Types, with or without
 a `start` block. A customer's portal bot already holds `create` among its
@@ -265,17 +268,21 @@ slip through. Order:
    about a container it cannot see.
 2. `in` (latest version): the container's Type, or `top`. Otherwise
    `ErrForbidden`, over the API `PERMISSION_DENIED` / `NOT_ALLOWED`;
-   message reason `START_NOT_IN`.
+   the item service's message names the reason `START_NOT_IN`.
 3. Customers: `own`/`shared` (as now). Staff and agents: `start.allowed`,
    judged by a new pure function `policy.MayStart(start, who,
    ContainerFacts)`, which shares its entry matching with `MayTransition`.
-   Otherwise `PERMISSION_DENIED` / `NOT_ALLOWED`; reason
-   `START_NOT_ALLOWED`.
+   Otherwise `PERMISSION_DENIED` / `NOT_ALLOWED`; the item service's
+   message names the reason `START_NOT_ALLOWED`.
 4. Then the session scope, the `create` power and the agent write rule, as
    now.
 
 No new error code, and no contract change: the two reasons go in the
-message only (decided at review, 2026-11-23).
+item service's message only (decided at review, 2026-11-23). The API
+returns only `NOT_ALLOWED`, with its fixed message: `apiError` never
+sends the item service's text, so an API or `pli` caller cannot tell the
+two apart, nor either from any other `NOT_ALLOWED` (corrected at step 1,
+Phase A, answer 4). Saying why over the API is under Later.
 
 Why `in` is checked before `allowed`: it is static (Type against Type),
 and the caller sees the container, so saying "not here" leaks nothing.
@@ -779,7 +786,7 @@ The SOC domain, in these pieces:
 | Step | Kernel change | Schema | API (`kernel.v1`) | Needs a second OK |
 | --- | --- | --- | --- | --- |
 | 1 | `create` power on `Create` | none | none | no (answer 1) |
-| 2 | `start` block; `policy.MayStart`; load checks; latest version governs | none | none (reasons in the message only) | no |
+| 2 | `start` block; `policy.MayStart`; load checks; latest version governs | none | none (reasons in the item service's message only; the API returns `NOT_ALLOWED`) | no |
 | 2b | the same "latest version governs" rule for placement (`placement_writable_by`), its own small step | none | none | no (review answer 2) |
 | 3 | first the intake kill switch (required before anything inbound); then source contracts (with `x-pli-personal`); intakes; the inbox; `intake:` principal; `Internal().Create`; the inbound endpoint and its conformance; the vendor precedents verified | `inbox` | a `SOURCE` kind in the actions' enum; the inbound endpoint is HTTP, outside `kernel.v1` | **yes**: a table, a door, a principal kind |
 | 4 | correlation: `external_keys`, `create_or_correlate`, `when_closed`, `unmatched` | `external_keys` | none | **yes**: a table |
@@ -800,7 +807,8 @@ migration or a contract change.
 ## Open questions, decided at review (2026-11-23)
 
 1. **Reason metadata**: no contract change; `START_NOT_IN` and
-   `START_NOT_ALLOWED` stay in the message (1.6).
+   `START_NOT_ALLOWED` stay in the item service's message; the API
+   returns only `NOT_ALLOWED` (1.6, corrected at step 1).
 2. **Latest version governs, for placement too**: yes, closing the same
    hole for `placement_writable_by`, as its own small step (2b in the
    table), not in step 2.
@@ -823,6 +831,14 @@ Also decided at review: **a reopened Item's key stays closed** (2.9).
 Each build step comes back for its own OK.
 
 ## Later (not proposed for building now)
+
+- **Say why over the API.** Today every refusal of this kind is
+  `NOT_ALLOWED` with one fixed message: a read-only session, a session
+  without `create`, and later `START_NOT_IN` and `START_NOT_ALLOWED` all
+  read the same. Agents need the reason to act sensibly (ask for a
+  session with `create`, pick another container, hand back to a person).
+  A contract change (a metadata key on `NOT_ALLOWED`, or new reasons):
+  asked separately.
 
 - `except` on `start` (answer 4); `except: [container_creator]` is the
   first use.

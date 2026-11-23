@@ -6,6 +6,23 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
+- **Starting work, step 1's Later items** (docs/plans/starting-work.md, 1.0):
+  - **Reaction creates by an agent without `create`.** An agent session
+    holding `transition:*` (or any transition power) but not `create` may
+    not create, yet its transition into a state with an on-enter create
+    reaction makes an Item: the target Type's `creates:` consent governs,
+    and no reaction reads a session's powers. Pinned by
+    `TestCreatePower_AReactionCreatesForAnAgentWithoutCreate`. Revisit if
+    a Type author needs "only creators may cause creates"; it would mean
+    reactions reading the causing session, a new concept.
+  - **Say why over the API.** A read-only session, a session without
+    `create`, and later `START_NOT_IN` / `START_NOT_ALLOWED` all answer
+    `PERMISSION_DENIED NOT_ALLOWED` with one fixed message: `apiError`
+    never sends the item service's text. Agents need the reason to act
+    sensibly (ask for `create`, pick another container, hand back to a
+    person). A contract change (a metadata key or new reasons), asked
+    separately; also under Later in the plan.
+
 - **The hook protocol's Later items** (design.md, "Hook protocol
   (pli.hooks/v1), as built"):
   - `actor` in the envelope (who caused the event: principal,
@@ -3161,3 +3178,28 @@ the pinned browser.
 **Open:** the stories' Later items (top of this file). **Next session:** the owner approves the six
 stories; then Ventoux item 6 (plain-language readings with witnesses), which reuses `Parse`, `Check`,
 `Run` and `Compare`.
+
+## 2026-11-23 — Starting work, step 1: the `create` power (finished)
+
+**Built:** an agent session needs `create` for every `Create`; another write power is no longer enough, and every
+other write keeps the v1 rule. `checkCreatePower` runs right after `checkWritePower`: scope (`NOT_FOUND`), then the
+power, then the agent write rule (`NEEDS_APPROVAL`). Refusal: `ErrForbidden`, "this agent session may not create";
+over the API `PERMISSION_DENIED NOT_ALLOWED`, byte for byte a read-only session's. Create reactions are unchanged.
+design.md, powers.go and starting-work.md updated. PR #55.
+
+**Decided (Phase A):** only `Create` needs `create`; reaction creates follow `creates:` (now a test); no test for
+replaying a pre-change key; the two half-true test comments gain "except a create" (own commit); the plan corrected:
+the item service's message names the reason, the API returns only `NOT_ALLOWED` (step 2's reasons too).
+
+**Tests:** 8 new (item service 6, API 1, pli 1); 6 failed for the right reason before the check, 2 guards passed. No
+existing test changed, confirmed by running the whole suite with the check in a throwaway worktree in Phase A.
+
+**Surprises:** the plan promised the refusal's message over the API, but `apiError` sends only the reason's fixed
+text. The stories (added after the plan's check) start no agent sessions.
+
+**Numbers.** `go test ./...` green: workflow 322 s, item service 70 s.
+
+**Local workarounds (nothing committed):** dockerd started by hand three times (it stops between runs);
+`postgres:17-alpine` from `mirror.gcr.io` after Docker Hub answered 429.
+
+**Open:** the two Later items above. **Next session:** step 2 (the `start` block), Phase A.

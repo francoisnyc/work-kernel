@@ -233,6 +233,20 @@ func checkWritePower(ctx context.Context, q policy.Querier, p item.Principal) er
 	return nil
 }
 
+// checkCreatePower is ErrForbidden for a session without the create power
+// (docs/plans/starting-work.md, 1.0). Only Create needs it; every other
+// write keeps the v1 rule (any write power). Non-agents pass.
+func checkCreatePower(ctx context.Context, q policy.Querier, p item.Principal) error {
+	c, err := loadCaps(ctx, q, p)
+	if err != nil || c == nil {
+		return err
+	}
+	if !slices.Contains(c.powers, item.PowerCreate) {
+		return fmt.Errorf("%w: this agent session may not create", ErrForbidden)
+	}
+	return nil
+}
+
 // sessionFilter returns, for a session limited to containers, a recursive
 // CTE named in_session holding every Item at or below them, and the SQL
 // condition that keeps alias's Items to it. Otherwise both are empty. The

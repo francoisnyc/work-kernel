@@ -427,7 +427,8 @@ func TestAgentScopes_ReadOnlySessionCannotWrite(t *testing.T) {
 	assertNotFound(t, "Update outside, read-only", agentUpdate(t, w.k, agent, w.inB))
 }
 
-// Any write power allows writes in v1 (read versus write only).
+// Any write power allows writes in v1 (read versus write only), except a
+// create, which needs the create power.
 func TestAgentScopes_AnyWritePowerWrites(t *testing.T) {
 	w := newCapWorld(t)
 	agent := scoped(t, w.k, w.user, []uuid.UUID{w.a}, item.PowerEditFields)

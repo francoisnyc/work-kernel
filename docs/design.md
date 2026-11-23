@@ -735,8 +735,9 @@ new call passes the kernel membership test.
     not, since a session spans Types), `transition:*` (any), `move`,
     `comment` (reserved: stored only, will mean "create comment Items") and
     `outbound`. An unknown power is `INVALID_ARGUMENT`. Every power is
-    stored; v1 enforces read versus any write power: without one, every
-    write is `NOT_ALLOWED`.
+    stored; v1 enforces read versus any write power, except `Create`,
+    which needs `create`: without one, every write is `NOT_ALLOWED`, and
+    without `create`, every create is.
   - **Grants**: what a user let an agent do, scopes and powers, per
     namespace; a config entry in the dev-token file for now. The API
     resolves the grant for (agent, user, namespace); the kernel checks the

@@ -7,7 +7,8 @@ import (
 
 // Powers an agent session may hold (capability mode, docs/design.md "Who is
 // calling"). read is always implied. v1 enforces read versus any write
-// power; the finer ones are stored for later.
+// power, except Create, which needs create; the finer ones are stored for
+// later.
 const (
 	PowerRead          = "read"
 	PowerCreate        = "create"
