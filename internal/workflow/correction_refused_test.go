@@ -6,7 +6,9 @@
 // other refusal is returned as before, and the workflow does not count it
 // as giving up.
 //
-// The HR stub answers "bob", not a principal ("user:bob"), for ana.
+// The HR stub answers "group:hr" for ana: a principal, so the action's
+// contract lets it through (Ventoux V1), but not one a principal field
+// holds (user: or agent:), so ResolveHold refuses the correction.
 package workflow_test
 
 import (
@@ -37,7 +39,7 @@ func refusedEvents(t *testing.T, id uuid.UUID) (n int) {
 func TestE2E_CorrectionRefused_HoldClosesAsError(t *testing.T) {
 	m := newMailStack(t)
 	m.balance(25)
-	m.hr.SetManager(m.ana.Actor, "bob") // not a principal
+	m.hr.SetManager(m.ana.Actor, "group:hr") // a principal, but not one a principal field holds
 	res, err := m.k.Create(serverCtx(t), itemservice.CreateRequest{IdempotencyKey: "key-" + uuid.NewString(),
 		Principal: m.ana, TypeID: "vacation_request", TypeVersion: 3,
 		Fields: map[string]any{"f_start": "2099-07-01", "f_end": "2099-07-05", "f_days": 5, "f_leave_type": "annual"}})
@@ -77,7 +79,7 @@ func TestActivities_RunCheck_CorrectionRefused_RetryEndsCleanly(t *testing.T) {
 	m.stopRelay()
 	m.stopWorker()
 	m.balance(25)
-	m.hr.SetManager(m.ana.Actor, "bob")
+	m.hr.SetManager(m.ana.Actor, "group:hr")
 	res, err := m.k.Create(serverCtx(t), itemservice.CreateRequest{IdempotencyKey: "key-" + uuid.NewString(),
 		Principal: m.ana, TypeID: "vacation_request", TypeVersion: 3,
 		Fields: map[string]any{"f_start": "2099-07-01", "f_end": "2099-07-05", "f_days": 5, "f_leave_type": "annual"}})

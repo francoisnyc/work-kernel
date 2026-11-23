@@ -78,6 +78,9 @@ const (
 	CodeUnknownAction     Code = "UNKNOWN_ACTION"
 	// A hook's reads or writes do not match its action's.
 	CodeActionArity Code = "ACTION_ARITY"
+	// CodeActionKind: a hook of a kind its action does not serve (Ventoux
+	// V1: a check naming an enrich action).
+	CodeActionKind Code = "ACTION_KIND"
 	// A field of the wrong type for this use (an at-timer on a string).
 	CodeWrongFieldType Code = "WRONG_FIELD_TYPE"
 	// A CEL expression that does not compile.

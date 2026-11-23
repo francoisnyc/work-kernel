@@ -136,8 +136,11 @@ Hooks (Step 6) are declared in the Type version, pinned with the lifecycle:
 `{id, on: enter, state}` for an **enrich** hook (reads some fields, calls out,
 writes others, never holds the Item, optional `fallback`), or `{id, on:
 transition, from, to}` for a **check**. Each names an action (code in
-`internal/hooks`, never in the Type) with `reads` and `writes`, matched to the
-action by position; the action's arity is checked at load. Since the hook
+`internal/hooks` or a connector service, never in the Type) with `reads` and
+`writes`, matched to the action by position. Since Ventoux V1 every action
+has a contract in `contracts/`, and a hook is checked against it at load:
+its arity, its kind, and the types of what it reads and writes (see
+"Ventoux V1, as built: action contracts"). Since the hook
 protocol, an action is `<connector>.<operation>[@<major>]` (no major means
 1), and the connector is compiled in or a remote service, by configuration:
 see "Hook protocol (pli.hooks/v1), as built". Besides fields,
@@ -781,6 +784,7 @@ container is a field, not part of its name, so a move never renames it.
 | `LinkItems`, `UnlinkItems` | Add or remove a link of a type the source's Type declares |
 | `GetType`, `ListTypes` | Read Type definitions (read-only; Types load from files at start) |
 | `ValidateTypes` | Check draft Types against every registered version; registers nothing ("Ventoux V2b and V2c, as built") |
+| `ListActions` | The action catalogue: every action a hook may name, with its contract ("Ventoux V1, as built") |
 | `StartAgentSession`, `ApproveWiden` | The agent rules |
 
 `Link` and `Archive` as they stand in the first-cut proto are removed until
@@ -1032,9 +1036,10 @@ stage 3 then also runs with every registered version, and adds
 | `UNKNOWN_LINK` | 2 | Names a link the Type cannot read |
 | `UNKNOWN_HOOK` | 2 | Names a hook the Type does not declare |
 | `UNKNOWN_REACTION` | 2, 3 | Names a reaction that does not exist (or reaches nothing) |
-| `UNKNOWN_ACTION` | 2 | A hook's action is not registered (`internal/hooks`) |
+| `UNKNOWN_ACTION` | 2 | A hook's action is not in the catalogue (`contracts/`, `ListActions`) |
 | `ACTION_ARITY` | 2 | A hook's reads or writes do not match its action's |
-| `WRONG_FIELD_TYPE` | 2, 3 | A field of the wrong type for this use (an at-timer on a string) |
+| `ACTION_KIND` | 2 | A hook of a kind its action does not serve (a check naming an enrich action) |
+| `WRONG_FIELD_TYPE` | 2, 3 | A field of the wrong type for this use (an at-timer on a string; a hook reading an int into a string input) |
 | `EXPRESSION_INVALID` | 2, 3 | A CEL expression that does not compile, or a form not allowed (a computed principal) |
 | `EXPRESSION_TYPE` | 2, 3 | A CEL expression that yields the wrong type (a guard that is not a bool) |
 | `READ_NOT_ALLOWED` | 2, 3 | An expression or reaction reads what it may not read here |
@@ -1634,7 +1639,7 @@ See `docs/plans/ideas-from-ventoux.md`.
 
 | Step | Build | Done when |
 | --- | --- | --- |
-| V1 | Action contracts: each hook action declares `name@version`, typed reads and writes, side effect, risk, idempotency and the reason codes it may answer; hooks name `action@version`; the catalogue is readable through the API. The hook protocol work (`pli.hooks/v1`: the descriptor and the compiled-in declaration `hr.manager_of@1`) is the first version of these contracts | Settled in its Phase A |
+| V1 (**done**) | Action contracts: each hook action declares `name@version`, typed reads and writes, side effect, risk and the reason codes it may answer (idempotency is the protocol's, for every connector); hooks name `action@version` (no major means 1, as built); the catalogue is readable through the API. The hook protocol work (`pli.hooks/v1`: the descriptor and the compiled-in declaration `hr.manager_of@1`) is the first version of these contracts | Every action has a frozen contract in `contracts/`; a hook of the wrong kind, or reading or writing a field of the wrong type, is refused at load (`ACTION_KIND`, `WRONG_FIELD_TYPE`); every connector's answers are held to its contract; `ListActions` and `pli action list`; CI refuses a published contract that changed. **Done 2026-11-23**: "Ventoux V1, as built" below, and the journal |
 | V2a | Every problem of a Type or a folder of Types as data: `{source, path, line, column, severity, code, message}`, in three stages (the YAML, each Type, the Types together), with no cascades; the codes in "Type problems" | Each code has a case with its exact path and position; a folder reports every file's problems at once; a source walk finds no problem without a code and a what-to-do; every test written before V2a passes unchanged |
 | V2b (**done**) | `ValidateTypes`: draft Types checked against every registered version, nothing written; `pli type validate`; exempt from `policy.Project` like `ListTypes`; users and agents (in a session), not customers; 256 KiB and 50 sources at most | A draft with problems is a successful call listing them; an identical registered `id@version` passes, a different one is `VERSION_CHANGED`; pli prints `source:line:col: CODE message` and exits non-zero on errors. **Done 2026-11-22**: "Ventoux V2b and V2c, as built" below, and the journal |
 | V2c (**done**) | The Type format as JSON Schema, by hand, in a checked-in file; checked with `santhosh-tekuri/jsonschema/v6` (test only) | Every file in `types/` validates; every key the schema allows is a key `typedef` knows; the schema is never stricter than `typedef`. **Done 2026-11-22**: "Ventoux V2b and V2c, as built" below |
@@ -3166,7 +3171,8 @@ no major means 1, so every existing Type names `hr@1`, `crm@1`, `erp@1`,
 input and output names in order (a hook's `reads` and `writes` map to them
 by position, as before, so an operation never sees a Type's field IDs),
 whether it has a side effect, and whether it is remote (no code in the
-worker: `hr.manager_of@1`). A Type naming a major the catalog does not
+worker: `hr.manager_of@1`). Since Ventoux V1 the catalog is the contracts
+in `contracts/`, with code attached to the compiled-in ones. A Type naming a major the catalog does not
 declare is refused at load, as an unknown action is (a kernel change). A
 new major needs a new Type version naming `@2` (specified, not built): Items
 keep their version's major, and configuration may hold `hr@1` and `hr@2`
@@ -3263,7 +3269,8 @@ properties; `type` read as a string or a list), `sideEffects` (`none` or
 reason codes it may answer). The worker reads it once per URL, before the
 first call there, and checks it against the catalog: the connector's name,
 the major of its version, `pli.hooks/v1`, the operation, its kinds, and its
-input and output names. A mismatch fails at once (`connector_mismatch`)
+input and output names (since V1, the whole contract: types, side effects,
+reasons). A mismatch fails at once (`connector_mismatch`)
 and nothing is posted; a descriptor it cannot read is retryable and not
 remembered. An answer whose `connectorVersion` has another major is a
 mismatch too, and the URL's descriptor is read again on the next call
@@ -3520,6 +3527,167 @@ internal test so they read typedef's own key table) prove it this way:
 string is meant (`id: 5` loads) and lets null through for most keys
 (`fields: ~` loads), so the schema does too. Tightening typedef's stage 1
 and the schema together is a Later entry in the journal.
+
+## Ventoux V1, as built: action contracts (2026-11-23)
+
+Item 1 of `docs/plans/ideas-from-ventoux.md`: every action a hook may name
+has a contract, checked when a Type loads and when a connector answers,
+and readable through the API, so an authoring tool knows the menu it may
+choose from. The hook protocol's descriptor and catalog were the first
+version; V1 makes the contract the single source of truth.
+
+**Contracts as data.** One JSON file per operation,
+`contracts/<connector>.<operation>@<major>.json`, compiled into the item
+service and the worker (`contracts/embed.go`, read by
+`internal/contracts`), so a Type is checked against exactly the contracts
+the worker runs, with no network. The format is the descriptor's operation
+(`hookproto.Operation`) plus its `connector` and `major`, with the
+contract's additions, all optional on the wire:
+
+- `inputs` and `outputs`: the property names in order (a hook's `reads`
+  and `writes` map to them by position; a JSON object keeps no order);
+- `description`, required on the operation and on every input and output;
+- `risk`: `low`, `medium` or `high`, required;
+- on a property, JSON Schema's `format` (`pli-principal`, `date`,
+  `date-time`) and `enum`, and on an input `x-pli-trust` (below).
+
+The schemas use a subset: each property's `type` is `string`, `integer` or
+`boolean`, alone or with `null`; `format` and `enum` only on a string,
+never together. Other rules: only an action has `sideEffects: some`, and
+it is its operation's only kind; `async` is `forbidden` (asynchronous
+completion is not built); only a check has `errors`, each a reason code;
+an enrich operation has an output. Idempotency is not a field: the
+protocol keys every call and every connector stores its successes only.
+A contract that breaks a rule stops the item service and the worker at
+start; `go test` finds it first. Versions stay by major, as built: a
+connector's implementations float within a major (HR 1.4 to 1.5); a
+change to a contract is a new major.
+
+| Action | Kind | Inputs, in order | Outputs | Side effects | Risk | Reasons |
+| --- | --- | --- | --- | --- | --- | --- |
+| `crm.get_plan@1` | enrich | `customerId` string (any) | `plan` enum free, pro, enterprise | none | low | |
+| `erp.get_credit_status@1` | enrich | `customerId` string (any) | `onHold` bool | none | low | |
+| `erp.check_credit@1` | check | `customerId` string, `amount` int (trusted) | `costCenter` string | none | low | `customer_on_hold`, `over_credit_limit` |
+| `erp.create_invoice@1` | action | `customerId` string, `amount` int (trusted) | `invoiceId` string | some | high | |
+| `hr.manager_of@1` | check | `onBehalfOf`, `createdBy` principal or null (trusted) | `manager` principal | none | low | `unknown_employee`, `no_eligible_approver` |
+| `email.notify@1` | action | `to` principal (trusted) | none | some | medium | |
+
+`hr.manager_of@1` has no code in the worker (a remote connector); the
+others do. Code without a contract stops the worker at start.
+
+**Frozen once published.** `contracts/contracts.lock` holds one line per
+contract, `<action> sha256:<hex>`: the digest of its **machine contract**,
+everything a Type or a connector relies on (the names, the inputs and
+outputs with their types, format, enum and trust, the kinds,
+`sideEffects`, `async`, `errors` and `risk`), as canonical JSON (keys
+sorted, no spaces; an input without `x-pli-trust` counts as `any`). **The
+descriptions are not in the digest**: they are required, but stay
+editable, and their changes show in the pull request's diff. Two guards:
+
+- `internal/contracts` (`Load`, run by `go test` and at every start)
+  checks files and lock both ways: a contract without its line, a line
+  without its contract, or a digest that differs is an error naming the
+  action. Editing a contract fails at once, with no git needed.
+- CI, on pull requests beside `buf breaking`, runs `contractsfrozen` on
+  the base branch's lock and this one: a line that changed or went is
+  refused; a new line publishes a contract. A base branch without a lock
+  has published nothing.
+
+The digest is also what `ListActions` serves, so a tool can tell that the
+contract it read is the one it pinned.
+
+**Checked when a Type loads** (stage 2, each Type on its own; `typedef`
+reads the catalogue, and no longer links the worker's connector code):
+
+- the action is in the catalogue (`UNKNOWN_ACTION`) and the hook gives it
+  as many reads and writes as it takes (`ACTION_ARITY`), as before;
+- **the hook's kind is one the action serves** (`ACTION_KIND`, at
+  `hooks[i].kind`): a check naming an enrich action is refused;
+- **each read goes into an input of its type, and each output into a
+  field of its type** (`WRONG_FIELD_TYPE`, at `hooks[i].reads[k]` or
+  `hooks[i].writes[k]`):
+
+| Contract value | Field it matches |
+| --- | --- |
+| `string` | string |
+| `string` with `enum` | enum |
+| `string` with `format: pli-principal` | principal; also `created_by`, `created_on_behalf_of`, `creator` and `container:<offer>` |
+| `string` with `format: date` / `date-time` | date / datetime |
+| `integer` | int |
+| `boolean` | bool |
+
+  A string input takes a string or an enum field; an enum input an enum
+  field whose options are all among its values. A string output goes into
+  a string field; an enum output into a string field, or an enum field
+  that has every one of its values. Otherwise the types are equal.
+  Nullability is not checked at load: any field may be unset (proving one
+  set from `required` is Later). A multi-value field is refused on any
+  hook, as before.
+- No cascades: a read or write that is already a problem (an unknown
+  field, a multi-value field, a write of `created_by`), an unknown action
+  or a wrong arity gets no type problem on top.
+
+No reason code is checked at load: no Type names a reason yet.
+`UNKNOWN_REASON` comes with the first place a Type can name one (a
+`business_error` routed to a transition). `pli type validate` needed no
+change: the new problems come through `typedef.Check`. No Type in
+`types/` changed.
+
+**Checked at run time, compiled in or remote alike** (the worker,
+`hooks.RunCall`): every output a connector answers must have its type (an
+enum one of its values, a principal a principal ID, a date a date), and a
+check's deny reason must be one its contract declares. Either breach is
+`connector_mismatch`, permanent: a check's hold closes as error with that
+reason. Before V1 only a remote connector's reasons were checked, against
+its descriptor, and no output's type. A remote connector's descriptor must
+fit the contract (`contracts.Matches`): its kinds include the contract's;
+its inputs and outputs are the contract's names with the contract's type
+lists, and the contract's `format` and `enum` where it gives them (a
+descriptor written before V1 has neither, and still fits); its
+`sideEffects` is the contract's; its `errors` are among the contract's. A
+misfit is `connector_mismatch` with nothing posted. connstub's HR
+connector serves the contract itself as its descriptor, so the two cannot
+drift. Inputs are not checked at run time: the connector decides (a null
+it does not take is its 400, as before).
+
+**Risk is data.** `low` (no effect outside), `medium` (an effect that can
+be corrected, or of low stakes: a message), `high` (an effect that cannot
+be undone: money, access). No kernel rule reads it: nothing yet needs it
+to behave the same everywhere (the membership test). It is served, so a
+reviewer and a tool can see it, and item 3's proofs may read it later, as
+warnings.
+
+**Trust is declared, not enforced until Ventoux item 4.** An input's
+`x-pli-trust` is `trusted` (the value must come from a trusted source) or
+`any` (the default). V1 reads it, freezes it in the digest and serves it,
+and checks nothing. It is declarable now so that item 4 can enforce it
+without a new major for every action. Today's rule: every input of a
+check or an action is `trusted`, since it decides a move or causes an
+effect (`email.notify`'s recipient included); an enrich input is `any`.
+The API field's comment, `pli action list` and this section all say
+"declared, not enforced until Ventoux item 4".
+
+**ListActions.** `ListActions {parent}` returns `actions[]`, ordered by
+action, each with `name` (`namespaces/{ns}/actions/hr.manager_of@1`),
+`action`, `connector`, `operation`, `major`, `description`, `kinds`,
+`inputs` and `outputs` in hook order (each `{name, type, options,
+nullable, description, trust}`, `type` the `FieldType` it matches, `trust`
+on inputs only), `side_effects`, `risk`, `reasons` and `digest`.
+- The catalogue is the kernel's, the same in every namespace. It says
+  nothing of whether this deployment configured an action's connector
+  (that shows as `connector_unconfigured` at run time; Later).
+- Who: users, and agents in a session, with no particular power.
+  Customers, and agents acting for one: `PERMISSION_DENIED` /
+  `NOT_ALLOWED` (it describes the organisation's integrations).
+- It reads no Item and holds no Item data: nothing goes through
+  `policy.Project`, as for `ListTypes`. It is served by the API from the
+  compiled-in catalogue; the item service gained no method.
+- `kernel.v1` grew one operation, three messages and three enums
+  (`HookKind`, `ActionRisk`, `ActionInputTrust`); `buf breaking` green.
+- `pli action list [--json]`: one block per action (its kinds, risk and
+  side effects; its description; each input and output with its type, an
+  enum with its values, "or null" when nullable; each input's trust; its
+  reasons), or the response.
 
 ## Out of scope for the spike
 

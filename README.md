@@ -98,10 +98,13 @@ let anyone on your network call the API with a dev token.
 export PLI_TOKENS=dev-tokens.example.yaml
 pli --as ana type list
 pli --as ana type validate types/   # draft Types checked against the registered ones; nothing registered
+pli --as ana action list            # the actions a hook may name, with their contracts
 ```
 
 The Type format is also described by a JSON Schema, `schema/type.schema.json`,
-for editors and authoring tools; typedef stays the authority.
+for editors and authoring tools; typedef stays the authority. The actions a
+Type's hooks may name each have a contract in `contracts/` (one JSON file per
+operation; a published one never changes: `contracts/contracts.lock`).
 
 ## A two-minute walkthrough
 

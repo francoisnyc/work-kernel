@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/francoisnyc/work-kernel/internal/connstub"
+	"github.com/francoisnyc/work-kernel/internal/contracts"
 	"github.com/francoisnyc/work-kernel/internal/hookproto"
 	"github.com/francoisnyc/work-kernel/internal/hookproto/conformance"
 )
@@ -74,22 +75,21 @@ func TestHR_Conformance(t *testing.T) {
 	}})
 }
 
+// Since Ventoux V1 the operation is built from the contract
+// (contracts/hr.manager_of@1.json), so the two cannot drift; the stub adds
+// only additionalProperties: false on its inputs.
 func TestHR_Descriptor(t *testing.T) {
 	hr := hrDirectory(t)
 	no := false
+	contract, ok := contracts.Default().Lookup("hr.manager_of@1")
+	if !ok {
+		t.Fatal("no contract for hr.manager_of@1")
+	}
+	op := contract.Operation
+	op.InputSchema.AdditionalProperties = &no
 	want := hookproto.Descriptor{
 		Connector: "hr", Version: "1.0.0", SupportedProtocolVersions: []string{hookproto.Protocol},
-		Operations: []hookproto.Operation{{
-			Name: "manager_of", Kinds: []hookproto.Kind{hookproto.KindCheck},
-			InputSchema: hookproto.Schema{Type: "object", AdditionalProperties: &no, Properties: map[string]hookproto.Property{
-				"onBehalfOf": {Type: hookproto.TypeList{"string", "null"}},
-				"createdBy":  {Type: hookproto.TypeList{"string", "null"}},
-			}},
-			OutputSchema: &hookproto.Schema{Type: "object", Properties: map[string]hookproto.Property{
-				"manager": {Type: hookproto.TypeList{"string"}},
-			}},
-			SideEffects: "none", Async: "forbidden", Errors: []string{"unknown_employee", "no_eligible_approver"},
-		}},
+		Operations: []hookproto.Operation{op},
 	}
 	if got := descriptor(t, hr.URL); !reflect.DeepEqual(got, want) {
 		t.Errorf("descriptor = %+v\nwant %+v", got, want)

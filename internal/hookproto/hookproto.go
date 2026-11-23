@@ -194,7 +194,10 @@ type Descriptor struct {
 	Operations                []Operation `json:"operations"`
 }
 
-// Operation is one operation a connector offers.
+// Operation is one operation a connector offers. It is also the body of an
+// action contract (Ventoux V1, package contracts): the fields after Errors
+// are the contract's additions, optional on the wire, so a descriptor
+// written before them still reads.
 type Operation struct {
 	Name         string   `json:"name"`
 	Kinds        []Kind   `json:"kinds"`
@@ -203,7 +206,27 @@ type Operation struct {
 	SideEffects  string   `json:"sideEffects"`      // none | some
 	Async        string   `json:"async"`            // forbidden | optional | required
 	Errors       []string `json:"errors,omitempty"` // the deny (and business error) codes it may answer
+
+	// Description says what the operation does, in plain words.
+	Description string `json:"description,omitempty"`
+	// Inputs and Outputs are the schemas' property names in order: a hook's
+	// reads and writes map to them by position (a JSON object keeps no
+	// order).
+	Inputs  []string `json:"inputs,omitempty"`
+	Outputs []string `json:"outputs,omitempty"`
+	// Risk is low, medium or high: data for people and tools.
+	Risk string `json:"risk,omitempty"`
 }
+
+// Values of Operation.SideEffects, Async and Risk.
+const (
+	SideEffectsNone = "none"
+	SideEffectsSome = "some"
+	AsyncForbidden  = "forbidden"
+	RiskLow         = "low"
+	RiskMedium      = "medium"
+	RiskHigh        = "high"
+)
 
 // Schema is the subset of JSON Schema 2020-12 v1 uses: an object whose
 // properties each have a type.
@@ -216,9 +239,25 @@ type Schema struct {
 
 // Property is one property's type: JSON Schema's "type", a string
 // ("string") or a list (["string", "null"]); v1 writes the list form.
+// Format, Enum and Description are JSON Schema's own keywords; Trust is
+// Pli's (an input's x-pli-trust: any or trusted, declared, not enforced
+// until Ventoux item 4).
 type Property struct {
-	Type TypeList `json:"type"`
+	Type        TypeList `json:"type"`
+	Format      string   `json:"format,omitempty"`
+	Enum        []string `json:"enum,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Trust       string   `json:"x-pli-trust,omitempty"`
 }
+
+// Values of Property.Format and Property.Trust.
+const (
+	FormatPrincipal = "pli-principal" // a principal ID: user:<id>, agent:<id>, ...
+	FormatDate      = "date"          // 2026-12-01
+	FormatDateTime  = "date-time"     // RFC 3339
+	TrustAny        = "any"
+	TrustTrusted    = "trusted"
+)
 
 // TypeList is JSON Schema's type keyword, read in either form.
 type TypeList []string

@@ -681,24 +681,29 @@ func TestVacation_HookInputReadsTheCreator(t *testing.T) {
 // --- 4a: field:<id> on an editable field ---
 
 // dutyType: f_owner is an ordinary, editable principal field. done and
-// checked are allowed to whoever f_owner names; checked has a check.
+// checked are allowed to whoever f_owner names; checked has a check. stamp
+// is a hook that writes f_owner (a check on open -> review, where `allowed`
+// does not name it: action contracts give only a check a principal to write).
 const dutyType = `
 id: duty
 version: 1
 initial_state: open
 fields:
-  - {id: f_owner, type: principal}
-  - {id: f_note,  type: string}
+  - {id: f_owner,  type: principal}
+  - {id: f_note,   type: string}
+  - {id: f_amount, type: int}
 states:
   - {id: open,    category: todo}
   - {id: done,    category: done}
   - {id: checked, category: done}
+  - {id: review,  category: todo}
 transitions:
   - {from: open, to: done,    allowed: ['field:f_owner']}
   - {from: open, to: checked, allowed: ['field:f_owner']}
+  - {from: open, to: review}
 hooks:
-  - {id: stamp, on: enter, state: open, kind: enrich, action: crm.get_plan, reads: [f_note], writes: [f_owner]}
-  - {id: gate,  on: transition, from: open, to: checked, kind: check, action: crm.get_plan, reads: [f_note], writes: [f_note]}
+  - {id: stamp, on: transition, from: open, to: review, kind: check, action: hr.manager_of, reads: [created_on_behalf_of, created_by], writes: [f_owner]}
+  - {id: gate,  on: transition, from: open, to: checked, kind: check, action: erp.check_credit, reads: [f_note, f_amount], writes: [f_note]}
 `
 
 func newDuty(t *testing.T, k *itemservice.Service, p item.Principal, fields map[string]any) uuid.UUID {
@@ -850,13 +855,14 @@ initial_state: pending
 fields:
   - {id: f_x, type: string}
   - {id: f_y, type: string}
+  - {id: f_n, type: int}
 states:
   - {id: pending, category: waiting, frozen: [f_x]}
   - {id: done,    category: done}
 transitions:
   - {from: pending, to: done}
 hooks:
-  - {id: gate, on: transition, from: pending, to: done, kind: check, action: crm.get_plan, reads: [f_x], writes: [f_y]}
+  - {id: gate, on: transition, from: pending, to: done, kind: check, action: erp.check_credit, reads: [f_x, f_n], writes: [f_y]}
 `
 
 func TestFrozen_BeforeHeld(t *testing.T) {
@@ -897,7 +903,8 @@ id: probe
 version: 1
 initial_state: start
 fields:
-  - {id: f_note, type: string}
+  - {id: f_note,   type: string}
+  - {id: f_amount, type: int}
 states:
   - {id: start,       category: todo, timer: {after: 1h, to: by_timer}}
   - {id: by_creator,  category: done}
@@ -911,7 +918,7 @@ transitions:
   - {from: start, to: by_request,  allowed: [creator]}
 hooks:
   - {id: stamp, on: enter, state: start, kind: enrich, action: crm.get_plan, reads: [f_note], writes: [f_note]}
-  - {id: gate, on: transition, from: start, to: by_request, kind: check, action: crm.get_plan, reads: [f_note], writes: [f_note]}
+  - {id: gate, on: transition, from: start, to: by_request, kind: check, action: erp.check_credit, reads: [f_note, f_amount], writes: [f_note]}
 `
 
 func newProbe(t *testing.T, k *itemservice.Service, p item.Principal) uuid.UUID {

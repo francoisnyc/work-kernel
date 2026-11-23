@@ -56,7 +56,7 @@ hooks:
     from: draft
     to: pending
     kind: check
-    action: erp.check_credit
+    action: hr.manager_of
     reads: [created_on_behalf_of, created_by]
     writes: [f_approver]
 HOOKS

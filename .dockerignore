@@ -1,4 +1,4 @@
-# The build needs go.mod, go.sum, the Go sources, migrations/ and types/.
+# The build needs go.mod, go.sum, the Go sources, migrations/, types/ and contracts/.
 .git
 .github
 docs

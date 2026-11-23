@@ -16,7 +16,7 @@ initial_state: new
 fields:
   - {id: f_customer, type: string}
   - {id: f_amount,   type: int}
-  - {id: f_plan,     type: enum, options: [free, pro, unknown]}
+  - {id: f_plan,     type: enum, options: [free, pro, enterprise, unknown]}
   - {id: f_invoice,  type: string}
   - {id: f_receipt,  type: string}
 states:
