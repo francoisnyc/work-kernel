@@ -144,6 +144,22 @@ Ventoux item 4, made central.
   It needs specs linked at each level: the roadmap and design notes on
   initiatives and epics, the brief and tests on each step (tracker story
   `c732c32c`).
+- **Work done from a chat.** An MCP server for the kernel, the agent's door
+  (every answer through `policy.Project`), and cards rendered in any chat
+  client that supports MCP Apps (the standard extension for interactive UI
+  in a conversation):
+  - **Cards come from the Type, never hand-built:** an Item's fields, one
+    button per move open to the caller now, a form for the move's
+    `required` fields. A Type written in plain English has its chat UI the
+    moment it loads.
+  - **The model proposes, the person clicks:** a gate that belongs to a
+    person is passed by the person's click, sent from the card to the
+    kernel, never by the model calling the same tool.
+  - **First check before building:** whether the kernel can tell a call
+    from the card (the person) from a call by the model. If it cannot,
+    gated moves go through a signed link or an out-of-band step instead.
+  - **Chat is for doing and describing,** not for overviews: queues,
+    boards and the roadmap stay in the tracker and the portal.
 - **A model suggesting moves on Items** (item 9).
 - **Agents building this kernel:** `build_step@1`
   (`docs/plans/build-step-type.md`) and the autonomous loop
