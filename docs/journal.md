@@ -6,6 +6,13 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
+- **Starting work, step 2's Later items** (docs/plans/starting-work.md, 1.3):
+  - The "governs earlier versions" and "loosened" notes, with the WARNING
+    severity (Ventoux item 3): `pli type validate` should say which earlier
+    versions a draft's start block will govern, and that a draft dropping
+    the block in force loosens them. It needs a severity other than ERROR
+    in `kernel.v1` (a contract change), so step 2 builds neither.
+
 - **Starting work, step 1's Later items** (docs/plans/starting-work.md, 1.0):
   - **Reaction creates by an agent without `create`.** An agent session
     holding `transition:*` (or any transition power) but not `create` may

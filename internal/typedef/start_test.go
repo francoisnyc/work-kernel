@@ -1,6 +1,5 @@
 // Tests for starting work, step 2 (docs/plans/starting-work.md, 1.1 to
-// 1.7): the start block on a Type, its load checks, Start.Admits, and the
-// notes on what registering a draft changes (StartNotes).
+// 1.7): the start block on a Type, its load checks and Start.Admits.
 //
 //   - start: {in, allowed}. in lists container Type IDs (any version of
 //     each) or top (no container); absent means anywhere. allowed takes
@@ -392,80 +391,5 @@ func TestStart_StoredForm(t *testing.T) {
 	}
 	if without := storedJSON(t, stAsk(1, "")); strings.Contains(string(without), "start") {
 		t.Errorf("a Type without a block stores %s; want no start key", without)
-	}
-}
-
-// --- StartNotes: what registering the drafts changes (1.3) ---
-
-func parsed(t *testing.T, files ...string) []*typedef.Type {
-	t.Helper()
-	var out []*typedef.Type
-	for _, f := range files {
-		ty, err := typedef.Parse([]byte(f))
-		if err != nil {
-			t.Fatalf("Parse: %v", err)
-		}
-		out = append(out, ty)
-	}
-	return out
-}
-
-func TestStartNotes(t *testing.T) {
-	block := "start:\n  in: [room]\n"
-	other := "start:\n  in: [room, top]\n"
-	cases := []struct {
-		name               string
-		registered, drafts []string
-		want               []typedef.StartNote // TypeID, Version, Code and Earlier compared
-	}{
-		{name: "a draft adds a block over registered versions",
-			registered: []string{stAsk(1, ""), stAsk(2, ""), stAsk(3, "")}, drafts: []string{stAsk(4, block)},
-			want: []typedef.StartNote{{TypeID: "ask", Version: 4, Code: typedef.StartGoverns, Earlier: []int{1, 2, 3}}}},
-		{name: "a folder never registered: the drafts below it count",
-			drafts: []string{stAsk(1, ""), stAsk(2, ""), stAsk(3, block)},
-			want:   []typedef.StartNote{{TypeID: "ask", Version: 3, Code: typedef.StartGoverns, Earlier: []int{1, 2}}}},
-		{name: "registered and draft versions below it",
-			registered: []string{stAsk(1, "")}, drafts: []string{stAsk(2, ""), stAsk(3, block)},
-			want: []typedef.StartNote{{TypeID: "ask", Version: 3, Code: typedef.StartGoverns, Earlier: []int{1, 2}}}},
-		{name: "a draft changes the block in force",
-			registered: []string{stAsk(1, ""), stAsk(2, block)}, drafts: []string{stAsk(3, other)},
-			want: []typedef.StartNote{{TypeID: "ask", Version: 3, Code: typedef.StartGoverns, Earlier: []int{1, 2}}}},
-		{name: "a draft drops the block in force: a loosening",
-			registered: []string{stAsk(1, ""), stAsk(2, block)}, drafts: []string{stAsk(3, "")},
-			want: []typedef.StartNote{{TypeID: "ask", Version: 3, Code: typedef.StartLoosened, Earlier: []int{1, 2}}}},
-		{name: "a draft keeps the block in force",
-			registered: []string{stAsk(1, ""), stAsk(2, block)}, drafts: []string{stAsk(3, block)}},
-		{name: "drafts identical to the registered versions: nothing new",
-			registered: []string{stAsk(1, ""), stAsk(2, block)}, drafts: []string{stAsk(1, ""), stAsk(2, block)}},
-		{name: "a draft that would not be the latest governs nothing",
-			registered: []string{stAsk(1, ""), stAsk(3, "")}, drafts: []string{stAsk(2, block)}},
-		{name: "a new Type with a block has nothing earlier",
-			drafts: []string{stAsk(1, block)}},
-		{name: "a block added, then dropped, by two drafts: nothing in force changes",
-			registered: []string{stAsk(1, "")}, drafts: []string{stAsk(2, block), stAsk(3, "")}},
-		{name: "one note per Type, by Type ID",
-			registered: []string{stAsk(1, ""), stRoom}, drafts: []string{stAsk(2, block), "id: room\nversion: 2\n" + other},
-			want: []typedef.StartNote{
-				{TypeID: "ask", Version: 2, Code: typedef.StartGoverns, Earlier: []int{1}},
-				{TypeID: "room", Version: 2, Code: typedef.StartGoverns, Earlier: []int{1}},
-			}},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got := typedef.StartNotes(parsed(t, c.drafts...), parsed(t, c.registered...))
-			if len(got) != len(c.want) {
-				t.Fatalf("StartNotes = %+v, want %+v", got, c.want)
-			}
-			for i, n := range got {
-				w := c.want[i]
-				if n.TypeID != w.TypeID || n.Version != w.Version || n.Code != w.Code || !slices.Equal(n.Earlier, w.Earlier) {
-					t.Errorf("note %d = %s v%d %s %v, want %s v%d %s %v", i, n.TypeID, n.Version, n.Code, n.Earlier,
-						w.TypeID, w.Version, w.Code, w.Earlier)
-				}
-				if strings.TrimSpace(n.Message) == "" {
-					t.Errorf("note %d has no message", i)
-				}
-			}
-		})
 	}
 }
