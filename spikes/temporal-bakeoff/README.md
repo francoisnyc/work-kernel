@@ -21,10 +21,10 @@ in Go, as a team would: no kernel code is used.
 | `store/` | Postgres: the table the inbox reads (written by the workflows) and the audit trail | 160 |
 | `acts/` | The activity library: HR lookup, order, notice, the write to Postgres | 107 |
 | `httpapi/` | What every route shares; the inbox, reading a request and its history, the agent's to-do list | 172 |
-| `purchase/` | **Step 1.** The purchase workflow (updates with validators, a query), its routes, its tests; `change.go` is the bake-off's switch for the CFO change | 329 + 115 + 177 + 29 |
+| `purchase/` | **Step 1.** The purchase workflow (updates with validators, a query), its routes, its tests; `change.go` is the bake-off's switch for the CFO change | 321 + 115 + 177 + 29 |
 | `access/` | **Step 2.** The access request, written by a separate builder from the step-1 code and the business's request only | 217 + 100 + 194 |
 | `cmd/ptapp/` | The one program: HTTP API and Temporal worker | 98 |
-| `cmd/ptreplay/` | Replays recorded workflow histories against the code: Temporal's check before deploying a change | 88 |
+| `cmd/ptreplay/` | Replays recorded workflow histories against the code: Temporal's check before deploying a change | 85 |
 | `compose.yaml` | Its own Postgres and Temporal development server (ports 25432, 27233) | |
 | `kernel-blind/` | The kernel side's counterpart to step 2: the access request as Types, written by a separate builder from the purchase Type and the same request | |
 
