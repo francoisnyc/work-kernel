@@ -1,0 +1,109 @@
+"""The inbox and the claim on both sides (part of measure 3): the same six
+requests as the first bake-off's test 3, then fay's inbox on each side (fay
+is in finance and owns the ledger system). Run on fresh data.
+Writes results/inbox.md.
+"""
+import os
+import subprocess
+import time
+
+from pt import FIRST, SPIKE, plain, pli, short, wait_state
+
+SEED = [("purchase", 2500, "officeco", "Laptops for two new hires", None),
+        ("purchase", 4000, "shadyparts", "Spare parts, urgent", "fay"),
+        ("purchase", 1800, "cloudhost", "Hosting for the test cluster", "gus"),
+        ("purchase", 300, "officeco", "Desk lamps", None),
+        ("access", "ledger", "admin", "Month-end close"),
+        ("access", "payroll", "viewer", "Audit sample")]
+
+
+def k_purchase(amount, vendor, why, claim):
+    _, c = pli("ana", "item", "create", "--type", "purchase@1", "--set", f"f_amount={amount}", "--set", f"f_vendor={vendor}",
+               "--set", "f_cost_centre=CC-100", "--set", f"f_justification={why}")
+    i = short(c["item"]["name"])
+    pli("ana", "item", "transition", i, "--to", "manager_review", "--wait", "5s")
+    return i
+
+
+def k_decide(i, amount, claim):
+    if amount >= 1000:
+        pli("bob", "item", "transition", i, "--to", "finance_queue")
+    if claim:
+        pli(claim, "item", "transition", i, "--to", "finance_review", "--set", f"f_claimed_by=user:{claim}")
+
+
+def k_access(system, role, why):
+    _, res = pli("ivy", "item", "search", "--type", "namespaces/acme/types/system", "--where", f"f_name={system}")
+    if res.get("items"):
+        s = short(res["items"][0]["name"])
+    else:
+        owner = {"payroll": "olaf", "ledger": "fay"}[system]
+        _, c = pli("ivy", "item", "create", "--type", "system@1", "--set", f"f_name={system}", "--set", f"f_owner=user:{owner}")
+        s = short(c["item"]["name"])
+    _, c = pli("ana", "item", "create", "--type", "system_access@1", "--in", s, "--set", f"f_role={role}", "--set", f"f_justification={why}")
+    pli("ana", "item", "transition", short(c["item"]["name"]), "--to", "owner_review")
+
+
+def p_purchase(amount, vendor, why, claim):
+    _, r = plain("ana", "POST", "/purchases", {"amount": amount, "vendor": vendor, "cost_centre": "CC-100", "justification": why})
+    wait_state("ana", r["id"], "manager_review")
+    return r["id"]
+
+
+def p_decide(rid, amount, claim):
+    if amount >= 1000:
+        plain("bob", "POST", f"/purchases/{rid}/decision", {"approve": True})
+    if claim:
+        plain(claim, "POST", f"/purchases/{rid}/claim")
+
+
+def p_access(system, role, why):
+    _, r = plain("ana", "POST", "/access-requests", {"system": system, "role": role, "justification": why})
+    for _ in range(50):
+        st, row = plain("ana", "GET", f"/requests/{r['id']}")
+        if st == 200 and row.get("waiting_on"):
+            return
+        time.sleep(0.2)
+
+
+# Everything is submitted, the agents prepare (the preparation closes at the
+# first decision on both sides), then the manager decides and finance claims.
+made = []
+for s in SEED:
+    if s[0] == "purchase":
+        made.append((k_purchase(*s[1:]), p_purchase(*s[1:]), s[1], s[4]))
+    else:
+        k_access(*s[1:]); p_access(*s[1:])
+subprocess.run(["python3", f"{FIRST}/scripts/kernel-agent.py"], capture_output=True)
+subprocess.run(["python3", f"{SPIKE}/scripts/plain-agent.py"], capture_output=True)
+for k_id, p_id, amount, claim in made:
+    k_decide(k_id, amount, claim); p_decide(p_id, amount, claim)
+time.sleep(2)
+
+k = subprocess.run(["python3", f"{FIRST}/scripts/kernel-inbox.py", "fay"], capture_output=True, text=True).stdout
+_, inbox = plain("fay", "GET", "/inbox")
+lines = [f"Inbox for fay: {len(inbox['requests'])} waiting"]
+for r in inbox["requests"]:
+    d = r["data"]
+    what = f"{d.get('amount')} to {d.get('vendor')}" if r["kind"] == "purchase" else f"{d.get('role')} on {d.get('system')}"
+    claimed = f", claimed by {r['claimed_by']}" if r.get("claimed_by") else ""
+    p = d.get("preparation") or {}
+    lines.append(f"- [{r['kind']}] {what} — {r['state']}{claimed} — waiting on {', '.join(r['waiting_on'])}")
+    lines.append(f"    agent: {p.get('summary', '(not prepared yet)')} [policy {p.get('policy', '-')}, flags {p.get('flags', '-')}]")
+p = "\n".join(lines) + "\n"
+
+extra = ["## Does a claim hold? fay tries to approve the purchase gus claimed\n"]
+_, res = pli("fay", "item", "search", "--type", "namespaces/acme/types/purchase", "--where", "f_claimed_by=user:gus")
+ok, o = pli("fay", "item", "transition", short(res["items"][0]["name"]), "--to", "approved", check=False)
+extra.append(f"- Kernel: {'allowed: the claim is only a field, any finance member decides' if ok else 'refused: ' + str(o)}")
+gus_claimed = next(r["id"] for r in inbox["requests"] if r.get("claimed_by") == "user:gus")
+st, o = plain("fay", "POST", f"/purchases/{gus_claimed}/decision", {"approve": True})
+extra.append(f"- Plain Temporal: HTTP {st} {o}")
+
+text = (f"# The inbox and the claim (fay: finance team, owner of the ledger system)\n\nGenerated by scripts/test_inbox.py on "
+        f"{time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())}, on fresh data.\n\nSeeded on both sides: "
+        + "; ".join(", ".join(str(x) for x in s if x) for s in SEED)
+        + f"\n\n## Kernel (the first bake-off's script, spikes/camunda-bakeoff/scripts/kernel-inbox.py)\n\n```\n{k}```\n\n"
+          f"## Plain Temporal (GET /inbox, built in step 1)\n\n```\n{p}```\n\n" + "\n".join(extra) + "\n")
+open(os.path.join(SPIKE, "results/inbox.md"), "w").write(text)
+print(text)

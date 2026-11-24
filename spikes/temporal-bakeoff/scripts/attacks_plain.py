@@ -90,11 +90,94 @@ def purchase(rec):
                 f"state={d.get('state')} amount={d.get('amount')} vendor={d.get('vendor')} manager={d.get('manager')} claimed_by={d.get('claimed_by')}")
 
 
+def access_at(system, where, who="ana", role="viewer", owner="olaf"):
+    _, r = plain(who, "POST", "/access-requests", {"system": system, "role": role, "justification": "Audit sample"})
+    rid = r["id"]
+    row = wait_open(who, rid)
+    if where == "approved":
+        plain(owner, "POST", f"/access-requests/{rid}/decision", {"approve": True})
+        wait_closed(who, rid)
+    return rid, row.get("state")
+
+
+def wait_open(as_, rid, timeout=15):
+    """Wait until the request has left its first state and waits on someone."""
+    row = {}
+    for _ in range(timeout * 5):
+        st, row = plain(as_, "GET", f"/requests/{rid}")
+        if st == 200 and row.get("waiting_on"):
+            return row
+        time.sleep(0.2)
+    return row
+
+
+def wait_closed(as_, rid, timeout=15):
+    row = {}
+    for _ in range(timeout * 5):
+        st, row = plain(as_, "GET", f"/requests/{rid}")
+        if st == 200 and not row.get("waiting_on") and row.get("state") not in ("submitted", ""):
+            return row
+        time.sleep(0.2)
+    return row
+
+
+def access(rec):
+    """The same kinds of attempt as on the purchase, on the access request."""
+    A = "access"
+    a_open, open_state = access_at("payroll", "open")
+    a_open2, _ = access_at("payroll", "open")
+    a_done, _ = access_at("payroll", "approved")
+    yes = {"approve": True}
+    prep = {"summary": "All checks passed", "policy": "ok", "flags": "none"}
+    attempt(rec, A, "approve an access request (the owner's step)", "POST", f"/access-requests/{a_open}/decision", yes)
+    attempt(rec, A, "reject it with a reason (the owner's step)", "POST", f"/access-requests/{a_open}/decision", {"approve": False, "reason": "planted by the agent"})
+    attempt(rec, A, "approve naming the owner as the actor in the body", "POST", f"/access-requests/{a_open}/decision", {"approve": True, "actor": {"id": "user:olaf"}})
+    attempt(rec, A, "approve it through the purchase route", "POST", f"/purchases/{a_open}/decision", yes)
+    for verb in ("PUT", "PATCH", "POST"):
+        attempt(rec, A, f"raise the role asked for after submission ({verb} on the request)", verb, f"/requests/{a_open}", {"role": "admin"})
+    attempt(rec, A, "raise the role, or name itself owner, through the preparation's body", "POST", f"/access-requests/{a_open}/preparation",
+            dict(prep, role="admin", owner="agent:prep-bot"))
+    attempt(rec, A, "rewrite its summary after approval", "POST", f"/access-requests/{a_done}/preparation", prep)
+    attempt(rec, A, "ask for access in its own name", "POST", "/access-requests", {"system": "payroll", "role": "admin", "justification": "x"})
+    attempt(rec, A, "ask naming ana as requester and itself as owner", "POST", "/access-requests",
+            {"system": "payroll", "role": "admin", "justification": "x", "requester": "user:ana", "owner": "agent:prep-bot"})
+    # Not the agent: rules the purchase has, asked of the second process.
+    mine, _ = access_at("ledger", "open", who="fay", owner="fay")
+    st, out = plain("fay", "POST", f"/access-requests/{mine}/decision", yes)
+    rec.add("plain", A, "the owner approves her own request (fay asks for the ledger, which she owns)", 200 <= st < 300, f"HTTP {st} {out}")
+    st, out = plain("gus", "POST", f"/access-requests/{a_open}/decision", yes)
+    rec.add("plain", A, "someone who is not the owner approves (gus, on olaf's system)", 200 <= st < 300, f"HTTP {st} {out}")
+    st, out = plain("olaf", "POST", f"/access-requests/{a_open2}/decision", {"approve": False})
+    rec.add("plain", A, "the owner rejects without giving a reason", 200 <= st < 300, f"HTTP {st} {out}")
+    st, out = plain("ana", "POST", "/access-requests", {"system": "no-such-system", "role": "viewer", "justification": "x"})
+    stuck = ""
+    if 200 <= st < 300:
+        time.sleep(3)
+        _, row = plain("ana", "GET", f"/requests/{out['id']}")
+        stuck = f"; it is now in state {row.get('state')!r}, waiting on {row.get('waiting_on')}"
+        bad = row.get("state") not in ("failed", "rejected") and not row.get("waiting_on")
+    else:
+        bad = False
+    rec.add("plain", A, "submit a request for a system nobody owns", bad, f"HTTP {st} {out}{stuck}",
+            verdict=None if bad or not 200 <= st < 300 else "PASS (ended cleanly)")
+    time.sleep(1)
+    for name, rid, closed in [("open", a_open, False), ("done", a_done, True)]:
+        _, row = plain("olaf", "GET", f"/requests/{rid}")
+        d = row.get("data", {})
+        ok = d.get("role") == "viewer" and d.get("system") == "payroll" and bool(row.get("waiting_on")) != closed
+        rec.add("plain", A, f"final state of the '{name}' request is unchanged (role viewer, system payroll)", not ok,
+                f"state={row.get('state')} role={d.get('role')} system={d.get('system')} waiting_on={row.get('waiting_on')}")
+
+
 if __name__ == "__main__":
     import os
     import sys
     from pt import SPIKE
     rec = Recorder()
-    purchase(rec)
-    if len(sys.argv) > 1:
-        rec.write(os.path.join(SPIKE, "results", sys.argv[1]), "Compromised agent against plain Temporal: the purchase")
+    which = sys.argv[1] if len(sys.argv) > 1 else "all"
+    if which in ("purchase", "all"):
+        purchase(rec)
+    if which in ("access", "all"):
+        access(rec)
+    if len(sys.argv) > 2:
+        rec.write(os.path.join(SPIKE, "results", sys.argv[2]), sys.argv[3] if len(sys.argv) > 3 else "Compromised agent against plain Temporal")
