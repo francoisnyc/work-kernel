@@ -95,12 +95,13 @@ attack that found it as its test:
    it, as built"): the bake-off's forged workflow start now places no
    order. What it leaves open is listed under "Holes found by the
    bake-off".
-   Built (PR #71). Follow-up: two kinds of acting timer leave no record
-   when they fire (on a schedule; at an instant with no `sets`), so a
-   forged early run is sent, once per run. A firing timer records an
-   event, so every run can be confirmed; until then, a Type whose timer
-   runs an action with side effects and leaves no record is refused at
-   load.
+   Follow-up: two kinds of acting timer leave no record when they fire
+   (on a schedule; at an instant with no `sets`), so a forged early run
+   is sent, once per run; `vacation_request@3`'s reminder is one. Its own
+   build step weighs recording every timer firing (judged due by the item
+   service's clock, so a forged start cannot record it early) against
+   anything narrower. Refusing such Types at load is not one of the
+   options: it would refuse `vacation_request@3` at start.
 2. **Fields closed to agents by default:** the fix that closed both holes in
    the second bake-off (a role only people hold), made the default; a Type
    opens a field to agents by saying so (fail closed).
