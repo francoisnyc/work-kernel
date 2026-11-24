@@ -97,6 +97,7 @@ func TestText_TheLayout(t *testing.T) {
 		"\n" +
 		"Not covered by this reading\n" +
 		"- Who can see a given w_leave: that is set for each Item and its container, not by its Type.\n" +
+		"- Who may create a w_leave, and where, once a later version exists: the latest version of w_leave decides, for every version.\n" +
 		"- How the kernel keeps its promises (retries, each write made once, recovery after a failure): the same for every Type.\n"
 	if got := reading.Read(ty, contracts.Default()).Text(); got != want {
 		t.Errorf("Text() =\n%s\nwant\n%s", got, want)
@@ -122,6 +123,7 @@ func TestText_NoLifecycle(t *testing.T) {
 		"\n" +
 		"Not covered by this reading\n" +
 		"- Who can see a given w_portal: that is set for each Item and its container, not by its Type.\n" +
+		"- Who may create a w_portal, and where, once a later version exists: the latest version of w_portal decides, for every version.\n" +
 		"- How the kernel keeps its promises (retries, each write made once, recovery after a failure): the same for every Type.\n"
 	if got := reading.Read(ty, contracts.Default()).Text(); got != want {
 		t.Errorf("Text() =\n%s\nwant\n%s", got, want)
