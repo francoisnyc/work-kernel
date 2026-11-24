@@ -45,6 +45,26 @@ That count, per domain, is the test of "general": a domain that needs few is
 evidence the one Item model holds; a domain that needs special cases in the
 kernel is evidence it does not.
 
+### Pilots serve generality
+
+A pilot (approvals, moving processes off an existing BPM suite, a team's
+tracker) is a test of the kernel, not its purpose. The kernel exists to
+compose any work application, safe for agents by design; a pilot is one
+composition, and evidence for or against that claim.
+
+- **What a pilot needs lands as composition or as a general feature,** never
+  as domain code in the kernel: team queues and claiming as a capability any
+  Type can use, not "approval queues"; a "waiting on me" view over any Type,
+  not an approvals screen.
+- **The membership test still decides** (`docs/design.md`): something joins
+  the kernel only if all three reference apps need it and it must behave the
+  same everywhere. A pilot's request that fails it belongs in the pilot's
+  Types or app.
+- **Every kernel change a pilot asks for is counted** in the journal and named
+  here, with the other domains it serves.
+- **The yardstick stays four domains.** A pilot that succeeded only through
+  kernel code made for it counts as a failure of the kernel.
+
 ## What exists already
 
 - **Three domains proven:** the vacation request (workflow), the IT desk with
