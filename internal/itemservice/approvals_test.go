@@ -96,6 +96,20 @@ func (w vacWorld) create(t *testing.T, p item.Principal, fields map[string]any) 
 	return res.ItemID
 }
 
+// agentDraft is an agent's request for ana: the agent creates it with no
+// fields and ana writes the terms. Fields are closed to agents by default,
+// and vacation_request opens none (a person fills their own leave).
+func (w vacWorld) agentDraft(t *testing.T, agent item.Principal) uuid.UUID {
+	t.Helper()
+	id := w.create(t, agent, nil)
+	if _, err := w.k.Update(testCtx(t), itemservice.UpdateRequest{
+		IdempotencyKey: newKey(), Principal: w.ana, ItemID: id, Fields: vacTerms(),
+	}); err != nil {
+		t.Fatalf("ana writes the terms of her agent's draft: %v", err)
+	}
+	return id
+}
+
 func (w vacWorld) move(t *testing.T, p item.Principal, id uuid.UUID, to string, patch map[string]any,
 	key string) (itemservice.TransitionResult, error) {
 	t.Helper()
@@ -451,7 +465,7 @@ func TestVacation_NoSelfApprovalEvenIfNamed(t *testing.T) {
 func TestVacation_NoSelfApprovalForAnAgentsUser(t *testing.T) {
 	w := newVacWorld(t)
 	agent := withSession(t, w.k, item.Principal{Actor: "agent:" + uuid.NewString()[:8], OnBehalfOf: w.ana.Actor})
-	id := w.create(t, agent, vacTerms())
+	id := w.agentDraft(t, agent)
 	req := w.submit(t, agent, id)
 	if _, err := w.hr(t, id, req, itemservice.VerdictCorrect, map[string]any{"f_approver": w.ana.Actor}, ""); err != nil {
 		t.Fatalf("HR correct: %v", err)
@@ -485,7 +499,7 @@ func TestVacation_AgentCreatedRequest_TheCreatorIsItsUser(t *testing.T) {
 	bot := "agent:" + uuid.NewString()[:8]
 	forAna := withSession(t, w.k, item.Principal{Actor: bot, OnBehalfOf: w.ana.Actor})
 	forBob := withSession(t, w.k, item.Principal{Actor: bot, OnBehalfOf: w.bob.Actor})
-	id := w.create(t, forAna, vacTerms())
+	id := w.agentDraft(t, forAna)
 
 	_, err := w.move(t, forBob, id, "submitted", nil, newKey())
 	assertNotAllowed(t, "agent:bot for bob submits", err)
@@ -518,7 +532,7 @@ func TestVacation_AgentAloneCannotDecideWhatItCreated(t *testing.T) {
 	forAna := withSession(t, w.k, item.Principal{Actor: bot, OnBehalfOf: w.ana.Actor})
 	alone := withSession(t, w.k, item.Principal{Actor: bot})
 	forBob := withSession(t, w.k, item.Principal{Actor: bot, OnBehalfOf: w.bob.Actor})
-	id := w.create(t, forAna, vacTerms())
+	id := w.agentDraft(t, forAna)
 
 	_, err := w.move(t, alone, id, "submitted", nil, newKey())
 	assertNotAllowed(t, "the agent alone submits (not the requester)", err)
@@ -669,7 +683,7 @@ func TestVacation_HookInputReadsTheCreator(t *testing.T) {
 	}
 
 	agent := withSession(t, w.k, item.Principal{Actor: "agent:" + uuid.NewString()[:8], OnBehalfOf: w.ana.Actor})
-	id = w.create(t, agent, vacTerms())
+	id = w.agentDraft(t, agent)
 	req = w.submit(t, agent, id)
 	got = read(id, req.ItemSeq)
 	if got["created_by"] != agent.Actor || got["created_on_behalf_of"] != w.ana.Actor || len(got) != 2 {
