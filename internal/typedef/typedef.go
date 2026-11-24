@@ -159,6 +159,10 @@ type Field struct {
 	// only a field that lists agents, or a role they hold.
 	WritableByPeople bool `yaml:"-" json:"writable_by_people,omitempty"`
 	WritableByAgents bool `yaml:"-" json:"writable_by_agents,omitempty"`
+	// writers is the writable_by list as written, kept only when it names
+	// people or agents, so that check's problems point at the right entry
+	// (WritableByRoles holds the roles alone). Never stored.
+	writers []string
 	// Multiple makes the field hold a set of values of its type (string,
 	// enum, principal or date): unordered, no duplicates, stored sorted; an
 	// empty set is an unset field. Max, when set, is the most members it
