@@ -1,5 +1,5 @@
---- kernel/types/purchase.v1.yaml	2026-11-24 02:05:57.533595365 +0000
-+++ kernel/types-v2/purchase.v2.yaml	2026-11-24 02:05:57.533595365 +0000
+--- kernel/types/purchase.v1.yaml	2026-11-24 02:49:25.064546805 +0000
++++ kernel/types-v2/purchase.v2.yaml	2026-11-24 02:49:25.065154460 +0000
 @@ -6,7 +6,8 @@
  #     manager_review with f_manager set by the kernel, never by a person.
  #   - Under 1,000 the manager approves or rejects. From 1,000 the manager's
@@ -8,9 +8,9 @@
 +#     (finance_review) and decides. Over 5,000, finance's approval sends it
 +#     to the CFO (cfo_review), who decides (v2: the owner's change).
  #   - The agent (agent:prep-bot, role preparer) writes only the three
- #     preparation fields; no move names it. Once submitted, what is being
- #     approved (amount, vendor, cost centre, justification) is frozen.
-@@ -14,7 +15,7 @@
+ #     preparation fields, and only until the manager has decided (they are
+ #     frozen from the finance queue on); no move names it. Once submitted, what is being
+@@ -15,7 +16,7 @@
  #     the vendor standing in for the ERP's customer); rejected, the
  #     requester is told (email.notify) and the reason is on the Item.
  id: purchase
@@ -19,17 +19,17 @@
  initial_state: draft
  
  fields:
-@@ -41,6 +42,9 @@
+@@ -42,6 +43,9 @@
    - id: finance_review
      category: active
-     frozen: [f_amount, f_vendor, f_cost_centre, f_justification, f_manager]
+     frozen: [f_amount, f_vendor, f_cost_centre, f_justification, f_manager, f_summary, f_policy, f_flags]
 +  - id: cfo_review
 +    category: waiting
-+    frozen: [f_amount, f_vendor, f_cost_centre, f_justification, f_manager, f_claimed_by]
++    frozen: [f_amount, f_vendor, f_cost_centre, f_justification, f_manager, f_claimed_by, f_summary, f_policy, f_flags]
    - id: approved
      category: done
      frozen: [f_amount, f_vendor, f_cost_centre, f_justification, f_manager, f_claimed_by, f_summary, f_policy, f_flags, f_reason]
-@@ -61,8 +65,12 @@
+@@ -62,8 +66,12 @@
    # Finance: claim from the shared queue, hand back, decide.
    - {from: finance_queue,  to: finance_review, allowed: ['role:finance'], except: [creator], required: [f_claimed_by]}
    - {from: finance_review, to: finance_queue,  allowed: ['role:finance'], clears: [f_claimed_by]}

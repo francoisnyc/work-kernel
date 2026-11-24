@@ -45,18 +45,18 @@ manager_review (waiting)
 15. Whoever `f_manager` names, but never anyone who took part in creating it, moves it from manager_review to rejected, once `f_reason` is set.
 
 finance_queue (waiting)
-16. While it is in finance_queue, nobody changes `f_amount`, `f_vendor`, `f_cost_centre`, `f_justification` or `f_manager`.
+16. While it is in finance_queue, nobody changes `f_amount`, `f_vendor`, `f_cost_centre`, `f_justification`, `f_manager`, `f_summary`, `f_policy` or `f_flags`.
 17. Anyone with the role finance, but never anyone who took part in creating it, moves it from finance_queue to finance_review, once `f_claimed_by` is set.
 
 finance_review (active)
-18. While it is in finance_review, nobody changes `f_amount`, `f_vendor`, `f_cost_centre`, `f_justification` or `f_manager`.
+18. While it is in finance_review, nobody changes `f_amount`, `f_vendor`, `f_cost_centre`, `f_justification`, `f_manager`, `f_summary`, `f_policy` or `f_flags`.
 19. Anyone with the role finance moves it from finance_review to finance_queue; the move clears `f_claimed_by`.
 20. Anyone with the role finance, but never anyone who took part in creating it, moves it from finance_review to approved, only if `f_amount` is at most 5000.
 21. Anyone with the role finance, but never anyone who took part in creating it, moves it from finance_review to cfo_review, only if `f_amount` is more than 5000.
 22. Anyone with the role finance, but never anyone who took part in creating it, moves it from finance_review to rejected, once `f_reason` is set.
 
 cfo_review (waiting)
-23. While it is in cfo_review, nobody changes `f_amount`, `f_vendor`, `f_cost_centre`, `f_justification`, `f_manager` or `f_claimed_by`.
+23. While it is in cfo_review, nobody changes `f_amount`, `f_vendor`, `f_cost_centre`, `f_justification`, `f_manager`, `f_claimed_by`, `f_summary`, `f_policy` or `f_flags`.
 24. Anyone with the role cfo, but never anyone who took part in creating it, moves it from cfo_review to approved.
 25. Anyone with the role cfo, but never anyone who took part in creating it, moves it from cfo_review to rejected, once `f_reason` is set.
 

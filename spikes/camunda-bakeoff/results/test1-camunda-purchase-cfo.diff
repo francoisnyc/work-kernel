@@ -1,19 +1,21 @@
 --- camunda/purchase.bpmn
 +++ camunda/purchase-cfo.bpmn
-@@ -1,10 +1,6 @@
+@@ -1,12 +1,6 @@
  <?xml version="1.0" encoding="UTF-8"?>
 -<!-- Bake-off: the purchase approval on Camunda 8.10 (v1). Started by the requester publishing the
--     message "purchase-submitted" with amount, vendor, costCentre, justification (untrusted), requester and
+-     message "purchase-submitted" with amount, vendor, costCentre, justification (untrusted) and
 -     requestRef. A message start, not a none start: people may publish the message but not create
--     instances, so they cannot use start instructions to skip the approvals. The agent prepares in its
--     own process (call activity prepare-decision); only `preparation` comes back. Diagram (bpmndi)
--     generated with bpmn-auto-layout. -->
+-     instances, so they cannot use start instructions to skip the approvals. The first step replaces
+-     `requester` with the user Camunda's audit log recorded as the instance's creator (whatever the
+-     message claimed); its password sits in this file for the spike only: use a connector secret.
+-     The agent prepares in its own process (call activity prepare-decision); only `preparation` comes
+-     back. Each decision has a form (*.form). Diagram (bpmndi) generated with bpmn-auto-layout. -->
 +<!-- Bake-off: purchase.bpmn with the owner's change (test 1): over 5,000, the CFO approves after
 +     finance. See scripts/bpmn-diff.sh camunda/purchase.bpmn camunda/purchase-cfo.bpmn. -->
  <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" xmlns:modeler="http://camunda.org/schema/modeler/1.0" id="purchase-definitions" targetNamespace="http://bakeoff.example/purchase" exporter="hand-written" modeler:executionPlatform="Camunda Cloud" modeler:executionPlatformVersion="8.10.0">
    <bpmn:process id="purchase" name="Purchase approval" isExecutable="true">
      <bpmn:startEvent id="submitted" name="Purchase submitted">
-@@ -71,7 +67,28 @@
+@@ -106,7 +100,29 @@
      <bpmn:sequenceFlow id="f5" sourceRef="finance_decision" targetRef="finance_gw" />
      <bpmn:exclusiveGateway id="finance_gw" name="Finance&#39;s answer" />
      <bpmn:sequenceFlow id="fin_ok" name="Approved" sourceRef="finance_gw" targetRef="place_order">
@@ -26,6 +28,7 @@
 +    <bpmn:userTask id="cfo_decision" name="CFO decides">
 +      <bpmn:extensionElements>
 +        <zeebe:userTask />
++        <zeebe:formDefinition formId="purchase-cfo-decision" />
 +        <zeebe:assignmentDefinition candidateGroups="cfo" />
 +        <zeebe:ioMapping>
 +          <zeebe:output source="=cfoApproved" target="cfoApproved" />

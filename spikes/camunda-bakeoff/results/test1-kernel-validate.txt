@@ -1,6 +1,6 @@
 $ pli type validate purchase.v2.yaml   # with f_amont and cfo_reveiw typed by mistake
-purchase.v2.yaml:69:28: UNKNOWN_STATE typedef purchase v2: transition finance_review -> cfo_reveiw: unknown state "cfo_reveiw". Declare the state, or name one that is declared
-purchase.v2.yaml:69:94: EXPRESSION_INVALID typedef purchase v2: transition finance_review -> cfo_reveiw: guard "f_amont > 5000": ERROR: <input>:1:1: undeclared reference to 'f_amont' (did you mean 'f_amount'?). Fix the CEL expression; it reads fields by their ids
+purchase.v2.yaml:70:28: UNKNOWN_STATE typedef purchase v2: transition finance_review -> cfo_reveiw: unknown state "cfo_reveiw". Declare the state, or name one that is declared
+purchase.v2.yaml:70:94: EXPRESSION_INVALID typedef purchase v2: transition finance_review -> cfo_reveiw: guard "f_amont > 5000": ERROR: <input>:1:1: undeclared reference to 'f_amont' (did you mean 'f_amount'?). Fix the CEL expression; it reads fields by their ids
 exit 1
 
 $ pli type validate kernel/types-v2/purchase.v2.yaml
