@@ -143,7 +143,7 @@ func TestAgentFields_Bakeoff_TheAgentMayNotEditADraft(t *testing.T) {
 	assertClosedToAgents(t, "the agent changes the amount and vendor", err, "f_amount", "f_vendor")
 	err = w.updateAs(t, w.forAna, id, map[string]any{"f_amount": 950})
 	assertClosedToAgents(t, "the agent, acting for ana, changes the amount", err, "f_amount")
-	assertNothingWritten(t, id, 1)
+	assertNothingWrittenNoOutbox(t, id, 1)
 
 	w.mustMove(t, w.ana, id, "manager_review", nil)
 	got := get(t, w.k, id)
