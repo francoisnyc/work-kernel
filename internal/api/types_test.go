@@ -121,7 +121,9 @@ func TestListTypes_EveryVersionInOrder(t *testing.T) {
 	want := []string{
 		"namespaces/globex/types/access_request/versions/1",
 		"namespaces/globex/types/apibean/versions/1",
+		"namespaces/globex/types/apihost/versions/1",
 		"namespaces/globex/types/apijar/versions/1",
+		"namespaces/globex/types/apipart/versions/1",
 		"namespaces/globex/types/approval/versions/1",
 		"namespaces/globex/types/bug/versions/1",
 		"namespaces/globex/types/bug/versions/2",

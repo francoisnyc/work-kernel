@@ -120,7 +120,8 @@ func run(m *testing.M) int {
 		return 1
 	}
 	// And the test Types of jira24b_test.go (apijar, apibean), once.
-	for _, src := range []string{api4bBean, api4bJar} {
+	// And apihost and apipart (jira23b_test.go), which no rule places.
+	for _, src := range []string{api4bBean, api4bJar, apiPart, apiHost} {
 		ty, err := typedef.Parse([]byte(src))
 		if err != nil {
 			log.Printf("parse a 2.4b test Type: %v", err)
