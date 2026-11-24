@@ -295,6 +295,33 @@ def camunda_default_role():
         time.sleep(2)
 
 
+def c_start_instructions(side):
+    """ana tries to start a purchase past its approvals (start instructions)."""
+    st, res = camunda("ana", "POST", "/v2/process-instances", {
+        "processDefinitionId": "purchase", "startInstructions": [{"elementId": "place_order"}],
+        "variables": {"amount": 99999, "vendor": "shadyparts", "costCentre": "CC-100", "justification": "x",
+                      "requester": "ana", "requestRef": str(uuid.uuid4())}})
+    ok = 200 <= st < 300
+    record(side, "start a purchase directly at 'Place the order' (no approval)", ok, f"HTTP {st} {res if not ok else res.get('processInstanceKey')}")
+    if ok:
+        time.sleep(3)
+        oid = c_var(res["processInstanceKey"], "orderId")
+        record(side, "  ... and the purchase system received the order", oid is not None, f"orderId={oid}")
+    st, res = camunda("ana", "POST", "/v2/process-instances", {
+        "processDefinitionId": "purchase", "startInstructions": [{"elementId": "manager_decision"}],
+        "variables": {"amount": 500, "vendor": "officeco", "costCentre": "CC-100", "justification": "x",
+                      "requester": "olaf", "manager": "ana", "requestRef": str(uuid.uuid4())}})
+    ok = 200 <= st < 300
+    record(side, "start at the manager's task, naming herself manager", ok, f"HTTP {st} {res if not ok else res.get('processInstanceKey')}")
+    if ok:
+        t = c_task(res["processInstanceKey"], "manager_decision")
+        camunda("ana", "POST", f"/v2/user-tasks/{t['userTaskKey']}/assignment", {"assignee": "ana", "action": "claim", "allowOverride": False})
+        st2, _ = camunda("ana", "POST", f"/v2/user-tasks/{t['userTaskKey']}/completion", {"variables": {"managerApproved": True}})
+        time.sleep(3)
+        oid = c_var(res["processInstanceKey"], "orderId")
+        record(side, "  ... approve it herself, and the order is placed", oid is not None, f"complete HTTP {st2}, orderId={oid}")
+
+
 def requester():
     """Not the agent: what the requester's own rights allow on each side."""
     ok, out = pli("ana", "item", "create", "--type", "purchase@1", "--set", "f_amount=99999", "--set", "f_vendor=shadyparts",
@@ -305,29 +332,17 @@ def requester():
     i = short(c["item"]["name"])
     ok, out = pli("ana", "item", "transition", i, "--to", "approved", check=False)
     record("kernel-requester", "move her own draft straight to approved", ok, out)
-    st, res = camunda("ana", "POST", "/v2/process-instances", {
-        "processDefinitionId": "purchase", "startInstructions": [{"elementId": "place_order"}],
-        "variables": {"amount": 99999, "vendor": "shadyparts", "costCentre": "CC-100", "justification": "x",
-                      "requester": "ana", "requestRef": str(uuid.uuid4())}})
-    ok = 200 <= st < 300
-    record("camunda-requester", "start a purchase directly at 'Place the order' (no approval)", ok, f"HTTP {st} {res if not ok else res.get('processInstanceKey')}")
-    if ok:
-        time.sleep(3)
-        oid = c_var(res["processInstanceKey"], "orderId")
-        record("camunda-requester", "  ... and the purchase system received the order", oid is not None, f"orderId={oid}")
-    st, res = camunda("ana", "POST", "/v2/process-instances", {
-        "processDefinitionId": "purchase", "startInstructions": [{"elementId": "manager_decision"}],
-        "variables": {"amount": 500, "vendor": "officeco", "costCentre": "CC-100", "justification": "x",
-                      "requester": "olaf", "manager": "ana", "requestRef": str(uuid.uuid4())}})
-    ok = 200 <= st < 300
-    record("camunda-requester", "start at the manager's task, naming herself manager", ok, f"HTTP {st} {res if not ok else res.get('processInstanceKey')}")
-    if ok:
-        t = c_task(res["processInstanceKey"], "manager_decision")
-        camunda("ana", "POST", f"/v2/user-tasks/{t['userTaskKey']}/assignment", {"assignee": "ana", "action": "claim", "allowOverride": False})
-        st2, _ = camunda("ana", "POST", f"/v2/user-tasks/{t['userTaskKey']}/completion", {"variables": {"managerApproved": True}})
-        time.sleep(3)
-        oid = c_var(res["processInstanceKey"], "orderId")
-        record("camunda-requester", "  ... approve it herself, and the order is placed", oid is not None, f"complete HTTP {st2}, orderId={oid}")
+    c_start_instructions("camunda-requester")
+    # The same with the ordinary right to start the process, which is what
+    # starting it from Tasklist or the API by its start event needs.
+    _, a = camunda("demo", "POST", "/v2/authorizations", {"ownerId": "ana", "ownerType": "USER", "resourceType": "PROCESS_DEFINITION",
+                                                         "resourceId": "purchase", "permissionTypes": ["CREATE_PROCESS_INSTANCE"]})
+    time.sleep(2)
+    try:
+        c_start_instructions("camunda-requester-may-start")
+    finally:
+        camunda("demo", "DELETE", f"/v2/authorizations/{a.get('authorizationKey')}")
+        time.sleep(2)
     # bob, ana's manager, submits a purchase claiming to be ana: the HR
     # lookup then names bob as the approver of his own purchase.
     st, pi = c_start("bob", 2500, {"requester": "ana", "justification": "Submitted by bob, posing as ana"})
@@ -376,6 +391,7 @@ def main():
         requester()
         write("kernel-requester")
         write("camunda-requester")
+        write("camunda-requester-may-start")
 
 
 if __name__ == "__main__":
