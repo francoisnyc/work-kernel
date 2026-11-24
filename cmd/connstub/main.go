@@ -115,12 +115,12 @@ func run(ctx context.Context, args []string, stderr io.Writer) error {
 		latencies[id] = d
 	}
 
-	crm, err := connstub.ServeCRM(*crmAddr)
+	crm, err := connstub.ServeCRM(*crmAddr, nil)
 	if err != nil {
 		return fmt.Errorf("crm: %w", err)
 	}
 	defer crm.Close()
-	erp, err := connstub.ServeERP(*erpAddr)
+	erp, err := connstub.ServeERP(*erpAddr, nil)
 	if err != nil {
 		return fmt.Errorf("erp: %w", err)
 	}
@@ -151,7 +151,7 @@ func run(ctx context.Context, args []string, stderr io.Writer) error {
 				return fmt.Errorf("--hr-hook-secret-env: %s: %w", *hrSecretEnv, err)
 			}
 		}
-		hr, err := connstub.ServeHR(*hrAddr)
+		hr, err := connstub.ServeHR(*hrAddr, nil)
 		if err != nil {
 			return fmt.Errorf("hr: %w", err)
 		}

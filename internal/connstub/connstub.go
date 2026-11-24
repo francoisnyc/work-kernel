@@ -125,15 +125,17 @@ func NewERP() *Server {
 }
 
 // ServeCRM starts a stub CRM listening on addr (":8081"), for cmd/connstub.
-func ServeCRM(addr string) (*Server, error) {
+// setup, if not nil, gives the stub what it starts with (its customers).
+func ServeCRM(addr string, setup func(*Server)) (*Server, error) {
 	s := newServer()
-	return s, s.startOn(addr, s.crmHandler())
+	return s, s.serveOn(addr, s.crmHandler(), setup)
 }
 
 // ServeERP starts a stub ERP listening on addr (":8082"), for cmd/connstub.
-func ServeERP(addr string) (*Server, error) {
+// setup is as for ServeCRM.
+func ServeERP(addr string, setup func(*Server)) (*Server, error) {
 	s := newServer()
-	return s, s.startOn(addr, s.erpHandler())
+	return s, s.serveOn(addr, s.erpHandler(), setup)
 }
 
 // NewHR starts a stub HR directory on a free loopback port.
@@ -145,10 +147,10 @@ func NewHR() *Server {
 }
 
 // ServeHR starts a stub HR directory listening on addr (":8083"), for
-// cmd/connstub.
-func ServeHR(addr string) (*Server, error) {
+// cmd/connstub. setup is as for ServeCRM (its secret and its directory).
+func ServeHR(addr string, setup func(*Server)) (*Server, error) {
 	s := newServer()
-	return s, s.startOn(addr, s.hrHandler())
+	return s, s.serveOn(addr, s.hrHandler(), setup)
 }
 
 // The HR directory as a pli.hooks/v1 connector (the hook protocol spike):
@@ -317,6 +319,17 @@ func (s *Server) count(n *int) {
 func (s *Server) start(h http.Handler) {
 	s.srv = httptest.NewServer(h)
 	s.URL = s.srv.URL
+}
+
+// serveOn serves h on addr, with setup.
+func (s *Server) serveOn(addr string, h http.Handler, setup func(*Server)) error {
+	if err := s.startOn(addr, h); err != nil {
+		return err
+	}
+	if setup != nil {
+		setup(s)
+	}
+	return nil
 }
 
 // startOn serves h on addr. httptest.Server is reused for its Close, which
