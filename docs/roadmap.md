@@ -91,6 +91,10 @@ General features, under "Pilots serve generality", each with the bake-off
 attack that found it as its test:
 
 1. **An effect re-checks what caused it** (`docs/design.md`, PR #65).
+   **Built** (PR #71; `docs/design.md`, "An effect re-checks what caused
+   it, as built"): the bake-off's forged workflow start now places no
+   order. What it leaves open is listed under "Holes found by the
+   bake-off".
 2. **Fields closed to agents by default:** the fix that closed both holes in
    the second bake-off (a role only people hold), made the default; a Type
    opens a field to agents by saying so (fail closed).
@@ -245,12 +249,28 @@ compromised agent attacking the approvals scenario; 31 of 36 attempts were
 refused). Fixed in this order, each with the attack that found it as its
 test:
 
-1. **An effect re-checks committed state.** A forged workflow start (on an
-   unauthenticated development Temporal) made an action hook place an order
-   for an Item still waiting on its manager: the hook trusted the workflow's
-   input. Before any effect, the kernel confirms against the item service
-   that the Item is in a state that allows it. A design rule, to be recorded
-   in `docs/design.md`.
+1. **Done (PR #71): an effect re-checks what caused it.** A forged workflow
+   start (on an unauthenticated development Temporal) made an action hook
+   place an order for an Item still waiting on its manager: the hook
+   trusted the workflow's input. Before any effect, the worker has the item
+   service confirm that the event named is the event the hook is bound to
+   (not that the Item is still in that state: an action runs for its entry
+   even after the Item has moved on). Still open after it, all through a
+   Temporal anyone can reach:
+   - a forged start can send an acting timer's reminder early, at most once
+     per run, for an Item that really entered that state;
+   - a timer at an instant with a hook and no write leaves no proof that it
+     acted, so its hook can be run early the same way;
+   - state timers trust the workflow's clock: a forged start can expire a
+     request now, and the move is then real;
+   - a forged `hook_failed` naming the true entry makes a real action count
+     as done, so it is never run;
+   - a forged enrich run re-runs a read-only action and rewrites that
+     hook's fields.
+
+   Locking down Temporal (sign-on, and who may start or signal what) closes
+   these at the root; the first three could also be closed in the item
+   service, which would then have to know when a timer is due.
 2. **Required means given by the mover.** An agent wrote the rejection reason
    in advance, so a person could reject without giving one although the Type
    requires it. A Type can ask that a `required` field be set in the move

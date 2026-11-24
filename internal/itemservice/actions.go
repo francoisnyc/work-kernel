@@ -97,6 +97,10 @@ func (in *Internal) HookFailed(ctx context.Context, req HookFailedRequest) (Writ
 		if err := checkRun(ty, h, req.Timer, req.Run); err != nil {
 			return WriteResult{}, err
 		}
+		// A malformed record first (ErrInvalid); then the cause it names.
+		if err := confirmBound(ty, h, kc); err != nil {
+			return WriteResult{}, err
+		}
 		payload := map[string]any{"hook": h.ID, "reason": req.Reason}
 		if req.Timer != "" {
 			payload["timer"], payload["run"] = req.Timer, req.Run

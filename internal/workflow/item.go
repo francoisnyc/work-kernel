@@ -78,6 +78,11 @@ const (
 	// different result (a second invoice), or the connector saw the key with
 	// a different request. A duplicate, never "already written".
 	ErrTypeKeyConflict = "KeyConflict"
+	// ErrTypeCauseNotConfirmed: the item service could not confirm the
+	// cause an action hook was given (a workflow's input is a request,
+	// never proof). Final, and already recorded on the Item where there
+	// was something true to record.
+	ErrTypeCauseNotConfirmed = "CauseNotConfirmed"
 	// The hook protocol: a remote connector's configuration or contract is
 	// wrong. Each fails a check at once, with its own reason on the hold.
 	ErrTypeConnectorUnconfigured = "ConnectorUnconfigured"
@@ -866,7 +871,7 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 		return HookInput{
 			ItemID: in.ItemID, TypeID: s.TypeID, TypeVersion: s.TypeVersion, HookID: hookID,
 			CauseSeq: causeSeq, CorrelationID: corr, Hop: hop,
-			IdempotencyKey: fmt.Sprintf("hook:%s:%d:%s", in.ItemID, causeSeq, hookID),
+			IdempotencyKey: lifecycle.HookKey(in.ItemID, causeSeq, hookID),
 		}
 	}
 
@@ -1069,7 +1074,7 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 				last = workflow.Now(gctx)
 				hin := hookInput(spec.Hook, entered, corr, hop+1)
 				hin.Timer, hin.Run = spec.ID, n
-				hin.IdempotencyKey = fmt.Sprintf("timer:%s:%s:%d:%d", in.ItemID, spec.ID, entered, n)
+				hin.IdempotencyKey = lifecycle.TimerRunKey(in.ItemID, spec.ID, entered, n)
 				runAction(hin)
 			}
 		})
@@ -1200,7 +1205,7 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 						if res.RunHook && spec.Hook != "" {
 							hin := hookInput(spec.Hook, entered, corr, hop+1)
 							hin.Timer = spec.ID
-							hin.IdempotencyKey = fmt.Sprintf("timer:%s:%s:%d:%s:hook", in.ItemID, spec.ID, entered,
+							hin.IdempotencyKey = lifecycle.TimerAtHookKey(in.ItemID, spec.ID, entered,
 								instant.UTC().Format(instantLayout))
 							runAction(hin)
 						}
@@ -1649,6 +1654,10 @@ func actionFailure(err error) (reason string, failed bool) {
 	if errors.As(err, &appErr) {
 		switch appErr.Type() {
 		case ErrTypeNotFound:
+			return "", false
+		case ErrTypeCauseNotConfirmed:
+			// Nothing was sent, and the item service has recorded the
+			// refusal itself: there is no failure of the action to add.
 			return "", false
 		case ErrTypeKeyConflict:
 			return "key_conflict", true

@@ -136,6 +136,10 @@ func checkHookWrite(ty *typedef.Type, kc *kernelCause, fields map[string]any) er
 	if !ok {
 		return fmt.Errorf("%w: hook %s is not declared by %s v%d", ErrInvalid, kc.hookID, ty.ID, ty.Version)
 	}
+	// An action's write-back is made for the event the action is bound to.
+	if err := confirmBound(ty, h, kc); err != nil {
+		return err
+	}
 	for _, id := range slices.Sorted(maps.Keys(fields)) {
 		if !slices.Contains(h.Writes, id) {
 			return fmt.Errorf("%w: hook %s does not write %s", ErrInvalid, kc.hookID, id)

@@ -85,6 +85,10 @@ func (in *Internal) HookRan(ctx context.Context, req HookRanRequest) (WriteResul
 		if err := checkRun(ty, h, req.Timer, req.Run); err != nil {
 			return WriteResult{}, err
 		}
+		// A malformed record first (ErrInvalid); then the cause it names.
+		if err := confirmBound(ty, h, kc); err != nil {
+			return WriteResult{}, err
+		}
 		// No field and no move: no hold or frozen field can refuse it.
 		payload := map[string]any{"hook": h.ID}
 		if req.Timer != "" {

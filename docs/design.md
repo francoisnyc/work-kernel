@@ -352,7 +352,10 @@ client → item service (Go, stateless)
   through the internal door (payload: the hook and a reason code,
   `budget_exhausted`, `key_conflict` or `action_failed`; no field or state
   change), under its own key `hook_failed:<item>:<entered seq>:<hook>`. Only
-  an action hook may write it. Its write-back's key coming back with a
+  an action hook may write it. (Two more reasons came later: `no_recipient`,
+  Jira part 2, step 3b; and `cause_not_confirmed`, which only the item
+  service's `ConfirmCause` writes: see "An effect re-checks what caused it,
+  as built".) Its write-back's key coming back with a
   different request means the connector made a second, different thing for
   one key: a duplicate, recorded as `key_conflict`, never treated as already
   written (an enrich hook's fallback shares its key, so there it is). An
@@ -4215,6 +4218,112 @@ every rule below already existed.
   repository: it freezes the tests' reference, not the files. Keeping the
   two in step is CI's job (later). It holds only while no agent is given
   `maintainer`.
+
+## An effect re-checks what caused it, as built (2026-11-24)
+
+The rule is under "Architecture style". The first bake-off found the hole
+(`docs/research/camunda-bakeoff.md`, test 2c): a workflow started by hand
+on a Temporal with no sign-on told the kernel's own workflow that a
+purchase still waiting on its manager was approved, and the worker placed
+the order. Everything an activity is given comes through Temporal (the
+start input, an update, an earlier activity's result), so all of it can be
+forged, by a forged start or by forged workflow code on the task queue.
+
+**The check.** `RunAction` first calls `Internal().ConfirmCause`
+(`internal/itemservice/cause.go`), before it reads the hook's inputs or
+calls the connector. From committed state only, it confirms:
+
+- the Type and version named are the Item's (an Item never changes version);
+- the hook is an action hook of that Type (by the contract rules, "action"
+  and `sideEffects: some` are the same set);
+- the event named is an event of this Item, and the one the hook is bound
+  to. Which event that is, is the Type's to say: one pure function,
+  `lifecycle.BoundTo`.
+
+| Hook | The event it is bound to | What else is confirmed |
+| --- | --- | --- |
+| `on: enter` | the create or transition that entered its state | |
+| `on: reaction` | the `reaction_applied` event of its reaction | |
+| `on: timer`, on a schedule | the entry into its timer's state | the timer is that state's and runs this hook; the run is 1 to `max` |
+| `on: timer`, at an instant, with `sets` | the entry into its timer's state | the same, and the timer's own write for that instant exists (`ActAt`'s idempotency record, written with its event) |
+| `on: timer`, at an instant, no `sets` | the entry into its timer's state | the timer is that state's and runs this hook; nothing else (below) |
+
+- **The idempotency key is the one the kernel derives** from the confirmed
+  cause. Before this, the key came from the workflow's input, so one true
+  cause could be used under many keys, each a new order. The workflow and
+  `ConfirmCause` build keys with the same functions (`lifecycle.HookKey`,
+  `TimerRunKey`, `TimerAtKey`, `TimerAtHookKey`).
+
+**The Item's state now is not asked.** The check is "this entry really
+happened", not "the Item is still there": an action runs to completion for
+its entry even after the Item has moved on, and a retry must confirm again.
+Events never change, so the same cause confirms every time.
+
+**A refusal** is `ErrCauseNotConfirmed`: final, a non-retryable
+`CauseNotConfirmed` in the worker, and nothing is read for the connector
+or sent. It is recorded on the Item as `hook_failed` with the reason
+`cause_not_confirmed`:
+
+- written by `ConfirmCause` itself, through the normal write path (the
+  Item locked, the event and its outbox row, an idempotency key, a
+  `commit_seq`), as the hook;
+- the payload is the hook and the reason, nothing else: no caller-supplied
+  text. It has no `causation_id` (the claimed cause is not its cause; and
+  an action counts as done for an entry once an event of its hook names
+  that entry, so naming it would let a forged call suppress a real action)
+  and no correlation ID (that too comes from the workflow's input);
+- once per Item, hook and event named, however often it is asked;
+- only when the event is real and the Item's Type declares the hook.
+  Otherwise (a made-up event, an undeclared hook, another Type's hook) it
+  is refused and logged, and nothing is recorded: there is nothing true to
+  say it about. A wrong version of the Item's own Type is recorded, as the
+  Item's own hook.
+
+Only `ConfirmCause` writes that reason: `HookFailed` does not accept it.
+The workflow does not record `action_failed` beside it.
+
+**An action's own records confirm their cause too.** `hook_ran`,
+`hook_failed` and the write-back are refused, under the Item's lock, for
+an event the action hook is not bound to (`confirmBound`); nothing is
+written. Checks and enrich hooks are unchanged: a check's write needs its
+open hold, its decider and its request; enrich is open (below).
+
+**Cost:** two reads by primary key (the Item, the event), a third for a
+timer at an instant with `sets`; the Type comes from the cache. About
+0.25 ms per side-effecting action on a local Postgres (p50 0.25, p95 0.36,
+p99 0.46 ms over 3,000 calls; the existing `HookInput` read measured 0.27
+ms in the same run). It runs in the worker's activity, in process.
+
+**No contract change:** no proto, schema, migration, dependency or
+hook-protocol change. One method on the internal door, one reason code (a
+value of the API's existing `reason` string), one worker error type.
+
+**Not confirmed** (each is in `docs/roadmap.md`, "Holes found by the
+bake-off", and pinned by a test named `TestResidue_...`, so closing one
+shows as a change to a test):
+
+- **That a scheduled acting timer's run was due.** A run leaves no event
+  until its hook has finished. A forged start can send a reminder early,
+  for an Item that really entered that state: at most once per run (the
+  key is the kernel's).
+- **That a timer at an instant with a hook and no `sets` acted.** It writes
+  nothing when it acts. No Type in `types/` has one.
+- **A forged `hook_failed` that names the hook's true entry.** It checks
+  out, and the action then counts as done. It withholds an effect; it
+  never makes one.
+- Outside this rule's wording: **state timers trust the workflow's clock**
+  (a forged start can make a duration timer's move early; the move is then
+  real, and its hooks confirm), and **an enrich hook's cause is not
+  confirmed** (a forged run re-reads through a read-only action and
+  rewrites the hook's own fields).
+
+Authenticating Temporal closes these at the root; this step makes the
+worker safe for side effects even where Temporal is not.
+
+**Tests:** `internal/workflow/cause_e2e_test.go` (15; the first is the
+bake-off's attack), `internal/lifecycle/cause_test.go`. The bake-off's own
+script, re-run against its own stack: "the purchase system received
+nothing".
 
 ## Out of scope for the spike
 

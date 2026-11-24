@@ -561,7 +561,7 @@ func (in *Internal) ActAt(ctx context.Context, req ActAtRequest) (ActAtResult, e
 
 	p := item.Principal{Actor: timerActor, Namespace: ns}
 	stamp, _ := typedef.FormatDateTime(req.Instant)
-	key := fmt.Sprintf("timer:%s:%s:%d:%s", req.ItemID, req.Timer, req.EnteredSeq, stamp)
+	key := lifecycle.TimerAtKey(req.ItemID.String(), req.Timer, req.EnteredSeq, stamp)
 	hash, err := requestHash("act_at", req)
 	if err != nil {
 		return ActAtResult{}, err
