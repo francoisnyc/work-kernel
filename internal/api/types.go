@@ -240,8 +240,12 @@ func draftSources(srcs []*kernelv1.TypeSource) ([]typedef.Source, *connect.Error
 func overTheLimits(n, size int) *connect.Error {
 	const mib = 1 << 20
 	tenths := (size*10 + mib - 1) / mib // integer division, rounded up
-	return badField("sources", fmt.Sprintf("give 1 to %d sources, %d MiB in all; this request has %d sources, %d.%d MiB",
-		maxTypeSources, maxTypeSourceBytes/mib, n, tenths/10, tenths%10))
+	noun := "sources"
+	if n == 1 {
+		noun = "source"
+	}
+	return badField("sources", fmt.Sprintf("give 1 to %d sources, %d MiB in all; this request has %d %s, %d.%d MiB",
+		maxTypeSources, maxTypeSourceBytes/mib, n, noun, tenths/10, tenths%10))
 }
 
 // problemsOut converts a draft's problems, named in the caller's
