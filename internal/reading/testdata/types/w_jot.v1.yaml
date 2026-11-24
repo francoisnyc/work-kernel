@@ -1,0 +1,5 @@
+# A jot: in a room or at the top level, by anyone who sees where.
+id: w_jot
+version: 1
+start:
+  in: [w_room, top]

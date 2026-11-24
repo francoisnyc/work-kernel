@@ -1,0 +1,9 @@
+# An ask, created only inside a room, by those its start block names.
+id: w_ask
+version: 2
+fields:
+  - {id: f_title, type: string}
+customer_fields: [f_title]
+start:
+  in: [w_room]
+  allowed: ['role:lead', 'principal:user:root', 'field:f_lead', container_creator]
