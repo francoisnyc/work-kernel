@@ -109,6 +109,9 @@ attack that found it as its test:
    includes starting work's step 2b (the latest version governs creates and
    placement).
 
+Item 5's "waiting on me" view is the visible milestone of the six weeks:
+it is the front door of the landing positioning below.
+
 **Done when** both bake-offs' scripts (`spikes/camunda-bakeoff/`,
 `spikes/temporal-bakeoff/`) pass in full on the kernel, re-run unchanged.
 
@@ -140,7 +143,11 @@ decision goes.
 
 - **If the kernel passes both bake-offs and a non-developer could author
   with it:** it becomes the target for moving processes off the old suite,
-  and the shared package migrates into Types.
+  and the shared package migrates into Types. It lands as **the
+  human-and-agent work layer for Temporal** (the tasks, queues, inbox, who
+  may decide and the audit that Temporal leaves to every team), and expands
+  from there into work orchestration where the rules are data, written in
+  plain English.
 - **If not:** its ideas (closed by default, declared rules, plain-language
   readings, the attack scripts) fold into the shared package, and the
   kernel stays the spike that shaped it.
