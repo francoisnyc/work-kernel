@@ -254,6 +254,37 @@ Only what the domains force, in the order they force it. Likely first:
 - issue keys, totals, `update_time`, search inside a container (the PoC apps'
   list in `docs/design.md`, "PoC apps as built: what the API lacked").
 
+### A pilot candidate: approvals
+
+Most companies have many separate apps for asking approval. A first real use
+of the kernel at work, lower in stakes than security operations, and touching
+almost every theme at once. Two products, in this order:
+
+1. **Approvals that live in the kernel.** Requests that sit today in email,
+   spreadsheets or small custom apps (access, exceptions, small purchases,
+   waivers): each one a Type, written in plain English, with its card and
+   portal screen from the Type. An agent summarises the request, checks it
+   against policy and flags what is unusual; the approval itself is a gate
+   only a person passes. A requester's justification is outside text: it
+   informs, never authorises.
+2. **One inbox for approvals that stay elsewhere** (expenses, hires,
+   purchase orders in their own systems): intakes bring each request in
+   (`docs/plans/starting-work.md`), an action hook sends the decision back.
+   An established category (SAP Task Center, ServiceNow's Approvals hub);
+   the cost is two-way sync and matching identities, per source system.
+
+What it needs that is not built:
+
+- a "waiting on me" view across every Type, fast enough to be a daily inbox;
+- delegation and out of office, recorded as who acted for whom;
+- approval rules beyond one approver: n of m, in sequence, in parallel, and
+  chains from the org chart (the HR `manager_of` hook is a start);
+- reminders and escalation on top of timers;
+- for the inbox of other systems: two-way sync and identity matching.
+
+Chosen only with a team at work that owns the problem; until then, a
+candidate, not a commitment.
+
 ### 6. The tracker as the showcase
 
 The ORI tracker, used to build this kernel, is where themes 2 and 3 are
