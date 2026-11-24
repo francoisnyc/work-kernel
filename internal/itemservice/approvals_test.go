@@ -917,7 +917,9 @@ id: probe
 version: 1
 initial_state: start
 fields:
-  - {id: f_note,   type: string}
+  # Open to agents: an agent creates a probe (fields are closed to agents
+  # by default).
+  - {id: f_note,   type: string, writable_by: [people, agents]}
   - {id: f_amount, type: int}
 states:
   - {id: start,       category: todo, timer: {after: 1h, to: by_timer}}
