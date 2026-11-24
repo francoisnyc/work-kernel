@@ -321,20 +321,12 @@ func (s *Server) start(h http.Handler) {
 	s.URL = s.srv.URL
 }
 
-// serveOn serves h on addr, with setup.
+// serveOn serves h on addr, once setup (if any) has given the stub what it
+// starts with. The address is taken first, so a port already in use fails
+// at once; a request that arrives during setup waits in the listener's
+// queue and is answered after it. httptest.Server is reused for its Close,
+// which waits for requests in flight; only its listener changes.
 func (s *Server) serveOn(addr string, h http.Handler, setup func(*Server)) error {
-	if err := s.startOn(addr, h); err != nil {
-		return err
-	}
-	if setup != nil {
-		setup(s)
-	}
-	return nil
-}
-
-// startOn serves h on addr. httptest.Server is reused for its Close, which
-// waits for requests in flight; only its listener changes.
-func (s *Server) startOn(addr string, h http.Handler) error {
 	l, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
@@ -342,6 +334,9 @@ func (s *Server) startOn(addr string, h http.Handler) error {
 	s.srv = httptest.NewUnstartedServer(h)
 	s.srv.Listener.Close()
 	s.srv.Listener = l
+	if setup != nil {
+		setup(s)
+	}
 	s.srv.Start()
 	s.URL = s.srv.URL
 	return nil

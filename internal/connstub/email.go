@@ -40,7 +40,7 @@ func NewEmail() *Server {
 // cmd/connstub.
 func ServeEmail(addr string) (*Server, error) {
 	s := newServer()
-	return s, s.startOn(addr, s.emailHandler())
+	return s, s.serveOn(addr, s.emailHandler(), nil)
 }
 
 // ServeEmailReader serves s's messages, read-only (GET only), on addr.
