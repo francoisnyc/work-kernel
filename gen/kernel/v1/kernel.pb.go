@@ -385,7 +385,10 @@ func (ReactionKind) EnumDescriptor() ([]byte, []int) {
 type FieldWriter int32
 
 const (
-	// Anyone who may write the Item, through the public API.
+	// People who may write the Item, through the public API, unless
+	// writable_by_roles limits them. Not agents: a field is closed to agents
+	// unless its Type opens it to them, or to a role they hold (this message
+	// does not yet say which fields are open to agents).
 	FieldWriter_FIELD_WRITER_UNSPECIFIED FieldWriter = 0
 	// Only the kernel (hooks, through the internal door): the public API
 	// refuses it on create, update and a transition's patch
@@ -4340,7 +4343,8 @@ type Field struct {
 	Type  FieldType              `protobuf:"varint,2,opt,name=type,proto3,enum=kernel.v1.FieldType" json:"type,omitempty"`
 	// Enum fields only: the allowed names.
 	Options []string `protobuf:"bytes,3,rep,name=options,proto3" json:"options,omitempty"`
-	// Who may write the field. UNSPECIFIED: anyone who may write the Item.
+	// Who may write the field. UNSPECIFIED: people who may write the Item;
+	// not agents, unless the Type opens the field to them (see FieldWriter).
 	WritableBy FieldWriter `protobuf:"varint,4,opt,name=writable_by,json=writableBy,proto3,enum=kernel.v1.FieldWriter" json:"writable_by,omitempty"`
 	// When set, only principals holding one of these roles write the field
 	// through the public API (an agent and the user it acts for must both
