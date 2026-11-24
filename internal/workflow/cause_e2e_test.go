@@ -570,3 +570,112 @@ func TestResidue_AHookOnlyTimerAtAnInstant_AForgedRunIsSent(t *testing.T) {
 		t.Errorf("emails = %+v; the residue as pinned is one, an hour early", got)
 	}
 }
+
+// --- a cause on another Item, a wrong Type version, another Type ---
+
+// A real entry into approved, on another ticket. Named for a ticket nobody
+// approved, by its number alone or with the other ticket's ID in the key,
+// it is not that ticket's cause: an input names one Item, and the cause is
+// an event of that Item.
+//
+// Nothing is sent for either ticket. The waiting ticket records the
+// refusal once (the number named is a real event of it: an update). The
+// approved ticket records nothing: it was never named as the Item.
+func TestActivities_RunAction_ACauseOnAnotherItem_IsNotTheCause(t *testing.T) {
+	s := newInvoiceStack(t, invoiceOpts{budget: 10 * time.Second})
+	s.stopWorker()
+	ana := approver(t)
+	other, otherCustomer := s.ticket(ana)
+	approval := s.approveByHand(ana, other) // the real approval, of the other ticket
+	waiting, customer := s.ticket(ana)
+	// The waiting ticket gets events up to that number, none an approval.
+	for seqOf(t, waiting) < approval {
+		if _, err := s.k.Update(serverCtx(t), itemservice.UpdateRequest{
+			IdempotencyKey: "key-" + uuid.NewString(), Principal: ana, ItemID: waiting,
+			Fields: map[string]any{"f_title": "Onboarding " + uuid.NewString()[:4]},
+		}); err != nil {
+			t.Fatalf("update: %v", err)
+		}
+	}
+	otherSeq := seqOf(t, other)
+	a := &wf.Activities{Items: s.k, Connectors: hooks.NewConnectors(s.crm.URL, s.erp.URL)}
+
+	in := actionInputFor(waiting, approval)
+	assertCauseRefused(t, "the other ticket's approval, by its number", a.RunAction(serverCtx(t), in))
+	in.IdempotencyKey = fmt.Sprintf("hook:%s:%d:create_invoice", other, approval)
+	assertCauseRefused(t, "the other ticket's approval, with its ID in the key", a.RunAction(serverCtx(t), in))
+
+	if got := s.erp.Invoices(customer); len(got) != 0 {
+		t.Errorf("the ERP received %v for the ticket nobody approved, want nothing", got)
+	}
+	if got := s.erp.Invoices(otherCustomer); len(got) != 0 {
+		t.Errorf("the ERP received %v for the other ticket, which no run named, want nothing", got)
+	}
+	if st, _ := s.state(waiting); st != "in_progress" || s.invoiced(ana, waiting) {
+		t.Errorf("the waiting ticket is %s, invoiced %v; want in_progress, no invoice", st, s.invoiced(ana, waiting))
+	}
+	assertOneRefusal(t, waiting, "ticket", "create_invoice")
+	if got := seqOf(t, other); got != otherSeq {
+		t.Errorf("the other ticket's item_seq went from %d to %d, want nothing recorded on it", otherSeq, got)
+	}
+}
+
+// The Type version named must be the Item's. A v4 ticket, really
+// approved, its invoice made: the true entry named with ticket v3 (a real
+// version, which has no invoice hook) or v99 (no such version) is refused
+// for good and sends nothing. The ticket records it once: the event is
+// real and its own Type declares the hook.
+//
+// Another Type altogether (a vacation request's hook, on a ticket) is
+// refused for good too, and records nothing: the ticket's Type declares no
+// such hook, so there is no hook to record it as.
+func TestActivities_RunAction_AWrongTypeVersion_OrAnotherType_IsRefused(t *testing.T) {
+	registerV3(t)
+	registerTypeFile(t, "leave_balance.v1.yaml")
+	registerTypeFile(t, "vacation_request.v3.yaml")
+	s := newInvoiceStack(t, invoiceOpts{budget: 10 * time.Second})
+	s.stopWorker()
+	ana := approver(t)
+	id, customer := s.ticket(ana)
+	approval := s.approveByHand(ana, id)
+	mail := connstub.NewEmail()
+	t.Cleanup(mail.Close)
+	a := &wf.Activities{Items: s.k, Connectors: hooks.NewConnectors(s.crm.URL, s.erp.URL).WithEmail(mail.URL)}
+	if err := a.RunAction(serverCtx(t), actionInputFor(id, approval)); err != nil {
+		t.Fatalf("the real run: %v", err)
+	}
+	first := s.fieldsOf(ana, id)["f_invoice_id"]
+	before := seqOf(t, id)
+
+	for _, version := range []int{3, 99} {
+		in := actionInputFor(id, approval)
+		in.TypeVersion = version
+		assertCauseRefused(t, fmt.Sprintf("ticket v%d named for a v4 ticket", version), a.RunAction(serverCtx(t), in))
+	}
+	assertOneRefusal(t, id, "ticket", "create_invoice")
+	if got := seqOf(t, id); got != before+1 {
+		t.Errorf("item_seq went from %d to %d, want one event: the record", before, got)
+	}
+
+	// Another Type: its hook, its version, the ticket's real approval.
+	err := a.RunAction(serverCtx(t), wf.HookInput{ItemID: id.String(), TypeID: "vacation_request", TypeVersion: 3,
+		HookID: "notify_approved", CauseSeq: approval, Hop: 1,
+		IdempotencyKey: fmt.Sprintf("hook:%s:%d:notify_approved", id, approval)})
+	var app *temporal.ApplicationError
+	if !errors.As(err, &app) || !app.NonRetryable() {
+		t.Errorf("another Type's hook: error = %v, want a non-retryable one", err)
+	}
+	if got := mail.Messages(id.String()); len(got) != 0 {
+		t.Errorf("emails about the ticket: %+v, want none", got)
+	}
+	if got := seqOf(t, id); got != before+1 {
+		t.Errorf("item_seq = %d after another Type's hook, want %d: nothing more recorded", got, before+1)
+	}
+
+	if got := s.erp.Invoices(customer); len(got) != 1 {
+		t.Errorf("ERP invoices %v, want the one real order", got)
+	}
+	if f := s.fieldsOf(ana, id)["f_invoice_id"]; f != first {
+		t.Errorf("f_invoice_id = %v, want the real order %v still", f, first)
+	}
+}
