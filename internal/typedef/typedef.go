@@ -188,6 +188,11 @@ type State struct {
 	// Frozen are the fields no write may change while an Item is in this
 	// state. The transition entering the state may set them.
 	Frozen []string `yaml:"frozen" json:"frozen,omitempty"`
+	// RequesterOnly are the fields only the Item's requester (IsRequester:
+	// its effective creator, or an agent acting for them) writes on the
+	// public door while the Item is in this state, besides what
+	// writable_by asks. Phase B stub: parsed only.
+	RequesterOnly []string `yaml:"requester_only" json:"requester_only,omitempty"`
 	// Acting are the state's acting timers (Step 2, part 3): each runs an
 	// action hook after a delay, without a transition, optionally again at
 	// an interval, at most Max times per entry into the state.

@@ -1,0 +1,17 @@
+# Corpus for the schema tests (Ventoux V2c): a state's requester_only
+# ("only the requester" for drafts, track 1 item 4). It loads on its own
+# (stages a and b).
+id: corpus_requester_only
+version: 1
+initial_state: draft
+
+fields:
+  - {id: f_amount, type: int}
+  - {id: f_note,   type: string}
+
+states:
+  - {id: draft, category: todo, requester_only: [f_amount]}
+  - {id: sent,  category: done, frozen: [f_amount]}
+
+transitions:
+  - {from: draft, to: sent, allowed: [creator]}

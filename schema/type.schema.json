@@ -81,6 +81,7 @@
         "id": {"$ref": "#/$defs/text"},
         "category": {"description": "What the state means to every Type.", "enum": ["triage", "backlog", "todo", "active", "waiting", "done", "canceled", "none"]},
         "frozen": {"description": "Fields no write may change in this state.", "$ref": "#/$defs/texts"},
+        "requester_only": {"description": "Fields only the requester writes while an Item is in this state (or an agent acting for them, where writable_by opens the field to agents).", "$ref": "#/$defs/texts"},
         "timer": {"$ref": "#/$defs/timer"},
         "at": {"$ref": "#/$defs/atTimer"},
         "acting": {"description": "Timers that act without leaving the state.", "type": ["array", "null"], "items": {"$ref": "#/$defs/actingTimer"}}
