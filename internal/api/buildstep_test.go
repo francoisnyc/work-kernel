@@ -1,4 +1,6 @@
-// Tests for build_step@1 (step 1 of docs/plans/autonomous-loop.md), through
+// Tests for build_step@2 (step 1 of docs/plans/autonomous-loop.md, version 1
+// with the agent's fields open to agents, since fields are closed to agents
+// by default), through
 // the public API: the way this repository is built, as a Type
 // (docs/plans/build-step-type.md, with the owner's decisions of 2026-11-22).
 //
@@ -26,15 +28,15 @@ import (
 	"github.com/francoisnyc/work-kernel/gen/kernel/v1/kernelv1connect"
 )
 
-const buildStepV1 = "namespaces/acme/types/build_step/versions/1"
+const buildStepV2 = "namespaces/acme/types/build_step/versions/2"
 
 // buildStepLoaded stops the test at once, with a clear message, while the
 // Type is not loaded.
 func buildStepLoaded(t *testing.T) *kernelv1.Type {
 	t.Helper()
-	res, err := as("ana").GetType(testCtx(t), connect.NewRequest(&kernelv1.GetTypeRequest{Name: buildStepV1}))
+	res, err := as("ana").GetType(testCtx(t), connect.NewRequest(&kernelv1.GetTypeRequest{Name: buildStepV2}))
 	if err != nil {
-		t.Fatalf("build_step@1 is not loaded: GetType %s: %v", buildStepV1, err)
+		t.Fatalf("build_step@2 is not loaded: GetType %s: %v", buildStepV2, err)
 	}
 	return res.Msg.Type
 }
@@ -61,7 +63,7 @@ func botForAna(t *testing.T, powers ...string) kernelv1connect.ItemServiceClient
 func createStep(t *testing.T, c kernelv1connect.ItemServiceClient, f map[string]any) (*kernelv1.CreateItemResponse, error) {
 	t.Helper()
 	res, err := c.CreateItem(testCtx(t), connect.NewRequest(&kernelv1.CreateItemRequest{
-		Parent: "namespaces/acme", RequestId: newID(), Type: buildStepV1, Fields: fields(t, f),
+		Parent: "namespaces/acme", RequestId: newID(), Type: buildStepV2, Fields: fields(t, f),
 	}))
 	if err != nil {
 		return nil, err
