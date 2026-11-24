@@ -30,9 +30,10 @@ of what keeps a process safe has to be written again every time?
 **Short answer, for two processes:**
 
 - **A process costs about five times more text on plain Temporal** (511
-  lines of Go against 95 lines of YAML for the second process), and about
-  a third of that code is safety rules typed again from the first process.
-  It also needs a developer; a Type does not need one to be read.
+  lines of Go against 95 lines of YAML for the second process). About 125
+  of its 317 lines of code are copies of the first process's, the safety
+  rules among them. It also needs a developer; a Type does not need one to
+  be read.
 - **Plain Temporal was nevertheless the safer side here.** Both of its
   processes refused every attempt of the compromised agent (31 of 31),
   including the second process, written by someone who was not told what
@@ -263,9 +264,9 @@ try; the plain side has no such doors.
 not decide, claim, name itself in a request's body, reach a request
 through the other process's route, change what was asked, or rewrite its
 preparation after the decision. The second process, written blind, also
-got right three rules nobody listed for it: the owner cannot approve their
-own request (it ends at once as "nobody else could decide"); someone who is
-not the owner is refused; a rejection needs a reason.
+got right two rules the request did not spell out: the owner cannot
+approve their own request (it ends at once as "nobody else could decide"),
+and a rejection needs a reason.
 - *Why it held:* the second builder copied the purchase's rule for who
   decides, by hand, correctly, and the workflow's design leaves little to
   attack: no drafts, no editable fields, one door per action.
@@ -321,7 +322,7 @@ not the owner is refused; a rejection needs a reason.
 
 **Reading.** The brief asked not "can it pass?" but "what did passing take,
 and did the second process get it right without being told?". It took
-about 60 lines of rules per process, typed again each time, and yes: the
+25 to 60 lines of rules per process, typed again each time, and yes: the
 second process got it right. On this evidence plain Temporal is the more
 consistent side at two processes, and the kernel's promise (a rule given
 once to every Type) is only as good as the rules the kernel has; two it
@@ -342,7 +343,7 @@ Evidence: `results/footprint.md`, `results/start-*.txt`.
 Both run on the same two pieces of infrastructure, and a production
 Temporal costs the same to run and secure on either side.
 
-- **Plain Temporal, to maintain:** about 1,700 lines of the team's own Go
+- **Plain Temporal, to maintain:** about 1,850 lines of the team's own Go
   for two processes, growing by 300 to 500 per process, each with tests
   that must be kept. Every process and every change needs a developer who
   knows Temporal's rules for workflow code (what may not change, how to
@@ -437,4 +438,19 @@ REVIEWER-NOTES-PLACEHOLDER
 
 ## Recommendation
 
-RECOMMENDATION-PLACEHOLDER
+*(Draft, before the review.)* Where Temporal already runs and developers
+will write the processes, **write the first few directly on Temporal, with
+a deliberately small shared base, and do not adopt the kernel for them on
+this evidence.** At two processes plain Temporal was the safer side, built
+the inbox the kernel lacks, and changed a running process where the kernel
+could not; its price is five times the text per process and a developer
+for every process and every change. **Keep the kernel for what plain
+Temporal cannot give:** processes that people who are not developers
+describe, read back and change, checked before they run; and treat this
+bake-off as its bar to clear first: an effect that re-checks state, "only
+the requester" and "only the decider" on a field, a claim that binds, an
+inbox, a change that can reach requests in flight. **What would change
+this answer:** many processes or many authors (the copied rules are the
+plain side's risk, and two processes cannot show how it grows); processes
+that non-developers must change weekly; the kernel closing the gaps above;
+or a team with no developer who knows Temporal's rules for workflow code.
