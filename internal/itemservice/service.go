@@ -300,9 +300,10 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 		if err := k.checkStart(ctx, tx, req, ns); err != nil {
 			return WriteResult{}, err
 		}
-		// Who may narrow it (Jira 2.4b): the Type's to say.
+		// Who may narrow it (Jira 2.4b): the Type's to say, by its latest
+		// version whatever version the caller names (step 2b).
 		if req.Narrow != nil {
-			if err := checkPlacement(ctx, tx, req.Principal, ty); err != nil {
+			if err := k.checkPlacement(ctx, tx, req.Principal, req.TypeID); err != nil {
 				return WriteResult{}, err
 			}
 		}
