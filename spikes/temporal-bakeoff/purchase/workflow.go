@@ -39,11 +39,16 @@ const (
 	StateApproved      = "approved"
 	StateRejected      = "rejected"
 	StateFailed        = "failed"
+	StateOrderFailed   = "order_failed" // approved, but the purchase system refused the order: finance looks at it
 
 	// From this amount, finance decides after the manager.
 	FinanceFrom = 1000
 	// Over this amount, the CFO decides after finance (the owner's change).
 	CFOOver = 5000
+	// The agent may rewrite its preparation this many times. Temporal accepts
+	// at most 2,000 updates per workflow; without a cap the agent could use
+	// them all and no decision could reach the request (found in review).
+	MaxPreparations = 20
 )
 
 // Input is what the requester asked. It never changes.
@@ -111,6 +116,7 @@ type run struct {
 	st     State
 	outbox []store.Event // changes not yet written to Postgres
 	seq    int
+	preps  int // preparations accepted so far
 }
 
 func (w *run) emit(actor, action string, detail map[string]any) {
@@ -140,6 +146,8 @@ func (w *run) checkPrepare(a PrepareArgs) error {
 		return refuse(ErrForbidden, "only the preparer writes the preparation")
 	case w.st.State != StateManagerReview:
 		return refuse(ErrConflict, "the preparation is closed once the manager has decided")
+	case w.preps >= MaxPreparations:
+		return refuse(ErrConflict, "the preparation has been rewritten too often")
 	case a.Policy != "ok" && a.Policy != "check" && a.Policy != "fail":
 		return refuse(ErrInvalid, "policy is ok, check or fail")
 	case strings.TrimSpace(a.Summary) == "" || len(a.Summary) > 2000 || len(a.Flags) > 500:
@@ -155,11 +163,13 @@ func (w *run) checkClaim(a ActorArgs) error {
 	return decider(a.Actor, w.st.Requester, "", "finance")
 }
 
+// checkRelease: any finance member may hand a claimed purchase back to the
+// queue, so one absent member cannot hold it (found in review).
 func (w *run) checkRelease(a ActorArgs) error {
 	if w.st.State != StateFinanceReview {
 		return refuse(ErrConflict, "nobody has claimed it")
 	}
-	return decider(a.Actor, w.st.Requester, w.st.ClaimedBy, "finance")
+	return decider(a.Actor, w.st.Requester, "", "finance")
 }
 
 func (w *run) checkDecide(a DecideArgs) error {
@@ -205,6 +215,7 @@ func (w *run) register(ctx workflow.Context) error {
 		return workflow.SetUpdateHandlerWithOptions(ctx, name, handler, workflow.UpdateHandlerOptions{Validator: validator})
 	}
 	if err := set(UpdatePrepare, func(_ workflow.Context, a PrepareArgs) error {
+		w.preps++
 		w.st.Preparation = &Preparation{Summary: a.Summary, Policy: a.Policy, Flags: a.Flags, By: a.Actor.ID}
 		w.emit(a.Actor.ID, "prepared", map[string]any{"policy": a.Policy, "flags": a.Flags})
 		return nil
@@ -243,7 +254,7 @@ func (w *run) row() store.Row {
 	switch w.st.State {
 	case StateManagerReview:
 		r.WaitingOn = []string{w.st.Manager}
-	case StateFinanceQueue, StateFinanceReview:
+	case StateFinanceQueue, StateFinanceReview, StateOrderFailed:
 		r.WaitingOn = []string{"role:finance"}
 	case StateCFOReview:
 		r.WaitingOn = []string{"role:cfo"}
@@ -251,13 +262,19 @@ func (w *run) row() store.Row {
 	return r
 }
 
-// flush writes every pending change to Postgres, in order.
-func (w *run) flush(actx workflow.Context) error {
+// flush writes every pending change to Postgres, in order. The write is
+// retried until it succeeds: a Postgres outage delays the inbox, it never
+// ends the request (found in review: a capped retry could).
+func (w *run) flush(ctx workflow.Context) error {
 	var a *acts.Activities
+	rctx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: 30 * time.Second,
+		RetryPolicy:         &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: time.Minute},
+	})
 	for len(w.outbox) > 0 {
 		ev := w.outbox[0]
 		w.outbox = w.outbox[1:]
-		if err := workflow.ExecuteActivity(actx, a.Record, w.row(), &ev).Get(actx, nil); err != nil {
+		if err := workflow.ExecuteActivity(rctx, a.Record, w.row(), &ev).Get(rctx, nil); err != nil {
 			return err
 		}
 	}
@@ -302,7 +319,11 @@ func Workflow(ctx workflow.Context, in Input) (State, error) {
 			// The order carries the workflow's own amount and vendor, and a key
 			// that makes a retry return the first order.
 			if err := workflow.ExecuteActivity(actx, a.PlaceOrder, in.ID, in.Vendor, in.Amount).Get(ctx, &w.st.OrderID); err != nil {
-				return w.st, err
+				// Approved, but no order: say so where finance will see it,
+				// rather than end with the request still reading "approved".
+				w.st.State, w.st.Failure = StateOrderFailed, "the purchase system refused the order: "+err.Error()
+				w.emit("system", "order_failed", map[string]any{"error": err.Error()})
+				return w.st, w.flush(actx)
 			}
 			w.emit("system", "ordered", map[string]any{"order_id": w.st.OrderID})
 			return w.st, w.flush(actx)

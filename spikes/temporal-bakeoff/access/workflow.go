@@ -69,6 +69,7 @@ type run struct {
 	st     State
 	outbox []store.Event // changes not yet written to Postgres
 	seq    int
+	preps  int // preparations accepted so far
 }
 
 func (w *run) emit(actor, action string, detail map[string]any) {
@@ -82,6 +83,8 @@ func (w *run) checkPrepare(a purchase.PrepareArgs) error {
 		return refuse(purchase.ErrForbidden, "only the preparer writes the preparation")
 	case w.st.State != StateOwnerReview:
 		return refuse(purchase.ErrConflict, "the preparation is closed once the owner has decided")
+	case w.preps >= purchase.MaxPreparations:
+		return refuse(purchase.ErrConflict, "the preparation has been rewritten too often")
 	case a.Policy != "ok" && a.Policy != "check" && a.Policy != "fail":
 		return refuse(purchase.ErrInvalid, "policy is ok, check or fail")
 	case strings.TrimSpace(a.Summary) == "" || len(a.Summary) > 2000 || len(a.Flags) > 500:
@@ -115,6 +118,7 @@ func (w *run) register(ctx workflow.Context) error {
 		return err
 	}
 	err := workflow.SetUpdateHandlerWithOptions(ctx, purchase.UpdatePrepare, func(_ workflow.Context, a purchase.PrepareArgs) error {
+		w.preps++
 		w.st.Preparation = &purchase.Preparation{Summary: a.Summary, Policy: a.Policy, Flags: a.Flags, By: a.Actor.ID}
 		w.emit(a.Actor.ID, "prepared", map[string]any{"policy": a.Policy, "flags": a.Flags})
 		return nil
@@ -148,8 +152,13 @@ func (w *run) row() store.Row {
 }
 
 // flush writes every pending change to Postgres, in order.
-func (w *run) flush(actx workflow.Context) error {
+func (w *run) flush(ctx workflow.Context) error {
 	var a *acts.Activities // only names the activity; never dereferenced here
+	// Retried until it succeeds, as for a purchase (found in review).
+	actx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: 30 * time.Second,
+		RetryPolicy:         &temporal.RetryPolicy{InitialInterval: time.Second, MaximumInterval: time.Minute},
+	})
 	for len(w.outbox) > 0 {
 		ev := w.outbox[0]
 		w.outbox = w.outbox[1:]

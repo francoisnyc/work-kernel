@@ -4,8 +4,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/uuid"
-	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/client"
 
 	"github.com/francoisnyc/work-kernel/spikes/temporal-bakeoff/auth"
@@ -31,6 +29,7 @@ func (a *API) submit(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		System        string `json:"system"`
 		Role          string `json:"role"`
 		Justification string `json:"justification"`
+		RequestID     string `json:"request_id"` // optional, as for a purchase
 	}
 	if !httpapi.Decode(w, r, &body) {
 		return
@@ -39,6 +38,9 @@ func (a *API) submit(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 	// "comma ok" form); only the second is needed here.
 	_, known := Owners[body.System]
 	switch {
+	case len(body.RequestID) > 100:
+		httpapi.Refuse(w, http.StatusBadRequest, "request_id is 100 characters at most")
+		return
 	case !p.IsUser():
 		httpapi.Refuse(w, http.StatusForbidden, "only a person asks for access")
 		return
@@ -51,15 +53,14 @@ func (a *API) submit(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		return
 	}
 	// The requester is the caller: the body cannot say otherwise.
-	in := Input{ID: IDPrefix + uuid.NewString(), Requester: p.ID, System: body.System, Role: body.Role, Justification: body.Justification}
-	_, err := a.Temporal.ExecuteWorkflow(r.Context(), client.StartWorkflowOptions{
-		ID: in.ID, TaskQueue: purchase.TaskQueue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
-	}, WorkflowName, in)
+	id, err := httpapi.Start(r.Context(), a.Temporal, IDPrefix, p.ID, body.RequestID, purchase.TaskQueue, WorkflowName, func(id string) any {
+		return Input{ID: id, Requester: p.ID, System: body.System, Role: body.Role, Justification: body.Justification}
+	})
 	if err != nil {
 		httpapi.Fail(w, err)
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusCreated, map[string]string{"id": in.ID})
+	httpapi.WriteJSON(w, http.StatusCreated, map[string]string{"id": id})
 }
 
 // update sends one update to the access request the path names and answers

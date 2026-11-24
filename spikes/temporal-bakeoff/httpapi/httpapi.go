@@ -6,12 +6,16 @@ package httpapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"slices"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/temporal"
@@ -169,4 +173,28 @@ func (c *Common) history(w http.ResponseWriter, r *http.Request, p auth.Principa
 		return
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"events": events})
+}
+
+// Start starts a request's workflow and returns its ID. A caller that sends
+// a request ID gets one request however often it retries: the workflow ID
+// is derived from the requester and that ID, and a second start answers
+// with the first (found in review: a retried submission made two). With no
+// request ID, every call makes a new request.
+func Start(ctx context.Context, c client.Client, prefix, requester, requestID, taskQueue, workflow string,
+	input func(id string) any) (string, error) {
+	id := prefix + uuid.NewString()
+	if requestID != "" {
+		sum := sha256.Sum256([]byte(requester + "\x00" + requestID))
+		id = prefix + hex.EncodeToString(sum[:16])
+	}
+	_, err := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+		ID: id, TaskQueue: taskQueue,
+		WorkflowIDReusePolicy:    enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
+		WorkflowIDConflictPolicy: enumspb.WORKFLOW_ID_CONFLICT_POLICY_USE_EXISTING,
+	}, workflow, input(id))
+	var done *serviceerror.WorkflowExecutionAlreadyStarted
+	if errors.As(err, &done) {
+		return id, nil // the request was made earlier and has already finished
+	}
+	return id, err
 }

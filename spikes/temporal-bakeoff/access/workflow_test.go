@@ -192,3 +192,18 @@ func TestARequestNobodyCouldDecide_Fails(t *testing.T) {
 		})
 	}
 }
+
+// Added after the review: the agent's rewrites are capped, as for a purchase.
+func TestPreparation_IsCappedSoTheDecisionCanAlwaysArrive(t *testing.T) {
+	steps := []step{}
+	for i := 0; i < purchase.MaxPreparations; i++ {
+		steps = append(steps, step{purchase.UpdatePrepare, purchase.PrepareArgs{Actor: bot, Summary: "again", Policy: "ok"}, false})
+	}
+	steps = append(steps,
+		denied(step{purchase.UpdatePrepare, purchase.PrepareArgs{Actor: bot, Summary: "once more", Policy: "ok"}, false}),
+		step{purchase.UpdateDecide, purchase.DecideArgs{Actor: olaf, Approve: true}, false})
+	got := play(t, ana, "payroll", steps...)
+	if got.State.State != StateApproved {
+		t.Fatalf("state %s", got.State.State)
+	}
+}

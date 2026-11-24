@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/mock"
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 
 	"github.com/francoisnyc/work-kernel/spikes/temporal-bakeoff/acts"
@@ -145,11 +146,14 @@ func TestPreparation_OnlyThePreparerAndOnlyBeforeTheManagerDecides(t *testing.T)
 	}
 }
 
-func TestRelease_PutsItBackInTheQueue(t *testing.T) {
+// Changed after the review: any finance member may hand a claimed purchase
+// back (it was the claimer only, so one absent member held the queue).
+func TestRelease_AnyFinanceMemberPutsItBackInTheQueue(t *testing.T) {
 	st, _ := play(t, 2500, approve(bob),
 		step{UpdateClaim, ActorArgs{Actor: fay}, false},
-		denied(step{UpdateRelease, ActorArgs{Actor: gus}, false}),
-		step{UpdateRelease, ActorArgs{Actor: fay}, false},
+		denied(step{UpdateRelease, ActorArgs{Actor: bob}, false}), // not finance
+		denied(step{UpdateRelease, ActorArgs{Actor: bot}, false}), // an agent
+		step{UpdateRelease, ActorArgs{Actor: gus}, false},         // fay is away
 		step{UpdateClaim, ActorArgs{Actor: gus}, false})
 	if st.State != StateFinanceReview || st.ClaimedBy != "user:gus" {
 		t.Fatalf("state %s, claimed by %s", st.State, st.ClaimedBy)
@@ -173,5 +177,39 @@ func TestFiveThousandExactly_NeedsNoCFO(t *testing.T) {
 	st, order := play(t, 5000, approve(bob), step{UpdateClaim, ActorArgs{Actor: fay}, false}, approve(fay))
 	if st.State != StateApproved || order == "" {
 		t.Fatalf("state %s, order %q", st.State, order)
+	}
+}
+
+func TestPreparation_IsCappedSoTheDecisionCanAlwaysArrive(t *testing.T) {
+	steps := []step{}
+	for i := 0; i < MaxPreparations; i++ {
+		steps = append(steps, step{UpdatePrepare, PrepareArgs{Actor: bot, Summary: "again", Policy: "ok"}, false})
+	}
+	steps = append(steps, denied(step{UpdatePrepare, PrepareArgs{Actor: bot, Summary: "once more", Policy: "ok"}, false}), approve(bob))
+	st, order := play(t, 500, steps...)
+	if st.State != StateApproved || order == "" {
+		t.Fatalf("state %s, order %q", st.State, order)
+	}
+}
+
+func TestOrderRefused_LeavesTheRequestWithFinanceNotApproved(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	var a *acts.Activities
+	env.OnActivity(a.ManagerOf, mock.Anything, "user:ana").Return("user:bob", nil)
+	env.OnActivity(a.Record, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	env.OnActivity(a.PlaceOrder, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("",
+		temporal.NewNonRetryableApplicationError("no such vendor", "HTTP_404", nil))
+	env.RegisterDelayedCallback(func() {
+		env.UpdateWorkflow(UpdateDecide, "", &testsuite.TestUpdateCallback{OnAccept: func() {}, OnReject: func(err error) { t.Error(err) }, OnComplete: func(any, error) {}},
+			DecideArgs{Actor: bob, Approve: true})
+	}, time.Second)
+	env.ExecuteWorkflow(Workflow, Input{ID: "purchase-1", Requester: "user:ana", Amount: 500, Vendor: "ghost", CostCentre: "CC-100", Justification: "x"})
+	var st State
+	if err := env.GetWorkflowResult(&st); err != nil {
+		t.Fatal(err)
+	}
+	if st.State != StateOrderFailed || st.Failure == "" {
+		t.Fatalf("state %s, failure %q", st.State, st.Failure)
 	}
 }

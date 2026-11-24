@@ -4,8 +4,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/uuid"
-	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/client"
 
 	"github.com/francoisnyc/work-kernel/spikes/temporal-bakeoff/auth"
@@ -36,11 +34,15 @@ func (a *API) submit(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		Vendor        string `json:"vendor"`
 		CostCentre    string `json:"cost_centre"`
 		Justification string `json:"justification"`
+		RequestID     string `json:"request_id"` // optional: a retry with the same ID makes no second purchase
 	}
 	if !httpapi.Decode(w, r, &body) {
 		return
 	}
 	switch {
+	case len(body.RequestID) > 100:
+		httpapi.Refuse(w, http.StatusBadRequest, "request_id is 100 characters at most")
+		return
 	case !p.IsUser():
 		httpapi.Refuse(w, http.StatusForbidden, "only a person asks for a purchase")
 		return
@@ -50,16 +52,14 @@ func (a *API) submit(w http.ResponseWriter, r *http.Request, p auth.Principal) {
 		return
 	}
 	// The requester is the caller: the body cannot say otherwise.
-	in := Input{ID: IDPrefix + uuid.NewString(), Requester: p.ID, Amount: body.Amount, Vendor: body.Vendor,
-		CostCentre: body.CostCentre, Justification: body.Justification}
-	_, err := a.Temporal.ExecuteWorkflow(r.Context(), client.StartWorkflowOptions{
-		ID: in.ID, TaskQueue: TaskQueue, WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
-	}, WorkflowName, in)
+	id, err := httpapi.Start(r.Context(), a.Temporal, IDPrefix, p.ID, body.RequestID, TaskQueue, WorkflowName, func(id string) any {
+		return Input{ID: id, Requester: p.ID, Amount: body.Amount, Vendor: body.Vendor, CostCentre: body.CostCentre, Justification: body.Justification}
+	})
 	if err != nil {
 		httpapi.Fail(w, err)
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusCreated, map[string]string{"id": in.ID})
+	httpapi.WriteJSON(w, http.StatusCreated, map[string]string{"id": id})
 }
 
 // id returns the path's request ID if it names a purchase; otherwise it answers 404.
