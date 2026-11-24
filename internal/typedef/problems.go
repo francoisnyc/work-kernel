@@ -128,6 +128,10 @@ const (
 	// A draft declares a registered Type version with another definition
 	// (Check, Ventoux V2b).
 	CodeVersionChanged Code = "VERSION_CHANGED"
+	// Something creates Items of a Type where the latest version's
+	// start.in does not let them be created: a container's own or shared
+	// entry, or a create reaction (starting work, step 2).
+	CodeStartNotIn Code = "START_NOT_IN"
 )
 
 // Problem is one thing wrong with a Type definition.

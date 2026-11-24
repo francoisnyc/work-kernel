@@ -493,6 +493,8 @@ func (t *Type) check() error {
 	t.checkMultiUses(r)
 	t.checkReadable(r)
 	t.checkJira24b(r)
+	// Where Items of this Type may be created, and by whom.
+	t.checkStart(r)
 	// Clears name fields, and may not sit on a held transition.
 	t.checkClears(r)
 	// Computed effects: the same, and each expression compiles to a value

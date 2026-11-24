@@ -1032,7 +1032,7 @@ stage 3 then also runs with every registered version, and adds
 | `WRONG_SHAPE` | 1 | A value of the wrong kind: text for a number, a map for a list |
 | `REQUIRED` | 2 | Something that must be there is missing (an ID, a link's inverse) |
 | `DUPLICATE` | 2 | Declared twice: a field, a state, a transition, an ID, a list entry |
-| `RESERVED_NAME` | 2 | A name the kernel keeps (today, caller, links, ...) |
+| `RESERVED_NAME` | 2 | A name the kernel keeps (today, caller, links, ...; a Type named top, which start.in uses for the top level) |
 | `INVALID_NAME` | 2 | A name or ID that is not well formed (lower case, digits and _) |
 | `INVALID_VALUE` | 2 | A value outside what the key allows (a category, a field type, a version below 1, a duration that is not positive) |
 | `KEY_NOT_APPLICABLE` | 2 | A key that does not apply here (options on a string field, a fallback on a check) |
@@ -1052,7 +1052,7 @@ stage 3 then also runs with every registered version, and adds
 | `WRITES_FROZEN_FIELD` | 2 | Something writes a field a state freezes |
 | `WRITES_KERNEL_FIELD` | 2 | Something other than a hook writes a field only the kernel writes |
 | `HELD_TRANSITION` | 2, 3 | A held transition, or a move into one, does what a hold forbids |
-| `CONFLICT` | 2 | Two declarations contradict each other (requires and clears a field) |
+| `CONFLICT` | 2, 3 | Two declarations contradict each other (requires and clears a field; own or shared naming a Type whose latest start.allowed is [nobody]) |
 | `ONLY_ONE_ALLOWED` | 2 | A second one where only one is allowed (two checks on a transition) |
 | `MISSING_COUNTERPART` | 2, 3 | A declaration needs another that is missing (a kernel field no hook writes, a held reaction with no undo) |
 | `TIMER_NOT_ALLOWED` | 2 | A timer's transition does not allow `principal:system:timer` |
@@ -1065,6 +1065,7 @@ stage 3 then also runs with every registered version, and adds
 | `DUPLICATE_VERSION` | 3 | Two files declare the same Type version (reported on the second) |
 | `FOLDER_TOO_DEEP` | 3 | A folder more than one level below the Types folder |
 | `VERSION_CHANGED` | 3 | A draft declares a registered Type version with another definition (`ValidateTypes`; reported on the draft's `version`) |
+| `START_NOT_IN` | 3 | Something creates Items of a Type where its latest version's start.in does not let them be created: a container's own or shared entry, or a create reaction (starting work, step 2) |
 
 ### Versioning
 
