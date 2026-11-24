@@ -126,12 +126,13 @@ func (k *Service) judgeCause(ctx context.Context, ns string, ty *typedef.Type, h
 		return "it is not the event the hook is bound to", nil
 	}
 	wrongKey := "the idempotency key is not the one the kernel derives from the cause"
+	id := req.ItemID.String()
 
 	if h.On != typedef.OnTimer {
 		if req.Timer != "" || req.Run != 0 {
 			return "the hook is not run by an acting timer", nil
 		}
-		if req.IdempotencyKey != fmt.Sprintf("hook:%s:%d:%s", req.ItemID, req.CauseSeq, h.ID) {
+		if req.IdempotencyKey != lifecycle.HookKey(id, req.CauseSeq, h.ID) {
 			return wrongKey, nil
 		}
 		return "", nil
@@ -146,7 +147,7 @@ func (k *Service) judgeCause(ctx context.Context, ns string, ty *typedef.Type, h
 		if req.Run < 1 || req.Run > timer.Max {
 			return fmt.Sprintf("acting timer %s runs 1 to %d times", timer.ID, timer.Max), nil
 		}
-		if req.IdempotencyKey != fmt.Sprintf("timer:%s:%s:%d:%d", req.ItemID, timer.ID, req.CauseSeq, req.Run) {
+		if req.IdempotencyKey != lifecycle.TimerRunKey(id, timer.ID, req.CauseSeq, req.Run) {
 			return wrongKey, nil
 		}
 		return "", nil
@@ -156,10 +157,12 @@ func (k *Service) judgeCause(ctx context.Context, ns string, ty *typedef.Type, h
 	if req.Run != 0 {
 		return fmt.Sprintf("acting timer %s acts at an instant: it has no numbered runs", timer.ID), nil
 	}
-	acted := fmt.Sprintf("timer:%s:%s:%d:", req.ItemID, timer.ID, req.CauseSeq) // ActAt's key, less the instant
-	stamp, isHook := strings.CutSuffix(strings.TrimPrefix(req.IdempotencyKey, acted), ":hook")
+	// The instant is whatever the key names between the timer's prefix
+	// and ":hook"; the key must then be exactly the one derived from it.
+	stamp, _ := strings.CutSuffix(strings.TrimPrefix(req.IdempotencyKey, lifecycle.TimerAtKey(id, timer.ID, req.CauseSeq, "")), ":hook")
 	at, err := time.Parse(typedef.DateTimeLayout, stamp)
-	if !strings.HasPrefix(req.IdempotencyKey, acted) || !isHook || err != nil || at.UTC().Format(typedef.DateTimeLayout) != stamp {
+	if err != nil || at.UTC().Format(typedef.DateTimeLayout) != stamp ||
+		req.IdempotencyKey != lifecycle.TimerAtHookKey(id, timer.ID, req.CauseSeq, stamp) {
 		return wrongKey, nil
 	}
 	if len(timer.Sets) == 0 {
@@ -171,7 +174,7 @@ func (k *Service) judgeCause(ctx context.Context, ns string, ty *typedef.Type, h
 	if err := k.pool.QueryRow(ctx,
 		`select exists (select 1 from idempotency
 		                where namespace_id = $1 and actor = $2 and key = $3 and result ? 'item_id')`,
-		ns, timerActor, acted+stamp).Scan(&proof); err != nil {
+		ns, timerActor, lifecycle.TimerAtKey(id, timer.ID, req.CauseSeq, stamp)).Scan(&proof); err != nil {
 		return "", fmt.Errorf("read the timer's write: %w", err)
 	}
 	if !proof {

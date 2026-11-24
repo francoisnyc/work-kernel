@@ -1,6 +1,10 @@
 package lifecycle
 
-import "github.com/francoisnyc/work-kernel/internal/typedef"
+import (
+	"fmt"
+
+	"github.com/francoisnyc/work-kernel/internal/typedef"
+)
 
 // An effect re-checks what caused it (docs/design.md, "Architecture
 // style"). A hook hangs off the lifecycle, so the event that causes it is
@@ -59,4 +63,33 @@ func ActingTimer(t *typedef.Type, state, id string) (typedef.ActingTimer, bool) 
 		}
 	}
 	return typedef.ActingTimer{}, false
+}
+
+// The idempotency keys of an action hook's runs. The workflow derives a
+// run's key with these, and the item service rebuilds it with the same
+// functions to confirm it (ConfirmCause): one definition, so the two
+// cannot drift apart. item is the Item's ID; seq is the causing event's
+// item_seq.
+
+// HookKey is the key of a hook caused by one event: an action entering
+// its state or following its reaction, and an enrich hook.
+func HookKey(item string, seq int64, hook string) string {
+	return fmt.Sprintf("hook:%s:%d:%s", item, seq, hook)
+}
+
+// TimerRunKey is the key of run number run of a scheduled acting timer,
+// for the entry seq.
+func TimerRunKey(item, timer string, seq int64, run int) string {
+	return fmt.Sprintf("timer:%s:%s:%d:%d", item, timer, seq, run)
+}
+
+// TimerAtKey is the key of an acting timer's own write at an instant, for
+// the entry seq; stamp is the instant in typedef.DateTimeLayout.
+func TimerAtKey(item, timer string, seq int64, stamp string) string {
+	return fmt.Sprintf("timer:%s:%s:%d:%s", item, timer, seq, stamp)
+}
+
+// TimerAtHookKey is the key of the hook that timer runs once it has acted.
+func TimerAtHookKey(item, timer string, seq int64, stamp string) string {
+	return TimerAtKey(item, timer, seq, stamp) + ":hook"
 }

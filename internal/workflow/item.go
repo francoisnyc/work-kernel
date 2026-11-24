@@ -871,7 +871,7 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 		return HookInput{
 			ItemID: in.ItemID, TypeID: s.TypeID, TypeVersion: s.TypeVersion, HookID: hookID,
 			CauseSeq: causeSeq, CorrelationID: corr, Hop: hop,
-			IdempotencyKey: fmt.Sprintf("hook:%s:%d:%s", in.ItemID, causeSeq, hookID),
+			IdempotencyKey: lifecycle.HookKey(in.ItemID, causeSeq, hookID),
 		}
 	}
 
@@ -1074,7 +1074,7 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 				last = workflow.Now(gctx)
 				hin := hookInput(spec.Hook, entered, corr, hop+1)
 				hin.Timer, hin.Run = spec.ID, n
-				hin.IdempotencyKey = fmt.Sprintf("timer:%s:%s:%d:%d", in.ItemID, spec.ID, entered, n)
+				hin.IdempotencyKey = lifecycle.TimerRunKey(in.ItemID, spec.ID, entered, n)
 				runAction(hin)
 			}
 		})
@@ -1205,7 +1205,7 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 						if res.RunHook && spec.Hook != "" {
 							hin := hookInput(spec.Hook, entered, corr, hop+1)
 							hin.Timer = spec.ID
-							hin.IdempotencyKey = fmt.Sprintf("timer:%s:%s:%d:%s:hook", in.ItemID, spec.ID, entered,
+							hin.IdempotencyKey = lifecycle.TimerAtHookKey(in.ItemID, spec.ID, entered,
 								instant.UTC().Format(instantLayout))
 							runAction(hin)
 						}
