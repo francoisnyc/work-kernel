@@ -118,6 +118,8 @@ order" in `docs/design.md` sets.
   rules engines are hard to reason about once rules interact; for a
   non-developer author, the reading and the story are the review, and the
   safety.
+- **Next:** provenance (item 4, theme 2), brought forward by the holes the
+  bake-off found.
 - **Then:** a semantic diff (item 7); patterns (item 8); checks that prove
   properties (item 3).
 - **Presentation hints on the Type; screens beside it.** A Type carries
@@ -151,6 +153,30 @@ Ventoux item 4, made central.
   loads, or held for a person's approval.
 - **A test domain built to be attacked:** security operations (below), where
   the data is attacker-controlled by nature.
+
+**Holes found by the bake-off** (`docs/research/camunda-bakeoff.md`, a
+compromised agent attacking the approvals scenario; 31 of 36 attempts were
+refused). Fixed in this order, each with the attack that found it as its
+test:
+
+1. **An effect re-checks committed state.** A forged workflow start (on an
+   unauthenticated development Temporal) made an action hook place an order
+   for an Item still waiting on its manager: the hook trusted the workflow's
+   input. Before any effect, the kernel confirms against the item service
+   that the Item is in a state that allows it. A design rule, to be recorded
+   in `docs/design.md`.
+2. **Required means given by the mover.** An agent wrote the rejection reason
+   in advance, so a person could reject without giving one although the Type
+   requires it. A Type can ask that a `required` field be set in the move
+   itself, by whoever makes it.
+3. **Who last wrote a value shows, and can be refused.** An agent edited a
+   requester's draft (amount, vendor) before she submitted it, and the
+   manager approved the agent's version. This is provenance's first real
+   case, so it moves up: next in theme 1's order of work.
+4. **Known, and planned elsewhere:** a requester creating on an older version
+   skips a newer rule (starting work, step 2); a claim is only a field, so a
+   colleague can still decide (team queues with an enforced claim, under
+   "Pilots serve generality").
 
 ### 3. Agents as task performers
 
