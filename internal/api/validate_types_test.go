@@ -271,6 +271,17 @@ func TestValidateTypes_LimitsRefusalSaysTheSizes(t *testing.T) {
 	}
 }
 
+// One source over 1 MiB: the refusal counts it in the singular, "1 source".
+func TestValidateTypes_LimitsRefusalOneSource(t *testing.T) {
+	head := "id: vtone\nversion: 1\n#"
+	one := tsrc("one.yaml", head+strings.Repeat("x", maxSourceBytes+1-len(head)-1)+"\n")
+	_, err := validateTypes(as("ana"), t, "namespaces/acme", one)
+	invalid(t, "one source over 1 MiB", err, "sources")
+	if desc := sourcesViolation(t, err); !strings.Contains(desc, "this request has 1 source,") {
+		t.Errorf("sources violation %q, want it to say %q", desc, "this request has 1 source,")
+	}
+}
+
 // sourcesViolation returns the description of a refusal's field violation
 // on sources, or "" when it has none.
 func sourcesViolation(t *testing.T, err error) string {
