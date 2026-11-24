@@ -176,6 +176,30 @@ func (e *PlacementNotWritableError) Error() string {
 }
 func (e *PlacementNotWritableError) Unwrap() error { return ErrForbidden }
 
+// StartRefusedError (starting work, step 2): a create the latest version
+// of the Type's start block refuses. Reason is StartNotIn (the container's
+// Type, or the top level, is not in start.in) or StartNotAllowed
+// (start.allowed does not let the caller in). It is an ErrForbidden; the
+// API answers PERMISSION_DENIED / NOT_ALLOWED with that reason's fixed
+// message, so the reason stays in the item service's message.
+//
+// Phase B stub: declared only; Create never returns it yet.
+type StartRefusedError struct {
+	Reason string
+	TypeID string
+}
+
+// The reasons of StartRefusedError.
+const (
+	StartNotIn      = "START_NOT_IN"
+	StartNotAllowed = "START_NOT_ALLOWED"
+)
+
+func (e *StartRefusedError) Error() string {
+	return fmt.Sprintf("%v: %s: the start block of %s refuses this create", ErrForbidden, e.Reason, e.TypeID)
+}
+func (e *StartRefusedError) Unwrap() error { return ErrForbidden }
+
 // CodeNotUnique (Jira 2.4b, kernel change 9): a write would give two
 // siblings the same value of a field declared unique_among_siblings.
 const CodeNotUnique = "not_unique"

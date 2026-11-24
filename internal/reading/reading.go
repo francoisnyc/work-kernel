@@ -126,6 +126,18 @@ const (
 	PlacementAnyone    Part = "placement.anyone"
 	PlacementRoles     Part = "placement.roles"
 	PlacementKernel    Part = "placement.kernel"
+
+	// Who starts it (starting work, step 2): the latest version's start
+	// block, which judges a create of every version. Phase B stub:
+	// declared and listed, not rendered yet.
+	StartIn                  Part = "start_in"                    // A {type} is created only inside {types}.
+	StartInTop               Part = "start_in.top"                // , or at the top level (or: only at the top level)
+	StartWho                 Part = "start_who"                   // {Who} creates one[; clauses].
+	StartWhoField            Part = "start_who.field"             // whoever {f} of the container names
+	StartWhoContainerCreator Part = "start_who.container_creator" // anyone who took part in creating the container
+	StartWhoNobody           Part = "start_who.nobody"            // No person creates a {type}: only a reaction does.
+	StartWhoCustomers        Part = "start_who.customers"         // ; a customer creates one only where a container lets them
+	StartLatest              Part = "start_latest"                // While this is the latest version of {type}, these rules hold for creating a {type} of any version.
 )
 
 // Parts is the closed list of parts, in the order of the constants.
@@ -144,6 +156,7 @@ func Parts() []Part {
 		Create, CreateForEach, Set,
 		ConsentAdd, ConsentSet, ConsentCreate, ConsentMove, ConsentWildcard, Readable, Offer,
 		CustomerFields, CustomerFieldsNone, Own, Shared, PlacementAnyone, PlacementRoles, PlacementKernel,
+		StartIn, StartInTop, StartWho, StartWhoField, StartWhoContainerCreator, StartWhoNobody, StartWhoCustomers, StartLatest,
 	}
 }
 
