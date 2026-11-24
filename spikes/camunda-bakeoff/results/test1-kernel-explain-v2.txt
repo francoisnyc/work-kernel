@@ -1,0 +1,84 @@
+$ pli type explain --draft purchase@2 kernel/types-v2/purchase.v2.yaml
+purchase@2
+
+Key
+- the requester: the person an Item is for: whoever created it, or the person they created it for.
+- a customer: a person outside the organisation.
+- an agent: a program acting for a person; it may do only what both it and that person may do, and a field that names a person never names an agent.
+- the kernel: the system that runs the rules of every Type; it is never a person.
+- a hold: while a check or a reaction decides a move, the Item waits where it is; that wait is a hold.
+
+Fields
+- `f_amount`: a whole number
+- `f_vendor`: text
+- `f_cost_centre`: text
+- `f_justification`: text
+- `f_manager`: a person
+- `f_claimed_by`: a person
+- `f_summary`: text
+- `f_policy`: one of ok, check or fail
+- `f_flags`: text
+- `f_reason`: text
+- `f_order_id`: text
+
+In short
+1. A purchase starts in draft.
+2. It moves only as listed below; any other move is refused.
+
+Who writes what
+3. Only the kernel writes `f_manager`: `manager_check`.
+4. Only holders of finance write `f_claimed_by`.
+5. Only holders of preparer write `f_summary`.
+6. Only holders of preparer write `f_policy`.
+7. Only holders of preparer write `f_flags`.
+8. Only the kernel writes `f_order_id`: `place_order`.
+
+draft (to do)
+9. The requester moves it from draft to manager_review, once `f_amount`, `f_vendor`, `f_cost_centre` and `f_justification` are set, only if `f_amount` is more than 0.
+10. Asking for this move opens a hold instead: `manager_check` calls `hr.manager_of@1` with onBehalfOf = who it was created for, createdBy = who created it; if it allows, or corrects `f_manager`, the move happens; it may deny it (unknown_employee, no_eligible_approver); with no answer within 15 minutes the move fails.
+11. While that hold is open, nothing moves it.
+
+manager_review (waiting)
+12. While it is in manager_review, nobody changes `f_amount`, `f_vendor`, `f_cost_centre`, `f_justification` or `f_manager`.
+13. Whoever `f_manager` names, but never anyone who took part in creating it, moves it from manager_review to approved, only if `f_amount` is less than 1000.
+14. Whoever `f_manager` names, but never anyone who took part in creating it, moves it from manager_review to finance_queue, only if `f_amount` is at least 1000.
+15. Whoever `f_manager` names, but never anyone who took part in creating it, moves it from manager_review to rejected, once `f_reason` is set.
+
+finance_queue (waiting)
+16. While it is in finance_queue, nobody changes `f_amount`, `f_vendor`, `f_cost_centre`, `f_justification`, `f_manager`, `f_summary`, `f_policy` or `f_flags`.
+17. Anyone with the role finance, but never anyone who took part in creating it, moves it from finance_queue to finance_review, once `f_claimed_by` is set.
+
+finance_review (active)
+18. While it is in finance_review, nobody changes `f_amount`, `f_vendor`, `f_cost_centre`, `f_justification`, `f_manager`, `f_summary`, `f_policy` or `f_flags`.
+19. Anyone with the role finance moves it from finance_review to finance_queue; the move clears `f_claimed_by`.
+20. Anyone with the role finance, but never anyone who took part in creating it, moves it from finance_review to approved, only if `f_amount` is at most 5000.
+21. Anyone with the role finance, but never anyone who took part in creating it, moves it from finance_review to cfo_review, only if `f_amount` is more than 5000.
+22. Anyone with the role finance, but never anyone who took part in creating it, moves it from finance_review to rejected, once `f_reason` is set.
+
+cfo_review (waiting)
+23. While it is in cfo_review, nobody changes `f_amount`, `f_vendor`, `f_cost_centre`, `f_justification`, `f_manager`, `f_claimed_by`, `f_summary`, `f_policy` or `f_flags`.
+24. Anyone with the role cfo, but never anyone who took part in creating it, moves it from cfo_review to approved.
+25. Anyone with the role cfo, but never anyone who took part in creating it, moves it from cfo_review to rejected, once `f_reason` is set.
+
+approved (done)
+26. On entering approved, `place_order` calls `erp.create_invoice@1` with customerId = `f_vendor`, amount = `f_amount` and writes what it made into `f_order_id`, once per entry, even if it has moved on.
+27. While it is in approved, nobody changes `f_amount`, `f_vendor`, `f_cost_centre`, `f_justification`, `f_manager`, `f_claimed_by`, `f_summary`, `f_policy`, `f_flags` or `f_reason`.
+28. Nothing leaves approved.
+
+rejected (canceled)
+29. On entering rejected, `notify_rejected` calls `email.notify@1` with to = the requester, once per entry, even if it has moved on.
+30. While it is in rejected, nobody changes `f_amount`, `f_vendor`, `f_cost_centre`, `f_justification`, `f_manager`, `f_claimed_by`, `f_summary`, `f_policy`, `f_flags`, `f_reason` or `f_order_id`.
+31. Nothing leaves rejected.
+
+Who sees it
+32. A customer who sees it sees none of its fields, only its header.
+33. No one moves it to another container or narrows who sees it.
+
+Actions it calls
+- `hr.manager_of@1` (a check, low risk): Finds who approves for a requester: their manager in the HR directory. The requester is onBehalfOf when set, else createdBy.
+- `erp.create_invoice@1` (an action with side effects, high risk): Creates an invoice in the ERP for a customer and an amount, once per idempotency key.
+- `email.notify@1` (an action with side effects, medium risk): Sends one message to one person or agent; the hook's ID names the message, and the Item goes with it.
+
+Not covered by this reading
+- Who can see a given purchase: that is set for each Item and its container, not by its Type.
+- How the kernel keeps its promises (retries, each write made once, recovery after a failure): the same for every Type.

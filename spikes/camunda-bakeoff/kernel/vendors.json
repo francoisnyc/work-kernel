@@ -1,0 +1,5 @@
+{
+  "officeco":   {"plan": "pro", "credit_limit": 100000000},
+  "cloudhost":  {"plan": "pro", "credit_limit": 100000000},
+  "shadyparts": {"plan": "free", "credit_limit": 100000000}
+}

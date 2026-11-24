@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Bake-off: the access request on Camunda 8.10. Started by publishing "access-requested" with
+     system, role, justification, requestRef. The requester comes from Camunda's audit log (see
+     purchase.bpmn); the owner from system-owner.dmn. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:modeler="http://camunda.org/schema/modeler/1.0" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" id="access-definitions" targetNamespace="http://bakeoff.example/access" exporter="hand-written" modeler:executionPlatform="Camunda Cloud" modeler:executionPlatformVersion="8.10.0">
+  <bpmn:process id="access-request" name="Access request" isExecutable="true">
+    <bpmn:startEvent id="submitted" name="Access requested">
+      <bpmn:messageEventDefinition id="submitted_msg" messageRef="msg_submitted" />
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="a1" sourceRef="submitted" targetRef="who_submitted" />
+    <bpmn:serviceTask id="who_submitted" name="Who really submitted?" zeebe:modelerTemplate="io.camunda.connectors.HttpJson.v2">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="io.camunda:http-json:1" retries="3" />
+        <zeebe:ioMapping>
+          <zeebe:input source="basic" target="authentication.type" />
+          <zeebe:input source="audit-reader" target="authentication.username" />
+          <zeebe:input source="audit-reader-pw" target="authentication.password" />
+          <zeebe:input source="POST" target="method" />
+          <zeebe:input source="http://orchestration:8080/v2/audit-logs/search" target="url" />
+          <zeebe:input source="={filter: {processInstanceKey: string(camunda.processInstance.key), entityType: &#34;PROCESS_INSTANCE&#34;, operationType: &#34;CREATE&#34;}}" target="body" />
+          <zeebe:input source="20" target="connectionTimeoutInSeconds" />
+          <zeebe:input source="20" target="readTimeoutInSeconds" />
+        </zeebe:ioMapping>
+        <zeebe:taskHeaders>
+          <zeebe:header key="resultExpression" value="={requester: response.body.items[1].actorId, submitterKnown: count(response.body.items) &#62; 0}" />
+          <zeebe:header key="retryBackoff" value="PT2S" />
+        </zeebe:taskHeaders>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="f0" sourceRef="who_submitted" targetRef="known_gw" />
+    <bpmn:exclusiveGateway id="known_gw" name="Does the audit log know yet?" default="not_yet" />
+    <bpmn:sequenceFlow id="known" name="Yes" sourceRef="known_gw" targetRef="find_owner">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=submitterKnown = true</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="not_yet" name="Not yet" sourceRef="known_gw" targetRef="wait_audit" />
+    <bpmn:intermediateCatchEvent id="wait_audit" name="2 seconds">
+      <bpmn:timerEventDefinition id="wait_audit_timer">
+        <bpmn:timeDuration xsi:type="bpmn:tFormalExpression">PT2S</bpmn:timeDuration>
+      </bpmn:timerEventDefinition>
+    </bpmn:intermediateCatchEvent>
+    <bpmn:sequenceFlow id="ask_again" sourceRef="wait_audit" targetRef="who_submitted" />
+    <bpmn:businessRuleTask id="find_owner" name="Find the system&#39;s owner">
+      <bpmn:extensionElements>
+        <zeebe:calledDecision decisionId="system-owner" resultVariable="owner" />
+      </bpmn:extensionElements>
+    </bpmn:businessRuleTask>
+    <bpmn:sequenceFlow id="a2" sourceRef="find_owner" targetRef="prepare" />
+    <bpmn:callActivity id="prepare" name="Agent prepares the decision">
+      <bpmn:extensionElements>
+        <zeebe:calledElement processId="prepare-decision" propagateAllChildVariables="false" propagateAllParentVariables="false" />
+        <zeebe:ioMapping>
+          <zeebe:input source="={kind: &#34;access&#34;, system: system, role: role, justification: justification}" target="request" />
+          <zeebe:output source="=preparation" target="preparation" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+    </bpmn:callActivity>
+    <bpmn:sequenceFlow id="a3" sourceRef="prepare" targetRef="owner_decision" />
+    <bpmn:userTask id="owner_decision" name="Owner decides">
+      <bpmn:extensionElements>
+        <zeebe:userTask />
+        <zeebe:formDefinition formId="access-owner-decision" />
+        <zeebe:assignmentDefinition candidateUsers="=[owner]" />
+        <zeebe:ioMapping>
+          <zeebe:output source="=ownerApproved" target="ownerApproved" />
+          <zeebe:output source="=reason" target="reason" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+    </bpmn:userTask>
+    <bpmn:sequenceFlow id="a4" sourceRef="owner_decision" targetRef="owner_gw" />
+    <bpmn:exclusiveGateway id="owner_gw" name="Owner&#39;s answer" />
+    <bpmn:sequenceFlow id="a_ok" name="Approved" sourceRef="owner_gw" targetRef="granted">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=ownerApproved = true</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="a_no" name="Rejected" sourceRef="owner_gw" targetRef="notify_rejected">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=ownerApproved != true</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:endEvent id="granted" name="Granted" />
+    <bpmn:serviceTask id="notify_rejected" name="Tell the requester" zeebe:modelerTemplate="io.camunda.connectors.HttpJson.v2">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="io.camunda:http-json:1" retries="3" />
+        <zeebe:ioMapping>
+          <zeebe:input source="noAuth" target="authentication.type" />
+          <zeebe:input source="POST" target="method" />
+          <zeebe:input source="http://host.docker.internal:18084/messages" target="url" />
+          <zeebe:input source="={to: &#34;user:&#34; + requester, template: &#34;notify_rejected&#34;, item: requestRef, key: &#34;rejected-&#34; + requestRef}" target="body" />
+          <zeebe:input source="20" target="connectionTimeoutInSeconds" />
+          <zeebe:input source="20" target="readTimeoutInSeconds" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="a5" sourceRef="notify_rejected" targetRef="rejected" />
+    <bpmn:endEvent id="rejected" name="Rejected" />
+  </bpmn:process>
+  <bpmn:message id="msg_submitted" name="access-requested" />
+  <bpmndi:BPMNDiagram id="BPMNDiagram_access-request">
+    <bpmndi:BPMNPlane id="BPMNPlane_access-request" bpmnElement="access-request">
+      <bpmndi:BPMNShape id="submitted_di" bpmnElement="submitted">
+        <dc:Bounds x="57" y="52" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="who_submitted_di" bpmnElement="who_submitted">
+        <dc:Bounds x="25" y="170" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="known_gw_di" bpmnElement="known_gw" isMarkerVisible="true">
+        <dc:Bounds x="50" y="325" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="wait_audit_di" bpmnElement="wait_audit">
+        <dc:Bounds x="57" y="472" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="find_owner_di" bpmnElement="find_owner">
+        <dc:Bounds x="25" y="590" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="prepare_di" bpmnElement="prepare">
+        <dc:Bounds x="25" y="730" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="owner_decision_di" bpmnElement="owner_decision">
+        <dc:Bounds x="25" y="870" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="owner_gw_di" bpmnElement="owner_gw" isMarkerVisible="true">
+        <dc:Bounds x="50" y="1025" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="granted_di" bpmnElement="granted">
+        <dc:Bounds x="57" y="1172" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="notify_rejected_di" bpmnElement="notify_rejected">
+        <dc:Bounds x="25" y="1290" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="rejected_di" bpmnElement="rejected">
+        <dc:Bounds x="57" y="1452" width="36" height="36" />
+      </bpmndi:BPMNShape>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

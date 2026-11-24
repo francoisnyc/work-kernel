@@ -6,6 +6,44 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
+- **Found by the Temporal bake-off** (docs/research/temporal-bakeoff.md; nothing built):
+  - **Fields are open to the agent by default.** Both bake-offs' Types left
+    what is asked, and the decision's reason, writable by anyone who may
+    edit fields, the agent included. `writable_by: ['role:staff']` (a role
+    every person holds) closed both holes for the agent, tested. Consider a
+    default, or a `writable_by: [people]`, so an author need not know it.
+    "Only the requester edits a draft" still has no way to be said.
+  - **Readings did not catch a request nobody can decide** (an owner asking
+    for their own system, `except: [creator]` on the only decider). A check
+    that proves every waiting state has someone who may move it.
+
+- **Found by the Camunda bake-off** (docs/research/camunda-bakeoff.md, "Gaps found"; nothing built):
+  - **A creator can pick an old Type version.** After `purchase@2` (the CFO
+    step) was live, `item create --type purchase@1` still worked and the
+    CFO was skipped. Starting work, steps 1 and 2b ("the latest version's
+    rules govern creates") would close it; it matters more than its place
+    in that plan suggests, because the failure is an approval.
+  - **The worker acts on workflow input without reading the Item.** An
+    `item` workflow started by hand on the Temporal dev server, with
+    `State: approved` and a pending `place_order`, ran the action for an
+    Item still in `manager_review` (the ERP stub made an invoice; the
+    kernel wrote `f_order_id`). The dev server has no sign-on. Decide
+    whether an action hook re-reads the Item's state (or the entry's seq)
+    before calling out, and what a production Temporal must enforce.
+  - **No "only the requester" or "only the decider" rule for a field.**
+    Anyone who sees a draft edits it before its owner submits (an agent
+    with `edit_fields` changed the amount; submit then froze the agent's
+    values). A decision's reason can be planted before the decider acts,
+    which defeats `required` (the Requests area already lists "a decision
+    field only the approver may write"). `writable_by: [creator]` and
+    `writable_by: ['field:f_x']` would cover both.
+  - **Queues.** No "what waits on me" search, no way to ask the caller's
+    roles, no claim tied to the caller (`sets` has no `caller`): the
+    bake-off's inbox rebuilt it from `GetType` with one search per move.
+  - **Stories for Types outside `types/`.** The story runner reads only
+    `../../types` and `../../stories`; a spike's Types cannot use it.
+  - **A Type goes live only at start; a request in flight cannot move to
+    a new version.** Camunda migrated one with one call.
 - **Starting work, step 2's Later items** (docs/plans/starting-work.md, 1.3):
   - The "governs earlier versions" and "loosened" notes, with the WARNING
     severity (Ventoux item 3): `pli type validate` should say which earlier
@@ -3414,3 +3452,111 @@ browser.
 **Open:** the Later items above. **Next session:** the owner approves the three readings (incident@4 new,
 incident@3 and vacation_request@3 with the closing line); then step 2b (the latest-version rule for placement).
 
+## 2026-11-24 — Bake-off: the approvals pilot on Camunda 8.10 and on the kernel (a spike, no kernel change)
+
+**Built:** `spikes/camunda-bakeoff/` for `docs/plans/camunda-bakeoff.md`, run without waiting for answers. The
+same purchase approval (manager, then a finance queue from 1,000; an agent prepares, never decides) and an
+access request, twice: on the kernel as three Types in YAML with the agent as a script over the agent session
+API, and on Camunda 8.10 Self-Managed (the official lightweight Compose setup with H2, authorizations on, BPMN,
+a DMN table, forms, the AI Agent Task in its own process and connectors runtime). One deterministic, gullible
+model stub and the repo's `connstub` serve both. `scripts/run-all.sh` runs the four tests from clean in about
+ten minutes; the evidence is in `results/`. The result is `docs/research/camunda-bakeoff.md`. **No kernel code
+changed; nothing on `main`.**
+
+**Result:** the report recommends **Camunda plus a layer of the kernel's ideas** for the pilot. Camunda, hardened,
+refused all 17 of the compromised agent's attempts; with its default connectors role 5 succeeded, one an order
+with no approval. The kernel refused 26 of 29; two got through (editing a draft before its owner submits it;
+planting a rejection reason), and the Temporal dev server let a hand-started workflow place an order for a
+purchase still waiting on its manager. Camunda's Tasklist was the inbox for four small forms; the kernel's had
+to be scripted. The kernel is about 185 MB idle and up in 7 s against 1.3 GB and 48 s, and free in production
+where Camunda needs an Enterprise licence.
+
+**The review changed the answer.** The draft recommended the kernel. A reviewer agent that built nothing argued
+Camunda's case and tested both running systems: it found the audit log knows who really submitted a request
+(built into the processes: the identity hole closed), that "nothing to build" for the inbox was wrong without
+forms (built), and four kernel-side holes the first attack list never tried (each re-run and confirmed before
+it went in the report). Its notes and what changed are a section of the report.
+
+**Surprises:**
+- `pli type explain` found a hole in my own Type ("anyone who can see it ... narrows who sees it"), and the load
+  check refused my first draft (a move cleared a field its state froze). Both did their job on a Type written
+  in a hurry by someone who had not written one before.
+- The kernel's checks did not find the holes that mattered: open drafts and the planted reason are things the
+  Type format cannot say, so no reading mentions them.
+- On Camunda, the right to start a process is the right to start it at any step ("start instructions"); the
+  permission a worker needs to finish its job is the one that rewrites the process's variables; a misspelled
+  variable deploys and stops the first real request with an incident. Starting by message, a called process for
+  the agent, and a task-worker role without COMPLETE for candidates were the fixes.
+- Camunda's AI Agent connector streams from its model and wants OpenAI's separate usage chunk; FEEL's
+  `string()` of a context is not JSON. Stub fidelity, not findings.
+
+**Assumptions** are numbered in the report (17). The two that shaped the work: no `ANTHROPIC_API_KEY`, so the
+live-model run was skipped; the roadmap's "A pilot candidate: approvals" and "Pilots serve generality" were
+merged to main during the run and the run did not read them, so the brief's scenario was taken as the pilot and
+its purpose as delivering approvals. Read with the roadmap (a pilot is a test of the kernel, not its purpose),
+the report's answer is to the narrower question; its assumption 2 says so.
+
+**Not done:** Camunda's Modeler, Copilot (needs a model key), linter, process tests and task listeners; a
+production-like Camunda; the kernel's stories for the spike's Types; timers; load.
+
+**Numbers.** `go vet ./...` and `go test ./...` green (25 packages; the spike adds one small test package for
+the stub). Both rounds took about an hour and a half on the session's clock, inside the one-day box.
+
+**Local workarounds (nothing committed outside the spike):** dockerd started by hand; one Docker Hub pull
+failed and worked on the retry; the kernel's programs ran on the host from `go build` (image builds cannot use
+the session's proxy); docs.camunda.io was unreachable, so Camunda's docs were read from `camunda/camunda-docs`
+on GitHub; BPMN diagrams generated with `bpmn-auto-layout` in the scratchpad.
+
+**Open:** the six Later items at the top of this file, the first two before anything else is built on the
+kernel. The roadmap says a pilot is a test of the kernel: then it runs on the kernel, after or with its gaps 1
+to 5; the report's Camunda answer is for delivering approvals to real people today. Not compared: the same
+approval as plain Temporal code (the report's last paragraph says what that would need). **Next session:** the
+owner's decision on the report; otherwise starting work, step 2, as before.
+
+## 2026-11-24 — Bake-off 2: the kernel, or each process written on Temporal (a spike, no kernel change)
+
+**Built:** `spikes/temporal-bakeoff/` for `docs/plans/temporal-bakeoff.md`, run without waiting for answers,
+on top of the first bake-off's spike (reused by path). The purchase approval and the access request written
+directly on Temporal in Go (updates with validators, a query, activities, Postgres for the inbox and audit, a
+small API with the same dev tokens), in two steps: the purchase by me, the access request by a separate agent
+given only the step-1 code and the business's five-sentence request. The kernel's access request was rewritten
+the same way for symmetry. Measures: the marginal cost of a process, the CFO change with requests in flight
+(`workflow.GetVersion`, and a replay checker), what each process rebuilds, and the compromised-agent lists per
+process, before and after hardening. `scripts/run-all.sh` repeats them in about five minutes. The result is
+`docs/research/temporal-bakeoff.md`. **No kernel code changed; nothing on `main`.**
+
+**Precondition not met:** the brief wanted "an effect re-checks committed state" fixed first. It was not on
+main; as instructed, the kernel's forged-workflow start is reported as a known hole and kept out of the
+comparison.
+
+**Result:** a second process was 252 lines of Go against 50 of YAML (comments and tests left out); a change
+reached requests in flight on plain Temporal and none on the kernel; plain Temporal built the inbox and a
+binding claim the kernel lacks. On safety, neither side was safe as built and both could be made so: the
+kernel's two holes (drafts the agent can edit; a planted rejection reason) are in every Type and close with two
+to five lines of YAML per Type; plain Temporal's (the agent exhausting a workflow's 2,000 updates so no decision
+lands; a failed order left reading "approved") were in both processes and took 137 lines to fix. The report
+recommends plain Temporal with a shared approvals package for the next few developer-written processes, and
+keeping the kernel for what plain Temporal leaves to every author, after it closes the listed gaps.
+
+**The review changed the answer again.** My draft called plain Temporal the safer side and said no Type could
+close the kernel's holes. The reviewer broke plain Temporal twice in ways my list never tried, and showed the
+kernel's holes close in YAML; I reproduced both before accepting them. It also showed the "blind" builds were
+less blind than I claimed (the attack script was reachable; the kernel rewrite is nearly my own Type).
+
+**Surprises:** Temporal's JSON converter drops struct fields tagged `json:"-"` on the way to an activity (the
+mocked workflow tests passed; the first real run wrote nulls). Temporal's 2,000-update cap is an attack surface
+for anyone allowed one update. A careless change to workflow code fails at read time, not deploy time; the
+replay check is the only warning. The kernel quietly gave four things plain Temporal had to discover: a limit
+one actor cannot exhaust, retries that never give up, safe resubmission, a record past retention.
+
+**Assumptions** are numbered in the report (9). The session was paused about eight and a half hours mid-run;
+active work was about 75 minutes, inside the half-day box.
+
+**Numbers.** `go vet ./...` green; `go test ./spikes/...` green (the two workflows' tests, 18 in all, in
+Temporal's test environment).
+
+**Open:** the two new Later items above, and the first bake-off's, the first two (old versions; the worker's
+trust in its input) still first. Starting work, step 2 (the `start` block) was merged to main during this run
+and not used here: it would replace the access Types' "only inside a system" invariant with `start: {in:
+[system]}`, and could stop an agent asking in its own name; it does not retire an old version. **Next session:**
+the owner's decision on the two reports.

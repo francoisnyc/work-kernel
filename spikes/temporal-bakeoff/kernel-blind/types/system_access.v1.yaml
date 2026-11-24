@@ -1,0 +1,69 @@
+# A request for access to a system, made inside the system's Item
+# (system@1: its name and its owner).
+#
+#   - The requester fills the access role wanted and a justification (both
+#     free text: untrusted), then submits. Submitting copies the system's
+#     name and owner from the system the request was made in (f_system_name,
+#     f_owner: the kernel's, never a person's) and marks when
+#     (f_submitted_at). A request made outside a system has nothing to copy:
+#     the invariant submitted_outside_system refuses its submit (an
+#     invariant, not a guard, because a guard is judged before the copies).
+#   - The system's owner approves or rejects; a rejection needs a reason.
+#     Nobody decides a request they made themselves.
+#   - The agent (agent:prep-bot, role preparer) writes only the three
+#     preparation fields, and only until the owner has decided; no move
+#     names it. Once submitted, what is being approved (system, role,
+#     justification) is frozen.
+#   - Rejected, the requester is told (email.notify, the purchase's
+#     notification) and the reason is on the Item. Approved, nothing more
+#     happens here: granting the access is someone else's job.
+id: system_access
+version: 1
+initial_state: draft
+
+fields:
+  - {id: f_role,          type: string}
+  - {id: f_justification, type: string}
+  - {id: f_system_name,   type: string,    writable_by: kernel}
+  - {id: f_owner,         type: principal, writable_by: kernel}
+  - {id: f_submitted_at,  type: datetime,  writable_by: kernel}
+  - {id: f_summary,       type: string,    writable_by: ['role:preparer']}
+  - {id: f_policy,        type: enum, options: [ok, check, fail], writable_by: ['role:preparer']}
+  - {id: f_flags,         type: string,    writable_by: ['role:preparer']}
+  - {id: f_reason,        type: string}
+
+states:
+  - {id: draft, category: todo}
+  - id: owner_review
+    category: waiting
+    frozen: [f_role, f_justification, f_system_name, f_owner, f_submitted_at]
+  - id: approved
+    category: done
+    frozen: [f_role, f_justification, f_system_name, f_owner, f_submitted_at, f_summary, f_policy, f_flags, f_reason]
+  - id: rejected
+    category: canceled
+    frozen: [f_role, f_justification, f_system_name, f_owner, f_submitted_at, f_summary, f_policy, f_flags, f_reason]
+
+transitions:
+  - from: draft
+    to: owner_review
+    allowed: [creator]
+    required: [f_role, f_justification]
+    sets:
+      f_system_name: 'container.f_name'
+      f_owner: 'container.f_owner'
+      f_submitted_at: 'cause.at'
+  # The system's owner.
+  - {from: owner_review, to: approved, allowed: ['field:f_owner'], except: [creator]}
+  - {from: owner_review, to: rejected, allowed: ['field:f_owner'], except: [creator], required: [f_reason]}
+
+invariants:
+  - id: submitted_outside_system
+    rule: 'f_submitted_at == null || (f_system_name != null && f_owner != null)'
+
+hooks:
+  - {id: notify_rejected, on: enter, state: rejected, kind: action, action: email.notify, reads: [creator]}
+
+# Nobody moves or narrows a request: it stays in its system, and hidden
+# from the owner it would wait for ever.
+placement_writable_by: [kernel]

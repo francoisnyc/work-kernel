@@ -1,0 +1,2 @@
+connectors:
+  hr@1: {url: "http://127.0.0.1:18083", secret_env: HR_HOOK_SECRET, ref: hr-directory}

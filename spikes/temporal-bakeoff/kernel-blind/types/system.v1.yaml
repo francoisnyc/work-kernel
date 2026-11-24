@@ -1,0 +1,26 @@
+# A system people may ask access to (payroll, the ledger), and who owns it.
+# One Item per system, made once by IT (role it_admin: scripts in
+# ../setup.sh). The list of systems and owners is data, not a Type: a new
+# system or a new owner is one write by IT, with no new Type version.
+#
+# An access request (system_access) is made inside its system and copies
+# the name and the owner when it is submitted: changing the owner later
+# changes no request already submitted.
+id: system
+version: 1
+
+# The name first: a page shows an Item by its first string field.
+fields:
+  - {id: f_name,  type: string,    writable_by: ['role:it_admin']}
+  - {id: f_owner, type: principal, writable_by: ['role:it_admin']}
+
+# What a request copies on submit.
+readable_by_reactions: [f_name, f_owner]
+
+invariants:
+  # A system always has a name and an owner: nobody without it_admin can
+  # make one, and a request never finds a system with no one to decide.
+  - {id: owner_missing, rule: 'f_name != null && f_owner != null'}
+
+# Only IT moves or narrows a system.
+placement_writable_by: ['role:it_admin']

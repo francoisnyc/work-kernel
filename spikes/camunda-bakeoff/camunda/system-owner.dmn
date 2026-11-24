@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Who owns each system (decides its access requests). -->
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/" id="system-owner-definitions" name="System owners" namespace="http://bakeoff.example/dmn">
+  <decision id="system-owner" name="System owner">
+    <decisionTable id="owners" hitPolicy="UNIQUE">
+      <input id="in_system" label="System">
+        <inputExpression id="in_system_expr" typeRef="string"><text>system</text></inputExpression>
+      </input>
+      <output id="out_owner" label="Owner" name="owner" typeRef="string"/>
+      <rule id="r_payroll">
+        <inputEntry id="r_payroll_in"><text>"payroll"</text></inputEntry>
+        <outputEntry id="r_payroll_out"><text>"olaf"</text></outputEntry>
+      </rule>
+      <rule id="r_ledger">
+        <inputEntry id="r_ledger_in"><text>"ledger"</text></inputEntry>
+        <outputEntry id="r_ledger_out"><text>"fay"</text></outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+</definitions>

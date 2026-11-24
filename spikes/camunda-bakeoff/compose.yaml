@@ -1,0 +1,117 @@
+# Bake-off stack (throwaway; local only; every port on 127.0.0.1).
+#
+# Two sides, as Compose profiles, so each one's footprint is measured alone:
+#   docker compose --profile kernel up -d --wait    Postgres + Temporal dev server
+#   docker compose --profile camunda up -d --wait   Camunda 8 orchestration cluster + connectors
+# The kernel's own programs (item service, relay, worker, stub connectors)
+# run on the host from this repository's main code: see README.md.
+#
+# Ports differ from the kernel's own stack (docker-compose.yml at the repo
+# root) so both can run side by side.
+name: bakeoff
+
+services:
+  kernel-postgres:
+    profiles: [kernel]
+    image: postgres:17-alpine
+    environment: {POSTGRES_USER: kernel, POSTGRES_PASSWORD: kernel, POSTGRES_DB: kernel}
+    ports: ["127.0.0.1:15432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kernel -d kernel"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  kernel-temporal:
+    profiles: [kernel]
+    image: temporalio/temporal:1.10.0
+    command: ["server", "start-dev", "--ip", "0.0.0.0"]
+    ports: ["127.0.0.1:17233:7233"]
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "localhost:7233"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+
+  # --- Camunda side: the official 8.10 lightweight Compose setup
+  # (camunda-distributions, docker-compose/versions/camunda-8.10), trimmed
+  # to what runs, with authorizations on (camunda/application.yaml).
+  camunda-data-init:
+    profiles: [camunda]
+    image: camunda/camunda:8.10.10
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c", "chown -R 1001:1001 /usr/local/camunda/camunda-data && chmod 775 /usr/local/camunda/camunda-data"]
+    volumes: [camunda-data:/usr/local/camunda/camunda-data]
+    restart: "no"
+
+  orchestration:
+    profiles: [camunda]
+    image: camunda/camunda:8.10.10
+    ports:
+      - "127.0.0.1:8088:8080"   # REST API v2, Operate, Tasklist, Admin
+      - "127.0.0.1:26501:26500" # gRPC
+      - "127.0.0.1:19600:9600"  # management
+    mem_limit: 1g               # as in the official file
+    volumes:
+      - camunda:/usr/local/camunda/data
+      - camunda-data:/usr/local/camunda/camunda-data
+      - ./camunda/application.yaml:/usr/local/camunda/config/application.yaml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9600 && echo -e \"GET /actuator/health/status HTTP/1.1\r\nHost: localhost\r\n\r\n\" >&3 && head -n 1 <&3 | grep -q 200'"]
+      interval: 2s
+      retries: 90
+      start_period: 20s
+    depends_on:
+      camunda-data-init: {condition: service_completed_successfully}
+
+  # The connectors runtime for the processes' own connectors (the REST
+  # calls to the purchase system, the HR directory and the email stub). It
+  # logs in as the user "connectors".
+  connectors:
+    profiles: [camunda]
+    image: camunda/connectors-bundle:8.10.8
+    ports: ["127.0.0.1:18086:8080"]
+    mem_limit: 512m             # as in the official file
+    environment: &connectors-env
+      CAMUNDA_CLIENT_MODE: self-managed
+      CAMUNDA_CLIENT_GRPC_ADDRESS: http://orchestration:26500
+      CAMUNDA_CLIENT_REST_ADDRESS: http://orchestration:8080
+      CAMUNDA_CLIENT_AUTH_METHOD: basic
+      CAMUNDA_CLIENT_AUTH_USERNAME: connectors
+      CAMUNDA_CLIENT_AUTH_PASSWORD: connectors-pw
+      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health
+      MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: "true"
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/actuator/health/readiness"]
+      interval: 3s
+      retries: 60
+      start_period: 15s
+    depends_on:
+      orchestration: {condition: service_healthy}
+
+  # The agent's own connectors runtime: the AI Agent connector runs here,
+  # logged in as "prep-bot", a user authorized only on the prepare-decision
+  # process. This is the agent's credential the compromised-agent test uses.
+  agent-connectors:
+    profiles: [camunda]
+    image: camunda/connectors-bundle:8.10.8
+    ports: ["127.0.0.1:18087:8080"]
+    mem_limit: 512m
+    environment:
+      <<: *connectors-env
+      CAMUNDA_CLIENT_AUTH_USERNAME: prep-bot
+      CAMUNDA_CLIENT_AUTH_PASSWORD: prep-bot-pw
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/actuator/health/readiness"]
+      interval: 3s
+      retries: 60
+      start_period: 15s
+    depends_on:
+      orchestration: {condition: service_healthy}
+
+volumes:
+  camunda:
+  camunda-data:
