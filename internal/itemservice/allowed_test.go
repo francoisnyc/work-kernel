@@ -28,7 +28,9 @@ id: request
 version: 1
 initial_state: open
 fields:
-  - {id: f_title, type: string}
+  # Open to agents: an agent creates a request in these tests (fields are
+  # closed to agents by default).
+  - {id: f_title, type: string, writable_by: [people, agents]}
 states:
   - {id: open,        category: todo}
   - {id: in_progress, category: active, timer: {after: 48h, to: open}}
