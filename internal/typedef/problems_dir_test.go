@@ -134,6 +134,19 @@ reactions:
 		problemCase: problemCase{code: typedef.CodeFolderTooDeep, old: "Types are read from a folder and its subfolders, one level deep"},
 		fixFiles:    nil, // the fix moves the file; see TestParseDirProblems_TheFixLoads
 	},
+	{
+		// Starting work, step 2: a portal would offer what the kernel
+		// refuses. On the container's own entry.
+		name: "own naming a Type created only in other containers",
+		files: map[string]string{
+			"room.v1.yaml": "id: room\nversion: 1\n",
+			"hall.v1.yaml": "id: hall\nversion: 1\nown: [ask]\n",
+			"ask.v1.yaml":  "id: ask\nversion: 1\nstart:\n  in: [room]\n",
+		},
+		source:      "hall.v1.yaml",
+		problemCase: problemCase{code: typedef.Code("START_NOT_IN"), path: "own[0]", line: 3, col: 7, typeID: "hall", version: 1, old: "admits customers to ask, whose latest version (v1) is created only in room"},
+		fixFiles:    map[string][][2]string{"ask.v1.yaml": {{"[room]", "[room, hall]"}}},
+	},
 }
 
 // Each kind of problem only a folder can have comes back alone, on the file

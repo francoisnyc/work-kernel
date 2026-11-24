@@ -1032,7 +1032,7 @@ stage 3 then also runs with every registered version, and adds
 | `WRONG_SHAPE` | 1 | A value of the wrong kind: text for a number, a map for a list |
 | `REQUIRED` | 2 | Something that must be there is missing (an ID, a link's inverse) |
 | `DUPLICATE` | 2 | Declared twice: a field, a state, a transition, an ID, a list entry |
-| `RESERVED_NAME` | 2 | A name the kernel keeps (today, caller, links, ...) |
+| `RESERVED_NAME` | 2 | A name the kernel keeps (today, caller, links, ...; a Type named top, which start.in uses for the top level) |
 | `INVALID_NAME` | 2 | A name or ID that is not well formed (lower case, digits and _) |
 | `INVALID_VALUE` | 2 | A value outside what the key allows (a category, a field type, a version below 1, a duration that is not positive) |
 | `KEY_NOT_APPLICABLE` | 2 | A key that does not apply here (options on a string field, a fallback on a check) |
@@ -1052,7 +1052,7 @@ stage 3 then also runs with every registered version, and adds
 | `WRITES_FROZEN_FIELD` | 2 | Something writes a field a state freezes |
 | `WRITES_KERNEL_FIELD` | 2 | Something other than a hook writes a field only the kernel writes |
 | `HELD_TRANSITION` | 2, 3 | A held transition, or a move into one, does what a hold forbids |
-| `CONFLICT` | 2 | Two declarations contradict each other (requires and clears a field) |
+| `CONFLICT` | 2, 3 | Two declarations contradict each other (requires and clears a field; own or shared naming a Type whose latest start.allowed is [nobody]) |
 | `ONLY_ONE_ALLOWED` | 2 | A second one where only one is allowed (two checks on a transition) |
 | `MISSING_COUNTERPART` | 2, 3 | A declaration needs another that is missing (a kernel field no hook writes, a held reaction with no undo) |
 | `TIMER_NOT_ALLOWED` | 2 | A timer's transition does not allow `principal:system:timer` |
@@ -1065,6 +1065,7 @@ stage 3 then also runs with every registered version, and adds
 | `DUPLICATE_VERSION` | 3 | Two files declare the same Type version (reported on the second) |
 | `FOLDER_TOO_DEEP` | 3 | A folder more than one level below the Types folder |
 | `VERSION_CHANGED` | 3 | A draft declares a registered Type version with another definition (`ValidateTypes`; reported on the draft's `version`) |
+| `START_NOT_IN` | 3 | Something creates Items of a Type where its latest version's start.in does not let them be created: a container's own or shared entry, or a create reaction (starting work, step 2) |
 
 ### Versioning
 
@@ -3943,7 +3944,7 @@ decide.
 only the terms its sentences use (the requester, staff, a customer, an
 agent, the kernel, the timer, a hold, a reaction); the fields; then the
 sections, each left out when empty: *In short* (where it starts, that no
-other move is possible, its invariants); *Who writes what* (fields only the
+other move is possible, its invariants); *Who starts it* (its start block); *Who writes what* (fields only the
 kernel or a role writes, and who the kernel's writers are; unique fields);
 *Links* (its link types, the names it gives incoming links, its rollups);
 *one section per state*, in the Type's order, headed with its category
@@ -3956,8 +3957,8 @@ Types may do to it* (consents, fields readable by reactions, offers); *Who
 sees it* (customer fields, own, shared, placement). Then the actions it
 calls, as their contracts describe them, and what no reading covers.
 
-**The kinds of sentence** (83 parts: 35 kinds and their clauses; the list
-is closed, `reading.Parts()`):
+**The kinds of sentence** (91 parts: 38 kinds and their clauses, the start
+block's 8 included; the list is closed, `reading.Parts()`):
 
 | Kind | Wording (clauses in brackets) |
 | --- | --- |
@@ -3974,6 +3975,7 @@ is closed, `reading.Parts()`):
 | move_children, move_container, move_link, create, set, reaction_hook | On entering {s}[ from {from}][, if {when}], {id} moves the {T}s inside it[ whose {when}] from {states} to {to} / moves its container from {states} to {to}[; if its container's rules refuse the move, it is skipped] / moves the {T} it links to as {link} from {states} to {to} / creates a {T}@{v} inside it[, one for each value of {f}], with {values} / sets {f} on its container to {value}. / When {reaction} has applied, {hook} calls {action} with {inputs}. |
 | created_inside | When {the requester / a person other than the requester / anyone} creates a {T} inside it[ while it is in {s}], {id} moves it to {to} / moves the {T}s inside it[ whose {when}] from {states} to {to}. |
 | consent, readable, offer | {T}'s reaction {id} [/ Any Type's reaction {id}, from its container,] may {change / set / create it, setting / move it to} .... / Another Type's create reaction may read {fields} from it. / Items inside it may read {f} as {offer}. |
+| start_in, start_who, start_latest (starting work, step 2) | A {type} is created only inside a {T}[, or at the top level] [/ only at the top level]. / {Any staff member who can see the container / Anyone with the role R / `principal` / Whoever {f} of the container names / Anyone who took part in creating the container} creates one; a customer creates one only where a container lets them. [/ No person creates a {type}: only a reaction does.] / While this is the latest version of {type}, these rules apply to creating a {type} of any version. |
 | customer_fields, own, shared, placement | A customer who sees it sees only {fields}, and sets only those when creating it. [/ ... sees none of its fields, only its header.] / A customer may create a {T} inside it, and sees the ones they requested. / The customer who requested it sees every {T} inside it, and may create one there. / {Anyone who can see it / Only holders of R / No one} moves it to another container or narrows who sees it. |
 
 Field IDs are written in code font; labels replace them when presentation
@@ -3994,12 +3996,14 @@ which views show the Item, not what the engine does to it); a field's type,
 options and count are the field list (the schema checks them on every
 write); who can see a given Item is set per Item and container, not by the
 Type; the kernel's own promises (retries, each write once, recovery) are
-the same for every Type. The last two are said in every reading's closing
-note.
+the same for every Type; and, since starting work step 2, who may create
+an Item of the Type and where once a later version exists (the latest
+version's start block decides for every version, so no reading of one
+version can say it). These three are said in every reading's closing note.
 
-**Witnesses and the guards.** Eleven witnesses
+**Witnesses and the guards.** Twelve witnesses (eleven, and step 2's `start`)
 (`internal/reading/witness_*_test.go`), each naming the exact sentences it
-relies on in the reading of a fixture Type (21 small Types in
+relies on in the reading of a fixture Type (26 small Types in
 `internal/reading/testdata/types/`, written for the witnesses, so
 `types/` can change without them) and running a story through
 internal/story's `Run` whose whole timeline is expected, both sides where
@@ -4014,8 +4018,9 @@ cited by a sentence; the words of conditions are held to
 run time, on 28 boundary cases, and a false guard is refused
 `GUARD_FAILED` through `Run`.
 
-**Two readings approved by the owner**, `readings/vacation_request@3.txt`
-and `readings/incident@3.txt`, compared exactly; a change to a Type or the
+**Readings approved by the owner**, `readings/vacation_request@3.txt`,
+`readings/incident@3.txt` and, since step 2, `readings/incident@4.txt`,
+compared exactly; a change to a Type or the
 renderer that changes them fails, and the new text is pasted in by hand
 and approved again in the pull request (no `-update`, as for stories).
 
@@ -4055,6 +4060,113 @@ narrow it.
 `kernel.v1`; `pli type explain`. No schema, write path or item service
 change; `ValidateTypes`'s draft checks are now shared helpers in the API,
 with no change in behaviour.
+
+## Starting work, step 2, as built: the start block (2026-11-24)
+
+Part 1, sections 1.1 to 1.8, of `docs/plans/starting-work.md`, without the
+intake rows (intakes do not exist yet). A Type may say where its Items are
+created and by whom; nothing changes for a Type without the block.
+
+```yaml
+start:
+  in: [desk, top]        # container Type IDs (any version of each); top = no container. Absent: anywhere
+  allowed: [role:desk_agent, principal:user:ana, field:f_lead, container_creator]   # or [nobody]. Absent or empty: anyone who sees the container
+```
+
+**The latest version governs.** The latest registered version's block
+judges a create of **every** version of the Type; the Item stays pinned to
+the version the caller names. Which version is latest is read in the
+create's own transaction every time (`select max(version) from types
+where id = $1`, one indexed lookup, never cached, so a version another
+process registers counts at once); the definition then comes from the Type
+cache. A later version without a block loosens every version at once. Types
+are global for now (journal, Later: Types per namespace), so a block
+governs every namespace. **What 1.3 promised `pli type validate` would say**
+(which earlier versions a new block governs; that dropping one loosens
+them) **is deferred, not built**: it needs a severity other than ERROR in
+`kernel.v1` (journal, Later, with Ventoux item 3).
+
+**Each entry reads the container**, never the new Item (`policy.MayStart`,
+which shares its entry matching with `MayTransition`: one function,
+`matchesEntry`, matches role:, principal: and field: for both):
+
+| Entry | Lets in |
+| --- | --- |
+| `role:<name>` | a holder of the role; an agent and the user it acts for must both hold it |
+| `principal:user:<id>` | that user; an agent acting for them does not pass (both must) |
+| `field:<id>` | the principal the **container's** principal field holds now (any member of a set). A field matches only the principal it holds: one holding `user:bob` never matches `agent:x`, so an agent acting for bob does not pass, and an agent named in the field passes only acting for itself |
+| `container_creator` | anyone who took part in creating the container (`TookPartInCreation`), judged once for the principal as a whole |
+| `nobody` | no person, no agent, no customer: only a create reaction, by the target's `creates:` consent |
+
+**Customers** (and agents acting for one) are not judged by `allowed`:
+their gate is the container's `own` and `shared`, as before; `in` applies
+to them; `nobody` refuses them too (fail closed). A person opening an Item
+for a customer (`requester`) is judged as the person.
+
+**The order of a create's checks** (inside the transaction that locks the
+container; this corrects plan 1.6, which put the start block before the
+session's scopes, against "NOT_FOUND before any other check" above):
+
+1. What answers `NOT_FOUND`: the container visible to the caller (and to
+   `on_behalf_of`), a customer's container checked again under the lock,
+   an agent session's scopes.
+2. `in`, against the container's Type, read under `FOR SHARE` (taken after
+   Create's own container locks, so never an upgrade): `START_NOT_IN`.
+3. `allowed`, by `policy.MayStart`, with the container's fields and creator
+   and the roles of the actor and its user (read only when an entry names a
+   role): `START_NOT_ALLOWED`.
+4. The rest, in their old order: placement for a narrow, the write and
+   create powers, the agent write rule, uniqueness, invariants. (The
+   placement check moved after the session's scopes, so `NOT_FOUND` now
+   comes before `PLACEMENT_NOT_WRITABLE` too.)
+
+A customer's `own`/`shared` check still runs before the transaction, so for
+a customer it refuses before `in`; over the API both read the same.
+
+**Refusals.** `*StartRefusedError{Reason, TypeID}`, an `ErrForbidden`;
+its message names the reason (`START_NOT_IN`, `START_NOT_ALLOWED`) and the
+Type ID, never a principal or an Item. The API answers `PERMISSION_DENIED`
+/ `NOT_ALLOWED` with that reason's fixed message, byte for byte a
+read-only agent session's: no contract change. Saying why over the API is
+Later.
+
+**Load checks** (`typedef.Check`, so `ParseDir`, `ValidateTypes` and
+`pli type validate` alike): stage 2 (`checkStart`): a Type named `top`
+(`RESERVED_NAME`); `start: {}` (`REQUIRED`); `in: []`, an entry of another
+kind, `creator`, or a `principal:` other than `user:` (`INVALID_VALUE`); a
+malformed `in` entry (`INVALID_NAME`); an entry twice (`DUPLICATE`, on the
+second); `field:` or `container_creator` without `in` or with `top` in it,
+and `nobody` beside another entry (`CONFLICT`, on that entry). Stage 3
+(`CheckStart`): `in` names a loaded Type (`UNKNOWN_TYPE`); `field:` names a
+principal field of every version of every Type in `in` (`UNKNOWN_FIELD`,
+`WRONG_FIELD_TYPE`); `own`, `shared` and create reactions are judged
+against the target's latest block: `START_NOT_IN` (new code) when its `in`
+excludes the container's Type (for a reaction, the source's: the Item is
+created inside it), `CONFLICT` when its `allowed` is `[nobody]`. A draft
+that drops a registered source from `in` is refused with the problem on the
+registered source. **1.5's refusal at registration holds for
+`ValidateTypes`, `pli type validate` and the Types folder read at start,
+not for `RegisterType`**, which runs no checks of the Types together (as
+for every other stage 3 check); at run time `Create` refuses anyway.
+
+**Readings.** A Type with a block reads a section *Who starts it* after *In
+short* (see "Ventoux V6, as built"), and every reading's closing note says
+that the latest version decides who may create one, and where.
+
+**incident@4** is incident@3 with `start: {in: [desk]}` and no `allowed`
+(the owner's decision, option B): an incident of any version is created
+only inside a desk, by anyone on staff who sees it, or by a customer where
+a desk's Type owns incidents. `role:desk_agent` would have shut out the
+employee with the problem, who opens the incident in scenario B (ana, not
+a desk agent); who may open incidents is a later product choice (journal,
+Later: a `role:employee`, say).
+
+**Kernel changes (four):** the `start` block in `typedef` (parse, load
+checks, `START_NOT_IN`, `Start.Admits`); `policy.MayStart` (with
+`matchesEntry` shared with transitions); the check in `Create` with the
+per-create latest-version lookup; the readings' *Who starts it* and closing
+line. No schema, proto, migration or go.mod change; the JSON Schema gained
+`start`.
 
 ## Out of scope for the spike
 

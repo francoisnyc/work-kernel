@@ -1,0 +1,10 @@
+# A chore: only the room's reaction creates one.
+id: w_chore
+version: 1
+fields:
+  - {id: f_kind, type: enum, options: [chore]}
+accepts_reactions:
+  w_room:make_chore: {creates: [f_kind]}
+start:
+  in: [w_room]
+  allowed: [nobody]

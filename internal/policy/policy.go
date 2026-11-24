@@ -123,15 +123,7 @@ func AuthorizeTransition(principal string, roles []string, tr typedef.Transition
 	if len(tr.Allowed) == 0 {
 		return true
 	}
-	if slices.Contains(tr.Allowed, typedef.AllowedPrincipalPrefix+principal) {
-		return true
-	}
-	for _, role := range roles {
-		if slices.Contains(tr.Allowed, typedef.AllowedRolePrefix+role) {
-			return true
-		}
-	}
-	return false
+	return matchesEntry(tr.Allowed, principal, roles, nil)
 }
 
 // AuthorizeTransitionOn is AuthorizeTransition with the Item's fields, so a
@@ -139,10 +131,27 @@ func AuthorizeTransition(principal string, roles []string, tr typedef.Transition
 // made; an unset or empty field matches no one. It judges one principal; a
 // creator entry is not judged here (see MayTransition).
 func AuthorizeTransitionOn(principal string, roles []string, tr typedef.Transition, fields map[string]any) bool {
-	if AuthorizeTransition(principal, roles, tr) {
+	if len(tr.Allowed) == 0 {
 		return true
 	}
-	for _, entry := range tr.Allowed {
+	return matchesEntry(tr.Allowed, principal, roles, fields)
+}
+
+// matchesEntry reports whether one principal matches a role:, principal:
+// or field:<id> entry of an allowed list, the field read from fields (the
+// Item's for a transition, the container's for a start block). It is the
+// one place these entries are matched: MayTransition and MayStart share it.
+// A field matches only the principal it holds (any member of a set).
+func matchesEntry(entries []string, principal string, roles []string, fields map[string]any) bool {
+	if slices.Contains(entries, typedef.AllowedPrincipalPrefix+principal) {
+		return true
+	}
+	for _, role := range roles {
+		if slices.Contains(entries, typedef.AllowedRolePrefix+role) {
+			return true
+		}
+	}
+	for _, entry := range entries {
 		id, ok := strings.CutPrefix(entry, typedef.AllowedFieldPrefix)
 		if !ok {
 			continue

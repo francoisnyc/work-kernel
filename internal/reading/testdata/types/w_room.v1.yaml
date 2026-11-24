@@ -1,0 +1,16 @@
+# A room: the container the start witnesses create in. Its lead names who
+# may start an ask inside it; entering busy makes a chore, which no person
+# starts.
+id: w_room
+version: 1
+initial_state: open
+fields:
+  - {id: f_lead, type: principal}
+states:
+  - {id: open, category: todo}
+  - {id: busy, category: active}
+transitions:
+  - {from: open, to: busy}
+reactions:
+  - {id: make_chore, kind: create, on: enter, state: busy, type: w_chore, version: 1, fields: {f_kind: '"chore"'}}
+own: [w_ask]

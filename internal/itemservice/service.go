@@ -279,7 +279,25 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 		if err != nil {
 			return WriteResult{}, err
 		}
+		// What is not found comes first, before any other refusal: the
+		// container visible to the caller, a customer's container checked
+		// again now that it is locked (childScope: moved out of what admits
+		// them since the check before this transaction, it is hidden), and
+		// an agent session's scopes (at the top level only if it covers the
+		// whole namespace).
 		if err := checkVisible(ctx, tx, req.Principal, scopeID); err != nil {
+			return WriteResult{}, err
+		}
+		if req.ContainerID != nil && policy.CustomerOf(req.Principal) != "" {
+			if err := k.checkSeesInTx(ctx, tx, req.Principal, *req.ContainerID); err != nil {
+				return WriteResult{}, err
+			}
+		}
+		if err := checkInSession(ctx, tx, req.Principal, req.ContainerID); err != nil {
+			return WriteResult{}, err
+		}
+		// Then the start block of the latest version: in, then allowed.
+		if err := k.checkStart(ctx, tx, req, ns); err != nil {
 			return WriteResult{}, err
 		}
 		// Who may narrow it (Jira 2.4b): the Type's to say.
@@ -288,21 +306,9 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 				return WriteResult{}, err
 			}
 		}
-		// A customer's container is checked again now that it is locked
-		// (childScope): moved out of what admits them since the check
-		// before this transaction, it is hidden.
-		if req.ContainerID != nil && policy.CustomerOf(req.Principal) != "" {
-			if err := k.checkSeesInTx(ctx, tx, req.Principal, *req.ContainerID); err != nil {
-				return WriteResult{}, err
-			}
-		}
-		// An agent session creates only inside its scopes (at the top level
-		// only if it covers the whole namespace), and only with the create
-		// power: another write power is not enough. Both before the agent
-		// write rule, which an approval would not get past.
-		if err := checkInSession(ctx, tx, req.Principal, req.ContainerID); err != nil {
-			return WriteResult{}, err
-		}
+		// An agent session creates only with the create power: another
+		// write power is not enough. Before the agent write rule, which an
+		// approval would not get past.
 		if err := checkWritePower(ctx, tx, req.Principal); err != nil {
 			return WriteResult{}, err
 		}

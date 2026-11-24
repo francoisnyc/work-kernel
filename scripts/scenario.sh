@@ -1320,6 +1320,9 @@ step "B2: ana opens a P3 incident; its two goals start from its creation, with t
 refuse ana "FAILED_PRECONDITION INVARIANT_FAILED" item create --type incident@1 --in "$desk" --set "f_title=No priority $w"
 refuse ana "PERMISSION_DENIED FIELD_NOT_WRITABLE" item create --type incident@1 --in "$desk" --set "f_title=Mine $w" \
 	--set f_priority=P4 --set f_due_resolution=2099-01-01T00:00:00Z
+# Only inside a desk: incident@4's start block (in: [desk]) judges every
+# incident version (starting work, step 2).
+refuse ana "PERMISSION_DENIED NOT_ALLOWED" item create --type incident@1 --set "f_title=Nowhere $w" --set f_priority=P3
 b3=$(incident ana P3 "Laptop will not wake")
 began=$(now_ms)
 wait_until 30 "the incident's two goals" has_goals "$b3"

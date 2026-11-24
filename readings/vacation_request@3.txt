@@ -74,4 +74,5 @@ Actions it calls
 
 Not covered by this reading
 - Who can see a given vacation_request: that is set for each Item and its container, not by its Type.
+- Who may create a vacation_request, and where, once a later version exists: the latest version of vacation_request decides, for every version.
 - How the kernel keeps its promises (retries, each write made once, recovery after a failure): the same for every Type.

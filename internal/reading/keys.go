@@ -96,6 +96,9 @@ var KeyParts = map[string][]Part{
 	"own":                         {Own},
 	"shared":                      {Shared},
 	"placement_writable_by":       {PlacementAnyone, PlacementRoles, PlacementKernel},
+	"start.in":                    {StartIn, StartInTop, StartLatest},
+	"start.allowed": {StartWho, WhoStaff, WhoRole, WhoPrincipal, StartWhoField, StartWhoContainerCreator, StartWhoNobody,
+		StartWhoCustomers, StartLatest},
 }
 
 // LeftOut are the keys no sentence reads, each with the reason.

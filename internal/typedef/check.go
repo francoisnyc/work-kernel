@@ -163,6 +163,8 @@ func together(types []*Type) Problems {
 		CheckOffers,
 		// And what a container admits customers to.
 		CheckCustomers,
+		// And where the latest version of a Type lets its Items be created.
+		CheckStart,
 	} {
 		var cps Problems
 		if errors.As(check(types), &cps) {
