@@ -49,8 +49,8 @@ transitions:
 // prep-bot is the agent, holding the preparer role, with a session for
 // itself and sessions acting for ana and for fay, every power in each.
 type purchaseWorld struct {
-	k                  *itemservice.Service
-	ana, bob, fay      item.Principal
+	k                   *itemservice.Service
+	ana, bob, fay       item.Principal
 	bot, forAna, forFay item.Principal
 }
 

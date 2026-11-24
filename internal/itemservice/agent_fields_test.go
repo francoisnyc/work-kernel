@@ -47,9 +47,9 @@ transitions:
 // bot (no role), alone and for ana; scribe (holding af_writer), alone,
 // for ana and for wren. Every session covers the namespace with every power.
 type noteWorld struct {
-	k                                    *itemservice.Service
-	ana, wren                            item.Principal
-	bot, botForAna                       item.Principal
+	k                                   *itemservice.Service
+	ana, wren                           item.Principal
+	bot, botForAna                      item.Principal
 	scribe, scribeForAna, scribeForWren item.Principal
 }
 
