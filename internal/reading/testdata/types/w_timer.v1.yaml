@@ -1,0 +1,36 @@
+# Witness fixture: every kind of timer.
+id: w_timer
+version: 1
+initial_state: open
+
+fields:
+  - {id: f_who,     type: principal}
+  - {id: f_end_at,  type: datetime}
+  - {id: f_seen_at, type: datetime, writable_by: kernel}
+
+states:
+  - id: open
+    category: active
+    timer: {after: 48h, to: expired}
+    acting:
+      - {id: nudge, after: 24h, every: 12h, max: 2, hook: nudge_who}
+  - {id: running,  category: active, at: {field: f_end_at, to: ended}}
+  - id: watching
+    category: active
+    acting:
+      - {id: mark, at: f_end_at, when: 'f_seen_at == null', sets: {f_seen_at: 'cause.at'}, hook: tell_who}
+  - {id: paused,   category: waiting}
+  - {id: expired,  category: canceled}
+  - {id: ended,    category: done}
+
+transitions:
+  - {from: open,     to: running}
+  - {from: open,     to: watching}
+  - {from: open,     to: expired, allowed: ['principal:system:timer']}
+  - {from: running,  to: ended,   allowed: ['principal:system:timer']}
+  - {from: watching, to: paused}
+  - {from: paused,   to: watching}
+
+hooks:
+  - {id: nudge_who, on: timer, kind: action, action: email.notify, reads: [f_who]}
+  - {id: tell_who,  on: timer, kind: action, action: email.notify, reads: [f_who]}

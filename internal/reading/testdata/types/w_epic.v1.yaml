@@ -1,0 +1,23 @@
+# Witness fixture: what links in: an incoming name, a rollup over it, a
+# guard reading it, and a move by another Type's reaction.
+id: w_epic
+version: 1
+initial_state: idle
+
+states:
+  - {id: idle,   category: todo}
+  - {id: active, category: active}
+  - {id: done,   category: done}
+
+transitions:
+  - {from: idle,   to: active, allowed: [nobody]}
+  - {from: active, to: done, guard: 'links.parts.all(p, p.category == "done")'}
+
+incoming:
+  - {name: parts, link: part_of, from: [w_part]}
+
+rollups:
+  - {id: progress, over: parts, count_by: category}
+
+accepts_reactions:
+  'w_part:wake_epic': {moves: [active]}

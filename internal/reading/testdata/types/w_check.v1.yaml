@@ -1,0 +1,32 @@
+# Witness fixture: a check on a move, its hold, an escape (and a hold
+# with none), and a state timer that waits for the hold.
+id: w_check
+version: 1
+initial_state: draft
+
+fields:
+  - {id: f_customer, type: string}
+  - {id: f_amount,   type: int}
+  - {id: f_cost,     type: string}
+  - {id: f_note,     type: string}
+
+states:
+  - {id: draft,   category: todo, timer: {after: 1h, to: lapsed}}
+  - {id: booked,  category: done}
+  - {id: parked,  category: backlog}
+  - {id: lapsed,  category: canceled}
+  - {id: dropped, category: canceled}
+
+transitions:
+  - {from: draft, to: booked}
+  - {from: draft, to: parked}
+  - {from: draft, to: lapsed,  allowed: ['principal:system:timer']}
+  - {from: draft, to: dropped, escape: true}
+  - {from: parked, to: booked}
+  - {from: parked, to: draft}
+
+hooks:
+  - {id: credit, on: transition, from: draft, to: booked, kind: check, action: erp.check_credit,
+     reads: [f_customer, f_amount], writes: [f_cost]}
+  - {id: recheck, on: transition, from: parked, to: booked, kind: check, action: erp.check_credit,
+     reads: [f_customer, f_amount], writes: [f_cost]}

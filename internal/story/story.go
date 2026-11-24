@@ -62,6 +62,8 @@ const (
 	Sees       Verb = "sees"        // sees ITEM with values
 	SeesFields Verb = "sees fields" // sees ITEM fields f, f, ...
 	CannotSee  Verb = "cannot see"
+	Places     Verb = "places"  // places ITEM in ITEM | places ITEM at the top level
+	Narrows    Verb = "narrows" // narrows ITEM to person, person, ...
 )
 
 // Step is one step of the timeline (or of given).
@@ -78,6 +80,9 @@ type Step struct {
 	In      string // creates: the container's name, if any
 
 	To string // moves
+
+	Top     bool     // places: at the top level (In is empty)
+	Readers []string // narrows: people's names
 
 	Link   string // links, unlinks
 	Target string // links, unlinks

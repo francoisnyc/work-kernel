@@ -41,32 +41,9 @@ func (c *cli) typeValidate(ctx context.Context, args []string) error {
 	if len(paths) == 0 {
 		return usagef("want at least one PATH (a Type file or a folder of Types)")
 	}
-	var (
-		sources []*kernelv1.TypeSource
-		local   []*kernelv1.TypeProblem
-	)
-	for _, path := range paths {
-		files, deep, err := typeFiles(path)
-		if err != nil {
-			return err
-		}
-		for _, f := range files {
-			data, err := os.ReadFile(f)
-			if err != nil {
-				return usagef("%v", err)
-			}
-			sources = append(sources, &kernelv1.TypeSource{Name: f, Content: string(data)})
-		}
-		for _, d := range deep {
-			local = append(local, &kernelv1.TypeProblem{
-				Source: d, Severity: kernelv1.TypeProblemSeverity_TYPE_PROBLEM_SEVERITY_ERROR, Code: "FOLDER_TOO_DEEP",
-				Message: "Types are read from a folder and its subfolders, one level deep. " +
-					"Move its Types up one level, or into their own folder of the Types folder",
-			})
-		}
-	}
-	if len(sources) == 0 && len(local) == 0 {
-		return usagef("no .yaml file in %s", strings.Join(paths, ", "))
+	sources, local, err := readSources(paths)
+	if err != nil {
+		return err
 	}
 	res := &kernelv1.ValidateTypesResponse{}
 	if len(sources) > 0 {
@@ -98,6 +75,35 @@ func (c *cli) typeValidate(ctx context.Context, args []string) error {
 		}
 	}
 	return nil
+}
+
+// readSources reads the Type files of PATHs as sources named by their
+// paths, and the folders too deep to read as problems found here.
+func readSources(paths []string) (sources []*kernelv1.TypeSource, local []*kernelv1.TypeProblem, err error) {
+	for _, path := range paths {
+		files, deep, err := typeFiles(path)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, f := range files {
+			data, err := os.ReadFile(f)
+			if err != nil {
+				return nil, nil, usagef("%v", err)
+			}
+			sources = append(sources, &kernelv1.TypeSource{Name: f, Content: string(data)})
+		}
+		for _, d := range deep {
+			local = append(local, &kernelv1.TypeProblem{
+				Source: d, Severity: kernelv1.TypeProblemSeverity_TYPE_PROBLEM_SEVERITY_ERROR, Code: "FOLDER_TOO_DEEP",
+				Message: "Types are read from a folder and its subfolders, one level deep. " +
+					"Move its Types up one level, or into their own folder of the Types folder",
+			})
+		}
+	}
+	if len(sources) == 0 && len(local) == 0 {
+		return nil, nil, usagef("no .yaml file in %s", strings.Join(paths, ", "))
+	}
+	return sources, local, nil
 }
 
 // typeFiles lists the Type files of a PATH: the file itself, or a folder's

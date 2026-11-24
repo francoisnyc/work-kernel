@@ -85,6 +85,28 @@ Ideas noted during the spike, not built yet.
     never heals; revisit if a story needs a delivery that heals later.
   (Ventoux V5)
 
+- **Readings' Later items** (Ventoux V6; design.md, "Ventoux V6, as
+  built"):
+  - **Found by readings:** incident@3 lets any staff member who sees an
+    incident start it, wait for the customer, resolve it or cancel it (four
+    moves with an empty `allowed`); only placement is kept for
+    `desk_agent`. Decide whether those moves belong to desk agents.
+  - **Found by readings:** vacation_request lets anyone who sees it narrow
+    it (already above: "vacation_request and ticket have no placement
+    rules"), so a requester can narrow a request away from its approver.
+  - A kind of sentence for the `start` block when starting work, step 2,
+    lands (who may create an Item of the Type), with its witness. The
+    `create` power (#55) is a session's, not a Type's, so no reading
+    changed for it.
+  - A move kept for a hook (`principal:hook:...` in `allowed`): no hook
+    makes a move today, so "Only the hook `h` may move it" is witnessed on
+    its refusal side only.
+  - The reading on the web UI's Type page; labels instead of field IDs once
+    presentation hints exist.
+  - Long `sets` lists read heavily (sla_goal's moves); patterns (item 8)
+    would shorten them, and the semantic diff (item 7) can compare two
+    readings' sentences by kind and path.
+
 - Serve the Type format's JSON Schema through the API (V2c checks it in as
   a file only), so an authoring tool fetches the schema of the server it
   talks to. (Ventoux 2a, answer 17)
@@ -3203,3 +3225,62 @@ text. The stories (added after the plan's check) start no agent sessions.
 `postgres:17-alpine` from `mirror.gcr.io` after Docker Hub answered 429.
 
 **Open:** the two Later items above. **Next session:** step 2 (the `start` block), Phase A.
+
+## 2026-11-24 — Ventoux V6: plain-language readings, each with a witness (Phase D)
+
+**Built:** `internal/reading` renders a Type as numbered sentences under sections a person reads in order, from
+the Type and the contracts it pins: 35 kinds of sentence and their clauses (83 parts, a closed list), a key
+defining only the terms used, the field list, the actions from their contracts, and what no reading covers.
+Conditions read in words in a closed subset, anything else as what it reads. `ExplainType` (a registered version
+or a draft) and `pli type explain`. Two readings approved by the owner, `readings/vacation_request@3.txt` and
+`readings/incident@3.txt`, compared exactly. design.md: "Ventoux V6, as built" (the wording of every kind), the V6
+row, and the empty-`allowed` sentence corrected ("any staff member who can see the Item, never a customer").
+Roadmap: V5 and V6 under Done.
+
+**Kernel changes (three, counted):** (1) `internal/reading`; (2) `ExplainType` in `kernel.v1` (one operation, six
+messages; `buf breaking` green); (3) `pli type explain`. No schema, write path or item service change; the API's
+draft checks for `ValidateTypes` became shared helpers, with no change in behaviour.
+
+**The story harness grew (counted apart, not kernel):** two steps, `places ITEM in ITEM | at the top level` and
+`narrows ITEM to person, ...`, and a read of a rollup's count, `sees ITEM with ROLLUP.KEY = N`. **And a fix the
+witnesses found:** naming an Item the kernel created filled only the harness's map from Item to name, so a step
+naming one went to no Item at all: a read failed `NOT_FOUND`, a write was refused `NOT_FOUND`, and `cannot see`
+passed whatever the person could see. **`kim cannot see first` in `stories/incident/reopen_on_reply.yaml` was
+vacuous before; it is a real check now, and still passes.**
+
+**Decided, each agreed:** Phase A's defaults (all kinds now; field IDs in code font; expressions as a closed
+subset, held to the kernel's own guard evaluation, plus one witness through `Run` of a false guard; the approved
+readings checked in, no `-update`; the two story steps; `ExplainType` with drafts, users and agents, customers
+refused, exempt from Project; the empty-`allowed` fix; the web UI later). Phase B: the operation lists gain
+`ExplainType` (additive, own commit); the rollup read as a third grammar addition; "Only the hook `h` may move it"
+kept. After the rebase onto #55 (the `create` power): no reading changes, since the power is a session's and no
+Type says anything of it; the key's agent entry stays true.
+
+**Tests:** 32 new test functions (reading 15, story 5, API 6, pli 6), with the eleven witnesses as subtests (21
+fixture Types), 28 condition cases and 3 cases of what a rule reads, and the cite and well-formed tests over the 50 Types of
+`types/` and the fixtures. **Test changes, agreed:** the two operation lists (`TestContract_OnlyPublicOperations`
+and `calls()`) gain `ExplainType`. No other test changed.
+
+**Surprises:** the witnesses caught two errors in my Phase A wording: an acting timer at an instant sets the
+field's instant, not the time it runs, and runs at once when the Item enters after it ("When it is in S and the
+instant in F has passed"); and guards come before `allowed`, so `nobody` reads "Only a reaction moves it". The
+harness bug above. A check's 15-minute budget ran out before a fake's outage ended, the first time I wrote the
+check witness. Capitalising every sentence turned "sla_goal's" into "Sla_goal's", which the approved incident
+reading caught: only my own phrases are capitalised now.
+
+**Numbers.** `go test -race ./...` green: workflow suite with the replay test 335 s, item service 158 s, reading
+12 s, stories 25 s. The story and reading packages 10 times under `-race`: no failure, no race (116 s and 44 s).
+After the rebase onto #55: reading, story, API and pli green under `-race`. Scenario twice on a fresh stack: 105 and
+104 s. Web Playwright 9 in 9.4 s; apps/poc's journeys 4 in 38.3 s; web 464 and apps/poc 408 unit tests.
+
+**Local workarounds, outside the repository (nothing committed):** dockerd started by hand (it stopped between
+phases, again); Go modules for the image builds served from this machine's module cache (`python3 -m
+http.server` as the GOPROXY, builds on the host network; go.sum unchanged); the web and poc images built from sites
+built on this machine with `VITE_DEV_USERS=1`, copied to scratch contexts (their `.dockerignore` leaves `dist`
+out), through a compose override in the scratchpad; Playwright through local configs (excluded in
+`.git/info/exclude`) pointing at this container's Chromium. Docker Hub did not rate-limit. CI builds the real
+images and runs the pinned browser.
+
+**Open:** the readings' Later items (top of this file), the first two found by readings. **Next session:** the
+owner decides on the incident's moves; then starting work, step 2 (the `start` block), which will need a kind of
+sentence of its own.

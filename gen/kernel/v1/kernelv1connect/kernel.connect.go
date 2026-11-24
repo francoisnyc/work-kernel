@@ -84,6 +84,8 @@ const (
 	ItemServiceValidateTypesProcedure = "/kernel.v1.ItemService/ValidateTypes"
 	// ItemServiceListActionsProcedure is the fully-qualified name of the ItemService's ListActions RPC.
 	ItemServiceListActionsProcedure = "/kernel.v1.ItemService/ListActions"
+	// ItemServiceExplainTypeProcedure is the fully-qualified name of the ItemService's ExplainType RPC.
+	ItemServiceExplainTypeProcedure = "/kernel.v1.ItemService/ExplainType"
 	// ItemServiceStartAgentSessionProcedure is the fully-qualified name of the ItemService's
 	// StartAgentSession RPC.
 	ItemServiceStartAgentSessionProcedure = "/kernel.v1.ItemService/StartAgentSession"
@@ -129,6 +131,15 @@ type ItemServiceClient interface {
 	// connector. Users and agents (in a session) may call it; customers, and
 	// agents acting for one, may not (PERMISSION_DENIED / NOT_ALLOWED).
 	ListActions(context.Context, *connect.Request[v1.ListActionsRequest]) (*connect.Response[v1.ListActionsResponse], error)
+	// A Type version in plain language (Ventoux item 6): every state, move,
+	// hook, reaction, timer, hold and visibility rule as one sentence, from
+	// the Type and the action contracts it pins; what a person approves. A
+	// registered version by name, or a draft from sources, checked as
+	// ValidateTypes checks drafts: a draft with problems is a successful call
+	// that lists them, with no reading. Users and agents (in a session) may
+	// call it; customers, and agents acting for one, may not
+	// (PERMISSION_DENIED / NOT_ALLOWED).
+	ExplainType(context.Context, *connect.Request[v1.ExplainTypeRequest]) (*connect.Response[v1.ExplainTypeResponse], error)
 	// Called with an agent's token: mint a session in capability mode, with
 	// the scopes it may touch and the powers it may use. Later calls carry its
 	// ID in the Pli-Agent-Session header.
@@ -221,6 +232,12 @@ func NewItemServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(itemServiceMethods.ByName("ListActions")),
 			connect.WithClientOptions(opts...),
 		),
+		explainType: connect.NewClient[v1.ExplainTypeRequest, v1.ExplainTypeResponse](
+			httpClient,
+			baseURL+ItemServiceExplainTypeProcedure,
+			connect.WithSchema(itemServiceMethods.ByName("ExplainType")),
+			connect.WithClientOptions(opts...),
+		),
 		startAgentSession: connect.NewClient[v1.StartAgentSessionRequest, v1.StartAgentSessionResponse](
 			httpClient,
 			baseURL+ItemServiceStartAgentSessionProcedure,
@@ -261,6 +278,7 @@ type itemServiceClient struct {
 	listTypes         *connect.Client[v1.ListTypesRequest, v1.ListTypesResponse]
 	validateTypes     *connect.Client[v1.ValidateTypesRequest, v1.ValidateTypesResponse]
 	listActions       *connect.Client[v1.ListActionsRequest, v1.ListActionsResponse]
+	explainType       *connect.Client[v1.ExplainTypeRequest, v1.ExplainTypeResponse]
 	startAgentSession *connect.Client[v1.StartAgentSessionRequest, v1.StartAgentSessionResponse]
 	approveWiden      *connect.Client[v1.ApproveWidenRequest, v1.ApproveWidenResponse]
 	linkItems         *connect.Client[v1.LinkItemsRequest, v1.LinkItemsResponse]
@@ -322,6 +340,11 @@ func (c *itemServiceClient) ListActions(ctx context.Context, req *connect.Reques
 	return c.listActions.CallUnary(ctx, req)
 }
 
+// ExplainType calls kernel.v1.ItemService.ExplainType.
+func (c *itemServiceClient) ExplainType(ctx context.Context, req *connect.Request[v1.ExplainTypeRequest]) (*connect.Response[v1.ExplainTypeResponse], error) {
+	return c.explainType.CallUnary(ctx, req)
+}
+
 // StartAgentSession calls kernel.v1.ItemService.StartAgentSession.
 func (c *itemServiceClient) StartAgentSession(ctx context.Context, req *connect.Request[v1.StartAgentSessionRequest]) (*connect.Response[v1.StartAgentSessionResponse], error) {
 	return c.startAgentSession.CallUnary(ctx, req)
@@ -375,6 +398,15 @@ type ItemServiceHandler interface {
 	// connector. Users and agents (in a session) may call it; customers, and
 	// agents acting for one, may not (PERMISSION_DENIED / NOT_ALLOWED).
 	ListActions(context.Context, *connect.Request[v1.ListActionsRequest]) (*connect.Response[v1.ListActionsResponse], error)
+	// A Type version in plain language (Ventoux item 6): every state, move,
+	// hook, reaction, timer, hold and visibility rule as one sentence, from
+	// the Type and the action contracts it pins; what a person approves. A
+	// registered version by name, or a draft from sources, checked as
+	// ValidateTypes checks drafts: a draft with problems is a successful call
+	// that lists them, with no reading. Users and agents (in a session) may
+	// call it; customers, and agents acting for one, may not
+	// (PERMISSION_DENIED / NOT_ALLOWED).
+	ExplainType(context.Context, *connect.Request[v1.ExplainTypeRequest]) (*connect.Response[v1.ExplainTypeResponse], error)
 	// Called with an agent's token: mint a session in capability mode, with
 	// the scopes it may touch and the powers it may use. Later calls carry its
 	// ID in the Pli-Agent-Session header.
@@ -463,6 +495,12 @@ func NewItemServiceHandler(svc ItemServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(itemServiceMethods.ByName("ListActions")),
 		connect.WithHandlerOptions(opts...),
 	)
+	itemServiceExplainTypeHandler := connect.NewUnaryHandler(
+		ItemServiceExplainTypeProcedure,
+		svc.ExplainType,
+		connect.WithSchema(itemServiceMethods.ByName("ExplainType")),
+		connect.WithHandlerOptions(opts...),
+	)
 	itemServiceStartAgentSessionHandler := connect.NewUnaryHandler(
 		ItemServiceStartAgentSessionProcedure,
 		svc.StartAgentSession,
@@ -511,6 +549,8 @@ func NewItemServiceHandler(svc ItemServiceHandler, opts ...connect.HandlerOption
 			itemServiceValidateTypesHandler.ServeHTTP(w, r)
 		case ItemServiceListActionsProcedure:
 			itemServiceListActionsHandler.ServeHTTP(w, r)
+		case ItemServiceExplainTypeProcedure:
+			itemServiceExplainTypeHandler.ServeHTTP(w, r)
 		case ItemServiceStartAgentSessionProcedure:
 			itemServiceStartAgentSessionHandler.ServeHTTP(w, r)
 		case ItemServiceApproveWidenProcedure:
@@ -570,6 +610,10 @@ func (UnimplementedItemServiceHandler) ValidateTypes(context.Context, *connect.R
 
 func (UnimplementedItemServiceHandler) ListActions(context.Context, *connect.Request[v1.ListActionsRequest]) (*connect.Response[v1.ListActionsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kernel.v1.ItemService.ListActions is not implemented"))
+}
+
+func (UnimplementedItemServiceHandler) ExplainType(context.Context, *connect.Request[v1.ExplainTypeRequest]) (*connect.Response[v1.ExplainTypeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kernel.v1.ItemService.ExplainType is not implemented"))
 }
 
 func (UnimplementedItemServiceHandler) StartAgentSession(context.Context, *connect.Request[v1.StartAgentSessionRequest]) (*connect.Response[v1.StartAgentSessionResponse], error) {

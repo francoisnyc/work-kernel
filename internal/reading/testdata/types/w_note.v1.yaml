@@ -1,0 +1,6 @@
+# Witness fixture: shared inside a w_who (a public note).
+id: w_note
+version: 1
+fields:
+  - {id: f_body, type: string}
+customer_fields: [f_body]

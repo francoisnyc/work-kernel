@@ -1,0 +1,30 @@
+# Witness fixture: an enrich hook with a fallback, an action that writes
+# what it made, and a move kept for a hook.
+id: w_order
+version: 1
+initial_state: new
+
+fields:
+  - {id: f_customer, type: string}
+  - {id: f_amount,   type: int}
+  - {id: f_plan,     type: enum, options: [free, pro, enterprise]}
+  - {id: f_invoice,  type: string, writable_by: kernel}
+
+states:
+  - {id: new,      category: triage}
+  - {id: placed,   category: active}
+  - {id: flagged,  category: waiting}
+  - {id: billed,   category: done}
+  - {id: archived, category: done}
+
+transitions:
+  - {from: new,    to: placed}
+  - {from: placed, to: flagged, allowed: ['principal:hook:w_order:plan']}
+  - {from: placed, to: billed}
+  - {from: billed, to: archived}
+
+hooks:
+  - {id: plan, on: enter, state: placed, kind: enrich, action: crm.get_plan, reads: [f_customer], writes: [f_plan],
+     fallback: {f_plan: free}}
+  - {id: invoice, on: enter, state: billed, kind: action, action: erp.create_invoice, reads: [f_customer, f_amount],
+     writes: [f_invoice]}

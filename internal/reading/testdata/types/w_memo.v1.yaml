@@ -1,0 +1,5 @@
+# Witness fixture: not shared inside a w_who (an internal memo).
+id: w_memo
+version: 1
+fields:
+  - {id: f_body, type: string}

@@ -1,0 +1,5 @@
+# Witness fixture: a message inside a w_case.
+id: w_msg
+version: 1
+fields:
+  - {id: f_body, type: string}

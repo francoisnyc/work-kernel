@@ -52,6 +52,8 @@ func TestContract_OnlyPublicOperations(t *testing.T) {
 	want = slices.Insert(want, slices.Index(want, "ListTypes")+1, "ValidateTypes")
 	// Ventoux V1, after ValidateTypes.
 	want = slices.Insert(want, slices.Index(want, "ValidateTypes")+1, "ListActions")
+	// Ventoux item 6, after ListActions.
+	want = slices.Insert(want, slices.Index(want, "ListActions")+1, "ExplainType")
 	if !slices.Equal(got, want) {
 		t.Errorf("ItemService methods = %v, want %v", got, want)
 	}

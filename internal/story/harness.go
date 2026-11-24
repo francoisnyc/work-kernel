@@ -376,6 +376,13 @@ func (h *harness) step(ctx context.Context, i int) error {
 	h.current = i
 	h.mu.Unlock()
 	st := h.steps[i]
+	// An Item the kernel created has a name (a name rule) only once the
+	// harness has looked: look before a step names one, so the step
+	// reaches it instead of no Item at all.
+	if (st.Item != "" && h.id(st.Item) == uuid.Nil) || (st.Target != "" && h.id(st.Target) == uuid.Nil) ||
+		(st.In != "" && h.id(st.In) == uuid.Nil) {
+		h.ensureNamed(ctx)
+	}
 	given := i < len(h.story.Given)
 	p := h.principal(st.Actor)
 	key := "story-" + uuid.NewString()
@@ -406,6 +413,20 @@ func (h *harness) step(ctx context.Context, i int) error {
 		tr, werr = h.k.Transition(ctx, itemservice.TransitionRequest{IdempotencyKey: key, Principal: p,
 			ItemID: h.id(st.Item), ToState: st.To, Fields: fields})
 		res = tr.WriteResult
+	case Places:
+		mv := &itemservice.Move{}
+		if !st.Top {
+			in := h.id(st.In)
+			mv.To = &in
+		}
+		res, werr = h.k.Update(ctx, itemservice.UpdateRequest{IdempotencyKey: key, Principal: p, ItemID: h.id(st.Item), Move: mv})
+	case Narrows:
+		readers := make([]string, len(st.Readers))
+		for i, r := range st.Readers {
+			readers[i] = h.principal(r).Actor
+		}
+		res, werr = h.k.Update(ctx, itemservice.UpdateRequest{IdempotencyKey: key, Principal: p, ItemID: h.id(st.Item),
+			Policy: &itemservice.PolicyPatch{Readers: readers}})
 	case Links, Unlinks:
 		req := itemservice.LinkRequest{IdempotencyKey: key, Principal: p, SourceID: h.id(st.Item), LinkType: st.Link, TargetID: h.id(st.Target)}
 		if st.Verb == Links {
@@ -515,6 +536,13 @@ func (h *harness) read(ctx context.Context, st Step) {
 	switch st.Verb {
 	case Sees:
 		for _, a := range st.Values {
+			if id, k, isRollup := strings.Cut(a.Field, "."); isRollup {
+				if got := it.Rollups[id].Counts[k]; got != a.Value.Int {
+					h.failStep(st, "%s sees %s: %s is %d, want %d", st.Actor, st.Item, a.Field, got, a.Value.Int)
+					return
+				}
+				continue
+			}
 			f, _ := ty.Field(a.Field)
 			sl := fieldSlot(f)
 			want, err := h.conv.value(a.Value, sl)

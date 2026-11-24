@@ -1,0 +1,20 @@
+# Witness fixture: a balance a w_spend takes from (consent) and gives
+# back to; only treasurers set it up.
+id: w_budget
+version: 1
+initial_state: open
+
+fields:
+  - {id: f_holder, type: principal, writable_by: ['role:treasurer']}
+  - {id: f_limit,  type: int,       writable_by: ['role:treasurer']}
+  - {id: f_spent,  type: int,       writable_by: kernel}
+
+states:
+  - {id: open, category: active}
+
+invariants:
+  - {id: over_limit, rule: 'f_spent == null || f_spent <= f_limit'}
+
+accepts_reactions:
+  w_spend:take:      [f_spent]
+  w_spend:give_back: [f_spent]

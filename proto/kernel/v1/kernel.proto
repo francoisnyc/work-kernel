@@ -66,6 +66,15 @@ service ItemService {
   // connector. Users and agents (in a session) may call it; customers, and
   // agents acting for one, may not (PERMISSION_DENIED / NOT_ALLOWED).
   rpc ListActions(ListActionsRequest) returns (ListActionsResponse);
+  // A Type version in plain language (Ventoux item 6): every state, move,
+  // hook, reaction, timer, hold and visibility rule as one sentence, from
+  // the Type and the action contracts it pins; what a person approves. A
+  // registered version by name, or a draft from sources, checked as
+  // ValidateTypes checks drafts: a draft with problems is a successful call
+  // that lists them, with no reading. Users and agents (in a session) may
+  // call it; customers, and agents acting for one, may not
+  // (PERMISSION_DENIED / NOT_ALLOWED).
+  rpc ExplainType(ExplainTypeRequest) returns (ExplainTypeResponse);
   // Called with an agent's token: mint a session in capability mode, with
   // the scopes it may touch and the powers it may use. Later calls carry its
   // ID in the Pli-Agent-Session header.
@@ -1154,6 +1163,80 @@ enum ActionInputTrust {
   ACTION_INPUT_TRUST_ANY = 1;
   // A trusted source (declared, not enforced until Ventoux item 4).
   ACTION_INPUT_TRUST_TRUSTED = 2;
+}
+
+message ExplainTypeRequest {
+  // A registered version: namespaces/{ns}/types/{type}/versions/{n}. Or
+  // leave it empty and give a draft: parent, sources, type_id and version.
+  string name = 1;
+  // A draft's namespace: namespaces/{ns}.
+  string parent = 2;
+  // A draft's files, as ValidateTypes takes them, with the same limits.
+  repeated TypeSource sources = 3;
+  // The draft version to read, among the sources.
+  string type_id = 4;
+  int32 version = 5;
+}
+
+message ExplainTypeResponse {
+  // Absent when the draft has problems.
+  TypeReading reading = 1;
+  // A draft's problems, as ValidateTypes lists them; empty for a
+  // registered version.
+  repeated TypeProblem problems = 2;
+}
+
+// A Type version in plain language. Each sentence is one claim about the
+// Type, and every kind of sentence has a witness: a test that runs the
+// engine and shows it does what the sentence says.
+message TypeReading {
+  // namespaces/{ns}/types/{type}/versions/{n}; for a draft, the name it
+  // would have.
+  string type = 1;
+  // The terms its sentences use, defined once.
+  repeated ReadingTerm key = 2;
+  // The field list: "`f_start`: a date".
+  repeated string fields = 3;
+  repeated ReadingSection sections = 4;
+  // The actions its hooks call, as their contracts describe them.
+  repeated ReadingAction actions = 5;
+  // What no reading of a Type covers.
+  repeated string not_covered = 6;
+  // The whole reading as a person reads it, numbered.
+  string text = 7;
+}
+
+message ReadingTerm {
+  string name = 1;
+  string meaning = 2;
+}
+
+// A heading ("In short", a state, "Who sees it") and its sentences.
+message ReadingSection {
+  string title = 1;
+  repeated ReadingSentence sentences = 2;
+}
+
+message ReadingSentence {
+  // From 1, across the reading.
+  int32 number = 1;
+  // Its kind (move, timer, ...), then the clauses it uses (move.guard,
+  // who.creator, ...): a closed list, documented in docs/design.md.
+  string kind = 2;
+  repeated string parts = 3;
+  string text = 4;
+  // The elements of the Type it reads, by path: transitions[1],
+  // states[2].timer.
+  repeated string paths = 5;
+}
+
+message ReadingAction {
+  // connector.operation@major, as a hook names it.
+  string action = 1;
+  repeated HookKind kinds = 2;
+  bool side_effects = 3;
+  ActionRisk risk = 4;
+  string description = 5;
 }
 
 message LinkItemsRequest {

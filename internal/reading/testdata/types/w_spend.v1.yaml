@@ -1,0 +1,34 @@
+# Witness fixture: a held reaction on its requester's budget (found by
+# the kernel), its undo, and a hook on the undo.
+id: w_spend
+version: 1
+initial_state: draft
+
+fields:
+  - {id: f_amount, type: int}
+
+states:
+  - {id: draft,  category: todo}
+  - {id: asked,  category: waiting, frozen: [f_amount]}
+  - {id: spent,  category: done}
+  - {id: undone, category: canceled}
+
+transitions:
+  - {from: draft, to: asked,  allowed: [creator]}
+  - {from: asked, to: spent,  allowed: ['role:treasurer']}
+  - {from: spent, to: undone, allowed: [creator]}
+
+links:
+  - name: budget
+    inverse: spends
+    targets: [w_budget]
+    max: one
+    writable_by: kernel
+    resolve: {on_enter: asked, field: f_holder, equals: creator, state: open}
+
+hooks:
+  - {id: tell, on: reaction, reaction: give_back, kind: action, action: email.notify, reads: [creator]}
+
+reactions:
+  - {id: take,      kind: held,  on: enter, state: spent,  from: [asked], link: budget, add: {f_spent: f_amount}}
+  - {id: give_back, kind: after, on: enter, state: undone, from: [spent], undoes: take}

@@ -15,6 +15,7 @@
 //	  type get TYPE
 //	  type list
 //	  type validate [--json] PATH...
+//	  type explain [--json] TYPE@VERSION | --draft TYPE@VERSION PATH...
 //	  action list [--json]
 //	  agent start [--for USER] --scopes S,S --powers P,P
 //	  agent approve SESSION SCOPE [--expect-audience A] [--yes] [--request-id ID]  (run it --as the user who approves)
@@ -51,6 +52,11 @@
 // service reads its Types folder) to ValidateTypes and prints one line per
 // problem, "<source>:<line>:<col>: <CODE> typedef <id> v<n>: <message>", or
 // the response with --json; it exits 1 on any ERROR.
+//
+// "type explain" prints a Type version in plain language (ExplainType): a
+// registered one, TYPE@VERSION, or with --draft a version among PATHs read
+// as type validate reads them; a draft's problems print as type validate
+// prints them, and exit 1.
 //
 // Every other response is printed as JSON (protobuf's JSON mapping, with
 // the proto field names). An API error goes to stderr as
@@ -119,6 +125,8 @@ const usage = `usage: pli [--server URL] [--tokens FILE] --as NAME [--session ID
   type get TYPE
   type list
   type validate [--json] PATH...  (draft Types, files or folders, checked against the registered ones; nothing registered)
+  type explain [--json] TYPE@VERSION | --draft TYPE@VERSION PATH...
+                                  (a Type version in plain language: what a person approves)
   action list [--json]            (the actions a Type's hooks may name, with their contracts)
   agent start [--for USER] --scopes S,S --powers P,P
   agent approve SESSION SCOPE [--expect-audience A] [--yes] [--request-id ID]  (run it --as the user who approves)
@@ -205,6 +213,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		"type get":        c.typeGet,
 		"type list":       c.typeList,
 		"type validate":   c.typeValidate,
+		"type explain":    c.typeExplain,
 		"action list":     c.actionList,
 	}
 	name := rest[0] + " " + rest[1]
