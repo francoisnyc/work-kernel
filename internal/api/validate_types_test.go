@@ -2,7 +2,7 @@
 // registered version and registers nothing. A draft with problems is a
 // successful call that lists them. Exempt from policy.Project like
 // ListTypes; users and agents (in a session) may call it, customers and
-// agents acting for one may not. At most 50 sources and 256 KiB of content.
+// agents acting for one may not. At most 200 sources and 1 MiB of content.
 package api_test
 
 import (
@@ -18,7 +18,10 @@ import (
 	"github.com/francoisnyc/work-kernel/gen/kernel/v1/kernelv1connect"
 )
 
-const maxSourceBytes = 256 << 10 // 256 KiB, in all
+const (
+	maxSources     = 200
+	maxSourceBytes = 1 << 20 // 1 MiB, in all
+)
 
 func validateTypes(c kernelv1connect.ItemServiceClient, t *testing.T, parent string, srcs ...*kernelv1.TypeSource) (*kernelv1.ValidateTypesResponse, error) {
 	t.Helper()
@@ -82,11 +85,15 @@ func problemLines(ps []*kernelv1.TypeProblem) string {
 }
 
 // The repository's own Types are all registered: as drafts they pass. They
-// are 50 files, the most one call takes.
+// fit in one call: at most 200 sources and 1 MiB of content in all.
 func TestValidateTypes_TheRepositoryTypes(t *testing.T) {
 	srcs := repoSources(t)
-	if len(srcs) != 50 {
-		t.Fatalf("test bug: types/ has %d files; this test expects 50, the limit", len(srcs))
+	total := 0
+	for _, src := range srcs {
+		total += len(src.Content)
+	}
+	if len(srcs) > maxSources || total > maxSourceBytes {
+		t.Fatalf("test bug: types/ has %d files and %d bytes; one call takes at most %d and %d", len(srcs), total, maxSources, maxSourceBytes)
 	}
 	if ps := problemsAs(t, "ana", srcs...); len(ps) != 0 {
 		t.Errorf("problems:\n%s", problemLines(ps))
@@ -202,9 +209,9 @@ func TestValidateTypes_Limits(t *testing.T) {
 	half := maxSourceBytes / 2
 
 	for name, srcs := range map[string][]*kernelv1.TypeSource{
-		"50 sources":            many(50),
-		"256 KiB":               {padded("a.yaml", half), padded("b.yaml", half)},
-		"one source of 256 KiB": {padded("a.yaml", maxSourceBytes)},
+		"200 sources":         many(maxSources),
+		"1 MiB":               {padded("a.yaml", half), padded("b.yaml", half)},
+		"one source of 1 MiB": {padded("a.yaml", maxSourceBytes)},
 	} {
 		if _, err := validateTypes(as("ana"), t, "namespaces/acme", srcs...); err != nil {
 			t.Errorf("%s: %v", name, err)
@@ -212,8 +219,8 @@ func TestValidateTypes_Limits(t *testing.T) {
 	}
 	for name, srcs := range map[string][]*kernelv1.TypeSource{
 		"no source":               nil,
-		"51 sources":              many(51),
-		"256 KiB and one byte":    {padded("a.yaml", half), padded("b.yaml", half+1)},
+		"201 sources":             many(maxSources + 1),
+		"1 MiB and one byte":      {padded("a.yaml", half), padded("b.yaml", half+1)},
 		"a source without a name": {memo(1), tsrc("", "id: vtnoname\nversion: 1\n")},
 		"two sources of one name": {memo(1), tsrc("m1.yaml", "id: vtother\nversion: 1\n")},
 	} {

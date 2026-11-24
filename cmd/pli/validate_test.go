@@ -183,8 +183,8 @@ func TestPli_TypeValidate_JSON(t *testing.T) {
 // The server's limits come back as an API refusal: exit 1.
 func TestPli_TypeValidate_OverTheLimit(t *testing.T) {
 	files := map[string]string{}
-	for i := range 51 {
-		files[fmt.Sprintf("m%02d.yaml", i)] = fmt.Sprintf("id: vtlim%d\nversion: 1\n", i)
+	for i := range 201 {
+		files[fmt.Sprintf("m%03d.yaml", i)] = fmt.Sprintf("id: vtlim%d\nversion: 1\n", i)
 	}
 	fails(t, "ana", "INVALID_ARGUMENT INVALID_REQUEST", "type", "validate", tree(t, files))
 }
