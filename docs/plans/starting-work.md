@@ -1,7 +1,9 @@
 # Starting work: who may start a workflow, and what else starts one
 
-Status: proposal, 2026-11-23. Nothing here is built, and `docs/design.md`
-is unchanged. The Phase A answers and the review's answers (both
+Status: proposal, 2026-11-23. **Built:** step 1, the `create` power
+(2026-11-23, PR #55), and step 2, the `start` block (2026-11-24; see
+`docs/design.md`, "Starting work, step 2, as built", which wins where the
+two differ). Nothing else is built. The Phase A answers and the review's answers (both
 2026-11-23) are recorded as decisions below. A new table, a new door or a new principal kind needs a second OK
 before it is built, even where this proposal names it.
 
@@ -217,13 +219,16 @@ This follows the connectors report's rule that policy is always latest
 ("Compliance cannot wait for a drain"). It is the first place where one
 version's declaration governs another's Items, so:
 
-- `pli type validate` says, on a draft that adds or changes a `start`
+- **Deferred, not built in step 2** (this note and the next need a
+  severity other than ERROR in `kernel.v1`; journal, Later, with Ventoux
+  item 3): `pli type validate` says, on a draft that adds or changes a `start`
   block, which earlier versions it will govern. That is a note, not a
   problem: it stops nothing (a warning, once warnings exist, Ventoux
   item 3).
 - Registering a later version that **drops** the block loosens every
   version at once. The semantic diff (Ventoux item 7) must report that as
-  a loosening. Until it exists, `pli type validate` says so in its output.
+  a loosening. Until it exists, `pli type validate` says so in its output
+  (**deferred**, as the note above).
 - A create reaction names a target version; its consent is checked on that
   version, as now; `in` is checked on the latest (1.5).
 
@@ -258,14 +263,17 @@ version's declaration governs another's Items, so:
 
 ### 1.6 Order of checks, and refusals
 
-`start` is checked **after the container is found visible** and before
-the agent checks, in the same transaction that locks the container, so a
-container moved or re-fielded between the check and the commit cannot
-slip through. Order:
+`start` is checked **after everything that answers `NOT_FOUND`** and
+before the rest of the agent checks, in the same transaction that locks the
+container, so a container moved or re-fielded between the check and the
+commit cannot slip through. Order (**as built, corrected**: the agent
+session's scopes come in step 1, not 4, since `design.md` puts `NOT_FOUND`
+before any other check):
 
-1. The container is visible to the caller (and to `on_behalf_of`).
-   Otherwise `NOT_FOUND`, as now, and first: the caller learns nothing
-   about a container it cannot see.
+1. The container is visible to the caller (and to `on_behalf_of`), a
+   customer's container is checked again under the lock, and an agent
+   session's scopes cover it. Otherwise `NOT_FOUND`, as now, and first: the
+   caller learns nothing about a container it cannot see.
 2. `in` (latest version): the container's Type, or `top`. Otherwise
    `ErrForbidden`, over the API `PERMISSION_DENIED` / `NOT_ALLOWED`;
    the item service's message names the reason `START_NOT_IN`.
@@ -274,8 +282,10 @@ slip through. Order:
    ContainerFacts)`, which shares its entry matching with `MayTransition`.
    Otherwise `PERMISSION_DENIED` / `NOT_ALLOWED`; the item service's
    message names the reason `START_NOT_ALLOWED`.
-4. Then the session scope, the `create` power and the agent write rule, as
-   now.
+4. Then placement for a narrow, the write and `create` powers and the
+   agent write rule, as now. (A customer's `own`/`shared` check still runs
+   before the transaction too, so for a customer it refuses before `in`;
+   over the API both read `NOT_ALLOWED`.)
 
 No new error code, and no contract change: the two reasons go in the
 item service's message only (decided at review, 2026-11-23). The API
@@ -786,7 +796,7 @@ The SOC domain, in these pieces:
 | Step | Kernel change | Schema | API (`kernel.v1`) | Needs a second OK |
 | --- | --- | --- | --- | --- |
 | 1 | `create` power on `Create` | none | none | no (answer 1) |
-| 2 | `start` block; `policy.MayStart`; load checks; latest version governs | none | none (reasons in the item service's message only; the API returns `NOT_ALLOWED`) | no |
+| 2 (**built** 2026-11-24) | `start` block; `policy.MayStart`; load checks; latest version governs; incident@4 with `in: [desk]` (option B) | none | none (reasons in the item service's message only; the API returns `NOT_ALLOWED`) | no |
 | 2b | the same "latest version governs" rule for placement (`placement_writable_by`), its own small step | none | none | no (review answer 2) |
 | 3 | first the intake kill switch (required before anything inbound); then source contracts (with `x-pli-personal`); intakes; the inbox; `intake:` principal; `Internal().Create`; the inbound endpoint and its conformance; the vendor precedents verified | `inbox` | a `SOURCE` kind in the actions' enum; the inbound endpoint is HTTP, outside `kernel.v1` | **yes**: a table, a door, a principal kind |
 | 4 | correlation: `external_keys`, `create_or_correlate`, `when_closed`, `unmatched` | `external_keys` | none | **yes**: a table |
