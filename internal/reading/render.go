@@ -15,7 +15,7 @@ import (
 	"github.com/francoisnyc/work-kernel/internal/typedef"
 )
 
-// The order of a reading: In short; Who writes what; Links; one section
+// The order of a reading: In short; Who starts it; Who writes what; Links; one section
 // per state, in the Type's order (what entering it does, what happens
 // while it is there, each move out with what it waits for, or that
 // nothing leaves); When something is created inside it; What other Types
@@ -38,6 +38,7 @@ type renderer struct {
 func Read(t *typedef.Type, cat *contracts.Catalog) *Reading {
 	r := &renderer{t: t, cat: cat, ctx: newCtx(t)}
 	r.inShort()
+	r.whoStarts()
 	r.whoWrites()
 	r.links()
 	if !noLifecycle(t) {
@@ -61,6 +62,9 @@ func Read(t *typedef.Type, cat *contracts.Catalog) *Reading {
 		Actions:  r.actions(),
 		NotCovered: []string{
 			"Who can see a given " + t.ID + ": that is set for each Item and its container, not by its Type.",
+			// The latest version's start block judges a create of every
+			// version, so no reading of one version can say it.
+			"Who may create " + withArticle(t.ID) + ", and where, once a later version exists: the latest version of " + t.ID + " decides, for every version.",
 			"How the kernel keeps its promises (retries, each write made once, recovery after a failure): the same for every Type.",
 		},
 	}
@@ -112,6 +116,71 @@ func (r *renderer) inShort() {
 		r.say([]Part{Invariant}, []string{at("invariants[%d]", i)},
 			at("Every write keeps this true: %s; a write that would not is refused (%s).", r.ctx.condition(inv.Rule), inv.ID))
 	}
+}
+
+// --- Who starts it ---
+
+// whoStarts reads the start block: where an Item of the Type is created,
+// who creates one (every entry reads the container), and that the block
+// holds for every version while this version is the latest.
+func (r *renderer) whoStarts() {
+	t := r.t
+	s := t.Start
+	if s == nil {
+		return
+	}
+	r.section("Who starts it")
+	path := []string{"start"}
+	subject := capitalize(withArticle(t.ID))
+	if len(s.In) > 0 {
+		var types []string
+		top := false
+		for _, id := range s.In {
+			if id == typedef.StartTop {
+				top = true
+			} else {
+				types = append(types, withArticle(id))
+			}
+		}
+		switch {
+		case len(types) == 0:
+			r.say([]Part{StartIn, StartInTop}, path, subject+" is created only at the top level.")
+		case top:
+			r.say([]Part{StartIn, StartInTop}, path, subject+" is created only inside "+joinOr(types)+", or at the top level.")
+		default:
+			r.say([]Part{StartIn}, path, subject+" is created only inside "+joinOr(types)+".")
+		}
+	}
+	if s.Nobody() {
+		r.say([]Part{StartWho, StartWhoNobody}, path, "No person creates "+withArticle(t.ID)+": only a reaction does.")
+	} else {
+		parts := []Part{StartWho}
+		var phrases []string
+		if len(s.Allowed) == 0 {
+			phrases, parts = append(phrases, "any staff member who can see the container"), append(parts, WhoStaff)
+		}
+		for _, e := range s.Allowed {
+			switch {
+			case strings.HasPrefix(e, typedef.AllowedRolePrefix):
+				phrases, parts = append(phrases, "anyone with the role "+strings.TrimPrefix(e, typedef.AllowedRolePrefix)), append(parts, WhoRole)
+			case strings.HasPrefix(e, typedef.AllowedFieldPrefix):
+				phrases, parts = append(phrases, "whoever `"+strings.TrimPrefix(e, typedef.AllowedFieldPrefix)+"` of the container names"),
+					append(parts, StartWhoField)
+			case e == typedef.AllowedContainerCreator:
+				phrases, parts = append(phrases, "anyone who took part in creating the container"), append(parts, StartWhoContainerCreator)
+			default: // principal:user:<id>, the only principal a block may name
+				phrases, parts = append(phrases, "`"+strings.TrimPrefix(e, typedef.AllowedPrincipalPrefix)+"`"), append(parts, WhoPrincipal)
+			}
+		}
+		who := strings.Join(phrases, ", or ")
+		if len(phrases) > 1 {
+			who += ","
+		}
+		r.say(append(parts, StartWhoCustomers), path,
+			capitalize(who)+" creates one; a customer creates one only where a container lets them.")
+	}
+	r.say([]Part{StartLatest}, path,
+		at("While this is the latest version of %s, these rules hold for creating %s of any version.", t.ID, withArticle(t.ID)))
 }
 
 // --- Who writes what ---
@@ -1096,7 +1165,7 @@ var keyTerms = []struct {
 		regexp.MustCompile(`\bstaff\b|` + "` names|with the role|holders of")},
 	{"the kernel", "the system that runs the rules of every Type; it is never a person.", regexp.MustCompile(`\bkernel\b`)},
 	{"the timer", "the kernel's clock; it makes only the moves a Type gives it.", regexp.MustCompile(`\bthe timer\b`)},
-	{"a hold", "while a check or a reaction decides a move, the Item waits where it is; that wait is a hold.", regexp.MustCompile(`\bhold\b`)},
+	{"a hold", "while a check or a reaction decides a move, the Item waits where it is; that wait is a hold.", regexp.MustCompile(`\b(a|the|that) hold\b`)}, // the noun, not the verb ("rules hold", "hold the same")
 	{"a reaction", "a write a Type makes on another Item when something happens to one of its own; the other Item's Type must allow it.",
 		regexp.MustCompile(`\breactions?\b`)},
 }

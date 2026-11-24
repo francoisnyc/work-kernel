@@ -128,8 +128,7 @@ const (
 	PlacementKernel    Part = "placement.kernel"
 
 	// Who starts it (starting work, step 2): the latest version's start
-	// block, which judges a create of every version. Phase B stub:
-	// declared and listed, not rendered yet.
+	// block, which judges a create of every version.
 	StartIn                  Part = "start_in"                    // A {type} is created only inside {types}.
 	StartInTop               Part = "start_in.top"                // , or at the top level (or: only at the top level)
 	StartWho                 Part = "start_who"                   // {Who} creates one[; clauses].
