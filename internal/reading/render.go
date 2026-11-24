@@ -63,8 +63,10 @@ func Read(t *typedef.Type, cat *contracts.Catalog) *Reading {
 		NotCovered: []string{
 			"Who can see a given " + t.ID + ": that is set for each Item and its container, not by its Type.",
 			// The latest version's start block judges a create of every
-			// version, so no reading of one version can say it.
-			"Who may create " + withArticle(t.ID) + ", and where, once a later version exists: the latest version of " + t.ID + " decides, for every version.",
+			// version, and its placement rule a move or a narrow of an
+			// Item of every version, so no reading of one version can
+			// say either.
+			"Who may create " + withArticle(t.ID) + ", and where, and who may move or narrow one, once a later version exists: the latest version of " + t.ID + " decides, for every version.",
 			"How the kernel keeps its promises (retries, each write made once, recovery after a failure): the same for every Type.",
 		},
 	}
