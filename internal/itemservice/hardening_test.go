@@ -178,15 +178,21 @@ func TestHardening_Reply2Note2Comment3_StayWhereTheyWereWritten(t *testing.T) {
 	w.mk(t, w.kim, "reply", 2, &kims, map[string]any{"f_body": "thanks"})
 }
 
-// Items of the older versions keep their version's rules: an incident@2,
-// its goals (sla_goal@1) and a reply@1 are placed, and the goals moved, as
-// before. design.md says so; moving Items to a new version is Later.
-func TestHardening_OlderVersionsKeepTheirRules(t *testing.T) {
+// Items of the older versions keep their version's lifecycle, and are
+// placed by the latest version's rule (starting work, step 2b): an
+// incident@2 still gets sla_goal@1 goals, and is narrowed by desk agents
+// only, as incident@3 says; a reply@1 stays where it was written, as
+// reply@2 says. Moving Items to a new version is Later.
+func TestHardening_OlderVersions_KeepTheirLifecycle_PlacedByTheLatestRule(t *testing.T) {
 	w := newHardWorld(t)
 	inc, goals := w.incident(t, w.ana, 2)
 	if err := w.update(t, w.ana, inc, itemservice.UpdateRequest{Policy: &itemservice.PolicyPatch{
+		Readers: []string{w.ana.Actor, w.sam.Actor}}}); !placementRefused(err) {
+		t.Errorf("ana (no desk_agent) narrows an incident@2: %v; want PlacementNotWritableError, by the latest version's rule", err)
+	}
+	if err := w.update(t, w.sam, inc, itemservice.UpdateRequest{Policy: &itemservice.PolicyPatch{
 		Readers: []string{w.ana.Actor, w.sam.Actor}}}); err != nil {
-		t.Errorf("ana narrows an incident@2: %v; want it accepted, as before", err)
+		t.Errorf("sam (desk_agent) narrows an incident@2: %v; want it accepted", err)
 	}
 	g, err := w.k.Get(testCtx(t), w.sam, goals[0])
 	if err != nil {
@@ -196,7 +202,7 @@ func TestHardening_OlderVersionsKeepTheirRules(t *testing.T) {
 		t.Errorf("incident@2's goal is sla_goal@%d; want @1, as before", g.TypeVersion)
 	}
 	reply := w.mk(t, w.sam, "reply", 1, &inc, map[string]any{"f_body": "on it"})
-	if err := w.update(t, w.sam, reply, narrowTo(w.sam)); err != nil {
-		t.Errorf("sam narrows a reply@1: %v; want it accepted, as before", err)
+	if err := w.update(t, w.sam, reply, narrowTo(w.sam)); !placementRefused(err) {
+		t.Errorf("sam narrows a reply@1: %v; want PlacementNotWritableError, by the latest version's rule", err)
 	}
 }
