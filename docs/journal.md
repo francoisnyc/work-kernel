@@ -6,6 +6,34 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
+- **Found by the Camunda bake-off** (docs/research/camunda-bakeoff.md, "Gaps found"; nothing built):
+  - **A creator can pick an old Type version.** After `purchase@2` (the CFO
+    step) was live, `item create --type purchase@1` still worked and the
+    CFO was skipped. Starting work, steps 1 and 2b ("the latest version's
+    rules govern creates") would close it; it matters more than its place
+    in that plan suggests, because the failure is an approval.
+  - **The worker acts on workflow input without reading the Item.** An
+    `item` workflow started by hand on the Temporal dev server, with
+    `State: approved` and a pending `place_order`, ran the action for an
+    Item still in `manager_review` (the ERP stub made an invoice; the
+    kernel wrote `f_order_id`). The dev server has no sign-on. Decide
+    whether an action hook re-reads the Item's state (or the entry's seq)
+    before calling out, and what a production Temporal must enforce.
+  - **No "only the requester" or "only the decider" rule for a field.**
+    Anyone who sees a draft edits it before its owner submits (an agent
+    with `edit_fields` changed the amount; submit then froze the agent's
+    values). A decision's reason can be planted before the decider acts,
+    which defeats `required` (the Requests area already lists "a decision
+    field only the approver may write"). `writable_by: [creator]` and
+    `writable_by: ['field:f_x']` would cover both.
+  - **Queues.** No "what waits on me" search, no way to ask the caller's
+    roles, no claim tied to the caller (`sets` has no `caller`): the
+    bake-off's inbox rebuilt it from `GetType` with one search per move.
+  - **Stories for Types outside `types/`.** The story runner reads only
+    `../../types` and `../../stories`; a spike's Types cannot use it.
+  - **A Type goes live only at start; a request in flight cannot move to
+    a new version.** Camunda migrated one with one call.
+
 - **Starting work, step 1's Later items** (docs/plans/starting-work.md, 1.0):
   - **Reaction creates by an agent without `create`.** An agent session
     holding `transition:*` (or any transition power) but not `create` may
@@ -3311,3 +3339,61 @@ someone typed; a request's own count and size are not that, and the new clause s
 before the name check, so an oversized request with a nameless source gets the size refusal (same code and field).
 
 **Open:** none. **Next session:** build_step@1 rebased onto this (its `TestPli_Types` count is its own).
+
+## 2026-11-24 — Bake-off: the approvals pilot on Camunda 8.10 and on the kernel (a spike, no kernel change)
+
+**Built:** `spikes/camunda-bakeoff/` for `docs/plans/camunda-bakeoff.md`, run without waiting for answers. The
+same purchase approval (manager, then a finance queue from 1,000; an agent prepares, never decides) and an
+access request, twice: on the kernel as three Types in YAML with the agent as a script over the agent session
+API, and on Camunda 8.10 Self-Managed (the official lightweight Compose setup with H2, authorizations on, BPMN,
+a DMN table, forms, the AI Agent Task in its own process and connectors runtime). One deterministic, gullible
+model stub and the repo's `connstub` serve both. `scripts/run-all.sh` runs the four tests from clean in about
+ten minutes; the evidence is in `results/`. The result is `docs/research/camunda-bakeoff.md`. **No kernel code
+changed; nothing on `main`.**
+
+**Result:** the report recommends **Camunda plus a layer of the kernel's ideas** for the pilot. Camunda, hardened,
+refused all 17 of the compromised agent's attempts; with its default connectors role 5 succeeded, one an order
+with no approval. The kernel refused 26 of 29; two got through (editing a draft before its owner submits it;
+planting a rejection reason), and the Temporal dev server let a hand-started workflow place an order for a
+purchase still waiting on its manager. Camunda's Tasklist was the inbox for four small forms; the kernel's had
+to be scripted. The kernel is about 185 MB idle and up in 7 s against 1.3 GB and 48 s, and free in production
+where Camunda needs an Enterprise licence.
+
+**The review changed the answer.** The draft recommended the kernel. A reviewer agent that built nothing argued
+Camunda's case and tested both running systems: it found the audit log knows who really submitted a request
+(built into the processes: the identity hole closed), that "nothing to build" for the inbox was wrong without
+forms (built), and four kernel-side holes the first attack list never tried (each re-run and confirmed before
+it went in the report). Its notes and what changed are a section of the report.
+
+**Surprises:**
+- `pli type explain` found a hole in my own Type ("anyone who can see it ... narrows who sees it"), and the load
+  check refused my first draft (a move cleared a field its state froze). Both did their job on a Type written
+  in a hurry by someone who had not written one before.
+- The kernel's checks did not find the holes that mattered: open drafts and the planted reason are things the
+  Type format cannot say, so no reading mentions them.
+- On Camunda, the right to start a process is the right to start it at any step ("start instructions"); the
+  permission a worker needs to finish its job is the one that rewrites the process's variables; a misspelled
+  variable deploys and stops the first real request with an incident. Starting by message, a called process for
+  the agent, and a task-worker role without COMPLETE for candidates were the fixes.
+- Camunda's AI Agent connector streams from its model and wants OpenAI's separate usage chunk; FEEL's
+  `string()` of a context is not JSON. Stub fidelity, not findings.
+
+**Assumptions** are numbered in the report (17). The two that shaped the work: no `ANTHROPIC_API_KEY`, so the
+live-model run was skipped; `docs/roadmap.md` has no "pilot candidate: approvals" section, so the brief's
+scenario was taken as the pilot.
+
+**Not done:** Camunda's Modeler, Copilot (needs a model key), linter, process tests and task listeners; a
+production-like Camunda; the kernel's stories for the spike's Types; timers; load.
+
+**Numbers.** `go vet ./...` and `go test ./...` green (25 packages; the spike adds one small test package for
+the stub). Both rounds took about an hour and a half on the session's clock, inside the one-day box.
+
+**Local workarounds (nothing committed outside the spike):** dockerd started by hand; one Docker Hub pull
+failed and worked on the retry; the kernel's programs ran on the host from `go build` (image builds cannot use
+the session's proxy); docs.camunda.io was unreachable, so Camunda's docs were read from `camunda/camunda-docs`
+on GitHub; BPMN diagrams generated with `bpmn-auto-layout` in the scratchpad.
+
+**Open:** the six Later items at the top of this file, the first two before anything else is built on the
+kernel. The owner decides whether the pilot's purpose is to deliver approvals (the report's answer) or to
+mature the kernel (then the kernel, after its gaps 1 to 5). **Next session:** the owner's decision on the
+report; otherwise starting work, step 2, as before.
