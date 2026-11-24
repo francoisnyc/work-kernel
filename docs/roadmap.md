@@ -91,7 +91,7 @@ General features, under "Pilots serve generality", each with the bake-off
 attack that found it as its test:
 
 1. **An effect re-checks what caused it** (`docs/design.md`, PR #65).
-   **Built** (PR #70; `docs/design.md`, "An effect re-checks what caused
+   **Built** (PR #71; `docs/design.md`, "An effect re-checks what caused
    it, as built"): the bake-off's forged workflow start now places no
    order. What it leaves open is listed under "Holes found by the
    bake-off".
@@ -249,7 +249,7 @@ compromised agent attacking the approvals scenario; 31 of 36 attempts were
 refused). Fixed in this order, each with the attack that found it as its
 test:
 
-1. **Done (PR #70): an effect re-checks what caused it.** A forged workflow
+1. **Done (PR #71): an effect re-checks what caused it.** A forged workflow
    start (on an unauthenticated development Temporal) made an action hook
    place an order for an Item still waiting on its manager: the hook
    trusted the workflow's input. Before any effect, the worker has the item
