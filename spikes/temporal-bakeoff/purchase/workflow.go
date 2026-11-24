@@ -35,12 +35,15 @@ const (
 	StateManagerReview = "manager_review"
 	StateFinanceQueue  = "finance_queue"
 	StateFinanceReview = "finance_review"
+	StateCFOReview     = "cfo_review"
 	StateApproved      = "approved"
 	StateRejected      = "rejected"
 	StateFailed        = "failed"
 
 	// From this amount, finance decides after the manager.
 	FinanceFrom = 1000
+	// Over this amount, the CFO decides after finance (the owner's change).
+	CFOOver = 5000
 )
 
 // Input is what the requester asked. It never changes.
@@ -166,6 +169,8 @@ func (w *run) checkDecide(a DecideArgs) error {
 		err = decider(a.Actor, w.st.Requester, w.st.Manager, "")
 	case StateFinanceReview:
 		err = decider(a.Actor, w.st.Requester, w.st.ClaimedBy, "finance")
+	case StateCFOReview:
+		err = decider(a.Actor, w.st.Requester, "", "cfo")
 	default:
 		return refuse(ErrConflict, "no decision is open")
 	}
@@ -175,13 +180,15 @@ func (w *run) checkDecide(a DecideArgs) error {
 	return err
 }
 
-func (w *run) decide(a DecideArgs) {
+func (w *run) decide(ctx workflow.Context, a DecideArgs) {
 	step := w.st.State
 	switch {
 	case !a.Approve:
 		w.st.State, w.st.Reason = StateRejected, strings.TrimSpace(a.Reason)
 	case step == StateManagerReview && w.st.Amount >= FinanceFrom:
 		w.st.State = StateFinanceQueue
+	case step == StateFinanceReview && w.st.Amount > CFOOver && cfoStepApplies(ctx):
+		w.st.State = StateCFOReview
 	default:
 		w.st.State = StateApproved
 	}
@@ -218,8 +225,8 @@ func (w *run) register(ctx workflow.Context) error {
 	}, w.checkRelease); err != nil {
 		return err
 	}
-	return set(UpdateDecide, func(_ workflow.Context, a DecideArgs) error {
-		w.decide(a)
+	return set(UpdateDecide, func(ctx workflow.Context, a DecideArgs) error {
+		w.decide(ctx, a)
 		return nil
 	}, w.checkDecide)
 }
@@ -229,7 +236,7 @@ func (w *run) row() store.Row {
 	data, _ := json.Marshal(w.st) // a struct of strings and numbers: cannot fail
 	r := store.Row{ID: w.st.ID, Kind: Kind, Requester: w.st.Requester, State: w.st.State, ClaimedBy: w.st.ClaimedBy,
 		PrepareOpen: w.st.State == StateManagerReview, Data: data,
-		Readers: []string{w.st.Requester, "role:finance", "role:preparer"}, WaitingOn: []string{}}
+		Readers: []string{w.st.Requester, "role:finance", "role:cfo", "role:preparer"}, WaitingOn: []string{}}
 	if w.st.Manager != "" {
 		r.Readers = append(r.Readers, w.st.Manager)
 	}
@@ -238,6 +245,8 @@ func (w *run) row() store.Row {
 		r.WaitingOn = []string{w.st.Manager}
 	case StateFinanceQueue, StateFinanceReview:
 		r.WaitingOn = []string{"role:finance"}
+	case StateCFOReview:
+		r.WaitingOn = []string{"role:cfo"}
 	}
 	return r
 }

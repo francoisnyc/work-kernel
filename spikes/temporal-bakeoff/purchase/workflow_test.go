@@ -17,6 +17,7 @@ var (
 	bob  = auth.Principal{ID: "user:bob"}
 	fay  = auth.Principal{ID: "user:fay", Roles: []string{"finance"}}
 	gus  = auth.Principal{ID: "user:gus", Roles: []string{"finance"}}
+	cora = auth.Principal{ID: "user:cora", Roles: []string{"cfo"}}
 	bot  = auth.Principal{ID: "agent:prep-bot", Roles: []string{"preparer"}}
 	evil = auth.Principal{ID: "agent:prep-bot", Roles: []string{"preparer", "finance"}} // an agent wrongly given finance
 )
@@ -152,5 +153,25 @@ func TestRelease_PutsItBackInTheQueue(t *testing.T) {
 		step{UpdateClaim, ActorArgs{Actor: gus}, false})
 	if st.State != StateFinanceReview || st.ClaimedBy != "user:gus" {
 		t.Fatalf("state %s, claimed by %s", st.State, st.ClaimedBy)
+	}
+}
+
+func TestOverFiveThousand_TheCFODecidesAfterFinance(t *testing.T) {
+	st, order := play(t, 6000,
+		approve(bob),
+		step{UpdateClaim, ActorArgs{Actor: fay}, false},
+		approve(fay),
+		denied(approve(fay)), // finance has decided; this step is the CFO's
+		denied(approve(bot)),
+		approve(cora))
+	if st.State != StateApproved || order == "" {
+		t.Fatalf("state %s, order %q", st.State, order)
+	}
+}
+
+func TestFiveThousandExactly_NeedsNoCFO(t *testing.T) {
+	st, order := play(t, 5000, approve(bob), step{UpdateClaim, ActorArgs{Actor: fay}, false}, approve(fay))
+	if st.State != StateApproved || order == "" {
+		t.Fatalf("state %s, order %q", st.State, order)
 	}
 }

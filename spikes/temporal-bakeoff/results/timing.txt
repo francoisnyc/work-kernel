@@ -2,3 +2,5 @@ step1-start 2026-11-24T03:19:48Z
 step1-end 2026-11-24T03:24:57Z
 step2-start 2026-11-24T03:25:27Z   (the builder agent's own clock: start of its work)
 step2-end 2026-11-24T03:29:21Z
+change-start 2026-11-24T03:31:39Z
+change-end 2026-11-24T03:32:14Z   (code and tests for the CFO change; the in-flight experiment came after)

@@ -38,6 +38,7 @@ func env(name, fallback string) string {
 func main() {
 	tokensPath := flag.String("tokens", "", "the dev-token file (the team's sign-in stand-in)")
 	listen := flag.String("listen", "127.0.0.1:28080", "address of the HTTP API")
+	flag.StringVar(&purchase.Deployed, "purchase-code", purchase.Deployed, "bake-off only: before, naive or patched (see purchase/change.go)")
 	flag.Parse()
 	if err := run(*tokensPath, *listen); err != nil {
 		log.Fatal(err)
