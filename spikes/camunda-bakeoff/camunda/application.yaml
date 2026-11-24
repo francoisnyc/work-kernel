@@ -1,0 +1,38 @@
+# Camunda 8.10 orchestration cluster (Zeebe + Operate + Tasklist + Admin) for
+# the bake-off. Based on camunda-distributions' lightweight
+# configuration/application-h2.yaml (H2 secondary storage, no
+# Elasticsearch), with two changes the docs recommend for anything
+# beyond a demo: the API is protected and authorizations are enforced.
+management.endpoints.configprops.show-values: always
+camunda:
+  backup:
+    webapps:
+      enabled: false
+  system:
+    cpu-thread-count: "3"
+    io-thread-count: "3"
+  security:
+    authentication:
+      method: "basic"
+      unprotectedApi: false
+    authorizations:
+      enabled: true
+    initialization:
+      users:
+        - username: "demo"
+          password: "demo"
+          name: "Demo Admin"
+          email: "demo@demo.com"
+      defaultRoles.admin.users:
+        - "demo"
+  data:
+    secondary-storage:
+      type: rdbms
+      rdbms:
+        url: jdbc:h2:file:./camunda-data/h2db
+        username: sa
+        password:
+        flushInterval: PT0.5S
+        queueSize: 1000
+  mcp:
+    enabled: false

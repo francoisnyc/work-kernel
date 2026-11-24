@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Bake-off: the purchase approval on Camunda 8.10 (v1). Started by the requester publishing the
+     message "purchase-submitted" with amount, vendor, costCentre, justification (untrusted), requester and
+     requestRef. A message start, not a none start: people may publish the message but not create
+     instances, so they cannot use start instructions to skip the approvals. The agent prepares in its
+     own process (call activity prepare-decision); only `preparation` comes back. Diagram (bpmndi)
+     generated with bpmn-auto-layout. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" xmlns:modeler="http://camunda.org/schema/modeler/1.0" id="purchase-definitions" targetNamespace="http://bakeoff.example/purchase" exporter="hand-written" modeler:executionPlatform="Camunda Cloud" modeler:executionPlatformVersion="8.10.0">
+  <bpmn:process id="purchase" name="Purchase approval" isExecutable="true">
+    <bpmn:startEvent id="submitted" name="Purchase submitted">
+      <bpmn:messageEventDefinition id="submitted_msg" messageRef="msg_submitted" />
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="f1" sourceRef="submitted" targetRef="find_manager" />
+    <bpmn:serviceTask id="find_manager" name="Find the manager" zeebe:modelerTemplate="io.camunda.connectors.HttpJson.v2">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="io.camunda:http-json:1" retries="3" />
+        <zeebe:ioMapping>
+          <zeebe:input source="noAuth" target="authentication.type" />
+          <zeebe:input source="GET" target="method" />
+          <zeebe:input source="=&#34;http://host.docker.internal:18083/employees/user:&#34; + requester + &#34;/manager&#34;" target="url" />
+          <zeebe:input source="20" target="connectionTimeoutInSeconds" />
+          <zeebe:input source="20" target="readTimeoutInSeconds" />
+        </zeebe:ioMapping>
+        <zeebe:taskHeaders>
+          <zeebe:header key="resultExpression" value="={manager: substring after(response.body.manager, &#34;user:&#34;)}" />
+        </zeebe:taskHeaders>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="f2" sourceRef="find_manager" targetRef="prepare" />
+    <bpmn:callActivity id="prepare" name="Agent prepares the decision">
+      <bpmn:extensionElements>
+        <zeebe:calledElement processId="prepare-decision" propagateAllChildVariables="false" propagateAllParentVariables="false" />
+        <zeebe:ioMapping>
+          <zeebe:input source="={kind: &#34;purchase&#34;, amount: amount, vendor: vendor, cost_centre: costCentre, justification: justification}" target="request" />
+          <zeebe:output source="=preparation" target="preparation" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+    </bpmn:callActivity>
+    <bpmn:sequenceFlow id="f3" sourceRef="prepare" targetRef="manager_decision" />
+    <bpmn:userTask id="manager_decision" name="Manager decides">
+      <bpmn:extensionElements>
+        <zeebe:userTask />
+        <zeebe:assignmentDefinition candidateUsers="=[manager]" />
+        <zeebe:ioMapping>
+          <zeebe:output source="=managerApproved" target="managerApproved" />
+          <zeebe:output source="=reason" target="reason" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+    </bpmn:userTask>
+    <bpmn:sequenceFlow id="f4" sourceRef="manager_decision" targetRef="manager_gw" />
+    <bpmn:exclusiveGateway id="manager_gw" name="Manager&#39;s answer" />
+    <bpmn:sequenceFlow id="m_rejected" name="Rejected" sourceRef="manager_gw" targetRef="notify_rejected">
+      <bpmn:conditionExpression xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="bpmn:tFormalExpression">=managerApproved != true</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="m_small" name="Approved, under 1,000" sourceRef="manager_gw" targetRef="place_order">
+      <bpmn:conditionExpression xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="bpmn:tFormalExpression">=managerApproved = true and amount &lt; 1000</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="m_large" name="Approved, 1,000 and over" sourceRef="manager_gw" targetRef="finance_decision">
+      <bpmn:conditionExpression xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="bpmn:tFormalExpression">=managerApproved = true and amount &gt;= 1000</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:userTask id="finance_decision" name="Finance decides">
+      <bpmn:extensionElements>
+        <zeebe:userTask />
+        <zeebe:assignmentDefinition candidateGroups="finance" />
+        <zeebe:ioMapping>
+          <zeebe:output source="=financeApproved" target="financeApproved" />
+          <zeebe:output source="=reason" target="reason" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+    </bpmn:userTask>
+    <bpmn:sequenceFlow id="f5" sourceRef="finance_decision" targetRef="finance_gw" />
+    <bpmn:exclusiveGateway id="finance_gw" name="Finance&#39;s answer" />
+    <bpmn:sequenceFlow id="fin_ok" name="Approved" sourceRef="finance_gw" targetRef="place_order">
+      <bpmn:conditionExpression xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="bpmn:tFormalExpression">=financeApproved = true</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="fin_no" name="Rejected" sourceRef="finance_gw" targetRef="notify_rejected">
+      <bpmn:conditionExpression xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="bpmn:tFormalExpression">=financeApproved != true</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:serviceTask id="place_order" name="Place the order" zeebe:modelerTemplate="io.camunda.connectors.HttpJson.v2">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="io.camunda:http-json:1" retries="3" />
+        <zeebe:ioMapping>
+          <zeebe:input source="noAuth" target="authentication.type" />
+          <zeebe:input source="POST" target="method" />
+          <zeebe:input source="http://host.docker.internal:18082/invoices" target="url" />
+          <zeebe:input source="={&#34;Idempotency-Key&#34;: &#34;purchase-&#34; + requestRef}" target="headers" />
+          <zeebe:input source="={customer_id: vendor, amount: amount}" target="body" />
+          <zeebe:input source="20" target="connectionTimeoutInSeconds" />
+          <zeebe:input source="20" target="readTimeoutInSeconds" />
+        </zeebe:ioMapping>
+        <zeebe:taskHeaders>
+          <zeebe:header key="resultExpression" value="={orderId: response.body.invoice_id}" />
+        </zeebe:taskHeaders>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="f6" sourceRef="place_order" targetRef="ordered" />
+    <bpmn:endEvent id="ordered" name="Ordered" />
+    <bpmn:serviceTask id="notify_rejected" name="Tell the requester" zeebe:modelerTemplate="io.camunda.connectors.HttpJson.v2">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="io.camunda:http-json:1" retries="3" />
+        <zeebe:ioMapping>
+          <zeebe:input source="noAuth" target="authentication.type" />
+          <zeebe:input source="POST" target="method" />
+          <zeebe:input source="http://host.docker.internal:18084/messages" target="url" />
+          <zeebe:input source="={to: &#34;user:&#34; + requester, template: &#34;notify_rejected&#34;, item: requestRef, key: &#34;rejected-&#34; + requestRef}" target="body" />
+          <zeebe:input source="20" target="connectionTimeoutInSeconds" />
+          <zeebe:input source="20" target="readTimeoutInSeconds" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="f7" sourceRef="notify_rejected" targetRef="rejected" />
+    <bpmn:endEvent id="rejected" name="Rejected" />
+  </bpmn:process>
+  <bpmn:message id="msg_submitted" name="purchase-submitted" />
+  <bpmndi:BPMNDiagram id="BPMNDiagram_purchase">
+    <bpmndi:BPMNPlane id="BPMNPlane_purchase" bpmnElement="purchase">
+      <bpmndi:BPMNShape id="submitted_di" bpmnElement="submitted">
+        <dc:Bounds x="57" y="52" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="find_manager_di" bpmnElement="find_manager">
+        <dc:Bounds x="25" y="170" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="prepare_di" bpmnElement="prepare">
+        <dc:Bounds x="25" y="310" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="manager_decision_di" bpmnElement="manager_decision">
+        <dc:Bounds x="25" y="450" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="manager_gw_di" bpmnElement="manager_gw" isMarkerVisible="true">
+        <dc:Bounds x="50" y="605" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="finance_decision_di" bpmnElement="finance_decision">
+        <dc:Bounds x="25" y="730" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="finance_gw_di" bpmnElement="finance_gw" isMarkerVisible="true">
+        <dc:Bounds x="50" y="885" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="place_order_di" bpmnElement="place_order">
+        <dc:Bounds x="25" y="1010" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="ordered_di" bpmnElement="ordered">
+        <dc:Bounds x="57" y="1172" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="notify_rejected_di" bpmnElement="notify_rejected">
+        <dc:Bounds x="25" y="1290" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="rejected_di" bpmnElement="rejected">
+        <dc:Bounds x="57" y="1452" width="36" height="36" />
+      </bpmndi:BPMNShape>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

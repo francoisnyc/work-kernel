@@ -1,0 +1,9 @@
+{
+  "user:ana": "user:bob",
+  "user:bob": "user:cora",
+  "user:fay": "user:cora",
+  "user:gus": "user:cora",
+  "user:olaf": "user:cora",
+  "user:ivy": "user:cora",
+  "user:cora": "user:cora"
+}
