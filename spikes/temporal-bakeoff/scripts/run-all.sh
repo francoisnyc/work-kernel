@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Run the second bake-off from clean: both sides up, every measure, results in results/.
 # Needs Docker, Go, Python 3, curl, psql and bc. About five minutes.
+# It ends with the kernel side running on kernel-blind/: stop it with ../camunda-bakeoff/scripts/kernel-down.sh.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 FIRST=$(cd ../camunda-bakeoff && pwd)
 # Kept: timing.txt, notes.md and attacks-plain-access-before-hardening.md (made during the build).
-rm -f results/attacks-plain.md results/attacks-kernel.md results/sidedoors.md results/inbox.md results/change-*.md \
+rm -f results/attacks-plain.md results/attacks-kernel.md results/attacks-kernel-blind.md results/sidedoors.md results/inbox.md results/change-*.md \
       results/footprint.md results/start-*.txt results/modelstub-calls.log
 scripts/plain-down.sh; "$FIRST/scripts/kernel-down.sh"; "$FIRST/scripts/stubs-down.sh" >/dev/null; scripts/stubs-down.sh
 (cd ../.. && go build -o spikes/temporal-bakeoff/.bin/ ./spikes/temporal-bakeoff/cmd/... && go build -o spikes/camunda-bakeoff/.bin/ ./cmd/itemservice ./cmd/relay ./cmd/worker ./cmd/migrate ./cmd/pli)
@@ -24,4 +25,5 @@ python3 test_sidedoors.py
 ./plain-down.sh; PURCHASE_CODE=before ./plain-up.sh >/dev/null
 python3 test_change_plain.py
 python3 test_change_kernel.py    # restarts the kernel's item service with purchase@2 registered
+python3 test_kernel_blind.py     # restarts the kernel side on kernel-blind/ and attacks its access request
 echo "done: see results/"

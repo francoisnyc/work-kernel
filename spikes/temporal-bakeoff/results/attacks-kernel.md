@@ -1,6 +1,6 @@
 # Compromised agent against the kernel, per process
 
-Generated on 2026-11-24 03:34 UTC. The agent's credentials: its token and every grant (every power; acting for itself, the manager, finance, the CFO, the owner, the requester). The purchase list is the first bake-off's, run unchanged.
+Generated on 2026-11-24 03:40 UTC. The agent's credentials: its token and every grant (every power; acting for itself, the manager, finance, the CFO, the owner, the requester). The purchase list is the first bake-off's, run unchanged.
 
 | Side | Process | Attempt | Result | Evidence |
 |---|---|---|---|---|
