@@ -17,13 +17,18 @@ import (
 // this order, on create, update and a transition, before an open hold is:
 //
 //  1. Not writable (FieldNotWritableError, an ErrForbidden): on the public
-//     door, a field only the kernel writes (writable_by: kernel); on every
+//     door, a field only the kernel writes (writable_by: kernel), and a
+//     field the writer may not write (policy.MayWriteField: people, agents
+//     and roles; a field that lists none is closed to agents); on every
 //     door, in a transition's patch, a field the transition's own `allowed`
 //     names through field:<id> (the caller would choose who may move).
 //  2. Frozen (field_frozen, an ErrRejected): a field the Item's current
 //     state freezes, on every door. A transition is checked against the
 //     state it leaves, so the one entering a state may set its frozen
 //     fields; the decision is lifecycle.CheckFrozen's.
+//
+// Create asks the writer's part of rule 1 later than the rest, after what
+// is not found, the start block and the create power (checkWriter).
 
 // checkPatch applies both rules to a patch. tr is the transition the patch
 // travels with, nil for an update or a create; state is the Item's state
@@ -37,29 +42,68 @@ func checkPatch(ty *typedef.Type, state string, tr *typedef.Transition, fields m
 	}
 	ids := slices.Sorted(maps.Keys(fields))
 	var refused []string
+	agent := false
 	if writer != nil {
 		refused = ty.KernelWritten(ids)
-		for _, id := range ty.RoleWritten(ids) {
-			if f, _ := ty.Field(id); !policy.MayWriteRoleField(f, *writer) {
-				refused = append(refused, id)
-			}
-		}
+		var byWriter []string
+		byWriter, agent = writerRefuses(ty, ids, *writer)
+		refused = append(refused, byWriter...)
 	}
 	if tr != nil {
 		refused = append(refused, tr.AllowedFields(ids)...)
 	}
-	if len(refused) > 0 {
-		slices.Sort(refused)
-		refused = slices.Compact(refused)
-		return &FieldNotWritableError{
-			Fields: refused,
-			Reason: "the request may not write " + strings.Join(refused, ", "),
-		}
+	if err := notWritable(refused, agent); err != nil {
+		return err
 	}
 	if state == "" {
 		return nil
 	}
 	return fromLifecycle(lifecycle.CheckFrozen(ty, state, ids))
+}
+
+// checkKernelFields is rule 1 for a create, without the writer's part: a
+// field only the kernel writes is refused at once.
+func checkKernelFields(ty *typedef.Type, fields map[string]any) error {
+	return notWritable(ty.KernelWritten(slices.Sorted(maps.Keys(fields))), false)
+}
+
+// checkWriter is the writer's part of rule 1 alone: Create asks it after
+// what is not found, the start block and the create power.
+func checkWriter(ty *typedef.Type, fields map[string]any, writer policy.Who) error {
+	refused, agent := writerRefuses(ty, slices.Sorted(maps.Keys(fields)), writer)
+	return notWritable(refused, agent)
+}
+
+// writerRefuses returns the fields among ids, other than kernel-written
+// ones, that who may not write, and whether who is an agent judged as
+// itself (not one acting for a customer), whose refusal says why.
+func writerRefuses(ty *typedef.Type, ids []string, who policy.Who) (refused []string, agent bool) {
+	for _, id := range ids {
+		f, ok := ty.Field(id)
+		if !ok || f.WritableBy == typedef.WritableByKernel {
+			continue
+		}
+		if !policy.MayWriteField(f, who) {
+			refused = append(refused, id)
+		}
+	}
+	agent = item.IsKind(who.Actor, item.KindAgent) && policy.CustomerOf(item.Principal{Actor: who.Actor, OnBehalfOf: who.OnBehalfOf}) == ""
+	return refused, agent
+}
+
+// notWritable is the refusal of fields not writable, sorted, or nil. An
+// agent is told that its Type opens only some fields to agents.
+func notWritable(refused []string, agent bool) error {
+	if len(refused) == 0 {
+		return nil
+	}
+	slices.Sort(refused)
+	refused = slices.Compact(refused)
+	reason := "the request may not write " + strings.Join(refused, ", ")
+	if agent {
+		reason = "an agent writes only the fields its Type opens to agents, or to a role it holds: " + reason
+	}
+	return &FieldNotWritableError{Fields: refused, Reason: reason}
 }
 
 // publicWriter is the public door's writer for checkPatch: the principal,
