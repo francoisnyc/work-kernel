@@ -107,3 +107,46 @@ engine, the task attributes, and authorisation rules.
   untrusted text.
 - **Delegation** ("out of office") is not on the KADAI permissions page read;
   the approvals pilot lists it.
+
+## On Temporal specifically (added 2026-11-24)
+
+Temporal has no human task management of its own; its forum says so, and its
+answer is a documented pattern ("Reliable document approvals with
+human-in-the-loop workflows"), not a component. Open-source work nearby:
+
+- **OpenNSW `taskflow`** ([package](https://pkg.go.dev/github.com/OpenNSW/core/taskflow),
+  [repository](https://github.com/OpenNSW/core), Apache-2.0, no tagged
+  version). A task layer between a business workflow and its human steps,
+  in Go: each task is its own small Temporal workflow of sequential steps
+  run by plugins (user input, API call, payment, external review); the
+  parent's activity returns `ErrResultPending` and is completed when the
+  task ends. Built for one application.
+- **Ballerina workflows**: human tasks and a management API, running on
+  Temporal, for programs written in Ballerina.
+- **Zigflow** ([repository](https://github.com/mrsimonemms/zigflow)):
+  Temporal workflows declared in YAML (CNCF Serverless Workflow), listed in
+  Temporal's Code Exchange. Steps only: no work items, deciders, inbox or
+  agents. The nearest neighbour to "Types instead of code"; to watch, maybe
+  complementary.
+- **iWF**: a programming model interpreted on Temporal, for developers.
+
+**Borrowed from OpenNSW** (each placed where it will be used):
+
+1. **Completing a step with a signed link** (`CompleteTaskStepByToken`):
+   for the kernel, a single-use link naming one person, one Item and one
+   transition, with an expiry, the click still judged by the Type's rules.
+   The fallback for gated moves in "work done from a chat"
+   (`docs/roadmap.md`), and "approve from the email".
+2. **A move writes only its own fields** (a step's submission is scoped to
+   its own namespace, the server stamping the key): a transition declares
+   the fields it may set, nothing else. Raised for track 1's items 3 and 4.
+3. **One call with everything a screen needs** (`GetTaskRenderInfo`): the
+   Item, the moves this person may make now, the Type's presentation hints.
+   For the inbox (track 1, item 5) and cards in chat.
+4. **Waiting on outside work with asynchronous activity completion**
+   (`ErrResultPending`): how the hook protocol's `pending` outcome could
+   work.
+
+**The same gaps as the kernel's:** a claim is "UI guidance" there, not
+enforced (track 1, item 5 makes it bind); tasks are pinned to the version
+they started with, with no migration (track 1, item 6).
