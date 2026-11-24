@@ -25,7 +25,7 @@ func TestReadings_TheApprovedOnes(t *testing.T) {
 	for _, ty := range types {
 		byName[ty.ID+"@"+strconv.Itoa(ty.Version)] = ty
 	}
-	for _, name := range []string{"vacation_request@3", "incident@3"} {
+	for _, name := range []string{"vacation_request@3", "incident@3", "incident@4"} {
 		t.Run(name, func(t *testing.T) {
 			want, err := os.ReadFile("../../readings/" + name + ".txt")
 			if err != nil {
