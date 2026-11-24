@@ -115,23 +115,27 @@ func run(ctx context.Context, args []string, stderr io.Writer) error {
 		latencies[id] = d
 	}
 
-	crm, err := connstub.ServeCRM(*crmAddr)
+	// Each stub is given its customers before it answers anything, so a
+	// caller that waits for /healthz never meets one half loaded.
+	withCustomers := func(s *connstub.Server) {
+		for id, c := range customers {
+			s.SetCustomer(id, connstub.Customer{Plan: c.Plan, OnHold: c.OnHold, CreditLimit: c.CreditLimit,
+				CostCenter: c.CostCenter, Latency: latencies[id]})
+		}
+	}
+	crm, err := connstub.ServeCRM(*crmAddr, withCustomers)
 	if err != nil {
 		return fmt.Errorf("crm: %w", err)
 	}
 	defer crm.Close()
-	erp, err := connstub.ServeERP(*erpAddr)
+	erp, err := connstub.ServeERP(*erpAddr, func(s *connstub.Server) {
+		s.SetLatency(*erpLatency)
+		withCustomers(s)
+	})
 	if err != nil {
 		return fmt.Errorf("erp: %w", err)
 	}
 	defer erp.Close()
-	erp.SetLatency(*erpLatency)
-	for id, c := range customers {
-		sc := connstub.Customer{Plan: c.Plan, OnHold: c.OnHold, CreditLimit: c.CreditLimit, CostCenter: c.CostCenter,
-			Latency: latencies[id]}
-		crm.SetCustomer(id, sc)
-		erp.SetCustomer(id, sc)
-	}
 	if *hrAddr != "" {
 		directory := map[string]string{}
 		if *hrPath != "" {
@@ -151,15 +155,16 @@ func run(ctx context.Context, args []string, stderr io.Writer) error {
 				return fmt.Errorf("--hr-hook-secret-env: %s: %w", *hrSecretEnv, err)
 			}
 		}
-		hr, err := connstub.ServeHR(*hrAddr)
+		hr, err := connstub.ServeHR(*hrAddr, func(s *connstub.Server) {
+			s.SetSecret(secret)
+			for employee, manager := range directory {
+				s.SetManager(employee, manager)
+			}
+		})
 		if err != nil {
 			return fmt.Errorf("hr: %w", err)
 		}
 		defer hr.Close()
-		hr.SetSecret(secret)
-		for employee, manager := range directory {
-			hr.SetManager(employee, manager)
-		}
 		if secret == "" {
 			slog.Warn("connstub: no --hr-hook-secret-env, so the HR connector refuses every hook request")
 		}
