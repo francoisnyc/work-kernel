@@ -6,6 +6,28 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
+- **Left open by bake-off hole 1** (design.md, "An effect re-checks what caused it, as built"; each
+  also in docs/roadmap.md, "Holes found by the bake-off"; all need a Temporal anyone can reach):
+  - **An early reminder.** A scheduled acting timer's run leaves no event until its hook finishes, so
+    a forged start can send it early, once per run. Closing it in the item service means the item
+    service knows when a run is due; the dev clock's scale lives only in the worker today.
+  - **A timer at an instant with a hook and no `sets`** writes nothing when it acts: no proof to ask
+    for. `ActAt` could leave a record for it.
+  - **State timers trust the workflow's clock.** A forged start can make a duration timer's move
+    early (expire a request now). Timers at an instant are already judged by the item service's clock.
+  - **A forged `hook_failed` naming the true entry** makes a real action count as done. Only the
+    workflow knows that a budget ran out, so the item service cannot tell it from a real failure.
+  - **Enrich hooks' causes are not confirmed**, and no activity checks that the hook it is given is
+    of its own kind (`RunEnrich` runs a check hook's action and writes its fields). No outside effect:
+    the values are the declared action's own answer for the Item's real fields.
+  - **Authenticating Temporal** (sign-on; who may start, signal or poll which task queue) closes all
+    five at the root. Not designed.
+  - **A hook that already completed for a cause is called again on a replayed request.** The
+    connector's own idempotency then decides; the kernel could answer from its own record instead.
+    Not done: `TestActivities_RunAction_SecondDifferentResult_IsAKeyConflict` pins that a second run
+    reaches the connector.
+  - **The web UI and the PoC apps show `cause_not_confirmed` as its raw code**, like every reason.
+
 - **Found by the Temporal bake-off** (docs/research/temporal-bakeoff.md; nothing built):
   - **Fields are open to the agent by default.** Both bake-offs' Types left
     what is asked, and the decision's reason, writable by anyone who may
@@ -23,13 +45,11 @@ Ideas noted during the spike, not built yet.
     CFO was skipped. Starting work, steps 1 and 2b ("the latest version's
     rules govern creates") would close it; it matters more than its place
     in that plan suggests, because the failure is an approval.
-  - **The worker acts on workflow input without reading the Item.** An
-    `item` workflow started by hand on the Temporal dev server, with
-    `State: approved` and a pending `place_order`, ran the action for an
-    Item still in `manager_review` (the ERP stub made an invoice; the
-    kernel wrote `f_order_id`). The dev server has no sign-on. Decide
-    whether an action hook re-reads the Item's state (or the entry's seq)
-    before calling out, and what a production Temporal must enforce.
+  - **The worker acts on workflow input without reading the Item.** Closed
+    for action hooks on 2026-11-24 (the entry "Bake-off hole 1" below):
+    the worker confirms the cause before any side effect. What a
+    production Temporal must enforce is still to decide; the list is in
+    the item below.
   - **No "only the requester" or "only the decider" rule for a field.**
     Anyone who sees a draft edits it before its owner submits (an agent
     with `edit_fields` changed the amount; submit then froze the agent's
@@ -3601,3 +3621,74 @@ next step picked from the tracker after that.
 **Rebased onto main 2026-11-24.** Written on 2026-11-22; it sits here, after later entries, because
 the branch waited for the draft limits to be raised (PR #58): with build_step@1 the repository's Types
 passed 50 files, the most one `ValidateTypes` call took then.
+
+## 2026-11-24 — Bake-off hole 1: an effect re-checks what caused it
+
+**Built:** the rule merged this morning (design.md, "Architecture style", PR #65), with the attack that
+found it as its first test. Before an action hook reads its inputs or calls its connector, the
+`RunAction` activity has the item service confirm the cause the workflow named
+(`Internal().ConfirmCause`, `internal/itemservice/cause.go`): the Type and version are the Item's, the
+hook is its action hook, the event is the one the hook is bound to (`lifecycle.BoundTo`, a pure
+function), an acting timer and its run are the state's own, a timer at an instant with `sets` has
+written for that instant, and the idempotency key is the one the kernel derives. A refusal is final
+and is recorded once on the Item as `hook_failed` / `cause_not_confirmed`. The action's own records
+(`hook_ran`, `hook_failed`, the write-back) confirm their cause too. design.md has the whole of it
+under "An effect re-checks what caused it, as built".
+
+**Kernel changes counted:** one method on the internal door, one reason code, one worker error type,
+one case in the workflow's `actionFailure`. 448 lines of production code in 7 files, then a small
+commit that gives the idempotency keys one definition (`lifecycle.HookKey` and three more), used by
+the workflow, `ConfirmCause` and `ActAt`. No proto, schema, migration, dependency, contract or
+hook-protocol change; no production code that exists only for tests.
+
+**Decisions (the owner's, Phase A):** all my defaults. The door is one new internal method, called
+first in `RunAction`. The Item need not still be in the state: the check is "this entry really
+happened". Checks are unchanged (already safe); enrich is not in this step. The refusal is the
+existing `hook_failed` with the new reason `cause_not_confirmed`, which he OK'd by name; payload
+`{hook, reason}` only. The key must be the kernel's. The action's own records confirm their cause.
+What stays open goes on the roadmap's list. He then OK'd the list of 15 tests before any code.
+
+**Tests:** `internal/workflow/cause_e2e_test.go`, 15 tests, written first: 11 failed, 4 pinned what
+holds today (a retry confirms again and an action runs after its Item moved on; three residues).
+None was changed afterwards; no existing test was changed. Plus a unit test of `BoundTo` (12 cases).
+The first test is the bake-off's attack through a real Temporal server: a workflow started by hand
+with a forged `Carried`. His list is covered: the forged start, a cause on another Item, a wrong
+Type version, a cause that is not the hook's state entry, a real entry still running after the Item
+moved on; and made-up keys, a retry, recorded once.
+
+**The bake-off's own script, re-run** (`spikes/camunda-bakeoff/scripts/test2-sidedoors.py`, its own
+stack, unchanged): "closed ... the purchase is in state manager_review and the purchase system
+received nothing"; the purchase carries one `hook_failed` by `hook:purchase:place_order`, reason
+`cause_not_confirmed`. `results/` is left as the record of the first run.
+
+**Surprises:**
+- The key was the bigger hole. The workflow's input carried the idempotency key, so for a purchase
+  really approved, a forged activity input with two made-up keys placed two more orders. Reading
+  the cause alone would not have closed that.
+- A claim of mine in Phase A was wrong, and Phase B's tests showed it: confirming the cause does not
+  stop a forged `hook_failed` that names the hook's true entry. It is pinned as a residue.
+- A wrong, unregistered Type version in a hook's input was a retryable error before: it would have
+  retried until its budget ran out. It is now refused at once.
+- Order mattered in `HookRan` and `HookFailed`: the new check first ran before the existing shape
+  check and changed which error an older test saw (`TestHookRan_IsChecked`). The shape check goes
+  first; the test is untouched.
+- The pause: the coordinator's go-ahead for Phase B came before the owner had answered Phase A, so
+  the first test commit was pushed on provisional answers. His answers were the same, and nothing
+  had to be redone.
+
+**Numbers.** `go vet ./...` clean; `go test ./...` and `go test -race ./...` green (28 packages; the
+workflow package about 330 s, with its replay tests; the two thin-margin tests passed). The new tests
+under `-race -count=10`: no failure. The check costs about 0.25 ms per side-effecting action (p50
+0.25, p95 0.36, p99 0.46 ms over 3,000 calls on a local Postgres, next to 0.27 ms for the existing
+`HookInput` read), measured with a throwaway timing test: `cmd/bench -invoices` measures forced
+timeouts, not this call. The scenario passed on the stack; web Playwright 9, apps/poc journeys 4.
+
+**Local workarounds, outside the repository (nothing committed):** dockerd started by hand, each time
+the container restarted; the stack through a compose override in the scratchpad (the Go programs
+built on this machine and copied onto the distroless image, since Docker builds cannot use the
+sandbox's proxy; the web and poc sites built here with `VITE_DEV_USERS=1` and served by nginx);
+Playwright through local configs (in `.git/info/exclude`) that point at the installed browser. CI
+builds the real images and runs the pinned browser.
+
+**Open:** the "Left open by bake-off hole 1" items at the top of this file. **Next session:** the
+owner's choice among the roadmap's Track 1 items 2 to 6; locking down Temporal has no step yet.
