@@ -953,7 +953,10 @@ dynamic values go in ErrorInfo metadata, never in a message: `hold` (HELD),
 (AUDIENCE_CHANGED), `from_state` and `to_state` (a transition rule's
 refusal), `fields` (MISSING_FIELDS, comma-separated IDs), `header` (a
 misused header). A field violation's description may name the
-field, never a value or an ID. A test fails if a message contains an ID.
+field, never a value or an ID: a refusal must not repeat what someone
+typed into a field. A request's own count and size are not that, so a
+refusal over a limit may state them, as the draft limits do ("this
+request has 214 sources, 1.3 MiB"). A test fails if a message contains an ID.
 A rule's refusal answers with its code; every kernel rejection carries one
 (a test walks the source), and one without a code is a bug: `INTERNAL`.
 
@@ -1644,7 +1647,7 @@ See `docs/plans/ideas-from-ventoux.md`.
 | --- | --- | --- |
 | V1 (**done**) | Action contracts: each hook action declares `name@version`, typed reads and writes, side effect, risk and the reason codes it may answer (idempotency is the protocol's, for every connector); hooks name `action@version` (no major means 1, as built); the catalogue is readable through the API. The hook protocol work (`pli.hooks/v1`: the descriptor and the compiled-in declaration `hr.manager_of@1`) is the first version of these contracts | Every action has a frozen contract in `contracts/`; a hook of the wrong kind, or reading or writing a field of the wrong type, is refused at load (`ACTION_KIND`, `WRONG_FIELD_TYPE`); every connector's answers are held to its contract; `ListActions` and `pli action list`; CI refuses a published contract that changed. **Done 2026-11-23**: "Ventoux V1, as built" below, and the journal |
 | V2a | Every problem of a Type or a folder of Types as data: `{source, path, line, column, severity, code, message}`, in three stages (the YAML, each Type, the Types together), with no cascades; the codes in "Type problems" | Each code has a case with its exact path and position; a folder reports every file's problems at once; a source walk finds no problem without a code and a what-to-do; every test written before V2a passes unchanged |
-| V2b (**done**) | `ValidateTypes`: draft Types checked against every registered version, nothing written; `pli type validate`; exempt from `policy.Project` like `ListTypes`; users and agents (in a session), not customers; 256 KiB and 50 sources at most | A draft with problems is a successful call listing them; an identical registered `id@version` passes, a different one is `VERSION_CHANGED`; pli prints `source:line:col: CODE message` and exits non-zero on errors. **Done 2026-11-22**: "Ventoux V2b and V2c, as built" below, and the journal |
+| V2b (**done**) | `ValidateTypes`: draft Types checked against every registered version, nothing written; `pli type validate`; exempt from `policy.Project` like `ListTypes`; users and agents (in a session), not customers; 1 MiB and 200 sources at most (raised from 50 and 256 KiB for build_step, 2026-11-24) | A draft with problems is a successful call listing them; an identical registered `id@version` passes, a different one is `VERSION_CHANGED`; pli prints `source:line:col: CODE message` and exits non-zero on errors. **Done 2026-11-22**: "Ventoux V2b and V2c, as built" below, and the journal |
 | V2c (**done**) | The Type format as JSON Schema, by hand, in a checked-in file; checked with `santhosh-tekuri/jsonschema/v6` (test only) | Every file in `types/` validates; every key the schema allows is a key `typedef` knows; the schema is never stricter than `typedef`. **Done 2026-11-22**: "Ventoux V2b and V2c, as built" below |
 | V5 (**done**) | Stories in simulated time (item 5): a walkthrough as data (the Types, the people and their roles, a fake for every action from its contract, a timeline of one-line steps, the whole expected timeline), run as a Go test against the real Item workflow and item service in Temporal's test environment; `make stories`; the runner's `Parse`, `Check`, `Run` and `Compare` for item 6's witnesses | The vacation request (approve, expiry, refund, the HR outage and a denial) and the incident desk (reopen on a reply with a paused goal, breach) run in seconds; any unexpected event, call, refusal or read fails a story with a report a person can read; a fake cannot answer what its contract forbids; continue-as-new and a validator's refusal behave in the harness as on the server. **Done 2026-11-23**: "Ventoux V5, as built" below, and the journal |
 | V6 (**done**) | Plain-language readings, each with a witness (item 6): every state rule, move, hook, reaction, timer, hold, link and visibility rule of a Type as one sentence, from the Type and the contracts it pins; a closed list of kinds of sentence and their clauses; a witness for each, a test that runs the engine through internal/story's `Run`; `ExplainType` (a registered version or a draft) and `pli type explain` | Every part has a witness, every key of the Type format is read or left out with a reason, every element of every Type in `types/` is cited by a sentence; condition words held to the engine's evaluation; `readings/vacation_request@3.txt` and `readings/incident@3.txt` approved by the owner and compared exactly. **Done 2026-11-24**: "Ventoux V6, as built" below, and the journal |
@@ -3478,9 +3481,15 @@ sorts the problems by source, then position, once every source has a name
 (a registered version's included). `code` is a string, like a refusal's
 reason, so a new code needs no proto change.
 - Limits, each `INVALID_ARGUMENT` / `INVALID_REQUEST` on `sources`: 1 to
-  50 sources, 256 KiB of content in all, a non-empty name of its own each.
-  Checked in the handler (a server-wide read limit would bind every
-  operation).
+  200 sources, 1 MiB of content in all (raised from 50 and 256 KiB for
+  build_step, 2026-11-24), a non-empty name of its own each. Outside the
+  limits (no source, more than 200, or more than 1 MiB), one refusal names
+  both limits and the request's own count and size, in MiB rounded up to
+  one decimal ("give 1 to 200 sources, 1 MiB in all; this request has 214
+  sources, 1.3 MiB"), so a tool can split the request without guessing. The
+  limits are checked before the names; a nameless or repeated name keeps
+  its fixed refusal. Checked in the handler (a server-wide read limit would
+  bind every operation).
 - Who: users, and agents in a session, with no particular power: it
   writes nothing and reads no Items. Customers, and agents acting for one:
   `PERMISSION_DENIED` / `NOT_ALLOWED`.

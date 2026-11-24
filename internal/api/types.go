@@ -202,32 +202,50 @@ func (s *server) ListTypes(ctx context.Context, req *connect.Request[kernelv1.Li
 	return connect.NewResponse(out), nil
 }
 
-// The limits of one ValidateTypes call (Ventoux V2b).
+// The limits of one ValidateTypes or ExplainType call (Ventoux V2b; raised
+// for build_step, 2026-11-24).
 const (
-	maxTypeSources     = 50
-	maxTypeSourceBytes = 256 << 10 // in all
+	maxTypeSources     = 200
+	maxTypeSourceBytes = 1 << 20 // 1 MiB, in all
 )
 
 // draftSources checks a request's draft sources against the limits: 1 to
-// 50, each named once, 256 KiB of content in all.
+// 200, each named once, 1 MiB of content in all.
 func draftSources(srcs []*kernelv1.TypeSource) ([]typedef.Source, *connect.Error) {
-	if len(srcs) == 0 || len(srcs) > maxTypeSources {
-		return nil, badField("sources", fmt.Sprintf("give 1 to %d sources", maxTypeSources))
+	total := 0
+	for _, src := range srcs {
+		total += len(src.Content)
 	}
-	total, names := 0, map[string]bool{}
+	if len(srcs) == 0 || len(srcs) > maxTypeSources || total > maxTypeSourceBytes {
+		return nil, overTheLimits(len(srcs), total)
+	}
+	names := map[string]bool{}
 	sources := make([]typedef.Source, 0, len(srcs))
 	for _, src := range srcs {
 		if src.Name == "" || names[src.Name] {
 			return nil, badField("sources", "give each source a name of its own")
 		}
 		names[src.Name] = true
-		total += len(src.Content)
 		sources = append(sources, typedef.Source{Name: src.Name, Content: []byte(src.Content)})
 	}
-	if total > maxTypeSourceBytes {
-		return nil, badField("sources", fmt.Sprintf("send at most %d KiB of content in all", maxTypeSourceBytes>>10))
-	}
 	return sources, nil
+}
+
+// overTheLimits refuses a request over the draft limits. It names both
+// limits and the request's own count and size, so a tool can split the
+// request without guessing. The size is in MiB, rounded up to one decimal:
+// a request over 1 MiB never reads "1.0 MiB". A count and a size are not
+// what anyone typed, so they may be in a field violation (docs/design.md,
+// "Messages are fixed").
+func overTheLimits(n, size int) *connect.Error {
+	const mib = 1 << 20
+	tenths := (size*10 + mib - 1) / mib // integer division, rounded up
+	noun := "sources"
+	if n == 1 {
+		noun = "source"
+	}
+	return badField("sources", fmt.Sprintf("give 1 to %d sources, %d MiB in all; this request has %d %s, %d.%d MiB",
+		maxTypeSources, maxTypeSourceBytes/mib, n, noun, tenths/10, tenths%10))
 }
 
 // problemsOut converts a draft's problems, named in the caller's

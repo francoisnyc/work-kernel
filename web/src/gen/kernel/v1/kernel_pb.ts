@@ -2561,7 +2561,7 @@ export type ValidateTypesRequest = Message<"kernel.v1.ValidateTypesRequest"> & {
   parent: string;
 
   /**
-   * The drafts: 1 to 50 sources, 256 KiB of content in all, each with a
+   * The drafts: 1 to 200 sources, 1 MiB of content in all, each with a
    * name of its own (else INVALID_ARGUMENT, field sources).
    *
    * @generated from field: repeated kernel.v1.TypeSource sources = 2;

@@ -5088,7 +5088,7 @@ type ValidateTypesRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// namespaces/{ns}
 	Parent string `protobuf:"bytes,1,opt,name=parent,proto3" json:"parent,omitempty"`
-	// The drafts: 1 to 50 sources, 256 KiB of content in all, each with a
+	// The drafts: 1 to 200 sources, 1 MiB of content in all, each with a
 	// name of its own (else INVALID_ARGUMENT, field sources).
 	Sources       []*TypeSource `protobuf:"bytes,2,rep,name=sources,proto3" json:"sources,omitempty"`
 	unknownFields protoimpl.UnknownFields

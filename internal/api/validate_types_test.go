@@ -2,7 +2,7 @@
 // registered version and registers nothing. A draft with problems is a
 // successful call that lists them. Exempt from policy.Project like
 // ListTypes; users and agents (in a session) may call it, customers and
-// agents acting for one may not. At most 50 sources and 256 KiB of content.
+// agents acting for one may not. At most 200 sources and 1 MiB of content.
 package api_test
 
 import (
@@ -13,12 +13,16 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 
 	kernelv1 "github.com/francoisnyc/work-kernel/gen/kernel/v1"
 	"github.com/francoisnyc/work-kernel/gen/kernel/v1/kernelv1connect"
 )
 
-const maxSourceBytes = 256 << 10 // 256 KiB, in all
+const (
+	maxSources     = 200
+	maxSourceBytes = 1 << 20 // 1 MiB, in all
+)
 
 func validateTypes(c kernelv1connect.ItemServiceClient, t *testing.T, parent string, srcs ...*kernelv1.TypeSource) (*kernelv1.ValidateTypesResponse, error) {
 	t.Helper()
@@ -82,11 +86,15 @@ func problemLines(ps []*kernelv1.TypeProblem) string {
 }
 
 // The repository's own Types are all registered: as drafts they pass. They
-// are 50 files, the most one call takes.
+// fit in one call: at most 200 sources and 1 MiB of content in all.
 func TestValidateTypes_TheRepositoryTypes(t *testing.T) {
 	srcs := repoSources(t)
-	if len(srcs) != 50 {
-		t.Fatalf("test bug: types/ has %d files; this test expects 50, the limit", len(srcs))
+	total := 0
+	for _, src := range srcs {
+		total += len(src.Content)
+	}
+	if len(srcs) > maxSources || total > maxSourceBytes {
+		t.Fatalf("test bug: types/ has %d files and %d bytes; one call takes at most %d and %d", len(srcs), total, maxSources, maxSourceBytes)
 	}
 	if ps := problemsAs(t, "ana", srcs...); len(ps) != 0 {
 		t.Errorf("problems:\n%s", problemLines(ps))
@@ -202,9 +210,9 @@ func TestValidateTypes_Limits(t *testing.T) {
 	half := maxSourceBytes / 2
 
 	for name, srcs := range map[string][]*kernelv1.TypeSource{
-		"50 sources":            many(50),
-		"256 KiB":               {padded("a.yaml", half), padded("b.yaml", half)},
-		"one source of 256 KiB": {padded("a.yaml", maxSourceBytes)},
+		"200 sources":         many(maxSources),
+		"1 MiB":               {padded("a.yaml", half), padded("b.yaml", half)},
+		"one source of 1 MiB": {padded("a.yaml", maxSourceBytes)},
 	} {
 		if _, err := validateTypes(as("ana"), t, "namespaces/acme", srcs...); err != nil {
 			t.Errorf("%s: %v", name, err)
@@ -212,14 +220,90 @@ func TestValidateTypes_Limits(t *testing.T) {
 	}
 	for name, srcs := range map[string][]*kernelv1.TypeSource{
 		"no source":               nil,
-		"51 sources":              many(51),
-		"256 KiB and one byte":    {padded("a.yaml", half), padded("b.yaml", half+1)},
+		"201 sources":             many(maxSources + 1),
+		"1 MiB and one byte":      {padded("a.yaml", half), padded("b.yaml", half+1)},
 		"a source without a name": {memo(1), tsrc("", "id: vtnoname\nversion: 1\n")},
 		"two sources of one name": {memo(1), tsrc("m1.yaml", "id: vtother\nversion: 1\n")},
 	} {
 		_, err := validateTypes(as("ana"), t, "namespaces/acme", srcs...)
 		invalid(t, name, err, "sources")
 	}
+}
+
+// A refusal over the limits names both limits and the request's own count
+// and size (MiB, one decimal), so a tool can split the request without
+// guessing. One text for both refusals, in ValidateTypes and in
+// ExplainType, which takes drafts with the same limits.
+func TestValidateTypes_LimitsRefusalSaysTheSizes(t *testing.T) {
+	var many []*kernelv1.TypeSource
+	for i := range maxSources + 1 {
+		many = append(many, tsrc(fmt.Sprintf("m%d.yaml", i), fmt.Sprintf("id: vtsize%d\nversion: 1\n", i)))
+	}
+	// Two sources of 768 KiB each: 1.5 MiB in all.
+	big := func(name string) *kernelv1.TypeSource {
+		head := "id: vt" + strings.TrimSuffix(name, ".yaml") + "\nversion: 1\n#"
+		return tsrc(name, head+strings.Repeat("x", 768<<10-len(head)-1)+"\n")
+	}
+	heavy := []*kernelv1.TypeSource{big("a.yaml"), big("b.yaml")}
+
+	for _, c := range []struct {
+		what string
+		srcs []*kernelv1.TypeSource
+		has  []string // the request's own count and size
+	}{
+		{"too many sources", many, []string{"this request has 201 sources"}},
+		{"too many bytes", heavy, []string{"this request has 2 sources", "1.5 MiB"}},
+	} {
+		_, verr := validateTypes(as("ana"), t, "namespaces/acme", c.srcs...)
+		_, eerr := explainType(as("ana"), t, &kernelv1.ExplainTypeRequest{
+			Parent: "namespaces/acme", Sources: c.srcs, TypeId: "vta", Version: 1,
+		})
+		for op, err := range map[string]error{"ValidateTypes": verr, "ExplainType": eerr} {
+			what := op + ", " + c.what
+			invalid(t, what, err, "sources")
+			desc := sourcesViolation(t, err)
+			for _, want := range append([]string{"1 to 200 sources", "1 MiB in all"}, c.has...) {
+				if !strings.Contains(desc, want) {
+					t.Errorf("%s: sources violation %q, want it to say %q", what, desc, want)
+				}
+			}
+		}
+	}
+}
+
+// One source over 1 MiB: the refusal counts it in the singular, "1 source".
+func TestValidateTypes_LimitsRefusalOneSource(t *testing.T) {
+	head := "id: vtone\nversion: 1\n#"
+	one := tsrc("one.yaml", head+strings.Repeat("x", maxSourceBytes+1-len(head)-1)+"\n")
+	_, err := validateTypes(as("ana"), t, "namespaces/acme", one)
+	invalid(t, "one source over 1 MiB", err, "sources")
+	if desc := sourcesViolation(t, err); !strings.Contains(desc, "this request has 1 source,") {
+		t.Errorf("sources violation %q, want it to say %q", desc, "this request has 1 source,")
+	}
+}
+
+// sourcesViolation returns the description of a refusal's field violation
+// on sources, or "" when it has none.
+func sourcesViolation(t *testing.T, err error) string {
+	t.Helper()
+	ce, ok := err.(*connect.Error)
+	if !ok {
+		return ""
+	}
+	for _, d := range ce.Details() {
+		v, derr := d.Value()
+		if derr != nil {
+			t.Fatalf("decode error detail: %v", derr)
+		}
+		if br, ok := v.(*errdetails.BadRequest); ok {
+			for _, fv := range br.FieldViolations {
+				if fv.Field == "sources" {
+					return fv.Description
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // The parent is the caller's namespace, as for ListTypes.
