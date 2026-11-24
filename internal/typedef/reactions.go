@@ -755,9 +755,33 @@ func (f *Field) UnmarshalYAML(n *yaml.Node) error {
 		return err
 	}
 	*f = Field(p)
+	wb, f.WritableByPeople, f.WritableByAgents = takeWriters(wb)
 	by, roles, err := decodeWritableBy(wb)
 	f.WritableBy, f.WritableByRoles = by, roles
 	return err
+}
+
+// takeWriters returns a field's writable_by list without its people and
+// agents entries, and whether it had each (Phase B stub: parsed only). A
+// scalar, or nothing, is returned as it is.
+func takeWriters(wb *yaml.Node) (rest *yaml.Node, people, agents bool) {
+	wb = resolveAlias(wb)
+	if wb == nil || wb.Kind != yaml.SequenceNode {
+		return wb, false, false
+	}
+	cp := *wb
+	cp.Content = nil
+	for _, e := range wb.Content {
+		switch v := resolveAlias(e); {
+		case v.Kind == yaml.ScalarNode && v.Value == WriterPeople:
+			people = true
+		case v.Kind == yaml.ScalarNode && v.Value == WriterAgents:
+			agents = true
+		default:
+			cp.Content = append(cp.Content, e)
+		}
+	}
+	return &cp, people, agents
 }
 
 // withoutKey returns a copy of mapping n without key, and key's value

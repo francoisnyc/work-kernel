@@ -193,6 +193,11 @@ func (w shapeWalker) writableBy(owner *yaml.Node, t reflect.Type, v *yaml.Node, 
 				w.wrongShape(e, at(path, i), "a single value")
 				continue
 			}
+			// people and agents: a field's other writers (Phase B stub:
+			// accepted here, checked by Phase C).
+			if t == fieldType && (e.Value == WriterPeople || e.Value == WriterAgents) {
+				continue
+			}
 			if !strings.HasPrefix(e.Value, AllowedRolePrefix) {
 				w.r.fail(CodeInvalidValue, at(path, i), "Write role:<name>, or writable_by: kernel on its own",
 					"%s %s: writable_by entry %q: a list takes role:<name> entries only "+

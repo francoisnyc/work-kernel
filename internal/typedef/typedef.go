@@ -49,6 +49,14 @@ const (
 	WritableByKernel WritableBy = "kernel"
 )
 
+// The entries of a field's writable_by list besides role:<name> (fields
+// closed to agents by default): any person, and any agent. Phase B stub:
+// parsed only.
+const (
+	WriterPeople = "people"
+	WriterAgents = "agents"
+)
+
 // Item attributes a hook may read besides fields: set by the kernel at
 // create and never editable. They are also guard variables.
 const (
@@ -146,6 +154,11 @@ type Field struct {
 	// agent and the user it acts for must both hold one). The kernel's own
 	// writers are not affected. Role names, without the role: prefix.
 	WritableByRoles []string `yaml:"-" json:"writable_by_roles,omitempty"`
+	// WritableByPeople and WritableByAgents (from writable_by: [people,
+	// agents, ...]): fields closed to agents by default. Phase B stub:
+	// parsed only, not yet checked or enforced.
+	WritableByPeople bool `yaml:"-" json:"writable_by_people,omitempty"`
+	WritableByAgents bool `yaml:"-" json:"writable_by_agents,omitempty"`
 	// Multiple makes the field hold a set of values of its type (string,
 	// enum, principal or date): unordered, no duplicates, stored sorted; an
 	// empty set is an unset field. Max, when set, is the most members it
