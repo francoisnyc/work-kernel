@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 
 	kernelv1 "github.com/francoisnyc/work-kernel/gen/kernel/v1"
 	"github.com/francoisnyc/work-kernel/gen/kernel/v1/kernelv1connect"
@@ -227,6 +228,71 @@ func TestValidateTypes_Limits(t *testing.T) {
 		_, err := validateTypes(as("ana"), t, "namespaces/acme", srcs...)
 		invalid(t, name, err, "sources")
 	}
+}
+
+// A refusal over the limits names both limits and the request's own count
+// and size (MiB, one decimal), so a tool can split the request without
+// guessing. One text for both refusals, in ValidateTypes and in
+// ExplainType, which takes drafts with the same limits.
+func TestValidateTypes_LimitsRefusalSaysTheSizes(t *testing.T) {
+	var many []*kernelv1.TypeSource
+	for i := range maxSources + 1 {
+		many = append(many, tsrc(fmt.Sprintf("m%d.yaml", i), fmt.Sprintf("id: vtsize%d\nversion: 1\n", i)))
+	}
+	// Two sources of 768 KiB each: 1.5 MiB in all.
+	big := func(name string) *kernelv1.TypeSource {
+		head := "id: vt" + strings.TrimSuffix(name, ".yaml") + "\nversion: 1\n#"
+		return tsrc(name, head+strings.Repeat("x", 768<<10-len(head)-1)+"\n")
+	}
+	heavy := []*kernelv1.TypeSource{big("a.yaml"), big("b.yaml")}
+
+	for _, c := range []struct {
+		what string
+		srcs []*kernelv1.TypeSource
+		has  []string // the request's own count and size
+	}{
+		{"too many sources", many, []string{"this request has 201 sources"}},
+		{"too many bytes", heavy, []string{"this request has 2 sources", "1.5 MiB"}},
+	} {
+		_, verr := validateTypes(as("ana"), t, "namespaces/acme", c.srcs...)
+		_, eerr := explainType(as("ana"), t, &kernelv1.ExplainTypeRequest{
+			Parent: "namespaces/acme", Sources: c.srcs, TypeId: "vta", Version: 1,
+		})
+		for op, err := range map[string]error{"ValidateTypes": verr, "ExplainType": eerr} {
+			what := op + ", " + c.what
+			invalid(t, what, err, "sources")
+			desc := sourcesViolation(t, err)
+			for _, want := range append([]string{"1 to 200 sources", "1 MiB in all"}, c.has...) {
+				if !strings.Contains(desc, want) {
+					t.Errorf("%s: sources violation %q, want it to say %q", what, desc, want)
+				}
+			}
+		}
+	}
+}
+
+// sourcesViolation returns the description of a refusal's field violation
+// on sources, or "" when it has none.
+func sourcesViolation(t *testing.T, err error) string {
+	t.Helper()
+	ce, ok := err.(*connect.Error)
+	if !ok {
+		return ""
+	}
+	for _, d := range ce.Details() {
+		v, derr := d.Value()
+		if derr != nil {
+			t.Fatalf("decode error detail: %v", derr)
+		}
+		if br, ok := v.(*errdetails.BadRequest); ok {
+			for _, fv := range br.FieldViolations {
+				if fv.Field == "sources" {
+					return fv.Description
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // The parent is the caller's namespace, as for ListTypes.
