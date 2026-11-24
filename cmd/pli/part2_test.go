@@ -126,11 +126,12 @@ func TestPli_AgentSession(t *testing.T) {
 
 	// A session scoped to one container sees nothing else.
 	box := create(t, "ana", "--type", "ticket@1")
-	inside := create(t, "ana", "--type", "ticket@1", "--in", box)
+	// A ticket@7: the bot writes its priority, which it opens to agents.
+	inside := create(t, "ana", "--type", "ticket@7", "--in", box)
 	ok(t, "bot", "agent", "start", "--for", "user:ana", "--scopes", box, "--powers", "read,edit_fields")
 	ok(t, "bot", "item", "get", inside)
 	fails(t, "bot", "NOT_FOUND NOT_FOUND", "item", "get", name)
-	ok(t, "bot", "item", "update", inside, "--set", "f_title=bot was here")
+	ok(t, "bot", "item", "update", inside, "--set", "f_priority=1")
 
 	// The older session still works when named.
 	ok(t, "bot", "--session", session["id"].(string), "item", "get", name)

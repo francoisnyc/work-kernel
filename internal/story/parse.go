@@ -11,6 +11,30 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+// agents holds "AGENT for PERSON" steps to the story's people: only an
+// agent acts for someone, and only for a person of the story who is not an
+// agent.
+func (p *parser) agents() {
+	people := map[string]Person{}
+	for _, pe := range p.s.People {
+		people[pe.Name] = pe
+	}
+	for _, st := range slices.Concat(p.s.Given, p.s.Steps) {
+		if st.For == "" {
+			continue
+		}
+		who, ok := people[st.For]
+		switch {
+		case !people[st.Actor].Agent:
+			p.fail(st.Line, "%s acts for %s, but only an agent acts for someone", st.Actor, st.For)
+		case !ok:
+			p.fail(st.Line, "%s acts for %s, who is not one of the story's people", st.Actor, st.For)
+		case who.Agent:
+			p.fail(st.Line, "%s acts for %s, an agent: an agent acts for a person", st.Actor, st.For)
+		}
+	}
+}
+
 // Parse reads a story file. source names it in problems. Every problem of
 // the file is reported at once, as Problems, each with its line.
 func Parse(source string, data []byte) (*Story, error) {
@@ -23,6 +47,7 @@ func Parse(source string, data []byte) (*Story, error) {
 		return nil, Problems{{Source: source, Line: 1, Message: "a story file is a mapping of keys (story, author, day1, people, steps, expect...)"}}
 	}
 	p.file(doc.Content[0])
+	p.agents()
 	if len(p.problems) > 0 {
 		slices.SortStableFunc(p.problems, func(a, b Problem) int { return a.Line - b.Line })
 		return nil, p.problems
@@ -225,10 +250,20 @@ func (p *parser) people(n *yaml.Node) {
 						ok = false
 					}
 					person.Customer = pv.Value == "true"
+				case "agent":
+					if pv.Value != "true" && pv.Value != "false" {
+						p.fail(pk.Line, "%s's agent is true or false", k.Value)
+						ok = false
+					}
+					person.Agent = pv.Value == "true"
 				default:
-					p.fail(pk.Line, "%s: unknown key %q (a person has roles and customer)", k.Value, pk.Value)
+					p.fail(pk.Line, "%s: unknown key %q (a person has roles, customer and agent)", k.Value, pk.Value)
 					ok = false
 				}
+			}
+			if person.Agent && person.Customer {
+				p.fail(k.Line, "%s is an agent and a customer: an agent is never a customer (it may act for one)", k.Value)
+				ok = false
 			}
 		case v.Kind == yaml.ScalarNode && (v.Value == "" || v.Tag == "!!null"):
 		default:
@@ -545,6 +580,13 @@ func parseStep(day1 time.Time, line string, timed bool) (Step, error) {
 	}
 	if st.Actor, err = word(i, "who acts, then what they do"); err != nil {
 		return st, err
+	}
+	// "bot for ana ...": an agent acting for a person.
+	if i+1 < len(toks) && toks[i+1].is("for") && !toks[i+1].quoted {
+		if st.For, err = word(i+2, "the person "+st.Actor+" acts for"); err != nil {
+			return st, err
+		}
+		i += 2
 	}
 	verb, err := word(i+1, "what "+st.Actor+" does: creates, updates, moves, links, unlinks, places, narrows, sees or cannot see")
 	if err != nil {

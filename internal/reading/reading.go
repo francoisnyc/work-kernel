@@ -35,6 +35,11 @@ const (
 	FieldKernel Part = "field_kernel" // Only the kernel writes {f}: {writers}.
 	FieldRoles  Part = "field_roles"  // Only holders of {roles} write {f}.
 	FieldUnique Part = "field_unique" // No two {type}s in one container, both in {states}, hold the same {f}.
+	// Fields closed to agents by default (who writes what).
+	FieldAgentsOnly      Part = "field_agents_only"      // Only agents[ and holders of {roles}] write {f}.
+	FieldAgents          Part = "field_agents"           // No agent writes its fields / An agent writes only {fields}
+	FieldAgentsRoles     Part = "field_agents.roles"     // , except one that names a role the agent holds / , and a field that names a role the agent holds
+	FieldAgentsCustomers Part = "field_agents.customers" // ; an agent acting for a customer sets only what the customer may
 
 	// Links.
 	Link           Part = "link"             // {Who} links it to {targets} as {name}[clauses]; a {target} sees it as {inverse}.
@@ -143,7 +148,7 @@ const (
 func Parts() []Part {
 	return []Part{
 		Starts, Closed, NoLifecycle, Invariant,
-		FieldKernel, FieldRoles, FieldUnique,
+		FieldKernel, FieldRoles, FieldUnique, FieldAgentsOnly, FieldAgents, FieldAgentsRoles, FieldAgentsCustomers,
 		Link, LinkOne, LinkInverseOne, LinkKernel, LinkRoles, Incoming, Rollup,
 		Frozen, Timer, TimerWaits, AtTimer, Acting, ActingEvery, ActingAt, ActingAtWhen, ActingAtSets,
 		Enrich, EnrichFallbk, Action, ActionWrites, Resolve, Final, ReactionFrom, ReactionWhen, ReactionSkip, ReactionHook,

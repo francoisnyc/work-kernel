@@ -328,27 +328,49 @@ var reactionID = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
 // roleNameRe matches a role name (as the item service's EnsureRoles).
 var roleNameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 
-// checkRoles validates a field's writable_by roles.
+// checkRoles validates a field's writable_by list: role names, and no
+// entry (a role, people, agents) twice. Paths index the list as written.
 func (f Field) checkRoles(r reporter, p string) error {
-	if len(f.WritableByRoles) == 0 {
+	entries := f.writers
+	if entries == nil {
+		for _, role := range f.WritableByRoles {
+			entries = append(entries, AllowedRolePrefix+role)
+		}
+		if f.WritableByPeople {
+			entries = append(entries, WriterPeople)
+		}
+		if f.WritableByAgents {
+			entries = append(entries, WriterAgents)
+		}
+	}
+	if len(entries) == 0 {
 		return nil
 	}
 	if f.WritableBy != WritableByAnyone {
-		return r.fail(CodeConflict, at(p, "writable_by"), "Write writable_by: kernel, or a list of roles, not both",
-			"field %s: writable_by is either kernel or a list of roles, not both", f.ID)
+		return r.fail(CodeConflict, at(p, "writable_by"), "Write writable_by: kernel, or a list of writers, not both",
+			"field %s: writable_by is either kernel or a list of writers (people, agents, role:<name>), not both", f.ID)
 	}
 	seen := map[string]bool{}
-	for i, role := range f.WritableByRoles {
+	for i, e := range entries {
+		if e == WriterPeople || e == WriterAgents {
+			if seen[e] {
+				r.fail(CodeDuplicate, at(p, "writable_by", i), "Remove the second one",
+					"field %s: writable_by names %s twice", f.ID, e)
+			}
+			seen[e] = true
+			continue
+		}
+		role := strings.TrimPrefix(e, AllowedRolePrefix)
 		if !roleNameRe.MatchString(role) {
 			r.fail(CodeInvalidName, at(p, "writable_by", i), "Name the role in lower case, digits, _ and -",
 				"field %s: writable_by role %q is not a role name (lower case, digits, _ and -)", f.ID, role)
 			continue
 		}
-		if seen[role] {
+		if seen[AllowedRolePrefix+role] {
 			r.fail(CodeDuplicate, at(p, "writable_by", i), "Remove the second one",
 				"field %s: writable_by names role %s twice", f.ID, role)
 		}
-		seen[role] = true
+		seen[AllowedRolePrefix+role] = true
 	}
 	return nil
 }
@@ -755,9 +777,56 @@ func (f *Field) UnmarshalYAML(n *yaml.Node) error {
 		return err
 	}
 	*f = Field(p)
+	f.writers = listedWriters(wb)
+	wb, f.WritableByPeople, f.WritableByAgents = takeWriters(wb)
 	by, roles, err := decodeWritableBy(wb)
 	f.WritableBy, f.WritableByRoles = by, roles
 	return err
+}
+
+// listedWriters returns a writable_by list's entries as written, when it
+// names people or agents; nil otherwise.
+func listedWriters(wb *yaml.Node) []string {
+	wb = resolveAlias(wb)
+	if wb == nil || wb.Kind != yaml.SequenceNode {
+		return nil
+	}
+	var out []string
+	other := false
+	for _, e := range wb.Content {
+		v := resolveAlias(e)
+		out = append(out, v.Value)
+		if v.Value == WriterPeople || v.Value == WriterAgents {
+			other = true
+		}
+	}
+	if !other {
+		return nil
+	}
+	return out
+}
+
+// takeWriters returns a field's writable_by list without its people and
+// agents entries, and whether it had each. A scalar, or nothing, is
+// returned as it is.
+func takeWriters(wb *yaml.Node) (rest *yaml.Node, people, agents bool) {
+	wb = resolveAlias(wb)
+	if wb == nil || wb.Kind != yaml.SequenceNode {
+		return wb, false, false
+	}
+	cp := *wb
+	cp.Content = nil
+	for _, e := range wb.Content {
+		switch v := resolveAlias(e); {
+		case v.Kind == yaml.ScalarNode && v.Value == WriterPeople:
+			people = true
+		case v.Kind == yaml.ScalarNode && v.Value == WriterAgents:
+			agents = true
+		default:
+			cp.Content = append(cp.Content, e)
+		}
+	}
+	return &cp, people, agents
 }
 
 // withoutKey returns a copy of mapping n without key, and key's value

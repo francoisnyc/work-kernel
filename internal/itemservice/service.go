@@ -234,12 +234,14 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 	if req.Requester != "" {
 		owner.OnBehalfOf = req.Requester
 	}
-	// Create is the public door only: a kernel-written field is refused.
+	// Create is the public door only: a kernel-written field is refused at
+	// once; who may write the others is asked in the transaction, after
+	// what is not found, the start block and the create power.
 	writer, err := publicWriter(ctx, k.pool, ty, req.Principal, req.Fields)
 	if err != nil {
 		return WriteResult{}, err
 	}
-	if err := checkPatch(ty, "", nil, req.Fields, writer); err != nil {
+	if err := checkKernelFields(ty, req.Fields); err != nil {
 		return WriteResult{}, err
 	}
 	// Date-time values are stored in one form, whatever offset they came in.
@@ -314,6 +316,12 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 			return WriteResult{}, err
 		}
 		if err := checkCreatePower(ctx, tx, req.Principal); err != nil {
+			return WriteResult{}, err
+		}
+		// Who may write each field it sets: people, agents, roles (a field
+		// that lists none is closed to agents). Before the agent write rule:
+		// a write refused needs no approval.
+		if err := checkWriter(ty, req.Fields, *writer); err != nil {
 			return WriteResult{}, err
 		}
 		if err := checkAgentWrite(ctx, tx, req.Principal, target, req.ContainerID); err != nil {

@@ -40,12 +40,21 @@ type Person struct {
 	Name     string
 	Roles    []string
 	Customer bool
+	// Agent makes the person an agent (fields closed to agents by default):
+	// it acts alone, or for a person of the story ("bot for ana updates
+	// ..."), in a session the harness starts with every power its user's
+	// kind allows. An agent is never a customer.
+	Agent bool
 }
 
-// Principal is the person's principal: user:<name> or customer:<name>.
+// Principal is the person's principal: user:<name>, customer:<name> or
+// agent:<name>.
 func (p Person) Principal() string {
-	if p.Customer {
+	switch {
+	case p.Customer:
 		return "customer:" + p.Name
+	case p.Agent:
+		return "agent:" + p.Name
 	}
 	return "user:" + p.Name
 }
@@ -72,6 +81,7 @@ type Step struct {
 	At    time.Time // zero for a given step
 	Text  string    // the step as written
 	Actor string    // a person's name
+	For   string    // the person an agent acts for ("bot for ana ..."), if any
 	Verb  Verb
 	Item  string
 

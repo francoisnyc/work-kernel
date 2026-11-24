@@ -39,7 +39,7 @@
     "count": {"description": "A whole number.", "type": ["integer", "null"]},
     "flag": {"description": "true or false.", "type": ["boolean", "null"]},
     "writableBy": {
-      "description": "kernel (only hooks and the kernel write it), or a list of role:<name>.",
+      "description": "kernel (only hooks and the kernel write it), or a list of writers: people, agents and role:<name> (a link takes role:<name> only). Absent: people, never agents.",
       "type": ["string", "number", "boolean", "null", "array"],
       "items": {"$ref": "#/$defs/text"}
     },

@@ -175,7 +175,15 @@ func TestAgentSession_Scopes(t *testing.T) {
 	ctx := testCtx(t)
 	w := word()
 	box := create(t, "ana", ticketV1, map[string]any{"f_title": w + " box"}).Item.Name
-	inside := createIn(t, "ana", box, map[string]any{"f_title": w + " inside"})
+	// A ticket@7, whose priority the bot writes below.
+	made7, err := as("ana").CreateItem(ctx, connect.NewRequest(&kernelv1.CreateItemRequest{
+		Parent: "namespaces/acme", RequestId: newID(), Type: ticketV7, Container: box,
+		Fields: fields(t, map[string]any{"f_title": w + " inside"}),
+	}))
+	if err != nil {
+		t.Fatalf("CreateItem ticket@7 in the box: %v", err)
+	}
+	inside := made7.Msg.Item.Name
 	outside := create(t, "ana", ticketV1, map[string]any{"f_title": w + " outside"}).Item.Name
 	session := startSession(t, "bot", "user:ana", []string{box}, "read", "edit_fields", "create")
 	bot := asAgent("bot", session)
@@ -185,7 +193,7 @@ func TestAgentSession_Scopes(t *testing.T) {
 			t.Errorf("GetItem %s inside: %v", name, err)
 		}
 	}
-	_, err := bot.GetItem(ctx, connect.NewRequest(&kernelv1.GetItemRequest{Name: outside}))
+	_, err = bot.GetItem(ctx, connect.NewRequest(&kernelv1.GetItemRequest{Name: outside}))
 	notFound(t, "GetItem outside", err)
 	_, err = bot.ListItemEvents(ctx, connect.NewRequest(&kernelv1.ListItemEventsRequest{Parent: outside}))
 	notFound(t, "ListItemEvents outside", err)
@@ -216,7 +224,7 @@ func TestAgentSession_Scopes(t *testing.T) {
 	}
 
 	if _, err := bot.UpdateItem(ctx, connect.NewRequest(&kernelv1.UpdateItemRequest{
-		Name: inside, RequestId: newID(), Fields: fields(t, map[string]any{"f_title": "bot was here"}),
+		Name: inside, RequestId: newID(), Fields: fields(t, map[string]any{"f_priority": 1}),
 	})); err != nil {
 		t.Errorf("UpdateItem inside: %v", err)
 	}

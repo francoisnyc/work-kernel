@@ -168,7 +168,8 @@ func (w shapeWalker) wrongShape(n *yaml.Node, path, want string) {
 }
 
 // writableBy checks a field's or a link type's writable_by: kernel, or a
-// non-empty list of role:<name> entries (the names are check's).
+// non-empty list of role:<name> entries, and for a field people and agents
+// too (the names, and an entry twice, are check's).
 func (w shapeWalker) writableBy(owner *yaml.Node, t reflect.Type, v *yaml.Node, path string) {
 	v = resolveAlias(v)
 	kind, nameKey := "field", "id"
@@ -193,10 +194,22 @@ func (w shapeWalker) writableBy(owner *yaml.Node, t reflect.Type, v *yaml.Node, 
 				w.wrongShape(e, at(path, i), "a single value")
 				continue
 			}
+			// A field's list also takes people and agents (fields are
+			// closed to agents unless their Type opens them); a link's
+			// takes roles only.
+			if t == fieldType && (e.Value == WriterPeople || e.Value == WriterAgents) {
+				continue
+			}
 			if !strings.HasPrefix(e.Value, AllowedRolePrefix) {
-				w.r.fail(CodeInvalidValue, at(path, i), "Write role:<name>, or writable_by: kernel on its own",
-					"%s %s: writable_by entry %q: a list takes role:<name> entries only "+
-						"(kernel stands alone: writable_by: kernel)", kind, name, e.Value)
+				if t == fieldType {
+					w.r.fail(CodeInvalidValue, at(path, i), "Write people, agents or role:<name>, or writable_by: kernel on its own",
+						"%s %s: writable_by entry %q: a list takes people, agents and role:<name> entries "+
+							"(kernel stands alone: writable_by: kernel)", kind, name, e.Value)
+				} else {
+					w.r.fail(CodeInvalidValue, at(path, i), "Write role:<name>, or writable_by: kernel on its own",
+						"%s %s: writable_by entry %q: a list takes role:<name> entries only "+
+							"(kernel stands alone: writable_by: kernel)", kind, name, e.Value)
+				}
 			}
 		}
 	default:

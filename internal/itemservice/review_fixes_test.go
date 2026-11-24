@@ -375,7 +375,8 @@ func TestFix_APortalBot_ApprovalUnavailable(t *testing.T) {
 	if _, err := w.k.Get(testCtx(t), staffBot, narrowed); err != nil {
 		t.Fatal(err)
 	}
-	_, err = w.tryCreate(t, staffBot, "note", 1, &open, map[string]any{"f_body": "x"})
+	// An empty note: note@1 opens no field to agents (closed by default).
+	_, err = w.tryCreate(t, staffBot, "note", 1, &open, nil)
 	if !errors.Is(err, itemservice.ErrNeedsApproval) {
 		t.Errorf("an agent for lea: %v; want ErrNeedsApproval, as before", err)
 	}

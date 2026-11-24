@@ -91,9 +91,11 @@ A Type is versioned YAML data that **names code but never contains it**.
   calendar date, `2026-12-01`), `datetime` (an instant: see "Jira part 2,
   step 1 as built"). A field may be `writable_by: kernel`: only the
   internal door (a hook, or another Type's reaction it accepts) writes it
-  (see "Approval as a business state"), or `writable_by: [role:<name>, ...]`:
-  on the public door only holders of a role write it (see "Link reactions,
-  the leave balance and the saga"). A Type may declare `invariants`, rules
+  (see "Approval as a business state"), or a list of its writers on the
+  public door: `people`, `agents` and `role:<name>` (see "Link reactions,
+  the leave balance and the saga" for roles). **Without `writable_by`, a
+  field is people's only: no agent writes it unless its Type opens it**
+  (see "Fields closed to agents by default, as built"). A Type may declare `invariants`, rules
   over its fields that every write keeps, and `reactions`, writes on the
   Items it links to. It may name the links other Types declare towards it
   (`incoming`) and declare `rollups`, counts computed when an Item is read
@@ -986,7 +988,7 @@ A rule's refusal answers with its code; every kernel rejection carries one
 | `ErrRejected`, an approval's audience changed since shown | `FAILED_PRECONDITION` | `AUDIENCE_CHANGED` (+ audience, expected_audience) |
 | `ErrRejected`, a max-one side of a link type already has its link | `FAILED_PRECONDITION` | `LINK_CARDINALITY` (+ link_type, side) |
 | `ErrRejected`, the link exists / does not exist / its target's Type is not allowed | `FAILED_PRECONDITION` | `ALREADY_LINKED` / `NOT_LINKED` / `LINK_TARGET_TYPE` |
-| `ErrForbidden`, a write names a field it may not write (kernel-written, or named by its transition's `allowed`) | `PERMISSION_DENIED` | `FIELD_NOT_WRITABLE` (+ fields) |
+| `ErrForbidden`, a write names a field it may not write (kernel-written, closed to the writer by `writable_by`, e.g. to an agent by default, or named by its transition's `allowed`) | `PERMISSION_DENIED` | `FIELD_NOT_WRITABLE` (+ fields) |
 | `ErrRejected`, a write names a field the Item's state freezes | `FAILED_PRECONDITION` | `FIELD_FROZEN` (+ fields, state) |
 | `ErrRejected`, a write would break one of the Type's invariants | `FAILED_PRECONDITION` | `INVARIANT_FAILED` (+ invariant) |
 | `ErrForbidden`, LinkItems / UnlinkItems on a link only the kernel sets | `PERMISSION_DENIED` | `LINK_NOT_WRITABLE` (+ link_type) |
@@ -1371,7 +1373,10 @@ hold for everyone).
 **Role writers.** `writable_by: [role:<name>, ...]`: on the public door the
 actor, and the user an agent acts for, must both hold one of the roles
 (`FIELD_NOT_WRITABLE`, after visibility); the kernel's own writers are not
-affected. On `leave_balance`, `f_owner` and `f_allowance` are `hr_admin`'s
+affected. An agent that holds the role writes the field: a role is how a
+deployment opens a field to a particular agent. Since fields closed to
+agents by default, the list may also name `people` and `agents`; see
+"Fields closed to agents by default, as built". On `leave_balance`, `f_owner` and `f_allowance` are `hr_admin`'s
 and `f_used` the kernel's; the invariant `balance_incomplete` refuses a
 balance without an owner and an allowance, so a non-admin cannot create one.
 
@@ -3780,6 +3785,7 @@ time   = day N HH:MM[:SS]
 value  = INT | true | false | null | "text" | word | day N | day N HH:MM[:SS] | [value, ...]
 values = field = value, field = value, ...
 
+person = NAME | AGENT for NAME   (an agent acting for a person; since fields closed to agents)
 step   = time person creates ITEM as TYPE@V [in ITEM] [with values]
        | time person updates ITEM with values
        | time person moves ITEM to STATE [with values]
@@ -3977,13 +3983,15 @@ sees it* (customer fields, own, shared, placement). Then the actions it
 calls, as their contracts describe them, and what no reading covers.
 
 **The kinds of sentence** (91 parts: 38 kinds and their clauses, the start
-block's 8 included; the list is closed, `reading.Parts()`):
+block's 8 included; 95 parts and 40 kinds since fields closed to agents;
+the list is closed, `reading.Parts()`):
 
 | Kind | Wording (clauses in brackets) |
 | --- | --- |
 | starts, closed, no_lifecycle | A {type} starts in {s}. / It moves only as listed below; any other move is refused. / A {type} has no lifecycle: it stays in `default`. |
 | invariant | Every write keeps this true: {rule}; a write that would not is refused ({id}). |
 | field_kernel, field_roles, field_unique | Only the kernel writes {f}: {writers}. / Only holders of {roles} write {f}. / No two {type}s in one container, both in {states}, hold the same {f}. |
+| field_agents_only, field_agents (fields closed to agents by default) | Only agents[ and holders of {roles}] write {f}. / {No agent writes its fields / An agent writes only {fields}}[, except one that names a role the agent holds / , and a field that names a role the agent holds][; an agent acting for a customer sets only what the customer may]. |
 | link, incoming, rollup | {Anyone who can see it / Only the kernel / Only holders of R} links it to a {T} as {name}, {at most one / any number}[; a {T} takes at most one]; a {T} sees it as {inverse}. / It reads the {T}s linked to it as {link} under the name {name}. / When it is read, {id} counts its {over} by {count_by}. |
 | frozen, final | While it is in {s}, nobody changes {fields}. / Nothing leaves {s}. |
 | timer, at_timer | {d} after it enters {s}, if it is still there, the timer moves it to {to}[; if a hold is open then, the timer waits for it to close and looks again]. / When it is in {s} and the instant in {f} has passed, the timer moves it to {to}. |
@@ -4229,7 +4237,7 @@ Later; Ventoux item 3).
 | who moves, narrows or un-narrows it (`placement_writable_by`) | the latest version |
 | its states and moves, guards, reactions, timers, invariants | the Item's own version |
 | who may make a move (a transition's `allowed`) | the Item's own version |
-| who may write a field (`writable_by`), what a customer sees | the Item's own version |
+| who may write a field (`writable_by`), what a customer sees | the Item's own version (but that a field without `writable_by` is closed to agents is a kernel rule, for every version: "Fields closed to agents by default, as built") |
 
 **What this does not close.** A create may still name an older version, and
 that version's lifecycle then applies: a requester creating on an older
@@ -4403,6 +4411,145 @@ worker safe for side effects even where Temporal is not.
 bake-off's attack), `internal/lifecycle/cause_test.go`. The bake-off's own
 script, re-run against its own stack: "the purchase system received
 nothing".
+
+## Fields closed to agents by default, as built (2026-11-24)
+
+Track 1, item 2 of `docs/roadmap.md`. Both bake-offs found the same two
+holes in every kernel Type (`docs/research/temporal-bakeoff.md`, measure 4;
+`docs/research/camunda-bakeoff.md`, test 2b): a compromised agent with the
+right to edit fields changed a requester's draft before she submitted it
+(what the manager then approved was the agent's version), and planted the
+reason for a decision, so the decider could reject without giving one
+though the Type requires it. A role every person holds and the agent does
+not (`writable_by: ['role:staff']`) closed both, but only for an author who
+knew the trick. Now the kernel closes them by default.
+
+**The rule.** A field's `writable_by` lists who writes it on the public
+door: `people` (any user or customer who may write the Item), `agents`
+(any agent with a write power), and `role:<name>` (its holders, agents
+included), in any mix. `kernel` still stands alone. **A field with no
+`writable_by` is people's only: an agent writes a field only where its
+Type says so**, by `agents` or by a role the agent holds.
+
+- `[people, agents]`: anyone. `[agents]`: an agent acting alone (its user,
+  a person, has no right there). `[people, role:x]`: any person, and an
+  agent holding x. `[role:x]`: holders of x, as before.
+- **An agent and the user it acts for both pass**, as for `allowed` and
+  roles: the agent as `agents` or holding a role, its user as `people` or
+  holding a role. An agent acting for ana, who may write a closed field
+  herself, is refused.
+- **An agent acting for a customer is judged as that customer**, under
+  the customer rules (`customer_fields`, on create only); they were already
+  closed.
+- `policy.MayWriteField(field, who)` is the one pure answer;
+  `typedef.Field.PeopleWrite` says whether people write a field.
+
+**The owner's decisions (Phase A):**
+
+- **A kernel rule, for every version at once**, like step 2b's placement
+  rule. A field without `writable_by` in an Item of any version is closed
+  to agents now; `writable_by` itself stays the Item's version's. An
+  opt-in per new version would have left the bake-offs' Types open. Items
+  in flight lose agent writes at once; a version that needs agents gets a
+  new version (and its open Items wait for track 1 item 6).
+- **Field by field.** No Type-wide opening: it would silently open every
+  field a later version adds (Later, if an agent-first Type finds it
+  painful).
+- **New versions only**, never an edit to a registered one:
+  `build_step@2` opens what its agent writes (`f_title`, `f_questions`,
+  `f_tests_ref`, `f_pr_url`, `f_journal`, `f_rank`; `f_owner` stays
+  `role:maintainer`'s) and `ticket@7` (ticket@6 with `f_priority` open: the
+  triage bot's field). `vacation_request` stays closed: a person fills
+  their own leave. The bake-offs' Types are unchanged.
+
+**What is closed, and what stays the kernel's.** Every field an agent
+names on the public door: on Create, on Update, in a transition's patch
+(a held transition's patch included, judged when asked), and **the fields
+a move `clears`** (a clear is a write of that field, as for roles). Not:
+a move's `sets` (the Type computes those values); a Create with no fields;
+links, readers and placement (their own rules; links closed to agents are
+Later). The kernel's own writers are untouched: hooks (a check's
+correction, an enrich, an action's write-back), timers and reactions all
+use the internal door.
+
+**The order of checks.** On Update and on Transition nothing moved: the
+field rule is still the first part of "not writable", before frozen and
+held. So an agent's write to a frozen closed field is now
+`FIELD_NOT_WRITABLE`, not `FIELD_FROZEN`, and on a transition the agent
+write rule (`NEEDS_APPROVAL`) still comes before the field rules, as before.
+**On Create**, who may write each field is now asked inside the
+transaction, after what is not found (the container, the session's
+scopes), the start block and the create power, and before the agent write
+rule; a kernel-written field is still refused at once.
+
+**The refusal.** The existing `PERMISSION_DENIED` / `FIELD_NOT_WRITABLE`
+with `fields` (no new code, no contract change). The item service's
+message, for an agent: "an agent writes only the fields its Type opens to
+agents, or to a role it holds: the request may not write f_amount,
+f_vendor".
+
+**Load checks and schema.** A field's list takes `people`, `agents` and
+`role:<name>`; anything else is `INVALID_VALUE` naming the three; an
+entry twice is `DUPLICATE` at the second (paths index the list as
+written); a link's list still takes roles only. The JSON Schema's
+`writableBy` says so. The stored definition gains `writable_by_people`
+and `writable_by_agents` only when set, so every registered version is
+byte-identical.
+
+**The contract.** Comments only: `FIELD_WRITER_UNSPECIFIED` and
+`Field.writable_by` now say people, not agents. `GetType` cannot yet say
+which fields are open to agents (Later).
+
+**Readings.** "Who writes what" ends with one new sentence kind,
+`field_agents`: "No agent writes its fields." or "An agent writes only
+`f_a` and `f_b`.", with ", except one that names a role the agent holds" /
+", and a field that names a role the agent holds", and "; an agent acting
+for a customer sets only what the customer may" when the Type has customer
+fields. A field only agents write reads "Only agents[ and holders of R]
+write `f`." (`field_agents_only`); a field people and a role write no
+longer reads as the role's alone. The three approved readings each gained
+the line, approved by the owner. Its witness runs a story with agents.
+
+**Agents in stories.** A person may be an agent (`bot: {agent: true,
+roles: [...]}`, principal `agent:bot`, never a customer), and a step may
+say an agent acts for a person: "bot for ana updates ...". The harness
+starts one session per agent and user, over the whole namespace with
+every power that user may grant (a customer's agent: read, create,
+comment and every move). Test tooling only, as before.
+
+**The bake-offs, re-run unchanged** (kernel side, their own stacks and
+Types; their `results/` stay the earlier record):
+
+| Run | Before | Now |
+|---|---|---|
+| Camunda bake-off, `test2-compromised.py kernel` | 31 of 36 refused | 32 of 32 refused |
+| Temporal bake-off, purchase | 26 of 29 (2 succeeded, 1 allowed) | 27 of 27 |
+| Temporal bake-off, access request | 15 of 19 (3 succeeded, 1 allowed) | 17 of 18 |
+| The access request written blind | 16 of 19 | 18 of 18 |
+| The staff-role Types | the agent refused | the same |
+
+Both holes are refused on every Type, acting alone and acting for the
+person. "File and submit a purchase in ana's name, acting for her" and
+"ask for access in its own name" are now refused too (closed values on
+create), so their follow-on attempts no longer run. Five attempts on
+frozen fields now read `FIELD_NOT_WRITABLE` instead of `FIELD_FROZEN`. Still
+allowed: ana's own request for no system (a person, the Type), and a
+colleague changing ana's draft (track 1 item 4, "only the requester"), so
+the bake-offs do not yet pass in full.
+
+**Tests:** item service 11 new (the two attacks and the preparation; who
+writes each kind of field, create, a transition's patch, clears, sets,
+kernel writes, customers' agents, NOT_FOUND first); policy 1 (32 cases);
+typedef 4; API 1; reading 2 and a witness; story 2; one scenario step.
+About 40 existing tests moved to Types that open the field, or to a
+person-written setup, assertions unchanged; the lists of every Type in
+`types/` gained the two versions (52 to 54); w_leave@1's layout test gained
+the line.
+
+**Kernel changes (counted):** the field rule (`policy.MayWriteField`, the
+item service's field rules and Create's order), the load checks, the
+readings' sentence. No schema, migration or go.mod change; the proto change
+is comments.
 
 ## Out of scope for the spike
 
