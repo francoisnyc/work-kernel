@@ -41,12 +41,15 @@ func asCustomer(name, session string) kernelv1connect.ItemServiceClient {
 	return withToken(customerTokens[i].Token, sessionHeader(session))
 }
 
-// portal is a desk@2 made by hana, with sam and hana as desk agents.
+// portal is a desk@2 made by hana, with sam and hana as desk agents. hana
+// holds sla_admin too: only its holders narrow a desk of any version, as
+// desk@3 says (the latest version's placement rule).
 func portal(t *testing.T) string {
 	t.Helper()
 	if _, err := pool.Exec(testCtx(t), `insert into principal_roles (namespace_id, principal, role)
-		values ('acme', 'user:sam', 'desk_agent'), ('acme', 'user:hana', 'desk_agent') on conflict do nothing`); err != nil {
-		t.Fatalf("grant desk_agent: %v", err)
+		values ('acme', 'user:sam', 'desk_agent'), ('acme', 'user:hana', 'desk_agent'), ('acme', 'user:hana', 'sla_admin')
+		on conflict do nothing`); err != nil {
+		t.Fatalf("grant desk_agent and sla_admin: %v", err)
 	}
 	return mkIn(t, "hana", deskV2, "", map[string]any{"f_key": "DESK-" + word(), "f_name": "portal " + word()})
 }
