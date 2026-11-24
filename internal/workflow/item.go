@@ -78,6 +78,11 @@ const (
 	// different result (a second invoice), or the connector saw the key with
 	// a different request. A duplicate, never "already written".
 	ErrTypeKeyConflict = "KeyConflict"
+	// ErrTypeCauseNotConfirmed: the item service could not confirm the
+	// cause an action hook was given (a workflow's input is a request,
+	// never proof). Final, and already recorded on the Item where there
+	// was something true to record.
+	ErrTypeCauseNotConfirmed = "CauseNotConfirmed"
 	// The hook protocol: a remote connector's configuration or contract is
 	// wrong. Each fails a check at once, with its own reason on the hold.
 	ErrTypeConnectorUnconfigured = "ConnectorUnconfigured"
@@ -1649,6 +1654,10 @@ func actionFailure(err error) (reason string, failed bool) {
 	if errors.As(err, &appErr) {
 		switch appErr.Type() {
 		case ErrTypeNotFound:
+			return "", false
+		case ErrTypeCauseNotConfirmed:
+			// Nothing was sent, and the item service has recorded the
+			// refusal itself: there is no failure of the action to add.
 			return "", false
 		case ErrTypeKeyConflict:
 			return "key_conflict", true

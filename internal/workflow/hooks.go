@@ -182,7 +182,15 @@ func (a *Activities) writeFields(ctx context.Context, c hookCall, key string, fi
 // connector made a second, different thing for one key: a duplicate. It is
 // a non-retryable key conflict, never "already written". (An enrich hook
 // treats the same case as already written: its fallback shares its key.)
+//
+// Before anything else it has the item service confirm the cause: the
+// input came through Temporal, where anyone who reaches the server can
+// put anything. Nothing is read for the connector, and nothing sent,
+// for a cause that does not check out.
 func (a *Activities) RunAction(ctx context.Context, in HookInput) error {
+	if err := a.confirmCause(ctx, in); err != nil {
+		return err
+	}
 	c, err := a.prepare(ctx, in)
 	if err != nil {
 		return err
@@ -223,6 +231,27 @@ func (a *Activities) RunAction(ctx context.Context, in HookInput) error {
 		return temporal.NewNonRetryableApplicationError(
 			fmt.Sprintf("%s ran again for key %s and got a different result", in.HookID, in.IdempotencyKey),
 			ErrTypeKeyConflict, err)
+	}
+	return kernelError(err)
+}
+
+// confirmCause asks the item service whether the cause this input names is
+// real (itemservice.ConfirmCause). A refusal is final: a non-retryable
+// error of its own type, which the workflow does not record again.
+func (a *Activities) confirmCause(ctx context.Context, in HookInput) error {
+	id, err := uuid.Parse(in.ItemID)
+	if err != nil {
+		return temporal.NewNonRetryableApplicationError(fmt.Sprintf("item id %q", in.ItemID), ErrTypeInvalid, err)
+	}
+	err = a.Items.Internal().ConfirmCause(ctx, itemservice.ConfirmCauseRequest{
+		ItemID: id, TypeID: in.TypeID, TypeVersion: in.TypeVersion, Hook: in.HookID,
+		CauseSeq: in.CauseSeq, Timer: in.Timer, Run: in.Run, IdempotencyKey: in.IdempotencyKey,
+	})
+	// IsActivity: the tests call an activity as a plain method, where
+	// there is no activity logger to ask for.
+	if errors.Is(err, itemservice.ErrCauseNotConfirmed) && activity.IsActivity(ctx) {
+		activity.GetLogger(ctx).Warn("an action hook's cause was not confirmed; nothing was sent",
+			"item", in.ItemID, "cause_seq", in.CauseSeq, "reason", err.Error())
 	}
 	return kernelError(err)
 }
@@ -331,6 +360,7 @@ func kernelError(err error) error {
 		target error
 		typ    string
 	}{
+		{itemservice.ErrCauseNotConfirmed, ErrTypeCauseNotConfirmed},
 		{itemservice.ErrNotFound, ErrTypeNotFound},
 		{itemservice.ErrHeld, ErrTypeHeld}, // before ErrStale, which it also is
 		{itemservice.ErrStale, ErrTypeStale},
