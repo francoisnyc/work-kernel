@@ -180,7 +180,7 @@ func (r *renderer) whoStarts() {
 			capitalize(who)+" creates one; a customer creates one only where a container lets them.")
 	}
 	r.say([]Part{StartLatest}, path,
-		at("While this is the latest version of %s, these rules hold for creating %s of any version.", t.ID, withArticle(t.ID)))
+		at("While this is the latest version of %s, these rules apply to creating %s of any version.", t.ID, withArticle(t.ID)))
 }
 
 // --- Who writes what ---

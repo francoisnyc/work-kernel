@@ -136,7 +136,7 @@ const (
 	StartWhoContainerCreator Part = "start_who.container_creator" // anyone who took part in creating the container
 	StartWhoNobody           Part = "start_who.nobody"            // No person creates a {type}: only a reaction does.
 	StartWhoCustomers        Part = "start_who.customers"         // ; a customer creates one only where a container lets them
-	StartLatest              Part = "start_latest"                // While this is the latest version of {type}, these rules hold for creating a {type} of any version.
+	StartLatest              Part = "start_latest"                // While this is the latest version of {type}, these rules apply to creating a {type} of any version.
 )
 
 // Parts is the closed list of parts, in the order of the constants.
