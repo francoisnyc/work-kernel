@@ -1,0 +1,8 @@
+camunda users, groups and authorizations set
+task-worker: candidates read and claim; only the assignee completes
+camunda side up in 48.251524132 s: orchestration cluster healthy after 16.501002048 s, then users set up and both connector runtimes healthy
+deployed purchase version 1
+deployed access-request version 1
+deployed prepare-decision version 1
+deployed system-owner version 1
+deployed system-owner-definitions version 1
