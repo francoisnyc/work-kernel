@@ -165,6 +165,9 @@ func TestSearch_MinSeqAlreadyReached_AnswersAtOnce(t *testing.T) {
 	alice := person("alice")
 	term := word()
 	res := createAs(t, k, alice, "now "+term, nil, nil)
+	// A new Service's first Search loads every registered Type version (a
+	// second under -race at this suite's size): not what is timed here.
+	searchIDs(t, k, alice, term, 0)
 
 	start := time.Now()
 	got := searchIDs(t, k, alice, term, res.CommitSeq)

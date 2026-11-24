@@ -256,6 +256,11 @@ func TestMinSeq_DoesNotWaitForYoungerTransactions(t *testing.T) {
 		t.Fatalf("setup: commit_seq %d is not above %d", high, low)
 	}
 	older.commit()
+	// A new Service's first Search loads every registered Type version (a
+	// second under -race at this suite's size): not what is timed here.
+	if _, err := searchWait(t, k, 0, 0); err != nil {
+		t.Fatalf("a first Search: %v", err)
+	}
 
 	took, err := searchWait(t, k, high, 3*time.Second)
 	if err != nil {
