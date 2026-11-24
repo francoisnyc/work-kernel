@@ -502,6 +502,11 @@ err_has "Content from this agent session will become visible to the readers of $
 ok triage-bot item update "$in_room" --set f_priority=1 >/dev/null
 ok triage-bot item link "$in_inner" blocks "$in_room" >/dev/null
 
+step "fields are closed to agents: ticket@7 opens only f_priority, so the bot may not retitle a ticket"
+refuse triage-bot "PERMISSION_DENIED FIELD_NOT_WRITABLE" item update "$in_room" --set "f_title=renamed by the bot"
+expect "the refused fields" "$(meta fields)" "f_title"
+expect "ana's title stands" "$(ok ana item get "$in_room" | j .item.fields.f_title)" "in the room $w"
+
 # ---------------------------------------------------------------------------
 # Step 2, part 1: the vacation request. Approval is a business state: the HR
 # check names the approver on the way into submitted, the terms freeze, and
