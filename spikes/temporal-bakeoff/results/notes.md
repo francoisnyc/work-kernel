@@ -1,0 +1,1 @@
+- 03:23 step 1: Row fields tagged json:"-" were dropped by Temporal's JSON data converter on the way to the Record activity (null readers in Postgres). Found only by running against real Temporal+Postgres; the mocked workflow tests passed.
