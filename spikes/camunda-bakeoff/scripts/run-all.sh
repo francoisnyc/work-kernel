@@ -18,7 +18,10 @@ python3 test3-inbox.py          # first, on fresh data
 python3 test2-injection.py
 python3 test0-paths.py
 python3 test2-compromised.py all
+python3 test2-sidedoors.py
 TYPES=kernel/types python3 test1-cfo.py
 cd ..
 scripts/test4-footprint.sh "both, after the tests"
+# Last: it gives the agent a role the kernel never takes back (reset with kernel-down.sh).
+(cd scripts && python3 test2-compromised.py agent-among-approvers)
 echo "done: see results/"

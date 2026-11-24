@@ -75,6 +75,9 @@ state, how = k_through_finance(new)
 say(f"- New purchase@2 {new}, 6,000: manager approved; {how}")
 ok, res = pli("fay", "item", "transition", new, "--to", "approved", check=False)
 say(f"- fay (finance) tries to approve it in cfo_review: {'allowed' if ok else 'refused: ' + ' '.join(str(res).split())[:90]}")
+_, ses = pli("prep-bot", "agent", "start", "--scopes", "namespaces/acme", "--powers", "read,create,edit_fields,transition:*,move", "--for", "user:cora")
+ok, res = pli("prep-bot", "item", "transition", new, "--to", "approved", session=ses["session"]["id"], check=False)
+say(f"- The agent, acting for the CFO with every power, tries to approve it: {'allowed' if ok else 'refused: ' + ' '.join(str(res).split())[:90]}")
 _, res = pli("cora", "item", "transition", new, "--to", "approved")
 time.sleep(2)
 _, res = pli("cora", "item", "get", new)
@@ -125,8 +128,9 @@ def c_after_finance(pi):
 
 
 before = c_new()
+before2 = c_new()
 _, pi = camunda("demo", "GET", f"/v2/process-instances/{before}")
-say(f"- In flight before the change: purchase version {pi.get('processDefinitionVersion')}, instance {before}, 6,000.")
+say(f"- In flight before the change: two instances of purchase version {pi.get('processDefinitionVersion')} ({before}, {before2}), 6,000 each.")
 # The same two slips as on the kernel side: a misspelled element and a
 # misspelled variable; then the variable alone.
 src = open(f"{SPIKE}/camunda/purchase-cfo.bpmn").read()
@@ -145,6 +149,8 @@ new = c_new()
 _, pi = camunda("demo", "GET", f"/v2/process-instances/{new}")
 t = c_after_finance(new)
 say(f"- New purchase (the start message now starts version {pi.get('processDefinitionVersion')}), 6,000: manager and finance approved; now at `{t['elementId']}` for {t.get('candidateGroups')}")
+st0 = camunda("prep-bot", "POST", f"/v2/user-tasks/{t['userTaskKey']}/completion", {"variables": {"cfoApproved": True}})[0]
+say(f"- The agent's user tries to complete the CFO task: HTTP {st0}")
 st = c_do("fay", t, "cfoApproved") if t.get("userTaskKey") else None
 say(f"- fay (finance, not cfo) tries to claim and complete the CFO task: HTTP {st}")
 st = c_do("cora", t, "cfoApproved")
@@ -153,5 +159,15 @@ _, v = camunda("demo", "POST", "/v2/variables/search", {"filter": {"processInsta
 say(f"- cora (cfo group) approves: HTTP {st}; orderId {v['items'][0]['value'] if v.get('items') else 'none'}")
 t = c_after_finance(before)
 say(f"- The in-flight instance {before}: after finance, at `{t['elementId']}` (it keeps the version it started on, unless migrated)")
-say("- A requester cannot pick the old version: a message start always starts the latest deployed version.")
+# Camunda can move a running instance to the new version (migration).
+c_task(before2, "manager_decision")
+st, res = camunda("demo", "POST", f"/v2/process-instances/{before2}/migration", {
+    "targetProcessDefinitionKey": str(pi.get("processDefinitionKey")),
+    "mappingInstructions": [{"sourceElementId": "manager_decision", "targetElementId": "manager_decision"}]})
+time.sleep(2)
+t = c_after_finance(before2) if 200 <= st < 300 else {"elementId": "(not migrated)"}
+say(f"- The other in-flight instance {before2}, migrated by an admin to the new version (HTTP {st}{'' if 200 <= st < 300 else ' ' + str(res)[:200]}): "
+    f"after finance, at `{t['elementId']}`: the change reaches a request already in flight.")
+say("- A requester cannot pick the old version: requests start by message, and a message starts the latest deployed version. "
+    "(With an ordinary start, the API accepts a version number.)")
 open(os.path.join(SPIKE, "results/test1-cfo.md"), "w").write("\n".join(out) + "\n")

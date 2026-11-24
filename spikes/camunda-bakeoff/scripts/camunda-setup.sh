@@ -42,6 +42,10 @@ done
 for p in purchase access-request; do
   auth connectors USER PROCESS_DEFINITION "$p" '["READ_PROCESS_DEFINITION","READ_PROCESS_INSTANCE","UPDATE_PROCESS_INSTANCE"]'
 done
+# The processes' first step asks Camunda's audit log who really created the
+# instance; it logs in as this user, who may read the audit log and nothing else.
+user audit-reader
+auth audit-reader USER AUDIT_LOG '*' '["READ"]'
 auth prep-bot USER PROCESS_DEFINITION prepare-decision '["READ_PROCESS_DEFINITION","READ_PROCESS_INSTANCE","UPDATE_PROCESS_INSTANCE"]'
 echo "camunda users, groups and authorizations set"
 

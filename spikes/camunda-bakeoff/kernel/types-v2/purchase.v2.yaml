@@ -9,7 +9,8 @@
 #     (finance_review) and decides. Over 5,000, finance's approval sends it
 #     to the CFO (cfo_review), who decides (v2: the owner's change).
 #   - The agent (agent:prep-bot, role preparer) writes only the three
-#     preparation fields; no move names it. Once submitted, what is being
+#     preparation fields, and only until the manager has decided (they are
+#     frozen from the finance queue on); no move names it. Once submitted, what is being
 #     approved (amount, vendor, cost centre, justification) is frozen.
 #   - Approved, the purchase system receives the order (erp.create_invoice,
 #     the vendor standing in for the ERP's customer); rejected, the
@@ -38,13 +39,13 @@ states:
     frozen: [f_amount, f_vendor, f_cost_centre, f_justification, f_manager]
   - id: finance_queue
     category: waiting
-    frozen: [f_amount, f_vendor, f_cost_centre, f_justification, f_manager]
+    frozen: [f_amount, f_vendor, f_cost_centre, f_justification, f_manager, f_summary, f_policy, f_flags]
   - id: finance_review
     category: active
-    frozen: [f_amount, f_vendor, f_cost_centre, f_justification, f_manager]
+    frozen: [f_amount, f_vendor, f_cost_centre, f_justification, f_manager, f_summary, f_policy, f_flags]
   - id: cfo_review
     category: waiting
-    frozen: [f_amount, f_vendor, f_cost_centre, f_justification, f_manager, f_claimed_by]
+    frozen: [f_amount, f_vendor, f_cost_centre, f_justification, f_manager, f_claimed_by, f_summary, f_policy, f_flags]
   - id: approved
     category: done
     frozen: [f_amount, f_vendor, f_cost_centre, f_justification, f_manager, f_claimed_by, f_summary, f_policy, f_flags, f_reason]

@@ -15,7 +15,7 @@ only: never deploy this anywhere shared.
 | `kernel/types/` | The kernel side: `purchase@1`, `system@1`, `system_access@1`, plain YAML, no kernel code change |
 | `kernel/types-v2/` | The same plus `purchase@2`, the CFO change (test 1) |
 | `kernel/dev-tokens.yaml`, `hr-directory.json`, `vendors.json`, `connectors.yaml` | The kernel side's people, roles, agent grants, HR directory and stub data |
-| `camunda/*.bpmn`, `camunda/system-owner.dmn` | The Camunda side: purchase, access request, the agent's prepare-decision process, the owner table; `purchase-cfo.bpmn` is the CFO change |
+| `camunda/*.bpmn`, `camunda/*.form`, `camunda/system-owner.dmn` | The Camunda side: purchase, access request, the agent's prepare-decision process, a form per decision, the owner table; `purchase-cfo.bpmn` is the CFO change |
 | `camunda/application.yaml` | The orchestration cluster's configuration: the official H2 file with the API protected and authorizations on |
 | `cmd/modelstub/` | The stand-in model: an OpenAI-compatible endpoint that answers deterministically and obeys injected instructions |
 | `scripts/` | Start, stop, set up, and the four tests (below) |
@@ -27,7 +27,8 @@ ana asks; bob is her manager (HR directory); fay and gus are finance (fay
 also owns the "ledger" system); cora is the CFO; olaf owns "payroll"; ivy
 sets up systems (kernel only); `prep-bot` is the agent. Kernel: dev tokens
 in `kernel/dev-tokens.yaml`. Camunda: users with password `<name>-pw`, admin
-`demo`/`demo`.
+`demo`/`demo`; `audit-reader` is the user the processes' first step logs in
+as, to ask Camunda's audit log who really submitted a request.
 
 ## How the agent runs
 
@@ -40,7 +41,7 @@ with no flags.
   it starts an agent session for `agent:prep-bot` with only `read` and
   `edit_fields`, finds Items waiting for a decision with no summary, asks the
   model, and writes `f_summary`, `f_policy`, `f_flags`: the only fields the
-  Types let the `preparer` role write.
+  Types let the `preparer` role write, and only until the first decision.
 - **Camunda:** the AI Agent Task connector (8.10 template, OpenAI provider,
   custom endpoint, no key) inside `prepare-decision.bpmn`, called from each
   approval process with a call activity whose output mapping returns only
@@ -68,7 +69,10 @@ spikes/camunda-bakeoff/scripts/run-all.sh
 
 That stops anything left from a previous run, builds the kernel's programs
 from this repository's `main` code, starts the stubs, the kernel side alone
-(timed, memory taken), then the Camunda side (timed, memory taken), and runs:
+(timed, memory taken), then the Camunda side (timed, memory taken), and runs
+the tests below. The last one gives the kernel's agent a role the kernel
+never takes back, so stop the kernel side (`scripts/kernel-down.sh`, which
+deletes its data) before running anything else by hand:
 
 | Test | Script | Result file |
 |---|---|---|
@@ -76,8 +80,10 @@ from this repository's `main` code, starts the stubs, the kernel side alone
 | 2a. Injection | `test2-injection.py` | `results/test2-injection.md` |
 | The other paths (small purchase, rejection) | `test0-paths.py` | `results/test0-paths.md` |
 | 2b. Compromised agent, and the requester | `test2-compromised.py all` | `results/test2-compromised-*.md` |
+| 2c. Side doors (no credentials) | `test2-sidedoors.py` | `results/test2-sidedoors.md` |
 | 1. The CFO change | `test1-cfo.py` | `results/test1-cfo.md`, `results/test1-kernel-*.txt` (the two `.diff` files were made with `diff -u` and `scripts/bpmn-diff.sh`) |
 | 4. Footprint | `test4-footprint.sh` | `results/test4-footprint.md`, `results/test4-start-*.txt` |
+| 2b, last: the agent wrongly given the approvers' rights | `test2-compromised.py agent-among-approvers` | `results/test2-compromised-*-agent-in-finance.md` |
 
 Piece by piece:
 

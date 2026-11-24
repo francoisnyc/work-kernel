@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 18,
+  "type": "default",
+  "id": "purchase-finance-decision",
+  "executionPlatform": "Camunda Cloud",
+  "executionPlatformVersion": "8.10.0",
+  "exporter": {
+    "name": "hand-written",
+    "version": "1"
+  },
+  "components": [
+    {
+      "type": "text",
+      "id": "t_request",
+      "text": "### Purchase: finance's decision\n\n**{{amount}}** to **{{vendor}}**, cost centre {{costCentre}}. Requested by **{{requester}}**. Approved by the manager, **{{manager}}**.\n\n**Justification (written by the requester, not checked):** {{justification}}"
+    },
+    {
+      "type": "text",
+      "id": "t_agent",
+      "text": "**Prepared by the agent (a suggestion, never a decision):** {{preparation.summary}}\n\nPolicy check: **{{preparation.policy}}** \u00b7 Flags: {{preparation.flags}}"
+    },
+    {
+      "type": "checkbox",
+      "id": "c_approve",
+      "key": "financeApproved",
+      "label": "Approve",
+      "defaultValue": false
+    },
+    {
+      "type": "textarea",
+      "id": "t_reason",
+      "key": "reason",
+      "label": "Reason (needed to reject)",
+      "validate": {
+        "required": true
+      },
+      "conditional": {
+        "hide": "=financeApproved = true"
+      }
+    }
+  ]
+}

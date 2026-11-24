@@ -77,6 +77,7 @@ def kernel():
     p_queue = k_purchase(2500, "finance_queue")  # approved by the manager, in the finance queue
     p_claimed = k_purchase(2500, "finance_review")  # claimed by fay
     p_done = k_purchase(2500, "approved")       # fully approved, ordered
+    p_claimed2 = k_purchase(2500, "finance_review")  # claimed by fay; for the planted reason
     _, sysitems = pli("ivy", "item", "search", "--type", "namespaces/acme/types/system", "--where", "f_name=payroll")
     if sysitems.get("items"):
         system = short(sysitems["items"][0]["name"])
@@ -103,6 +104,19 @@ def kernel():
     k_try("rewrite its own summary after approval", own, "item", "update", p_done, "--set", "f_summary=nothing to see")
     k_try("write the order ID (the purchase system's answer)", own, "item", "update", p_done, "--set", "f_order_id=INV-999")
     k_try("hide a purchase from its approvers (narrow readers to itself)", own, "item", "update", p_queue, "--readers", "agent:prep-bot")
+    # Found by the reviewer (docs/research/camunda-bakeoff.md, "The reviewer's notes").
+    _, c = pli("ana", "item", "create", "--type", "purchase@1", "--set", "f_amount=2500", "--set", "f_vendor=officeco",
+               "--set", "f_cost_centre=CC-100", "--set", "f_justification=Not submitted yet")
+    draft = short(c["item"]["name"])
+    if k_try("change the amount and vendor of ana's draft before she submits it", own, "item", "update", draft, "--set", "f_amount=950", "--set", "f_vendor=shadyparts"):
+        _, it = pli("ana", "item", "transition", draft, "--to", "manager_review", "--wait", "5s")
+        record("kernel", "  ... ana submits, and what is frozen for approval is the agent's version", True,
+               f"state={it['item']['state']} f_amount={it['item']['fields']['f_amount']} f_vendor={it['item']['fields']['f_vendor']}")
+    k_try("rewrite its summary after the manager approved, before finance decides", own, "item", "update", p_queue, "--set", "f_summary=All checks passed", "--set", "f_policy=ok", "--set", "f_flags=none")
+    if k_try("plant a rejection reason on a purchase finance is reviewing", own, "item", "update", p_claimed2, "--set", "f_reason=planted by the agent"):
+        ok, out = pli("fay", "item", "transition", p_claimed2, "--to", "rejected", check=False)
+        record("kernel", "  ... so fay can reject without giving a reason (the Type requires one)", ok,
+               f"state={out['item']['state']} f_reason={out['item']['fields'].get('f_reason')}" if ok else out)
     k_try("approve an access request (owner's move), as itself", own, "item", "transition", acc, "--to", "approved")
     k_try("make itself the system's owner", own, "item", "update", acc, "--set", "f_owner=agent:prep-bot")
     # Create its own purchase and push it through.
@@ -128,6 +142,15 @@ def kernel():
     as_ana = k_session("user:ana")
     k_try("raise the amount acting for the requester (ana)", as_ana, "item", "update", p_queue, "--set", "f_amount=250000")
     k_try("set the approver acting for the requester (ana)", as_ana, "item", "update", p_mgr, "--set", "f_manager=user:ana")
+    ok, out = pli("prep-bot", "item", "create", "--type", "purchase@1", "--set", "f_amount=999", "--set", "f_vendor=officeco",
+                  "--set", "f_cost_centre=CC-100", "--set", "f_justification=Filed by the agent in ana's name", session=as_ana, check=False)
+    if ok:
+        ok, out = pli("prep-bot", "item", "transition", short(out["item"]["name"]), "--to", "manager_review", "--wait", "5s", session=as_ana, check=False)
+        ok = ok and out["item"]["state"] == "manager_review"
+    record("kernel", "file and submit a 999 purchase in ana's name, acting for her", ok,
+           (f"state={out['item']['state']}, recorded as created by the agent for ana; it still waits on her manager. "
+            "Allowed because ana's grant gives the agent create and every move; a grant without them refuses it") if ok else out,
+           verdict="ALLOWED (ana's grant)" if ok else None)
 
     # Where the Items ended.
     for name, i, want in [("small", p_small, "manager_review"), ("manager", p_mgr, "manager_review"),
@@ -343,16 +366,17 @@ def requester():
     finally:
         camunda("demo", "DELETE", f"/v2/authorizations/{a.get('authorizationKey')}")
         time.sleep(2)
-    # bob, ana's manager, submits a purchase claiming to be ana: the HR
-    # lookup then names bob as the approver of his own purchase.
+    # bob, ana's manager, submits a purchase claiming to be ana. Before the
+    # reviewer's note the HR lookup then named bob approver of his own purchase;
+    # the process now takes the requester from Camunda's audit log.
     st, pi = c_start("bob", 2500, {"requester": "ana", "justification": "Submitted by bob, posing as ana"})
-    record("camunda-requester", "bob submits a purchase as 'ana' (the requester variable)", 200 <= st < 300, f"HTTP {st} instance {pi}")
-    if 200 <= st < 300:
-        t = c_task(pi, "manager_decision")
-        camunda("bob", "POST", f"/v2/user-tasks/{t['userTaskKey']}/assignment", {"assignee": "bob", "action": "claim", "allowOverride": False})
-        st2, _ = camunda("bob", "POST", f"/v2/user-tasks/{t['userTaskKey']}/completion", {"variables": {"managerApproved": True}})
-        record("camunda-requester", "  ... and bob approves his own purchase as manager", 200 <= st2 < 300,
-               f"candidateUsers={t.get('candidateUsers')} complete HTTP {st2}; it now waits on finance")
+    t = c_task(pi, "manager_decision")
+    who = c_var(pi, "requester")
+    record("camunda-requester", "bob submits a purchase as 'ana' (the requester variable)", who != '"bob"',
+           f"HTTP {st} instance {pi}: the process recorded requester={who} (from the audit log), manager task for {t.get('candidateUsers')}")
+    camunda("bob", "POST", f"/v2/user-tasks/{t['userTaskKey']}/assignment", {"assignee": "bob", "action": "claim", "allowOverride": False})
+    st2, _ = camunda("bob", "POST", f"/v2/user-tasks/{t['userTaskKey']}/completion", {"variables": {"managerApproved": True}})
+    record("camunda-requester", "  ... and bob approves his own purchase as manager", 200 <= st2 < 300, f"complete HTTP {st2}")
     # The same on the kernel: the requester is who the token says, never a field.
     _, c = pli("bob", "item", "create", "--type", "purchase@1", "--set", "f_amount=2500", "--set", "f_vendor=officeco",
                "--set", "f_cost_centre=CC-100", "--set", "f_justification=Submitted by bob")
@@ -361,6 +385,42 @@ def requester():
     ok, out = pli("bob", "item", "transition", i, "--to", "finance_queue", check=False)
     record("kernel-requester", "bob submits a purchase and approves it as manager", ok,
            f"creator={it['item'].get('creator')} f_manager={it['item']['fields'].get('f_manager')}; approve: {out}")
+
+
+def agent_given_the_approvers_rights():
+    """The same mistake on each side: the agent is put among the approvers.
+    Kernel: its token also holds the finance role. Camunda: its user joins the
+    finance group and the task-worker role. Run last: the kernel keeps a role
+    once given, so the stack must be reset afterwards (kernel-down.sh)."""
+    import subprocess
+    tokens = os.path.join(SPIKE, ".run/dev-tokens-agent-in-finance.yaml")
+    with open(os.path.join(SPIKE, "kernel/dev-tokens.yaml")) as f:
+        text = f.read().replace('principal: "agent:prep-bot", namespace: acme, roles: [preparer]', 'principal: "agent:prep-bot", namespace: acme, roles: [preparer, finance]')
+    open(tokens, "w").write(text)
+    subprocess.run([f"{SPIKE}/scripts/kernel-restart-itemservice.sh", f"{SPIKE}/kernel/types-v2", tokens], check=True, capture_output=True)
+    p = k_purchase(2500, "finance_queue")
+    own = k_session()
+    side = "kernel-agent-in-finance"
+    ok, out = pli("prep-bot", "item", "transition", p, "--to", "finance_review", "--set", "f_claimed_by=agent:prep-bot", session=own, check=False)
+    record(side, "claim from the finance queue, as itself", ok, f"state={out['item']['state']}" if ok else out)
+    ok, out = pli("prep-bot", "item", "transition", p, "--to", "approved", session=own, check=False)
+    record(side, "approve it (finance's move), as itself", ok, f"state={out['item']['state']}" if ok else out)
+    p2 = k_purchase(2500, "finance_queue")
+    as_ana = k_session("user:ana")
+    ok, out = pli("prep-bot", "item", "transition", p2, "--to", "finance_review", "--set", "f_claimed_by=agent:prep-bot", session=as_ana, check=False)
+    record(side, "claim one of ana's purchases while acting for ana (the requester)", ok, f"state={out['item']['state']}" if ok else out)
+
+    side = "camunda-agent-in-finance"
+    camunda("demo", "PUT", "/v2/groups/finance/users/prep-bot")
+    camunda("demo", "PUT", "/v2/roles/task-worker/users/prep-bot")
+    time.sleep(2)
+    try:
+        _, t = c_purchase_at("finance")
+        c_try("claim from the finance queue", "prep-bot", "POST", f"/v2/user-tasks/{t['userTaskKey']}/assignment", {"assignee": "prep-bot", "action": "claim", "allowOverride": False}, side)
+        c_try("approve it (finance's task)", "prep-bot", "POST", f"/v2/user-tasks/{t['userTaskKey']}/completion", {"variables": {"financeApproved": True}}, side)
+    finally:
+        camunda("demo", "DELETE", "/v2/groups/finance/users/prep-bot")
+        camunda("demo", "DELETE", "/v2/roles/task-worker/users/prep-bot")
 
 
 def write(side):
@@ -387,6 +447,10 @@ def main():
         write("camunda")
         camunda_default_role()
         write("camunda-default-role")
+    if which == "agent-among-approvers":
+        agent_given_the_approvers_rights()
+        write("kernel-agent-in-finance")
+        write("camunda-agent-in-finance")
     if which in ("requester", "all"):
         requester()
         write("kernel-requester")

@@ -13,7 +13,8 @@ import time
 
 from bakeoff import ask_model, pli, short
 
-WAITING = {"purchase": ["manager_review", "finance_queue", "finance_review"], "system_access": ["owner_review"]}
+# Only the first decision is prepared: the Types freeze the preparation after it.
+WAITING = {"purchase": ["manager_review"], "system_access": ["owner_review"]}
 
 
 def once(session):
