@@ -327,7 +327,8 @@ func writes(f typedef.Field, principal string, roles []string) bool {
 // (writable_by: [role:<name>, ...]) on the public door: the actor holds one
 // of the roles and, when it acts for a user, so does the user (an agent has
 // its user's rights only where it also has its own). A field without roles
-// is anyone's; a kernel-written field is not this function's question.
+// is not limited by it (MayWriteField asks who writes it, people or
+// agents); a kernel-written field is not this function's question.
 func MayWriteRoleField(f typedef.Field, who Who) bool {
 	if len(f.WritableByRoles) == 0 {
 		return true
