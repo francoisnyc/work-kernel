@@ -1673,6 +1673,9 @@ refuse sam "PERMISSION_DENIED PLACEMENT_NOT_WRITABLE" item update "$note1" --rea
 refuse sam "PERMISSION_DENIED PLACEMENT_NOT_WRITABLE" item update "$(goal "$c1" resolution)" --readers user:sam
 refuse lea "PERMISSION_DENIED NOT_ALLOWED" item transition "$(goal "$c1" resolution)" --to completed
 ok sam item update "$a3" --readers user:sam,user:lea,user:ana >/dev/null
+# The latest version's placement rule judges every version (starting work,
+# step 2b): ana's incident@1 of B2 is narrowed by desk agents only, too.
+refuse ana "PERMISSION_DENIED PLACEMENT_NOT_WRITABLE" item update "$b3" --readers user:ana,user:sam
 
 # ---------------------------------------------------------------------------
 # Scenario E (Jira 2.4b): an access request. A resource says who approves
