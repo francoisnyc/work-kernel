@@ -32,6 +32,30 @@ found it as its test:
    includes starting work, step 2b (the latest version governs placement),
    and the roadmap's open hole: a create may still name an older version.
 
+### A build step for the effect re-check's follow-up
+
+The owner creates it himself, as a `build_step`, once this note is on
+main; it is listed here so the re-plan holds it. It goes under the Track
+1 epic, ranked after item 4.
+
+- **Title:** a firing timer leaves a record, so its run can be confirmed.
+- **Why:** two kinds of acting timer leave no record when they fire (on a
+  schedule; at an instant with no `sets`), so a forged workflow start can
+  send their action early, once per run (`docs/roadmap.md`, Track 1,
+  item 1; the residue tests of PR #71).
+- **Phase A weighs** recording every timer firing (judged due by the item
+  service's own clock, so a forged start cannot record it early) against
+  anything narrower. Refusing such Types at load is not an option: it
+  would refuse `vacation_request@3`, whose reminder is such a timer.
+- **Also asked in Phase A:** whether the same step closes state timers
+  that trust the workflow's clock (a forged start can expire a request
+  now); replay safety for workflows with timers in flight; the event's
+  shape (no personal data) and its cost in history.
+- **Done when:** a forged start can no longer send a reminder, or fire a
+  timer at an instant, before it is due; the residue tests that pin
+  today's behaviour change only with the owner's OK; every other timer
+  test, story and replay test passes unchanged.
+
 ## Epic "Track 2: test what is untested", ranked second
 
 1. A non-developer authors a real process: a colleague describes a process
@@ -69,5 +93,8 @@ The loop does not pick a story labelled `paused`.
 
 ## Also
 
-`build_step@1` is on main (PR #68). Load it when the owner moves the
-tracker stack forward.
+Load `build_step@2` (PR #75) when the owner moves the tracker stack
+forward, not `@1`: fields are now closed to agents by default, and @2
+opens the working fields an agent writes (`f_title`, `f_questions`,
+`f_tests_ref`, `f_pr_url`, `f_journal`, `f_rank`; `f_owner` stays the
+maintainer's).
