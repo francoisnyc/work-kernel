@@ -79,6 +79,16 @@ Ideas noted during the spike, not built yet.
     and 5 further runs on the branch; a poller of open transactions found
     only tests that hold locks on purpose. A test change for later (a
     bound relative to an unloaded Search, or no bound under -race).
+    **Fixed 2026-11-24** (found in step 2b's Phase C, where both failed on
+    main too): the second was not the wait. Each test makes its own
+    Service, and a Service's first Search loads every registered Type
+    version (`ListTypes`), 441 of them by the end of the package's run:
+    0.85 to 1.03 s under `-race`, growing with every step that registers
+    test Types. Each test now makes one Search before the clock starts;
+    the timed Search then takes 3 to 5 ms, and the 1 s bound and the
+    assertions are unchanged (the owner agreed). Still open, for the day
+    Search is measured: resolving a filter loads every Type; a long-lived
+    Service pays it once.
 
 - **Starting work, step 1's Later items** (docs/plans/starting-work.md, 1.0):
   - **Reaction creates by an agent without `create`.** An agent session
