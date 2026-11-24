@@ -282,6 +282,9 @@ What it needs that is not built:
 - reminders and escalation on top of timers;
 - for the inbox of other systems: two-way sync and identity matching.
 
+Prior art: `docs/research/task-inboxes-taskana-polyflow.md` (queues that a
+team claims from; the inbox as a projection fed by events).
+
 Chosen only with a team at work that owns the problem; until then, a
 candidate, not a commitment.
 
