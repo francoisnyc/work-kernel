@@ -89,8 +89,10 @@ order" in `docs/design.md` sets.
 
 - **Done:** V2a (Type problems as data), V2b (`ValidateTypes`, `pli types
   validate`), V2c (the Type format as JSON Schema), V1 (action contracts,
-  frozen in `contracts/` and readable through `ListActions`).
-- **Now, understanding before breadth:** plain-language readings with
+  frozen in `contracts/` and readable through `ListActions`), V5 (stories
+  in simulated time, `make stories`), V6 (plain-language readings, each
+  kind with a witness; `ExplainType`, `pli type explain`).
+- **Understanding before breadth (built: V5 and V6):** plain-language readings with
   witnesses (item 6) and stories in simulated time (item 5). A kernel whose
   rules interact (guards, reactions, holds, timers) is a rules engine, and
   rules engines are hard to reason about once rules interact; for a

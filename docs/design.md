@@ -98,7 +98,9 @@ A Type is versioned YAML data that **names code but never contains it**.
   - Who may act is the transition's `allowed` list. An entry is `role:<name>`,
     `principal:<id>`, `field:<id>` (whoever a principal field holds when the
     move runs) or `creator` (the requester: see below). Absent or empty means
-    anyone who can see the Item.
+    any staff member who can see the Item, never a customer: a customer
+    takes only the moves whose `allowed` names `creator` (Jira part 2, step
+    4a; corrected here by Ventoux V6, whose reading of it a witness holds).
   - Who may not act is its `except` list. It takes only `creator` for now,
     and there it means anyone who took part in creating the Item. A match is
     `ErrForbidden`, asked with `allowed`, after the guards.
@@ -1645,6 +1647,7 @@ See `docs/plans/ideas-from-ventoux.md`.
 | V2b (**done**) | `ValidateTypes`: draft Types checked against every registered version, nothing written; `pli type validate`; exempt from `policy.Project` like `ListTypes`; users and agents (in a session), not customers; 256 KiB and 50 sources at most | A draft with problems is a successful call listing them; an identical registered `id@version` passes, a different one is `VERSION_CHANGED`; pli prints `source:line:col: CODE message` and exits non-zero on errors. **Done 2026-11-22**: "Ventoux V2b and V2c, as built" below, and the journal |
 | V2c (**done**) | The Type format as JSON Schema, by hand, in a checked-in file; checked with `santhosh-tekuri/jsonschema/v6` (test only) | Every file in `types/` validates; every key the schema allows is a key `typedef` knows; the schema is never stricter than `typedef`. **Done 2026-11-22**: "Ventoux V2b and V2c, as built" below |
 | V5 (**done**) | Stories in simulated time (item 5): a walkthrough as data (the Types, the people and their roles, a fake for every action from its contract, a timeline of one-line steps, the whole expected timeline), run as a Go test against the real Item workflow and item service in Temporal's test environment; `make stories`; the runner's `Parse`, `Check`, `Run` and `Compare` for item 6's witnesses | The vacation request (approve, expiry, refund, the HR outage and a denial) and the incident desk (reopen on a reply with a paused goal, breach) run in seconds; any unexpected event, call, refusal or read fails a story with a report a person can read; a fake cannot answer what its contract forbids; continue-as-new and a validator's refusal behave in the harness as on the server. **Done 2026-11-23**: "Ventoux V5, as built" below, and the journal |
+| V6 (**done**) | Plain-language readings, each with a witness (item 6): every state rule, move, hook, reaction, timer, hold, link and visibility rule of a Type as one sentence, from the Type and the contracts it pins; a closed list of kinds of sentence and their clauses; a witness for each, a test that runs the engine through internal/story's `Run`; `ExplainType` (a registered version or a draft) and `pli type explain` | Every part has a witness, every key of the Type format is read or left out with a reason, every element of every Type in `types/` is cited by a sentence; condition words held to the engine's evaluation; `readings/vacation_request@3.txt` and `readings/incident@3.txt` approved by the owner and compared exactly. **Done 2026-11-24**: "Ventoux V6, as built" below, and the journal |
 
 ## Jira proof of concept
 
@@ -3906,6 +3909,143 @@ story runs the worker in process, and pli links nothing of the kernel. A
 a guard test reads the module's source), `hooks.Connectors.WithConnector`,
 `workflow.Register` (pulled out of `NewWorker`, no behaviour change), and
 `api.Refusal`. No schema, proto or write-path change.
+
+## Ventoux V6, as built: plain-language readings with witnesses (2026-11-24)
+
+Item 6 of `docs/plans/ideas-from-ventoux.md`. A **reading** renders a Type
+as numbered sentences a person approves, from the Type and the action
+contracts it pins, nothing else: what a non-developer reads instead of the
+YAML. Each sentence has a kind, and every kind has a **witness**, a test
+that runs the engine and shows it does what the sentence says, so the
+reading cannot lie about what the kernel does.
+
+**The package.** `internal/reading` reads the semantic model
+(`typedef.Type`), never the YAML: `Read(type, catalog)` returns the
+sentences under their sections, a key, the field list, the actions and what
+no reading covers; `Text()` lays them out for a person; `Condition` reads
+one expression. Each sentence carries its kind and the clauses it uses (its
+**parts**: `move`, `move.guard`, `who.creator`, ...) and the paths of the
+Type it reads (`transitions[1]`, `states[2].timer`). Which moves wait on a
+check or a held reaction comes from `lifecycle.CheckFor` and
+`lifecycle.HeldReaction`: the reading asks the lifecycle, it does not
+decide.
+
+**The order of a reading.** The heading (`incident@3`); a key defining
+only the terms its sentences use (the requester, staff, a customer, an
+agent, the kernel, the timer, a hold, a reaction); the fields; then the
+sections, each left out when empty: *In short* (where it starts, that no
+other move is possible, its invariants); *Who writes what* (fields only the
+kernel or a role writes, and who the kernel's writers are; unique fields);
+*Links* (its link types, the names it gives incoming links, its rollups);
+*one section per state*, in the Type's order, headed with its category
+("submitted (waiting)"): what entering it does (a link the kernel
+resolves, hooks, reactions and the hooks on them), what happens while it
+is there (frozen fields, timers, acting timers), each move out followed by
+what it waits for (a check or a held reaction, and the hold's rules), or
+that nothing leaves; *When something is created inside it*; *What other
+Types may do to it* (consents, fields readable by reactions, offers); *Who
+sees it* (customer fields, own, shared, placement). Then the actions it
+calls, as their contracts describe them, and what no reading covers.
+
+**The kinds of sentence** (83 parts: 35 kinds and their clauses; the list
+is closed, `reading.Parts()`):
+
+| Kind | Wording (clauses in brackets) |
+| --- | --- |
+| starts, closed, no_lifecycle | A {type} starts in {s}. / It moves only as listed below; any other move is refused. / A {type} has no lifecycle: it stays in `default`. |
+| invariant | Every write keeps this true: {rule}; a write that would not is refused ({id}). |
+| field_kernel, field_roles, field_unique | Only the kernel writes {f}: {writers}. / Only holders of {roles} write {f}. / No two {type}s in one container, both in {states}, hold the same {f}. |
+| link, incoming, rollup | {Anyone who can see it / Only the kernel / Only holders of R} links it to a {T} as {name}, {at most one / any number}[; a {T} takes at most one]; a {T} sees it as {inverse}. / It reads the {T}s linked to it as {link} under the name {name}. / When it is read, {id} counts its {over} by {count_by}. |
+| frozen, final | While it is in {s}, nobody changes {fields}. / Nothing leaves {s}. |
+| timer, at_timer | {d} after it enters {s}, if it is still there, the timer moves it to {to}[; if a hold is open then, the timer waits for it to close and looks again]. / When it is in {s} and the instant in {f} has passed, the timer moves it to {to}. |
+| acting, acting_at | {d} after it enters {s}[, then every {e}], {hook} calls {action} with {inputs}, at most {n} times while it stays there. / When it is in {s} and the instant in {f} has passed, [if {when}, ][{id} sets {f} to that instant and ]{hook} calls {action} with {inputs}. |
+| enrich, action, resolve | On entering {s}, {hook} calls {action} with {inputs} and writes its answer into {fields}[; with no answer within 15 minutes it writes {fallback}]. / ... [and writes what it made into {fields}], once per entry, even if it has moved on. / On entering {s}, the kernel links {link} to the requester's {state} {T} (the one whose {f} is the requester); if there is none, or more than one, the move into {s} is refused. |
+| move | {Who} moves it from {a} to {b}[, once {fields} are set][, only if {guard}][, even while a hold is open on it, which cancels the hold][; the move clears {fields}][; the move sets {f} to {value}]. Who: Any staff member who can see it / The requester / Anyone with the role R / Whoever {f} names / `principal` / Only the timer / Only the hook {h} may move it / Only a reaction; [but never anyone who took part in creating it / its container]. |
+| check, held, hold, undo | Asking for this move opens a hold instead: {hook} calls {action} with {inputs}; if it allows[, or corrects {fields},] the move happens; it may deny it ({reasons}); with no answer within 15 minutes the move fails. / Asking for this move opens a hold instead: {id} adds {v} to {f} on the {T} linked as {link}; the move happens only if that Item accepts the write, else it is denied with that Item's reason. / While that hold is open, [nobody changes {fields}, and] {the only move out of {a} is to {escape} / nothing moves it}. / On entering {s} from {from}, {id} gives back what {held} added. |
+| move_children, move_container, move_link, create, set, reaction_hook | On entering {s}[ from {from}][, if {when}], {id} moves the {T}s inside it[ whose {when}] from {states} to {to} / moves its container from {states} to {to}[; if its container's rules refuse the move, it is skipped] / moves the {T} it links to as {link} from {states} to {to} / creates a {T}@{v} inside it[, one for each value of {f}], with {values} / sets {f} on its container to {value}. / When {reaction} has applied, {hook} calls {action} with {inputs}. |
+| created_inside | When {the requester / a person other than the requester / anyone} creates a {T} inside it[ while it is in {s}], {id} moves it to {to} / moves the {T}s inside it[ whose {when}] from {states} to {to}. |
+| consent, readable, offer | {T}'s reaction {id} [/ Any Type's reaction {id}, from its container,] may {change / set / create it, setting / move it to} .... / Another Type's create reaction may read {fields} from it. / Items inside it may read {f} as {offer}. |
+| customer_fields, own, shared, placement | A customer who sees it sees only {fields}, and sets only those when creating it. [/ ... sees none of its fields, only its header.] / A customer may create a {T} inside it, and sees the ones they requested. / The customer who requested it sees every {T} inside it, and may create one there. / {Anyone who can see it / Only holders of R / No one} moves it to another container or narrows who sees it. |
+
+Field IDs are written in code font; labels replace them when presentation
+hints exist (roadmap, theme 1).
+
+**Expressions in words.** A closed subset reads in words: fields and the
+kernel's variables (today, the time of the write; "that instant" in an
+acting timer at an instant), literals, plus and minus, the comparisons
+("at least", "on or after" for dates and instants), "is set" and "is
+unset", "is x or y", and a chain of "and" or of "or" (never both: a reader
+cannot see the brackets). Anything else reads as what it reads, "a rule
+over `f_a` and today holds", "computed from `f_priority`, the time of the
+write and its container's `sla_policy`": never a guess at its meaning.
+
+**Left out, each for a reason** (`reading.LeftOut`, held to the JSON
+Schema's keys): a state's category is a label in its heading (it decides
+which views show the Item, not what the engine does to it); a field's type,
+options and count are the field list (the schema checks them on every
+write); who can see a given Item is set per Item and container, not by the
+Type; the kernel's own promises (retries, each write once, recovery) are
+the same for every Type. The last two are said in every reading's closing
+note.
+
+**Witnesses and the guards.** Eleven witnesses
+(`internal/reading/witness_*_test.go`), each naming the exact sentences it
+relies on in the reading of a fixture Type (21 small Types in
+`internal/reading/testdata/types/`, written for the witnesses, so
+`types/` can change without them) and running a story through
+internal/story's `Run` whose whole timeline is expected, both sides where
+there are two (the named person can, someone else is refused with the
+API's reason). Written, never generated: a generator reading the Type would
+share the renderer's misreading. The guards: every part has a witness
+(both ways); every `Part` constant is on the list (a source walk); every
+key of `schema/type.schema.json` is read by a part or left out with a
+reason; every element of every Type in `types/` (and every fixture) is
+cited by a sentence; the words of conditions are held to
+`lifecycle.TransitionWith`, the function the item service's moves call at
+run time, on 28 boundary cases, and a false guard is refused
+`GUARD_FAILED` through `Run`.
+
+**Two readings approved by the owner**, `readings/vacation_request@3.txt`
+and `readings/incident@3.txt`, compared exactly; a change to a Type or the
+renderer that changes them fails, and the new text is pasted in by hand
+and approved again in the pull request (no `-update`, as for stories).
+
+**ExplainType** (`kernel.v1` grew one operation and six messages, reusing
+`HookKind` and `ActionRisk`): a registered version by `name`, or a draft
+(`parent`, `sources`, `type_id`, `version`) checked by the item service's
+`ValidateTypes` with its limits; a draft with problems is a successful call
+listing them, with no reading. The reading comes whole: sentences with
+number, kind, parts, text and paths; key; fields; actions; what is not
+covered; the text. Users, and agents in a session; customers and agents
+acting for one, `PERMISSION_DENIED` / `NOT_ALLOWED` (a reading names the
+organisation's integrations, as `ListActions` does). No Item is read, so
+nothing goes through `policy.Project`; the item service gained no method.
+
+**pli.** `pli type explain [--json] TYPE@VERSION` prints the text exactly;
+`--draft TYPE@VERSION PATH...` reads the PATHs as `type validate` does,
+and prints a draft's problems as it does (exit 1).
+
+**Stories grew** (harness, not kernel): `person places ITEM in ITEM | at
+the top level`, `person narrows ITEM to person, ...` and `sees ITEM with
+ROLLUP.KEY = N`. And a fix the witnesses found: a step naming an Item the
+kernel created (a name rule) went to no Item, so `cannot see` of one passed
+whatever the person could see; `kim cannot see first` in
+`stories/incident/reopen_on_reply.yaml` was vacuous, and is now a real
+check that passes.
+
+**Found by writing the witnesses:** an acting timer at an instant sets
+`cause.at` to the field's instant, not to when it runs, and runs at once
+when the Item enters after the instant; guards are judged before `allowed`,
+so a move `allowed: [nobody]` with a false guard is refused
+`GUARD_FAILED`. **Found by the readings** (Later): incident@3 lets any
+staff member who sees it start, wait, resolve or cancel an incident (only
+placement is kept for desk_agent); vacation_request lets anyone who sees it
+narrow it.
+
+**Kernel changes (three):** `internal/reading`; `ExplainType` in
+`kernel.v1`; `pli type explain`. No schema, write path or item service
+change; `ValidateTypes`'s draft checks are now shared helpers in the API,
+with no change in behaviour.
 
 ## Out of scope for the spike
 
