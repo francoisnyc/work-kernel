@@ -51,8 +51,10 @@ func TestPli_Link_RoleWrittenLinkRefused(t *testing.T) {
 // --not-empty: the field has a value. Beside --empty, its opposite.
 func TestPli_Search_NotEmpty(t *testing.T) {
 	w := word()
-	with := create(t, "ana", "--type", "incident@1", "--set", "f_title=assigned "+w, "--set", "f_priority=P2", "--set", "f_assignee=user:bob")
-	without := create(t, "ana", "--type", "incident@1", "--set", "f_title=unassigned "+w, "--set", "f_priority=P2")
+	// An incident is created only inside a desk (incident@4's start block).
+	desk := create(t, "ana", "--type", "desk@1", "--set", "f_key=IT", "--set", "f_name=IT "+w)
+	with := create(t, "ana", "--type", "incident@1", "--in", desk, "--set", "f_title=assigned "+w, "--set", "f_priority=P2", "--set", "f_assignee=user:bob")
+	without := create(t, "ana", "--type", "incident@1", "--in", desk, "--set", "f_title=unassigned "+w, "--set", "f_priority=P2")
 	if got := namesOf(t, ok(t, "ana", "item", "search", w, "--type", "incident", "--not-empty", "f_assignee"), "items"); !slices.Equal(got, []string{with}) {
 		t.Errorf("--not-empty f_assignee = %v, want [%s]", got, with)
 	}
@@ -69,5 +71,5 @@ func TestPli_Search_NotEmpty(t *testing.T) {
 	// if the field were unknown.
 	ok(t, "ana", "item", "search", w, "--type", "incident", "--order-by", "f_due_resolution")
 	// Priority is required at creation.
-	fails(t, "ana", "FAILED_PRECONDITION INVARIANT_FAILED", "item", "create", "--type", "incident@1", "--set", "f_title=no priority "+w)
+	fails(t, "ana", "FAILED_PRECONDITION INVARIANT_FAILED", "item", "create", "--type", "incident@1", "--in", desk, "--set", "f_title=no priority "+w)
 }
