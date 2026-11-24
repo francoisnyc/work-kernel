@@ -104,6 +104,14 @@ attack that found it as its test:
 2. **Fields closed to agents by default:** the fix that closed both holes in
    the second bake-off (a role only people hold), made the default; a Type
    opens a field to agents by saying so (fail closed).
+   **Built** (PR #75; `docs/design.md`, "Fields closed to agents by default,
+   as built"): a field without `writable_by` is people's only, and
+   `writable_by` lists `people`, `agents` and roles. Re-run unchanged, both
+   bake-offs' scripts now refuse the agent both holes on every Type (the
+   Camunda bake-off's kernel list 32 of 32; the Temporal bake-off's purchase
+   27 of 27, its access request 17 of 18, the one left being a person's).
+   They do not yet pass in full: a colleague can still change someone's
+   draft (item 4).
 3. **Required means given by the mover**, where a Type asks for it.
 4. **"Only the requester" for drafts:** a draft's fields written only by
    whoever created it, until it is submitted. (Who last wrote a value, in
@@ -287,11 +295,16 @@ test:
 2. **Required means given by the mover.** An agent wrote the rejection reason
    in advance, so a person could reject without giving one although the Type
    requires it. A Type can ask that a `required` field be set in the move
-   itself, by whoever makes it.
+   itself, by whoever makes it. **The agent's part is closed** (track 1 item
+   2, PR #75: no agent writes a field its Type does not open to it); a
+   person other than the decider can still plant it.
 3. **Who last wrote a value shows, and can be refused.** An agent edited a
    requester's draft (amount, vendor) before she submitted it, and the
    manager approved the agent's version. This is provenance's first real
-   case, so it moves up: next in theme 1's order of work.
+   case, so it moves up: next in theme 1's order of work. **The agent's
+   part is closed** (track 1 item 2, PR #75); a colleague can still edit the
+   draft, which waits on track 1 item 4 ("only the requester"), and the
+   bake-offs' "pass in full" with it.
 4. **Still open: a requester creating on an older version skips a newer
    rule.** The CFO approval was skipped this way. Starting work, steps 2 and
    2b make the latest version decide where an Item starts and who places it,

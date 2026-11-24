@@ -462,8 +462,10 @@ room=$(ok ana item create --type channel@1 --set "f_name=project $w" \
 	--narrow user:ana,user:bob,agent:triage-bot | j .item.name)
 inner=$(ok ana item create --type channel@1 --in "$room" --set "f_name=secrets $w" \
 	--narrow user:ana,agent:triage-bot | j .item.name)
-in_room=$(ok ana item create --type ticket@5 --in "$room" --set "f_title=in the room $w" | j .item.name)
-in_inner=$(ok ana item create --type ticket@5 --in "$inner" --set "f_title=in the inner room $w" | j .item.name)
+# ticket@7: the triage bot writes their priority, which it opens to agents
+# (fields are closed to agents by default).
+in_room=$(ok ana item create --type ticket@7 --in "$room" --set "f_title=in the room $w" | j .item.name)
+in_inner=$(ok ana item create --type ticket@7 --in "$inner" --set "f_title=in the inner room $w" | j .item.name)
 outside=$(new_ticket ana)
 
 step "triage-bot starts a session for ana, scoped to the room only"
@@ -499,6 +501,11 @@ ok ana agent approve "$session" "$scope" --yes >/dev/null
 err_has "Content from this agent session will become visible to the readers of $scope"
 ok triage-bot item update "$in_room" --set f_priority=1 >/dev/null
 ok triage-bot item link "$in_inner" blocks "$in_room" >/dev/null
+
+step "fields are closed to agents: ticket@7 opens only f_priority, so the bot may not retitle a ticket"
+refuse triage-bot "PERMISSION_DENIED FIELD_NOT_WRITABLE" item update "$in_room" --set "f_title=renamed by the bot"
+expect "the refused fields" "$(meta fields)" "f_title"
+expect "ana's title stands" "$(ok ana item get "$in_room" | j .item.fields.f_title)" "in the room $w"
 
 # ---------------------------------------------------------------------------
 # Step 2, part 1: the vacation request. Approval is a business state: the HR

@@ -199,7 +199,12 @@ func (r *renderer) whoWrites() {
 			} else {
 				r.say([]Part{FieldKernel}, path, at("Only the kernel writes `%s`.", f.ID))
 			}
-		case len(f.WritableByRoles) > 0:
+		case f.WritableByAgents && !f.PeopleWrite() && len(f.WritableByRoles) > 0:
+			r.say([]Part{FieldAgentsOnly, FieldRoles}, path,
+				at("Only agents and holders of %s write `%s`.", joinOr(f.WritableByRoles), f.ID))
+		case f.WritableByAgents && !f.PeopleWrite():
+			r.say([]Part{FieldAgentsOnly}, path, at("Only agents write `%s`.", f.ID))
+		case len(f.WritableByRoles) > 0 && !f.WritableByPeople && !f.WritableByAgents:
 			r.say([]Part{FieldRoles}, path, at("Only holders of %s write `%s`.", joinOr(f.WritableByRoles), f.ID))
 		}
 		if len(f.UniqueAmongSiblings) > 0 {
@@ -207,6 +212,50 @@ func (r *renderer) whoWrites() {
 				plural([]string{t.ID}), joinOr(f.UniqueAmongSiblings), f.ID))
 		}
 	}
+	r.agentWriters()
+}
+
+// agentWriters says, last in who writes what, which fields an agent writes:
+// those its Type opens to agents, and one that names a role the agent
+// holds (fields are closed to agents by default). An agent acting for a
+// customer is held to the customer rules. A Type with no field but the
+// kernel's says nothing.
+func (r *renderer) agentWriters() {
+	t := r.t
+	var open, paths []string
+	roles := false
+	for i, f := range t.Fields {
+		if f.WritableBy == typedef.WritableByKernel {
+			continue
+		}
+		paths = append(paths, at("fields[%d]", i))
+		if f.WritableByAgents {
+			open = append(open, f.ID)
+		} else if len(f.WritableByRoles) > 0 {
+			roles = true
+		}
+	}
+	if len(paths) == 0 {
+		return
+	}
+	parts := []Part{FieldAgents}
+	var text string
+	switch {
+	case len(open) == 0 && roles:
+		text, parts = "No agent writes its fields, except one that names a role the agent holds", append(parts, FieldAgentsRoles)
+	case len(open) == 0:
+		text = "No agent writes its fields"
+	case roles:
+		text = "An agent writes only " + joinAnd(ticked(open)) + ", and a field that names a role the agent holds"
+		parts = append(parts, FieldAgentsRoles)
+	default:
+		text = "An agent writes only " + joinAnd(ticked(open))
+	}
+	if len(t.CustomerFields) > 0 {
+		text += "; an agent acting for a customer sets only what the customer may"
+		parts, paths = append(parts, FieldAgentsCustomers), append(paths, "customer_fields")
+	}
+	r.say(parts, paths, text+".")
 }
 
 // kernelWriters are who writes a kernel field, as the Type names them:
@@ -1164,7 +1213,7 @@ var keyTerms = []struct {
 	{"staff", "people in the organisation, and agents acting for them; a customer is never staff.", regexp.MustCompile(`\bstaff\b`)},
 	{"a customer", "a person outside the organisation.", regexp.MustCompile(`customer`)},
 	{"an agent", "a program acting for a person; it may do only what both it and that person may do, and a field that names a person never names an agent.",
-		regexp.MustCompile(`\bstaff\b|` + "` names|with the role|holders of")},
+		regexp.MustCompile(`\bstaff\b|\bagents?\b|` + "` names|with the role|holders of")},
 	{"the kernel", "the system that runs the rules of every Type; it is never a person.", regexp.MustCompile(`\bkernel\b`)},
 	{"the timer", "the kernel's clock; it makes only the moves a Type gives it.", regexp.MustCompile(`\bthe timer\b`)},
 	{"a hold", "while a check or a reaction decides a move, the Item waits where it is; that wait is a hold.", regexp.MustCompile(`\b(a|the|that) hold\b`)}, // the noun, not the verb ("rules hold", "hold the same")

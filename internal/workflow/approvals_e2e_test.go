@@ -104,7 +104,21 @@ func TestE2E_HRCheck_ReadsWhoTheRequestIsFor(t *testing.T) {
 		t.Fatalf("StartAgentSession: %v", err)
 	}
 	agent.AgentSession = session
-	id := h.request(agent)
+	// The agent creates ana's draft with no fields and ana writes the terms:
+	// vacation_request opens no field to agents (closed by default).
+	res, err := h.k.Create(serverCtx(t), itemservice.CreateRequest{
+		IdempotencyKey: "key-" + uuid.NewString(), Principal: agent, TypeID: "vacation_request", TypeVersion: 1,
+	})
+	if err != nil {
+		t.Fatalf("the agent creates ana's request: %v", err)
+	}
+	id := res.ItemID
+	if _, err := h.k.Update(serverCtx(t), itemservice.UpdateRequest{
+		IdempotencyKey: "key-" + uuid.NewString(), Principal: ana, ItemID: id,
+		Fields: map[string]any{"f_start": "2099-07-01", "f_end": "2099-07-05", "f_days": 5, "f_leave_type": "annual"},
+	}); err != nil {
+		t.Fatalf("ana writes the terms: %v", err)
+	}
 
 	if res := h.submit(agent, id); res.Outcome != itemservice.OutcomeApplied {
 		t.Fatalf("submit = %+v, want applied", res)

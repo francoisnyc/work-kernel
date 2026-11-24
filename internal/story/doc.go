@@ -27,6 +27,7 @@
 //	  alice: {}
 //	  hana: {roles: [hr_admin]}                    # roles held in the story's namespace
 //	  kim: {customer: true}                        # customer:kim; customers hold no roles
+//	  bot: {agent: true}                           # agent:bot; it may hold roles, never be a customer
 //	names:                                         # Items the kernel creates
 //	  first: sla_goal in inc where f_metric = first_response
 //	hide_values:                                   # values left out of lines (the field stays)
@@ -45,7 +46,11 @@
 //	expect:
 //	  - "day 1 09:00 request: alice created it in draft"
 //
-// A person is user:<name>, or customer:<name> with customer: true. The
+// A person is user:<name>, customer:<name> with customer: true, or
+// agent:<name> with agent: true. An agent acts alone ("bot updates ...")
+// or for a person of the story ("bot for kim creates ..."), in a session
+// the harness starts over the whole namespace with every power its user
+// may grant (for a customer: read, create, comment, every move). The
 // default observer is the person observer (user:observer), a staff user
 // with no roles, added when no person has that name. Each run has a
 // namespace of its own, so runs never see each other's Items.
@@ -66,6 +71,7 @@
 //
 // # Steps
 //
+//	person = NAME | AGENT for NAME                   an agent acting for a person
 //	time person creates ITEM as TYPE@V [in ITEM] [with values]
 //	time person updates ITEM with values             (field = null clears it)
 //	time person moves ITEM to STATE [with values]

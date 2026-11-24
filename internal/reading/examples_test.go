@@ -79,21 +79,24 @@ func TestText_TheLayout(t *testing.T) {
 		"2. It moves only as listed below; any other move is refused.\n" +
 		"3. Every write keeps this true: `f_days` is unset or `f_days` is at least 0; a write that would not is refused (days_negative).\n" +
 		"\n" +
+		"Who writes what\n" +
+		"4. No agent writes its fields.\n" +
+		"\n" +
 		"draft (to do)\n" +
-		"4. Any staff member who can see it moves it from draft to submitted, once `f_start` and `f_end` are set, " +
+		"5. Any staff member who can see it moves it from draft to submitted, once `f_start` and `f_end` are set, " +
 		"only if `f_end` is on or after `f_start` and `f_start` is on or after today; the move sets `f_sent_at` to the time of the write.\n" +
 		"\n" +
 		"submitted (waiting)\n" +
-		"5. While it is in submitted, nobody changes `f_start` or `f_end`.\n" +
-		"6. Any staff member who can see it moves it from submitted to draft; the move clears `f_note`.\n" +
-		"7. Any staff member who can see it moves it from submitted to done.\n" +
+		"6. While it is in submitted, nobody changes `f_start` or `f_end`.\n" +
+		"7. Any staff member who can see it moves it from submitted to draft; the move clears `f_note`.\n" +
+		"8. Any staff member who can see it moves it from submitted to done.\n" +
 		"\n" +
 		"done (done)\n" +
-		"8. Nothing leaves done.\n" +
+		"9. Nothing leaves done.\n" +
 		"\n" +
 		"Who sees it\n" +
-		"9. A customer who sees it sees none of its fields, only its header.\n" +
-		"10. Anyone who can see it moves it to another container or narrows who sees it.\n" +
+		"10. A customer who sees it sees none of its fields, only its header.\n" +
+		"11. Anyone who can see it moves it to another container or narrows who sees it.\n" +
 		"\n" +
 		"Not covered by this reading\n" +
 		"- Who can see a given w_leave: that is set for each Item and its container, not by its Type.\n" +

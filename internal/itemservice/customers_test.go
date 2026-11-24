@@ -1081,9 +1081,11 @@ func TestIdempotency_AnAgentForTwoPeople_TheSameKey_TwoWrites(t *testing.T) {
 	forSam := withSession(t, w.k, item.Principal{Actor: userAgent, OnBehalfOf: w.sam.Actor, Namespace: w.ns})
 	forLea := withSession(t, w.k, item.Principal{Actor: userAgent, OnBehalfOf: w.lea.Actor, Namespace: w.ns})
 	key = newKey()
+	// An empty note: note@1 opens no field to agents (closed by default),
+	// and the key, not the content, is what this checks.
 	note := func(p item.Principal) (itemservice.WriteResult, error) {
 		return w.k.Create(testCtx(t), itemservice.CreateRequest{IdempotencyKey: key, Principal: p, TypeID: "note", TypeVersion: 1,
-			ContainerID: &kims, Fields: map[string]any{"f_body": "same"}})
+			ContainerID: &kims})
 	}
 	if _, err := note(forSam); err != nil {
 		t.Fatal(err)

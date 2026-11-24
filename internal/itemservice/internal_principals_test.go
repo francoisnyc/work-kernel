@@ -30,7 +30,9 @@ id: intake
 version: 1
 initial_state: triage
 fields:
-  - {id: f_title, type: string}
+  # Open to agents: an agent creates an intake in these tests (fields are
+  # closed to agents by default).
+  - {id: f_title, type: string, writable_by: [people, agents]}
   - {id: f_plan,  type: string}
 states:
   - {id: triage,   category: triage}

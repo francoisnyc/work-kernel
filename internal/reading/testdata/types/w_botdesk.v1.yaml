@@ -1,0 +1,5 @@
+# Witness fixture: a container where a customer (or an agent acting for
+# one) may create a w_bot.
+id: w_botdesk
+version: 1
+own: [w_bot]

@@ -95,9 +95,9 @@ func newAgentWorld(t *testing.T) agentWorld {
 	user := person("user")
 	agent := agentFor(t, k, user)
 	w := agentWorld{k: k, user: user, agent: agent}
-	w.open = createAs(t, k, user, "open", nil, nil).ItemID
-	w.space = createAs(t, k, user, "space", &itemservice.Narrow{Readers: []string{user.Actor, agent.Actor}}, nil).ItemID
-	w.inSpace = createAs(t, k, user, "in the space", nil, &w.space).ItemID
+	w.open = createOpenAs(t, k, user, "open", nil, nil).ItemID
+	w.space = createOpenAs(t, k, user, "space", &itemservice.Narrow{Readers: []string{user.Actor, agent.Actor}}, nil).ItemID
+	w.inSpace = createOpenAs(t, k, user, "in the space", nil, &w.space).ItemID
 	return w
 }
 
@@ -273,7 +273,7 @@ func TestAgent_WriteAtOrBelowTheReadScope_IsAllowed(t *testing.T) {
 	}); err != nil {
 		t.Errorf("write into the scope read: %v", err)
 	}
-	deeper := createAs(t, w.k, w.agent, "deeper", &itemservice.Narrow{Readers: []string{w.user.Actor, w.agent.Actor}}, &w.inSpace)
+	deeper := createOpenAs(t, w.k, w.agent, "deeper", &itemservice.Narrow{Readers: []string{w.user.Actor, w.agent.Actor}}, &w.inSpace)
 	if _, err := w.k.Update(testCtx(t), itemservice.UpdateRequest{
 		IdempotencyKey: newKey(), Principal: w.agent, ItemID: deeper.ItemID, Fields: map[string]any{"f_title": "below"},
 	}); err != nil {
@@ -307,7 +307,7 @@ func TestAgent_CreateIntoAWiderContainer_NeedsApproval(t *testing.T) {
 	assertVisible(t, w.k, w.agent, w.inSpace)
 
 	_, err := w.k.Create(testCtx(t), itemservice.CreateRequest{
-		IdempotencyKey: newKey(), Principal: w.agent, TypeID: "ticket", TypeVersion: 1,
+		IdempotencyKey: newKey(), Principal: w.agent, TypeID: "agent_ticket", TypeVersion: 1,
 		ContainerID: &w.open, Fields: map[string]any{"f_title": "leak"},
 	})
 	assertNeedsApproval(t, err, scopeOf(t, w.open))
@@ -317,7 +317,7 @@ func TestAgent_CreateIntoAWiderContainer_NeedsApproval(t *testing.T) {
 		t.Fatalf("read root: %v", err)
 	}
 	_, err = w.k.Create(testCtx(t), itemservice.CreateRequest{
-		IdempotencyKey: newKey(), Principal: w.agent, TypeID: "ticket", TypeVersion: 1,
+		IdempotencyKey: newKey(), Principal: w.agent, TypeID: "agent_ticket", TypeVersion: 1,
 		Fields: map[string]any{"f_title": "leak"},
 	})
 	assertNeedsApproval(t, err, root)
@@ -364,8 +364,8 @@ func TestAgent_WideningPolicyChange_NeedsApproval(t *testing.T) {
 // write into either needs approval. Conservative, and correct.
 func TestAgent_ReadsInTwoBranches_EveryWriteNeedsApproval(t *testing.T) {
 	w := newAgentWorld(t)
-	other := createAs(t, w.k, w.user, "other space", &itemservice.Narrow{Readers: []string{w.user.Actor, w.agent.Actor}}, nil)
-	inOther := createAs(t, w.k, w.user, "in the other space", nil, &other.ItemID)
+	other := createOpenAs(t, w.k, w.user, "other space", &itemservice.Narrow{Readers: []string{w.user.Actor, w.agent.Actor}}, nil)
+	inOther := createOpenAs(t, w.k, w.user, "in the other space", nil, &other.ItemID)
 	assertVisible(t, w.k, w.agent, w.inSpace)
 	assertVisible(t, w.k, w.agent, inOther.ItemID)
 
@@ -409,8 +409,8 @@ func TestAgent_ApprovalByTheSessionUser_UnlocksThatScopeOnly(t *testing.T) {
 	}
 
 	// Bound to one scope: a different wider scope is still refused.
-	another := createAs(t, w.k, w.user, "another open space", nil, nil)
-	inAnother := createAs(t, w.k, w.user, "in it", nil, &another.ItemID)
+	another := createOpenAs(t, w.k, w.user, "another open space", nil, nil)
+	inAnother := createOpenAs(t, w.k, w.user, "in it", nil, &another.ItemID)
 	_, err = w.k.Update(testCtx(t), itemservice.UpdateRequest{
 		IdempotencyKey: newKey(), Principal: w.agent, ItemID: inAnother.ItemID, Fields: map[string]any{"f_title": "x"},
 	})

@@ -54,13 +54,29 @@ Ideas noted during the spike, not built yet.
     reaches the connector.
   - **The web UI and the PoC apps show `cause_not_confirmed` as its raw code**, like every reason.
 
-- **Found by the Temporal bake-off** (docs/research/temporal-bakeoff.md; nothing built):
-  - **Fields are open to the agent by default.** Both bake-offs' Types left
-    what is asked, and the decision's reason, writable by anyone who may
-    edit fields, the agent included. `writable_by: ['role:staff']` (a role
-    every person holds) closed both holes for the agent, tested. Consider a
-    default, or a `writable_by: [people]`, so an author need not know it.
-    "Only the requester edits a draft" still has no way to be said.
+- **Fields closed to agents by default: its Later items** (design.md, "Fields closed to agents by default, as built"):
+  - **The contract cannot say which fields are open to agents.** `GetType`'s
+    `Field` has `writable_by` (kernel or not) and `writable_by_roles`, not
+    `people` or `agents`, so an agent or the UI cannot tell what it may
+    write. A field on `kernelv1.Field` is a contract change, for the owner.
+  - **Links closed to agents.** Only fields are closed; an agent still adds
+    and removes links its Type allows anyone (a guard may read links).
+  - **A Type-wide opening** (all fields open to agents), only if an
+    agent-first Type finds field by field painful. Not built on purpose: it
+    would silently open every field a later version adds.
+  - **Trust of agent-written values** (Ventoux item 4): a field open to
+    agents holds model-written values; a check's or an action's `trusted`
+    input that reads one should be flagged.
+  - **Local note: Playwright's browser build.** The repository's Playwright
+    (1.65) wants a newer Chromium build than this machine's preinstalled
+    one; the browser suites ran here through scratchpad configs pointing at
+    `/opt/pw-browsers/chromium`. CI installs the pinned browser.
+
+- **Found by the Temporal bake-off** (docs/research/temporal-bakeoff.md):
+  - **Fields are open to the agent by default.** **Built** (PR #75): a
+    field without `writable_by` is people's only; `writable_by` lists
+    `people`, `agents` and roles. "Only the requester edits a draft" still
+    has no way to be said (track 1 item 4).
   - **Readings did not catch a request nobody can decide** (an owner asking
     for their own system, `except: [creator]` on the only decider). A check
     that proves every waiting state has someone who may move it.
@@ -3785,3 +3801,56 @@ using the installed Chromium. CI builds the real images and runs the pinned brow
 
 **Open:** the owner's approval of the closing note's wording in the three readings; the Later items above. **Next session:** creating on an older version (the roadmap's open item), or
 starting work, step 3 (the intake kill switch first).
+
+## 2026-11-24 — Track 1, item 2: fields closed to agents by default (Phase D)
+
+**Built:** a field without `writable_by` is people's only: no agent writes it unless its Type opens it. `writable_by`
+lists `people`, `agents` and `role:<name>`; an agent and the user it acts for both pass; an agent acting for a
+customer is judged as that customer. Closed: every field an agent names on create, update, a transition's patch and
+the fields its move clears. The kernel's own writes (hooks, timers, reactions, a move's `sets`) are untouched. On
+Create the writer rule moved into the transaction, after what is not found, the start block and the create power. The
+readings gained `field_agents` ("No agent writes its fields." / "An agent writes only ..."), and stories gained agents
+("bot for ana updates ..."), for its witness. design.md: "Fields closed to agents by default, as built", and the
+Type section, "Role writers", the errors table, step 2b's table and V6's kinds corrected. Roadmap: track 1 item 2 built.
+
+**Kernel changes (four, counted):** `policy.MayWriteField` and the item service's field rules with Create's order; the
+load checks (and the JSON Schema's description); the readings' sentence; comments on `FIELD_WRITER_UNSPECIFIED`
+(`make gen`, `make gen-web`; `buf breaking` green). No schema, migration or go.mod change. Test tooling: agents in
+stories. Data: `build_step@2`, `ticket@7`.
+
+**Decided (the owner, through the coordinator):** Phase A's defaults, all of them: the syntax (`people`, `agents`,
+roles; absent means `[people]`; a role an agent holds still opens a role field); **a kernel rule for every version at
+once**, like step 2b; **field by field**, no Type-wide opening; **new versions only** (build_step@2, ticket@7; the
+owner's "ticket@6" became ticket@7, since ticket@6 existed); customers' agents under the customer rules; a move's
+`clears` counts as a write; the existing refusal; a proto comment correction only. Phase B's tests and the scope
+addition (agents in stories); the layout test's new line (the coordinator's review, for the owner).
+
+**Tests:** new: item service 11 (the bake-offs' two attacks and the preparation first), policy 1 (32 cases), typedef 4,
+API 1, reading 2 and a witness, story 2, one scenario step. **About 40 existing tests migrated**, each in its own commit,
+assertions unchanged (test-only Types that open the field, `agent_ticket@1`, build_step@2 and ticket@7, or a
+person-written setup); checked against an uncommitted prototype of the rule. **Assertion changes, agreed:** the three
+lists of every Type in `types/` (52 to 54), the three approved readings' new line, w_leave@1's layout test. Seven tests
+were left closed on purpose: they pin the order on Create.
+
+**Surprises:** ticket@6 already existed (Phase A missed it). The prototype found the order on Create: the field rule
+ran before the transaction, ahead of NOT_FOUND, the start block and the create power, and seven existing tests pinned
+those first. On a transition the agent write rule comes before the field rules, on an update after them (kept). A
+witness needs a story, and stories had no agents. Five bake-off rows on frozen fields now read FIELD_NOT_WRITABLE, since
+"not writable" comes before "frozen".
+
+**Numbers.** `go vet` clean; `go test ./...` and `go test -race -count=1 ./...` green, 28 packages, no race (item
+service 233 s, workflow 345 s); the new and order tests `-race -count=10` green. Scenario on the compose stack: passed,
+whole, in 111 s (run word run0f88b167), with the new step. Web Playwright 9 in 10.5 s; apps/poc journeys 4 in 30.2 s.
+**The bake-offs re-run unchanged** (kernel side; `results/` kept as the earlier record): the Camunda bake-off's kernel
+list 32 of 32 refused (was 31 of 36); the Temporal bake-off's purchase 27 of 27 (was 26 of 29), access request 17 of 18
+(was 15 of 19; the one left is ana's own request for no system), the blind-written access request 18 of 18 (was 16 of
+19), the staff-role run unchanged (a colleague still edits ana's draft: item 4).
+
+**Local workarounds, outside the repository (nothing committed):** dockerd started by hand (twice); Docker Hub answered
+429, so temporal and nginx-unprivileged came from mirror.gcr.io; image builds cannot reach the network here, so the
+stack ran from a compose override in the scratchpad (Go binaries and the web and poc bundles built on this machine into
+the same base images); Playwright through scratchpad configs using the preinstalled Chromium (Later, local note).
+
+**Open:** the Later items above (the contract field, links, a Type-wide opening, trust). **Next session:** track 1
+item 3 (required means given by the mover) or item 4 (only the requester edits a draft), which the bake-offs' "pass in
+full" waits on.

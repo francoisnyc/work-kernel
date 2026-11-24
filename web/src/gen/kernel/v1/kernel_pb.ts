@@ -2147,7 +2147,8 @@ export type Field = Message<"kernel.v1.Field"> & {
   options: string[];
 
   /**
-   * Who may write the field. UNSPECIFIED: anyone who may write the Item.
+   * Who may write the field. UNSPECIFIED: people who may write the Item;
+   * not agents, unless the Type opens the field to them (see FieldWriter).
    *
    * @generated from field: kernel.v1.FieldWriter writable_by = 4;
    */
@@ -3577,7 +3578,10 @@ export const ReactionKindSchema: GenEnum<ReactionKind> = /*@__PURE__*/
  */
 export enum FieldWriter {
   /**
-   * Anyone who may write the Item, through the public API.
+   * People who may write the Item, through the public API, unless
+   * writable_by_roles limits them. Not agents: a field is closed to agents
+   * unless its Type opens it to them, or to a role they hold (this message
+   * does not yet say which fields are open to agents).
    *
    * @generated from enum value: FIELD_WRITER_UNSPECIFIED = 0;
    */

@@ -22,7 +22,9 @@ func TestListEvents_NamingAContainerIsNotReadingIt(t *testing.T) {
 	// level (open); another passed through the second.
 	shared := createAs(t, w.k, w.user, "shared room", &itemservice.Narrow{Readers: []string{w.user.Actor, agent.Actor}}, nil).ItemID
 	hidden := createAs(t, w.k, w.user, "user's room", &itemservice.Narrow{Readers: readers(w.user)}, nil).ItemID
-	x := createAs(t, w.k, w.user, "was in the shared room", nil, &shared).ItemID
+	// x is an agent_ticket: the agent writes its fields below (fields are
+	// closed to agents by default).
+	x := createOpenAs(t, w.k, w.user, "was in the shared room", nil, &shared).ItemID
 	if _, err := moveTo(t, w.k, w.user, x, nil, true); err != nil {
 		t.Fatalf("move x to the top level: %v", err)
 	}

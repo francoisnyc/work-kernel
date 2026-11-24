@@ -227,8 +227,10 @@ const r3Remark = `
 id: r3remark
 version: 1
 fields:
-  - {id: f_body,   type: string}
-  - {id: f_public, type: bool}
+  # Open to agents: an agent acting for the requester remarks in these
+  # tests (fields are closed to agents by default).
+  - {id: f_body,   type: string, writable_by: [people, agents]}
+  - {id: f_public, type: bool,   writable_by: [people, agents]}
 accepts_reactions:
   '*:note': {creates: [f_public]}
 `

@@ -33,10 +33,11 @@ func TestAgentSession_CreateNeedsTheCreatePower(t *testing.T) {
 		t.Errorf("without create and read-only differ over the API:\n%q\n%q", errBytes(t, errEditor), errBytes(t, errReader))
 	}
 
-	// The same session still updates: any write power, as before.
-	it := create(t, "ana", ticketV1, nil).Item.Name
+	// The same session still updates: any write power, as before (a
+	// ticket@7's priority, which it opens to agents).
+	it := create(t, "ana", ticketV7, nil).Item.Name
 	if _, err := asAgent("bot", editor).UpdateItem(ctx, connect.NewRequest(&kernelv1.UpdateItemRequest{
-		Name: it, RequestId: newID(), Fields: fields(t, map[string]any{"f_title": "bot was here"}),
+		Name: it, RequestId: newID(), Fields: fields(t, map[string]any{"f_priority": 1}),
 	})); err != nil {
 		t.Errorf("UpdateItem with read,edit_fields: %v", err)
 	}

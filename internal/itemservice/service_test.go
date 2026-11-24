@@ -153,6 +153,7 @@ func TestCreate_WritesItemEventAndOutbox(t *testing.T) {
 	ctx := testCtx(t)
 	k := itemservice.New(pool)
 	req := newRequest()
+	req.TypeID = "agent_ticket" // an agent writes its fields (closed to agents by default)
 	req.Principal = withSession(t, k, item.Principal{Actor: "agent:7", OnBehalfOf: "user:alice"})
 
 	res, err := k.Create(ctx, req)

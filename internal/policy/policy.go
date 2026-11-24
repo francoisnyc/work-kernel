@@ -287,11 +287,48 @@ func MayTransition(tr typedef.Transition, who Who, it ItemFacts) bool {
 	return who.OnBehalfOf == "" || AuthorizeTransitionOn(who.OnBehalfOf, who.OnBehalfOfRoles, tr, it.Fields)
 }
 
+// MayWriteField answers whether who may write the field on the public door
+// (fields closed to agents by default). A field's writable_by lists its
+// writers: people, agents and role:<name>; none means people only, so an
+// agent writes a field only where its Type says so. kernel is no one's
+// here: only the internal door writes it.
+//
+// An agent has its user's rights only where it also has its own: the agent
+// must pass (as agents, or holding a role) and so must the user it acts
+// for (as people, or holding a role). An agent acting for a customer is
+// judged as that customer; the customer rules decide which fields that is.
+func MayWriteField(f typedef.Field, who Who) bool {
+	if f.WritableBy == typedef.WritableByKernel {
+		return false
+	}
+	if CustomerOf(item.Principal{Actor: who.Actor, OnBehalfOf: who.OnBehalfOf}) != "" && who.OnBehalfOf != "" {
+		return writes(f, who.OnBehalfOf, who.OnBehalfOfRoles)
+	}
+	if !writes(f, who.Actor, who.ActorRoles) {
+		return false
+	}
+	return who.OnBehalfOf == "" || writes(f, who.OnBehalfOf, who.OnBehalfOfRoles)
+}
+
+// writes answers for one principal: an agent as agents, anyone else (a
+// user, a customer) as people, and either by holding one of the roles.
+func writes(f typedef.Field, principal string, roles []string) bool {
+	if item.IsKind(principal, item.KindAgent) {
+		if f.WritableByAgents {
+			return true
+		}
+	} else if f.PeopleWrite() {
+		return true
+	}
+	return slices.ContainsFunc(f.WritableByRoles, func(r string) bool { return slices.Contains(roles, r) })
+}
+
 // MayWriteRoleField answers whether who may write a field limited to roles
 // (writable_by: [role:<name>, ...]) on the public door: the actor holds one
 // of the roles and, when it acts for a user, so does the user (an agent has
 // its user's rights only where it also has its own). A field without roles
-// is anyone's; a kernel-written field is not this function's question.
+// is not limited by it (MayWriteField asks who writes it, people or
+// agents); a kernel-written field is not this function's question.
 func MayWriteRoleField(f typedef.Field, who Who) bool {
 	if len(f.WritableByRoles) == 0 {
 		return true

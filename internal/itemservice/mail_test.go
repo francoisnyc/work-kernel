@@ -300,8 +300,10 @@ func TestHookInput_Creator(t *testing.T) {
 	}
 	// For an agent's request on ana's behalf, creator is ana.
 	agent := withSession(t, w.k, item.Principal{Actor: "agent:" + uuid.NewString()[:8], OnBehalfOf: w.ana.Actor})
+	// With no fields: vacation_request opens none to agents (closed by
+	// default), and the hook reads only who it is for.
 	res, err := w.k.Create(testCtx(t), itemservice.CreateRequest{IdempotencyKey: newKey(), Principal: agent,
-		TypeID: "vacation_request", TypeVersion: 3, Fields: leaveTerms(1)})
+		TypeID: "vacation_request", TypeVersion: 3})
 	if err != nil {
 		t.Fatal(err)
 	}

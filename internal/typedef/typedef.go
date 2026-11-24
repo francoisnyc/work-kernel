@@ -49,6 +49,13 @@ const (
 	WritableByKernel WritableBy = "kernel"
 )
 
+// The entries of a field's writable_by list besides role:<name> (fields
+// closed to agents by default): any person, and any agent.
+const (
+	WriterPeople = "people"
+	WriterAgents = "agents"
+)
+
 // Item attributes a hook may read besides fields: set by the kernel at
 // create and never editable. They are also guard variables.
 const (
@@ -146,6 +153,16 @@ type Field struct {
 	// agent and the user it acts for must both hold one). The kernel's own
 	// writers are not affected. Role names, without the role: prefix.
 	WritableByRoles []string `yaml:"-" json:"writable_by_roles,omitempty"`
+	// WritableByPeople and WritableByAgents (from writable_by: [people,
+	// agents, ...]): fields closed to agents by default. A field whose
+	// writable_by lists nothing is people's (PeopleWrite); agents write
+	// only a field that lists agents, or a role they hold.
+	WritableByPeople bool `yaml:"-" json:"writable_by_people,omitempty"`
+	WritableByAgents bool `yaml:"-" json:"writable_by_agents,omitempty"`
+	// writers is the writable_by list as written, kept only when it names
+	// people or agents, so that check's problems point at the right entry
+	// (WritableByRoles holds the roles alone). Never stored.
+	writers []string
 	// Multiple makes the field hold a set of values of its type (string,
 	// enum, principal or date): unordered, no duplicates, stored sorted; an
 	// empty set is an unset field. Max, when set, is the most members it
@@ -378,6 +395,17 @@ func (t *Type) problems() Problems {
 	var ps Problems
 	errors.As(t.check(), &ps)
 	return ps
+}
+
+// PeopleWrite reports whether any person (a user or a customer) may write
+// the field on the public door, roles aside: when its writable_by lists
+// people, or lists nothing at all (the default: closed to agents, open to
+// people). A kernel field is no one's.
+func (f Field) PeopleWrite() bool {
+	if f.WritableBy == WritableByKernel {
+		return false
+	}
+	return f.WritableByPeople || (len(f.WritableByRoles) == 0 && !f.WritableByAgents)
 }
 
 // Field returns the field with the given ID. The second value reports
