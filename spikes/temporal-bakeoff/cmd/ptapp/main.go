@@ -20,6 +20,7 @@ import (
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 
+	"github.com/francoisnyc/work-kernel/spikes/temporal-bakeoff/access"
 	"github.com/francoisnyc/work-kernel/spikes/temporal-bakeoff/acts"
 	"github.com/francoisnyc/work-kernel/spikes/temporal-bakeoff/auth"
 	"github.com/francoisnyc/work-kernel/spikes/temporal-bakeoff/httpapi"
@@ -66,6 +67,7 @@ func run(tokensPath, listen string) error {
 
 	w := worker.New(tc, purchase.TaskQueue, worker.Options{})
 	w.RegisterWorkflowWithOptions(purchase.Workflow, workflow.RegisterOptions{Name: purchase.WorkflowName})
+	w.RegisterWorkflowWithOptions(access.Workflow, workflow.RegisterOptions{Name: access.WorkflowName})
 	w.RegisterActivity(acts.New(st, env("HR_URL", "http://127.0.0.1:18083"), env("ERP_URL", "http://127.0.0.1:18082"), env("EMAIL_URL", "http://127.0.0.1:18084")))
 	if err := w.Start(); err != nil {
 		return err
@@ -76,6 +78,7 @@ func run(tokensPath, listen string) error {
 	mux.HandleFunc("GET /healthz", func(http.ResponseWriter, *http.Request) {})
 	(&httpapi.Common{Store: st, Temporal: tc}).Routes(mux, tokens)
 	(&purchase.API{Temporal: tc}).Routes(mux, tokens)
+	(&access.API{Temporal: tc}).Routes(mux, tokens)
 	srv := &http.Server{Addr: listen, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 
 	// The server runs on its own goroutine; this one waits for it to fail or
