@@ -7,7 +7,7 @@ var KeyParts = map[string][]Part{
 	"id":            {Starts, NoLifecycle},
 	"initial_state": {Starts},
 
-	"fields[].writable_by":           {FieldKernel, FieldRoles},
+	"fields[].writable_by":           {FieldKernel, FieldRoles, FieldAgentsOnly, FieldAgents, FieldAgentsRoles},
 	"fields[].unique_among_siblings": {FieldUnique},
 
 	"states[].frozen":          {Frozen},
@@ -92,7 +92,7 @@ var KeyParts = map[string][]Part{
 	"accepts_reactions.*.sets":    {ConsentSet, ConsentWildcard},
 	"readable_by_reactions":       {Readable},
 	"offers":                      {Offer},
-	"customer_fields":             {CustomerFields, CustomerFieldsNone},
+	"customer_fields":             {CustomerFields, CustomerFieldsNone, FieldAgentsCustomers},
 	"own":                         {Own},
 	"shared":                      {Shared},
 	"placement_writable_by":       {PlacementAnyone, PlacementRoles, PlacementKernel},

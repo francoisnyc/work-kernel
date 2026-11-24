@@ -1,0 +1,17 @@
+# Witness fixture: fields closed to agents by default. f_note has no
+# writable_by (people only, and a customer field); f_score is open to
+# agents; f_tag only agents write; f_grade only holders of grader.
+id: w_bot
+version: 1
+initial_state: open
+fields:
+  - {id: f_note,  type: string}
+  - {id: f_score, type: int,    writable_by: [people, agents]}
+  - {id: f_tag,   type: string, writable_by: [agents]}
+  - {id: f_grade, type: int,    writable_by: ['role:grader']}
+customer_fields: [f_note]
+states:
+  - {id: open, category: todo}
+  - {id: done, category: done}
+transitions:
+  - {from: open, to: done}
