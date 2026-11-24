@@ -3398,10 +3398,10 @@ without the lock the create always committed after the update.
 
 **Numbers.** `go test ./...` green (25 packages; workflow 320 to 340 s, item service 75 to 100 s). Race test
 `-count=20`: green, 0 to 3 creates of 20 won per run, never one after the update; `TestStart_` `-race -count=10`
-green; `TestMayStart_SharesMatchingWithMayTransition` `-count=20` green. `go test -race ./...`: see Later (a timing
-margin seen twice under load). Scenario on the compose stack: passed (run word run72025425; before the rebase, with
-the 50-source step skipped in a scratch copy, the rest through to "scenario passed"), 111 s to the type validate
-step. Web Playwright 9 in 12.9 s; apps/poc journeys 4 in 47.1 s.
+green; `TestMayStart_SharesMatchingWithMayTransition` `-count=20` green. `go test -race -count=1 ./...` after the
+rebase: green, 25 packages (the timing margin under Later did not show). Scenario on the compose stack after the
+rebase: passed, whole, in 104 s (run word run5da6bb08), the new B2 refusal included. Web Playwright 9 in 9.1 s;
+apps/poc journeys 4 in 29.6 s.
 
 **Local workarounds, outside the repository (nothing committed):** dockerd started by hand (twice: the container
 restarted mid-Phase C); Docker builds cannot verify the sandbox's TLS proxy, so the Go images built with a
