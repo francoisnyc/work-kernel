@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/francoisnyc/work-kernel/internal/item"
+	"github.com/francoisnyc/work-kernel/internal/lifecycle"
 	"github.com/francoisnyc/work-kernel/internal/typedef"
 )
 
@@ -100,6 +101,9 @@ type kernelCause struct {
 	// see moveCause. Its cause may be an event of another Item, and the
 	// Item moved may be of another Type: ReactMove has checked both.
 	move *moveCause
+	// cause is the shape of the causing event, read by admit: what an
+	// action hook's records are confirmed against (confirmBound).
+	cause lifecycle.Cause
 }
 
 // decider is the hook or reaction acting: what a hold names as deciding it.
@@ -244,15 +248,19 @@ func admit(ctx context.Context, tx pgx.Tx, p item.Principal, id uuid.UUID, it lo
 		return item.Principal{}, fmt.Errorf("%w: kernel write: %s ran for %s v%d, on an Item of %s v%d",
 			ErrInvalid, p.Actor, kc.typeID, kc.typeVersion, it.TypeID, it.TypeVersion)
 	}
-	var actor, onBehalfOf string
+	var actor, onBehalfOf, op string
+	var payload []byte
 	err := tx.QueryRow(ctx,
-		`select actor, coalesce(on_behalf_of, '') from item_events where item_id = $1 and item_seq = $2`,
-		id, kc.causeSeq).Scan(&actor, &onBehalfOf)
+		`select actor, coalesce(on_behalf_of, ''), op, payload from item_events where item_id = $1 and item_seq = $2`,
+		id, kc.causeSeq).Scan(&actor, &onBehalfOf, &op, &payload)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return item.Principal{}, fmt.Errorf("%w: kernel write: the cause is not an event of this Item", ErrInvalid)
 	}
 	if err != nil {
 		return item.Principal{}, fmt.Errorf("read cause: %w", err)
+	}
+	if kc.cause, err = causeOf(op, payload); err != nil {
+		return item.Principal{}, err
 	}
 	root := onBehalfOf
 	if root == "" && item.IsKind(actor, item.KindUser, item.KindCustomer) {
