@@ -418,11 +418,18 @@ func TestBalanceLink_ForWhomTheRequestIs(t *testing.T) {
 	w := newLeaveWorld(t)
 	bal := w.balance(t, w.ana, 25)
 	agent := withSession(t, w.k, item.Principal{Actor: "agent:" + uuid.NewString()[:8], OnBehalfOf: w.ana.Actor})
+	// The agent creates the draft with no fields and ana writes the terms:
+	// vacation_request opens no field to agents (closed by default).
 	res, err := w.k.Create(testCtx(t), itemservice.CreateRequest{
-		IdempotencyKey: newKey(), Principal: agent, TypeID: "vacation_request", TypeVersion: 2, Fields: leaveTerms(5),
+		IdempotencyKey: newKey(), Principal: agent, TypeID: "vacation_request", TypeVersion: 2,
 	})
 	if err != nil {
 		t.Fatalf("the agent creates ana's request: %v", err)
+	}
+	if _, err := w.k.Update(testCtx(t), itemservice.UpdateRequest{
+		IdempotencyKey: newKey(), Principal: w.ana, ItemID: res.ItemID, Fields: leaveTerms(5),
+	}); err != nil {
+		t.Fatalf("ana writes the terms: %v", err)
 	}
 	if _, h := w.hrNames(t, res.ItemID, w.askSubmit(t, w.ana, res.ItemID), w.bob); h.Status != item.HoldAllowed {
 		t.Fatalf("submit: hold %+v", h)
