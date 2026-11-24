@@ -699,6 +699,9 @@ func TestHookInput_ContainerOffer_NoRecipient(t *testing.T) {
 	// The incident is narrowed to its requester and the admin: the
 	// assignee cannot see it, so is told nothing about it.
 	t.Run("the assignee cannot see the incident", func(t *testing.T) {
+		// Only desk agents narrow an incident once incident@3 is
+		// registered (the latest version's placement rule): ana is one here.
+		grantRoleIn(t, w.ns, w.ana, "desk_agent")
 		res, err := w.k.Create(testCtx(t), itemservice.CreateRequest{IdempotencyKey: newKey(), Principal: w.ana, TypeID: "incident", TypeVersion: 1,
 			ContainerID: &w.desk, Narrow: &itemservice.Narrow{Readers: []string{w.ana.Actor, w.admin.Actor}},
 			Fields: map[string]any{"f_title": "private " + word(), "f_priority": "P1", "f_assignee": w.sam.Actor}})
