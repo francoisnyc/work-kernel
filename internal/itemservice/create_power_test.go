@@ -39,6 +39,9 @@ func TestCreatePower_OtherWritePowersMayNotCreate(t *testing.T) {
 		t.Run(power, func(t *testing.T) {
 			w := newCapWorld(t)
 			agent := scoped(t, w.k, w.user, []uuid.UUID{w.a}, item.PowerRead, power)
+			// An Item in A whose fields an agent may write (fields are
+			// closed to agents by default).
+			openInA := createOpenAs(t, w.k, w.user, "open in A", nil, &w.a).ItemID
 			ctx := testCtx(t)
 			key := newKey()
 			before := count(t, `select count(*) from items where container_id = $1`, w.a)
@@ -61,7 +64,7 @@ func TestCreatePower_OtherWritePowersMayNotCreate(t *testing.T) {
 			}
 
 			// Every other write keeps the v1 rule: any write power.
-			if err := agentUpdate(t, w.k, agent, w.inA); err != nil {
+			if err := agentUpdate(t, w.k, agent, openInA); err != nil {
 				t.Errorf("Update with %s: %v", power, err)
 			}
 			if _, err := w.k.Transition(ctx, itemservice.TransitionRequest{
@@ -78,12 +81,13 @@ func TestCreatePower_OtherWritePowersMayNotCreate(t *testing.T) {
 func TestCreatePower_CreateOnly(t *testing.T) {
 	w := newCapWorld(t)
 	agent := scoped(t, w.k, w.user, []uuid.UUID{w.a}, item.PowerCreate)
+	openInA := createOpenAs(t, w.k, w.user, "open in A", nil, &w.a).ItemID // fields an agent may write
 	if _, err := w.k.Create(testCtx(t), itemservice.CreateRequest{
 		IdempotencyKey: newKey(), Principal: agent, TypeID: "ticket", TypeVersion: 1, ContainerID: &w.a,
 	}); err != nil {
 		t.Errorf("Create with create only: %v", err)
 	}
-	if err := agentUpdate(t, w.k, agent, w.inA); err != nil {
+	if err := agentUpdate(t, w.k, agent, openInA); err != nil {
 		t.Errorf("Update with create only: %v", err)
 	}
 }
