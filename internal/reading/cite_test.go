@@ -80,6 +80,9 @@ func elements(ty *typedef.Type) []string {
 		add("shared")
 	}
 	add("placement_writable_by")
+	if ty.Start != nil {
+		add("start")
+	}
 	sort.Strings(out)
 	return out
 }

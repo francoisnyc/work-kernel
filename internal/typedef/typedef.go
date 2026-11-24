@@ -301,6 +301,9 @@ type Type struct {
 	// role:<name>. Empty is anyone who sees the Item, as before. Phase B
 	// stub: parsed only.
 	PlacementWritableBy []string `yaml:"placement_writable_by" json:"placement_writable_by,omitempty"`
+	// Start (starting work, step 2; see start.go): where Items of the
+	// Type may be created, and by whom. nil when the Type has no block.
+	Start *Start `yaml:"start" json:"start,omitempty"`
 }
 
 // Jira 2.4b keywords. AllowedNobody (kernel change 12) is the `allowed`
@@ -490,6 +493,8 @@ func (t *Type) check() error {
 	t.checkMultiUses(r)
 	t.checkReadable(r)
 	t.checkJira24b(r)
+	// Where Items of this Type may be created, and by whom.
+	t.checkStart(r)
 	// Clears name fields, and may not sit on a held transition.
 	t.checkClears(r)
 	// Computed effects: the same, and each expression compiles to a value

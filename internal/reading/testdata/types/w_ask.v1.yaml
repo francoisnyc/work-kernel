@@ -1,0 +1,7 @@
+# An ask before its start block: version 2's block judges a create of
+# this version too.
+id: w_ask
+version: 1
+fields:
+  - {id: f_title, type: string}
+customer_fields: [f_title]

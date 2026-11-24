@@ -440,6 +440,13 @@ justifications and reasons it stores in clear) matters more there.
    half-day box; the wall clock is not.
 9. Times are an agent's minutes. Tests-first with the owner's approval was
    not possible in an autonomous run.
+10. The kernel's "starting work, step 2" (a `start` block: who may create a
+    Type's Items, and where, judged by the latest version) was merged to
+    `main` during the run and was not used: both kernel sides ran on the
+    kernel as it was when the branch was made. It would replace the access
+    Types' "only inside a system" trick (`start: {in: [system]}`) and could
+    stop an agent asking for access in its own name. It does not let a
+    team retire an old version, so the CFO change's loophole stands.
 
 ## Not done
 

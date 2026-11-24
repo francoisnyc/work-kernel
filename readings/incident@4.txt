@@ -1,0 +1,92 @@
+incident@4
+
+Key
+- the requester: the person an Item is for: whoever created it, or the person they created it for.
+- staff: people in the organisation, and agents acting for them; a customer is never staff.
+- a customer: a person outside the organisation.
+- an agent: a program acting for a person; it may do only what both it and that person may do, and a field that names a person never names an agent.
+- the kernel: the system that runs the rules of every Type; it is never a person.
+- the timer: the kernel's clock; it makes only the moves a Type gives it.
+- a reaction: a write a Type makes on another Item when something happens to one of its own; the other Item's Type must allow it.
+
+Fields
+- `f_title`: text
+- `f_priority`: one of P1, P2, P3 or P4
+- `f_impact`: one of extensive, significant, moderate or minor
+- `f_assignee`: a person
+- `f_resolution`: one of fixed, workaround, wontfix or duplicate
+- `f_due_first_response`: an instant
+- `f_due_resolution`: an instant
+
+In short
+1. An incident starts in new.
+2. It moves only as listed below; any other move is refused.
+3. Every write keeps this true: `f_priority` is set; a write that would not is refused (priority_missing).
+
+Who starts it
+4. An incident is created only inside a desk.
+5. Any staff member who can see the container creates one; a customer creates one only where a container lets them.
+6. While this is the latest version of incident, these rules apply to creating an incident of any version.
+
+Who writes what
+7. Only the kernel writes `f_due_first_response`: sla_goal's reactions `cancel_first_response`, `clear_first_response`, `hide_first_response` and `show_first_response`.
+8. Only the kernel writes `f_due_resolution`: sla_goal's reactions `cancel_resolution`, `clear_resolution`, `hide_resolution` and `show_resolution`.
+
+Links
+9. Anyone who can see it links it to a bug as `caused_by`, any number; a bug sees it as `causes`.
+
+new (to triage)
+10. On entering new, `sla_start_first_response` creates a sla_goal@3 inside it, with `f_days_off` = `f_days_off` of its container's `calendar`, `f_metric` = first_response, `f_started_at` = the time of the write, `f_week` = `f_week` of its container's `calendar`, `f_zone` = `f_zone` of its container's `calendar`, and `f_due_at` and `f_target_s` computed from `f_priority`, the time of the write, its container's `calendar` and its container's `sla_policy`.
+11. On entering new, `sla_start_resolution` creates a sla_goal@3 inside it, with `f_days_off` = `f_days_off` of its container's `calendar`, `f_metric` = resolution, `f_started_at` = the time of the write, `f_week` = `f_week` of its container's `calendar`, `f_zone` = `f_zone` of its container's `calendar`, and `f_due_at` and `f_target_s` computed from `f_priority`, the time of the write, its container's `calendar` and its container's `sla_policy`.
+12. Any staff member who can see it moves it from new to in_progress.
+13. The requester, or anyone with the role desk_agent, moves it from new to canceled.
+
+in_progress (active)
+14. On entering in_progress from resolved, `sla_restart_resolution` creates a sla_goal@3 inside it, with `f_days_off` = `f_days_off` of its container's `calendar`, `f_metric` = resolution, `f_started_at` = the time of the write, `f_week` = `f_week` of its container's `calendar`, `f_zone` = `f_zone` of its container's `calendar`, and `f_due_at` and `f_target_s` computed from `f_priority`, the time of the write, its container's `calendar` and its container's `sla_policy`.
+15. On entering in_progress from waiting_for_customer, `sla_resume` moves the sla_goals inside it whose `f_metric` is resolution from paused to running.
+16. Any staff member who can see it moves it from in_progress to waiting_for_customer.
+17. Any staff member who can see it moves it from in_progress to resolved, once `f_resolution` is set.
+18. Any staff member who can see it moves it from in_progress to canceled.
+
+waiting_for_customer (waiting)
+19. On entering waiting_for_customer, `sla_pause` moves the sla_goals inside it whose `f_metric` is resolution from running to paused.
+20. Any staff member who can see it moves it from waiting_for_customer to in_progress.
+21. Any staff member who can see it moves it from waiting_for_customer to resolved, once `f_resolution` is set.
+
+resolved (done)
+22. On entering resolved, `sla_stop` moves the sla_goals inside it from running or paused to completed.
+23. 120 hours after it enters resolved, if it is still there, the timer moves it to closed.
+24. Only the timer moves it from resolved to closed.
+25. The requester, or anyone with the role desk_agent, moves it from resolved to in_progress; the move clears `f_resolution`.
+
+closed (done)
+26. Nothing leaves closed.
+
+canceled (canceled)
+27. On entering canceled, `sla_cancel` moves the sla_goals inside it from running or paused to canceled.
+28. Nothing leaves canceled.
+
+When something is created inside it
+29. When a person other than the requester creates a reply inside it, `sla_answered` moves the sla_goals inside it whose `f_metric` is first_response from running to completed.
+30. When the requester creates a reply inside it while it is in waiting_for_customer, `customer_replied` moves it to in_progress.
+
+What other Types may do to it
+31. sla_goal's reaction `cancel_first_response` may set `f_due_first_response`.
+32. sla_goal's reaction `cancel_resolution` may set `f_due_resolution`.
+33. sla_goal's reaction `clear_first_response` may set `f_due_first_response`.
+34. sla_goal's reaction `clear_resolution` may set `f_due_resolution`.
+35. sla_goal's reaction `hide_first_response` may set `f_due_first_response`.
+36. sla_goal's reaction `hide_resolution` may set `f_due_resolution`.
+37. sla_goal's reaction `show_first_response` may set `f_due_first_response`.
+38. sla_goal's reaction `show_resolution` may set `f_due_resolution`.
+39. Items inside it may read `f_assignee` as `breach_contact`.
+
+Who sees it
+40. A customer who sees it sees only `f_title`, `f_priority`, `f_impact` and `f_resolution`, and sets only those when creating it.
+41. The customer who requested it sees every reply inside it, and may create one there.
+42. Only holders of desk_agent move it to another container or narrow who sees it.
+
+Not covered by this reading
+- Who can see a given incident: that is set for each Item and its container, not by its Type.
+- Who may create an incident, and where, once a later version exists: the latest version of incident decides, for every version.
+- How the kernel keeps its promises (retries, each write made once, recovery after a failure): the same for every Type.

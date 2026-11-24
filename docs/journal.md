@@ -44,6 +44,41 @@ Ideas noted during the spike, not built yet.
     `../../types` and `../../stories`; a spike's Types cannot use it.
   - **A Type goes live only at start; a request in flight cannot move to
     a new version.** Camunda migrated one with one call.
+- **Starting work, step 2's Later items** (docs/plans/starting-work.md, 1.3):
+  - The "governs earlier versions" and "loosened" notes, with the WARNING
+    severity (Ventoux item 3): `pli type validate` should say which earlier
+    versions a draft's start block will govern, and that a draft dropping
+    the block in force loosens them. It needs a severity other than ERROR
+    in `kernel.v1` (a contract change), so step 2 builds neither.
+  - `ListStartable` (plan 1.9), and `start` in `kernel.v1.Type`, so that
+    `GetType`/`ListTypes` show the block and a UI or an agent knows what it
+    may offer. Both are contract changes.
+  - The web UI's "New" form offers the latest version of every Type to
+    anyone, so staff can pick a Type and a place the start block then
+    refuses (`NOT_ALLOWED`). It needs the item above.
+  - apps/poc knows incident versions [2, 3] only (`INCIDENT_VERSIONS`): an
+    incident@4, which the web UI's customer form now creates, is not in its
+    queue.
+  - Roles are not locked during a create's start check, as for
+    transitions: a role revoked while a create commits does not stop it.
+  - `RegisterType` runs no checks of the Types together, the start block's
+    included: plan 1.5's refusal at registration holds for
+    `ValidateTypes`, `pli type validate` and the Types folder at start
+    only. `Create` refuses at run time anyway.
+  - Who may open an incident is a product choice left open: incident@4 says
+    only where (`in: [desk]`); a `role:employee` beside `role:desk_agent`,
+    say, once a domain asks (owner's decision 1, option B).
+  - A story that walks incident@4's rule (who opens an incident, where):
+    the readings' `start` witness covers the kernel's side; a story was
+    not asked for in this step.
+  - **A -race timing margin.** `TestMinSeq_DoesNotWaitForYoungerTransactions`
+    and `TestSearch_MinSeqAlreadyReached_AnswersAtOnce` allow 1 s for a
+    Search with `min_seq`; under `-race` they take 0.70 to 0.89 s, on main
+    too. With the workflow package running beside them (`-p 2`) they took
+    1.24 to 1.31 s twice in this step's runs, and passed in 3 runs on main
+    and 5 further runs on the branch; a poller of open transactions found
+    only tests that hold locks on purpose. A test change for later (a
+    bound relative to an unloaded Search, or no bound under -race).
 
 - **Starting work, step 1's Later items** (docs/plans/starting-work.md, 1.0):
   - **Reaction creates by an agent without `create`.** An agent session
@@ -3351,6 +3386,72 @@ before the name check, so an oversized request with a nameless source gets the s
 
 **Open:** none. **Next session:** build_step@1 rebased onto this (its `TestPli_Types` count is its own).
 
+## 2026-11-24 — Starting work, step 2: the `start` block (Phase D)
+
+**Built:** an optional `start: {in, allowed}` block on a Type (plan part 1, 1.1 to 1.8, without intakes). `in`
+names the container Types (any version) or `top`; `allowed` takes `role:`, `principal:user:`, `field:` (the
+container's), `container_creator` or `nobody`. The **latest registered version's** block judges a create of every
+version. `typedef` parses and checks it (stage 2 and 3, new code `START_NOT_IN`; a Type named `top` is
+`RESERVED_NAME`); `policy.MayStart` judges `allowed`, sharing one matcher (`matchesEntry`) with `MayTransition`;
+`Create` checks it in its transaction, after everything that answers `NOT_FOUND`; readings gain *Who starts it* and
+a closing line. One Type uses it: **incident@4** = incident@3 + `start: {in: [desk]}`. design.md: "Starting work,
+step 2, as built", the V6 table row and counts, the problem-code rows. starting-work.md: step 2 marked built, 1.6's
+order corrected, 1.3's notes marked deferred.
+
+**Kernel changes (four, counted):** (1) the `start` block in `typedef` (parse, load checks, `START_NOT_IN`,
+`Start.Admits`); (2) `policy.MayStart` and the shared `matchesEntry`; (3) the check in `Create`, with a
+`max(version)` lookup per create in its transaction; (4) the readings' *Who starts it* and the closing line. No
+proto, schema, migration or go.mod change; the JSON Schema gained `start`.
+
+**Decided:** Phase A's answers: no proto change (the "governs earlier versions" / "loosened" notes deferred, so
+`StartNotes`, built in Phase B, was removed at review: production code only tests would call); test-only Types with
+unique IDs in the item service (Types are global, and registering incident@4 there would judge other tests'
+incident creates by test order); the order of checks (NOT_FOUND first, then `in`, then `allowed`, then the rest:
+corrects plan 1.6); a typed `StartRefusedError` whose message names the reason and the Type only; the latest version
+read per create, never cached; `nobody` refuses customers too, and `own`/`shared` naming such a Type is `CONFLICT`
+at load (fail closed); `field:` matches as in transitions (a field matches only the principal it holds); no change
+to `RegisterType`. **Decision 1, option B (owner):** incident@4 gets only `in: [desk]`. `allowed: [role:desk_agent]`
+plus the latest-version rule would have shut every staff member without the role out of opening incidents of any
+version, and in scenario B the person who opens an incident is the employee with the problem (ana), not a desk
+agent; `allowed` is proven on test-only Types instead. Phase D review: the readings say "these rules apply to",
+not "hold", since "a hold" is a defined term.
+
+**Tests:** 28 new test functions (typedef 9, policy 2, item service 14, API 1, pli 1, reading 1) and one witness
+(`start`, 8 parts) with 5 fixture Types; table cases: 22 stage-2 problems, 11 stage-3 problems and 8 that load,
+13 `Admits` rows, 35 `MayStart` rows, 70 combinations held to `MayTransition`; scenario B2 gained one refusal.
+**Existing tests changed, each in its own commit, agreed:** a `START_NOT_IN` case in `dirCases`;
+`TestPli_Search_NotEmpty` puts its incidents in a desk; the closing line in two layout tests and the two approved
+readings; `cite_test` requires `start` to be cited; `TestReadings_TheApprovedOnes` gains incident@4. In Phase D:
+the list/count expectations (incident@4 in `TestParseDir_ReadsTheRepositorysTypes` and
+`TestListTypes_EveryVersionInOrder`, 51 in `TestPli_Types`); my own incident@4 reading and witness line for "apply
+to"; one new test pinning the key's "a hold" as the noun. After the rebase onto the limit raise,
+`TestValidateTypes_TheRepositoryTypes` and `TestPli_TypeValidate_Clean` passed unchanged.
+
+**Surprises:** the key's "a hold" matched the verb ("these rules hold", "hold the same"), putting the term in keys
+of Types without holds (fixed, pinned). A create's placement check ran before the session's scopes, so an agent
+outside them was told `PLACEMENT_NOT_WRITABLE` before `NOT_FOUND`; it now follows them. Types being global made
+"latest version governs" a test-isolation question in every package that registers Types piecemeal. The race test
+(a create judged by `field:` racing an update of the container's field) failed in every round against the stub:
+without the lock the create always committed after the update.
+
+**Numbers.** `go test ./...` green (25 packages; workflow 320 to 340 s, item service 75 to 100 s). Race test
+`-count=20`: green, 0 to 3 creates of 20 won per run, never one after the update; `TestStart_` `-race -count=10`
+green; `TestMayStart_SharesMatchingWithMayTransition` `-count=20` green. `go test -race -count=1 ./...` after the
+rebase: green, 25 packages (the timing margin under Later did not show). Scenario on the compose stack after the
+rebase: passed, whole, in 104 s (run word run5da6bb08), the new B2 refusal included. Web Playwright 9 in 9.1 s;
+apps/poc journeys 4 in 29.6 s.
+
+**Local workarounds, outside the repository (nothing committed):** dockerd started by hand (twice: the container
+restarted mid-Phase C); Docker builds cannot verify the sandbox's TLS proxy, so the Go images built with a
+`GOPROXY` served from this machine's module cache (`python3 -m http.server`, builds on the host network,
+`GOSUMDB=off`), and the web and poc images as nginx images over sites built here with `VITE_DEV_USERS=1`, through a
+compose override in the scratchpad; Playwright could not download its browser, so local configs (in
+`.git/info/exclude`) use the installed Chrome (`channel: chrome`). CI builds the real images and runs the pinned
+browser.
+
+**Open:** the Later items above. **Next session:** the owner approves the three readings (incident@4 new,
+incident@3 and vacation_request@3 with the closing line); then step 2b (the latest-version rule for placement).
+
 ## 2026-11-24 — Bake-off: the approvals pilot on Camunda 8.10 and on the kernel (a spike, no kernel change)
 
 **Built:** `spikes/camunda-bakeoff/` for `docs/plans/camunda-bakeoff.md`, run without waiting for answers. The
@@ -3455,5 +3556,7 @@ active work was about 75 minutes, inside the half-day box.
 Temporal's test environment).
 
 **Open:** the two new Later items above, and the first bake-off's, the first two (old versions; the worker's
-trust in its input) still first. **Next session:** the owner's decision on the two reports; otherwise starting
-work, step 2.
+trust in its input) still first. Starting work, step 2 (the `start` block) was merged to main during this run
+and not used here: it would replace the access Types' "only inside a system" invariant with `start: {in:
+[system]}`, and could stop an agent asking in its own name; it does not retire an old version. **Next session:**
+the owner's decision on the two reports.

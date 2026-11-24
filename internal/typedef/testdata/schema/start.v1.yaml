@@ -1,0 +1,9 @@
+# Corpus for the schema tests (Ventoux V2c): the start block (starting
+# work, step 2), both of its keys. It loads on its own (stages a and b);
+# the container Type it names is not loaded.
+id: corpus_start
+version: 1
+
+start:
+  in: [corpus_room]
+  allowed: ['role:lead', 'principal:user:ana', 'field:f_lead', container_creator]
