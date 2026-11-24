@@ -28,7 +28,7 @@ approve its own questions, tests or pull request.
 Not on the dev stack: `make reset` deletes everything, and the scenario and
 the e2e journeys write their own data into it. The tracker runs on a second,
 long-lived stack, pinned to a known-good commit, in its own namespace
-(`dev`), with an `ORI` space. Changing the kernel never breaks the tracker
+(`acme`), with an `ORI` space. Changing the kernel never breaks the tracker
 until the tracker's stack is moved forward, on purpose.
 
 `design.md` stays in git, reviewed in pull requests: it is the spec. The
@@ -141,7 +141,7 @@ agent. Keeping the repository in step with the record is CI's job.
 
 ## First steps
 
-1. A second stack, the `dev` namespace, the `ORI` space, using only the Types
+1. A second stack, the `acme` namespace, the `ORI` space, using only the Types
    that exist: the ten items of `ideas-from-ventoux.md` as epics.
 2. Then `build_step@1`, through the usual process: questions, tests, build.
    Its first Item tracks its own build.

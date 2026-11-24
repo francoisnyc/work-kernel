@@ -25,7 +25,7 @@ approving only where a decision is theirs.
 | Role | Who | Does | Never |
 | --- | --- | --- | --- |
 | **Owner** | a person (`user:francois`, role `maintainer`) | answers what only they can decide; agrees each step's tests; accepts the pull request and merges | relays reports between agents |
-| **Orchestrator** | an agent, acting for the owner | picks the next story; writes the step's brief; starts a builder; runs the reviewer; answers questions the docs already settle; escalates the rest; records everything on the step | approves a gate; merges |
+| **Orchestrator** | an agent, acting for the owner | picks the next build_step; writes the step's brief; starts a builder; runs the reviewer; answers questions the docs already settle; escalates the rest; records everything on the step | approves a gate; merges |
 | **Builder** | an agent, one per step | follows `CLAUDE.md`: questions, failing tests, code, pull request, journal | approves its own questions, tests or pull request |
 | **Reviewer** | an agent, a different session from the builder | checks each phase against the brief and the checklist below; reports to the step | writes code on the builder's branch |
 
@@ -36,11 +36,11 @@ them can pass a gate that `build_step@1` gives to `field:f_owner`.
 
 ## The loop, on one `build_step`
 
-1. **Pick.** The orchestrator takes the top open story of the active sprint,
-   creates a `build_step` linked to its epic (or the owner does, while only a
-   maintainer may create one: `build-step-type.md`, open question 1), and
-   writes its brief as a file under `docs/plans/`, on a branch, as
-   `item-2-brief.md` was.
+1. **Pick.** The owner creates each `build_step`, linked to its epic, with no
+   story (only a maintainer may create one: `build-step-type.md`, decided).
+   The orchestrator takes the top open step by rank (`f_rank`) that nothing
+   blocks, and writes its brief as a file under `docs/plans/`, on a branch,
+   as `item-2-brief.md` was.
 2. **Questions.** The builder reads the brief and the docs, and posts its
    questions on the step (`questions -> answering`). The orchestrator answers
    every question the docs already settle, citing where, and escalates the
