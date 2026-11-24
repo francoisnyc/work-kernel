@@ -77,8 +77,8 @@ type harness struct {
 	runs      map[string]int
 	canned    map[string]int
 	sessions  map[string]string // an agent's session, by "agent for user"
-	lastErr   map[string]error // the relay adapter's last error, by Item
-	settle    sync.Mutex       // one settle at a time: the relay is single-instance
+	lastErr   map[string]error  // the relay adapter's last error, by Item
+	settle    sync.Mutex        // one settle at a time: the relay is single-instance
 
 	// The kernel's activities in flight, for settling: fresh counts those
 	// scheduled whose first attempt has not started (by type), executing
