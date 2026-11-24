@@ -173,10 +173,16 @@ test:
    requester's draft (amount, vendor) before she submitted it, and the
    manager approved the agent's version. This is provenance's first real
    case, so it moves up: next in theme 1's order of work.
-4. **Known, and planned elsewhere:** a requester creating on an older version
-   skips a newer rule (starting work, step 2); a claim is only a field, so a
-   colleague can still decide (team queues with an enforced claim, under
-   "Pilots serve generality").
+4. **Still open: a requester creating on an older version skips a newer
+   rule.** The CFO approval was skipped this way. Starting work, steps 2 and
+   2b make the latest version decide where an Item starts and who places it,
+   but a create may still name an older version, and that version's
+   lifecycle then applies. It needs its own step, decided before it is built
+   (for example: a create takes only the latest version unless the Type says
+   otherwise).
+5. **Known, and planned elsewhere:** a claim is only a field, so a colleague
+   can still decide (team queues with an enforced claim, under "Pilots serve
+   generality").
 
 ### 3. Agents as task performers
 
