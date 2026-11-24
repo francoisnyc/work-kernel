@@ -837,21 +837,75 @@ func TestListEvents_ReactionRecordsNameTheirTarget(t *testing.T) {
 		t.Error("no record on the goal names the incident its set reaction wrote")
 	}
 
-	// Someone who sees the incident and not one goal: that target is
-	// restricted, with no ID; the other is named as before.
-	if _, err := w.k.Update(testCtx(t), itemservice.UpdateRequest{IdempotencyKey: newKey(), Principal: w.admin, ItemID: res,
-		Policy: &itemservice.PolicyPatch{Readers: []string{w.admin.Actor}}}); err != nil {
-		t.Fatalf("narrow the resolution goal: %v", err)
-	}
-	got = records(w.ana, inc)
-	if r := got["incident:sla_start_resolution"]; len(r) != 1 || r[0] == nil || !r[0].Restricted || r[0].ID != uuid.Nil {
-		t.Errorf("the hidden goal's record names %+v; want restricted, without its ID", r)
-	}
-	if r := got["incident:sla_start_first_response"]; len(r) != 1 || !is(r[0], first) {
-		t.Errorf("the visible goal's record names %+v", r)
-	}
 	// A record that wrote nothing names nothing.
 	if r := got["incident:sla_answered"]; len(r) != 1 || r[0] != nil {
 		t.Errorf("the record of nothing moved names %+v; want one record, naming nothing", r)
 	}
+
+	// Someone who sees the source and not one target: that target is
+	// restricted, with no ID; the other is named as before. On Types of
+	// this test: no person narrows a goal once sla_goal@3 is registered
+	// (the latest version's placement rule judges every version).
+	host, parts := hostWithTwoParts(t, w.k, w.ana)
+	if _, err := w.k.Update(testCtx(t), itemservice.UpdateRequest{IdempotencyKey: newKey(), Principal: w.admin, ItemID: parts[1],
+		Policy: &itemservice.PolicyPatch{Readers: []string{w.admin.Actor}}}); err != nil {
+		t.Fatalf("narrow the second part: %v", err)
+	}
+	var a, b []*itemservice.ItemRef
+	for reaction, refs := range records(w.ana, host) {
+		if strings.HasSuffix(reaction, ":make_a") {
+			a = refs
+		} else {
+			b = refs
+		}
+	}
+	if len(b) != 1 || b[0] == nil || !b[0].Restricted || b[0].ID != uuid.Nil {
+		t.Errorf("the hidden part's record names %+v; want restricted, without its ID", b)
+	}
+	if len(a) != 1 || !is(a[0], parts[0]) {
+		t.Errorf("the visible part's record names %+v", a)
+	}
+}
+
+// hostWithTwoParts is a host of who's, of a Type of this test, and the two
+// parts its create reactions make_a and make_b made inside it. Neither
+// Type says who places its Items.
+func hostWithTwoParts(t *testing.T, k *itemservice.Service, who item.Principal) (uuid.UUID, [2]uuid.UUID) {
+	t.Helper()
+	s := word()[1:9]
+	registerInline(t, k, strings.ReplaceAll(`
+id: part_{s}
+version: 1
+fields:
+  - {id: f_title, type: string}
+accepts_reactions:
+  'host_{s}:make_a': {creates: [f_title]}
+  'host_{s}:make_b': {creates: [f_title]}
+`, "{s}", s))
+	registerInline(t, k, strings.ReplaceAll(`
+id: host_{s}
+version: 1
+initial_state: open
+fields:
+  - {id: f_title, type: string}
+states:
+  - {id: open, category: active}
+reactions:
+  - {id: make_a, kind: create, on: enter, state: open, type: part_{s}, version: 1, fields: {f_title: '"a"'}}
+  - {id: make_b, kind: create, on: enter, state: open, type: part_{s}, version: 1, fields: {f_title: '"b"'}}
+`, "{s}", s))
+	res, err := k.Create(testCtx(t), itemservice.CreateRequest{IdempotencyKey: newKey(), Principal: who, TypeID: "host_" + s, TypeVersion: 1,
+		Fields: map[string]any{"f_title": "h " + word()}})
+	if err != nil {
+		t.Fatalf("create a host: %v", err)
+	}
+	var parts [2]uuid.UUID
+	for i, r := range []string{"make_a", "make_b"} {
+		out, err := k.Internal().ReactCreate(testCtx(t), entered(res.ItemID, 1, r))
+		if err != nil || out.Outcome != itemservice.ReactionApplied {
+			t.Fatalf("%s: %+v, %v", r, out, err)
+		}
+		parts[i] = out.Target
+	}
+	return res.ItemID, parts
 }
