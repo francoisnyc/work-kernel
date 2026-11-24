@@ -18,7 +18,7 @@ var _ = addWitness(witness{
 			"A w_ask is created only inside a w_room.",
 			"Anyone with the role lead, or `user:root`, or whoever `f_lead` of the container names, or anyone who took part in creating the container, " +
 				"creates one; a customer creates one only where a container lets them.",
-			"While this is the latest version of w_ask, these rules hold for creating a w_ask of any version.",
+			"While this is the latest version of w_ask, these rules apply to creating a w_ask of any version.",
 		},
 		"w_chore@1": {
 			"A w_chore is created only inside a w_room.",

@@ -26,7 +26,7 @@ In short
 Who starts it
 4. An incident is created only inside a desk.
 5. Any staff member who can see the container creates one; a customer creates one only where a container lets them.
-6. While this is the latest version of incident, these rules hold for creating an incident of any version.
+6. While this is the latest version of incident, these rules apply to creating an incident of any version.
 
 Who writes what
 7. Only the kernel writes `f_due_first_response`: sla_goal's reactions `cancel_first_response`, `clear_first_response`, `hide_first_response` and `show_first_response`.
