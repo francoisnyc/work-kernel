@@ -1,0 +1,49 @@
+# Bake-off: the second approval kind, an access request (system, role,
+# justification), made inside the system it asks for and decided by the
+# system's owner. Submitting copies the owner from the system, in the same
+# write: a request outside a system cannot be submitted (the invariant).
+# The agent prepares it as it prepares a purchase.
+id: system_access
+version: 1
+initial_state: draft
+
+fields:
+  - {id: f_system_name,   type: string,    writable_by: kernel}
+  - {id: f_owner,         type: principal, writable_by: kernel}
+  - {id: f_role,          type: string,    writable_by: ['role:staff']}
+  - {id: f_justification, type: string,    writable_by: ['role:staff']}
+  - {id: f_summary,       type: string,    writable_by: ['role:preparer']}
+  - {id: f_policy,        type: enum, options: [ok, check, fail], writable_by: ['role:preparer']}
+  - {id: f_flags,         type: string,    writable_by: ['role:preparer']}
+  - {id: f_reason,        type: string,    writable_by: ['role:staff']}
+
+states:
+  - {id: draft, category: todo}
+  - id: owner_review
+    category: waiting
+    frozen: [f_system_name, f_owner, f_role, f_justification]
+  - id: approved
+    category: done
+    frozen: [f_system_name, f_owner, f_role, f_justification, f_summary, f_policy, f_flags, f_reason]
+  - id: rejected
+    category: canceled
+    frozen: [f_system_name, f_owner, f_role, f_justification, f_summary, f_policy, f_flags, f_reason]
+
+transitions:
+  - from: draft
+    to: owner_review
+    allowed: [creator]
+    required: [f_role, f_justification]
+    sets:
+      f_owner: 'container.f_owner'
+      f_system_name: 'container.f_name'
+  - {from: owner_review, to: approved, allowed: ['field:f_owner'], except: [creator]}
+  - {from: owner_review, to: rejected, allowed: ['field:f_owner'], except: [creator], required: [f_reason]}
+
+invariants:
+  - {id: no_owner, rule: 'f_system_name == null || f_owner != null'}
+
+hooks:
+  - {id: notify_rejected, on: enter, state: rejected, kind: action, action: email.notify, reads: [creator]}
+
+placement_writable_by: [kernel]

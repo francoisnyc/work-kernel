@@ -6,6 +6,17 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
+- **Found by the Temporal bake-off** (docs/research/temporal-bakeoff.md; nothing built):
+  - **Fields are open to the agent by default.** Both bake-offs' Types left
+    what is asked, and the decision's reason, writable by anyone who may
+    edit fields, the agent included. `writable_by: ['role:staff']` (a role
+    every person holds) closed both holes for the agent, tested. Consider a
+    default, or a `writable_by: [people]`, so an author need not know it.
+    "Only the requester edits a draft" still has no way to be said.
+  - **Readings did not catch a request nobody can decide** (an owner asking
+    for their own system, `except: [creator]` on the only decider). A check
+    that proves every waiting state has someone who may move it.
+
 - **Found by the Camunda bake-off** (docs/research/camunda-bakeoff.md, "Gaps found"; nothing built):
   - **A creator can pick an old Type version.** After `purchase@2` (the CFO
     step) was live, `item create --type purchase@1` still worked and the
@@ -3400,3 +3411,49 @@ kernel. The roadmap says a pilot is a test of the kernel: then it runs on the ke
 to 5; the report's Camunda answer is for delivering approvals to real people today. Not compared: the same
 approval as plain Temporal code (the report's last paragraph says what that would need). **Next session:** the
 owner's decision on the report; otherwise starting work, step 2, as before.
+
+## 2026-11-24 — Bake-off 2: the kernel, or each process written on Temporal (a spike, no kernel change)
+
+**Built:** `spikes/temporal-bakeoff/` for `docs/plans/temporal-bakeoff.md`, run without waiting for answers,
+on top of the first bake-off's spike (reused by path). The purchase approval and the access request written
+directly on Temporal in Go (updates with validators, a query, activities, Postgres for the inbox and audit, a
+small API with the same dev tokens), in two steps: the purchase by me, the access request by a separate agent
+given only the step-1 code and the business's five-sentence request. The kernel's access request was rewritten
+the same way for symmetry. Measures: the marginal cost of a process, the CFO change with requests in flight
+(`workflow.GetVersion`, and a replay checker), what each process rebuilds, and the compromised-agent lists per
+process, before and after hardening. `scripts/run-all.sh` repeats them in about five minutes. The result is
+`docs/research/temporal-bakeoff.md`. **No kernel code changed; nothing on `main`.**
+
+**Precondition not met:** the brief wanted "an effect re-checks committed state" fixed first. It was not on
+main; as instructed, the kernel's forged-workflow start is reported as a known hole and kept out of the
+comparison.
+
+**Result:** a second process was 252 lines of Go against 50 of YAML (comments and tests left out); a change
+reached requests in flight on plain Temporal and none on the kernel; plain Temporal built the inbox and a
+binding claim the kernel lacks. On safety, neither side was safe as built and both could be made so: the
+kernel's two holes (drafts the agent can edit; a planted rejection reason) are in every Type and close with two
+to five lines of YAML per Type; plain Temporal's (the agent exhausting a workflow's 2,000 updates so no decision
+lands; a failed order left reading "approved") were in both processes and took 137 lines to fix. The report
+recommends plain Temporal with a shared approvals package for the next few developer-written processes, and
+keeping the kernel for what plain Temporal leaves to every author, after it closes the listed gaps.
+
+**The review changed the answer again.** My draft called plain Temporal the safer side and said no Type could
+close the kernel's holes. The reviewer broke plain Temporal twice in ways my list never tried, and showed the
+kernel's holes close in YAML; I reproduced both before accepting them. It also showed the "blind" builds were
+less blind than I claimed (the attack script was reachable; the kernel rewrite is nearly my own Type).
+
+**Surprises:** Temporal's JSON converter drops struct fields tagged `json:"-"` on the way to an activity (the
+mocked workflow tests passed; the first real run wrote nulls). Temporal's 2,000-update cap is an attack surface
+for anyone allowed one update. A careless change to workflow code fails at read time, not deploy time; the
+replay check is the only warning. The kernel quietly gave four things plain Temporal had to discover: a limit
+one actor cannot exhaust, retries that never give up, safe resubmission, a record past retention.
+
+**Assumptions** are numbered in the report (9). The session was paused about eight and a half hours mid-run;
+active work was about 75 minutes, inside the half-day box.
+
+**Numbers.** `go vet ./...` green; `go test ./spikes/...` green (the two workflows' tests, 17 in all, in
+Temporal's test environment).
+
+**Open:** the two new Later items above, and the first bake-off's, the first two (old versions; the worker's
+trust in its input) still first. **Next session:** the owner's decision on the two reports; otherwise starting
+work, step 2.

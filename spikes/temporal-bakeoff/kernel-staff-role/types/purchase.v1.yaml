@@ -1,0 +1,86 @@
+# Bake-off 2: the first bake-off's purchase@1, with what is asked and the
+# reason writable only by holders of role staff (people; the agent holds
+# preparer only). The reviewer's suggestion, tested in results/kernel-staff-role.md.
+#
+# Bake-off: the purchase approval (docs/plans/camunda-bakeoff.md).
+#
+#   - The requester fills amount, vendor, cost centre and justification
+#     (free text: untrusted), then submits. Submitting asks the HR directory
+#     who the requester's manager is (a check hook): the Item enters
+#     manager_review with f_manager set by the kernel, never by a person.
+#   - Under 1,000 the manager approves or rejects. From 1,000 the manager's
+#     approval sends it to the finance queue; any finance member claims it
+#     (finance_review) and decides.
+#   - The agent (agent:prep-bot, role preparer) writes only the three
+#     preparation fields, and only until the manager has decided (they are
+#     frozen from the finance queue on); no move names it. Once submitted, what is being
+#     approved (amount, vendor, cost centre, justification) is frozen.
+#   - Approved, the purchase system receives the order (erp.create_invoice,
+#     the vendor standing in for the ERP's customer); rejected, the
+#     requester is told (email.notify) and the reason is on the Item.
+id: purchase
+version: 1
+initial_state: draft
+
+fields:
+  - {id: f_amount,        type: int, writable_by: ['role:staff']}
+  - {id: f_vendor,        type: string, writable_by: ['role:staff']}
+  - {id: f_cost_centre,   type: string, writable_by: ['role:staff']}
+  - {id: f_justification, type: string, writable_by: ['role:staff']}
+  - {id: f_manager,       type: principal, writable_by: kernel}
+  - {id: f_claimed_by,    type: principal, writable_by: ['role:finance']}
+  - {id: f_summary,       type: string,    writable_by: ['role:preparer']}
+  - {id: f_policy,        type: enum, options: [ok, check, fail], writable_by: ['role:preparer']}
+  - {id: f_flags,         type: string,    writable_by: ['role:preparer']}
+  - {id: f_reason,        type: string,    writable_by: ['role:staff']}
+  - {id: f_order_id,      type: string,    writable_by: kernel}
+
+states:
+  - {id: draft, category: todo}
+  - id: manager_review
+    category: waiting
+    frozen: [f_amount, f_vendor, f_cost_centre, f_justification, f_manager]
+  - id: finance_queue
+    category: waiting
+    frozen: [f_amount, f_vendor, f_cost_centre, f_justification, f_manager, f_summary, f_policy, f_flags]
+  - id: finance_review
+    category: active
+    frozen: [f_amount, f_vendor, f_cost_centre, f_justification, f_manager, f_summary, f_policy, f_flags]
+  - id: approved
+    category: done
+    frozen: [f_amount, f_vendor, f_cost_centre, f_justification, f_manager, f_claimed_by, f_summary, f_policy, f_flags, f_reason]
+  - id: rejected
+    category: canceled
+    frozen: [f_amount, f_vendor, f_cost_centre, f_justification, f_manager, f_claimed_by, f_summary, f_policy, f_flags, f_reason, f_order_id]
+
+transitions:
+  - from: draft
+    to: manager_review
+    allowed: [creator]
+    required: [f_amount, f_vendor, f_cost_centre, f_justification]
+    guard: 'f_amount > 0'
+  # The manager.
+  - {from: manager_review, to: approved,      allowed: ['field:f_manager'], except: [creator], guard: 'f_amount < 1000'}
+  - {from: manager_review, to: finance_queue, allowed: ['field:f_manager'], except: [creator], guard: 'f_amount >= 1000'}
+  - {from: manager_review, to: rejected,      allowed: ['field:f_manager'], except: [creator], required: [f_reason]}
+  # Finance: claim from the shared queue, hand back, decide.
+  - {from: finance_queue,  to: finance_review, allowed: ['role:finance'], except: [creator], required: [f_claimed_by]}
+  - {from: finance_review, to: finance_queue,  allowed: ['role:finance'], clears: [f_claimed_by]}
+  - {from: finance_review, to: approved,       allowed: ['role:finance'], except: [creator]}
+  - {from: finance_review, to: rejected,       allowed: ['role:finance'], except: [creator], required: [f_reason]}
+
+hooks:
+  - id: manager_check
+    on: transition
+    from: draft
+    to: manager_review
+    kind: check
+    action: hr.manager_of
+    reads: [created_on_behalf_of, created_by]
+    writes: [f_manager]
+  - {id: place_order,     on: enter, state: approved, kind: action, action: erp.create_invoice, reads: [f_vendor, f_amount], writes: [f_order_id]}
+  - {id: notify_rejected, on: enter, state: rejected, kind: action, action: email.notify, reads: [creator]}
+
+# Nobody moves or narrows a purchase: hidden from its approvers, it would
+# wait for ever (found by reading `pli type explain`, rule "Who sees it").
+placement_writable_by: [kernel]

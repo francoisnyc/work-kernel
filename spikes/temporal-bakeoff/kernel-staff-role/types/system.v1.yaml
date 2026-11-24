@@ -1,0 +1,10 @@
+# Bake-off: a system people ask access to. Only it_admin names its owner.
+id: system
+version: 1
+
+fields:
+  - {id: f_name,  type: string, writable_by: ['role:it_admin']}
+  - {id: f_owner, type: principal, writable_by: ['role:it_admin']}
+
+readable_by_reactions: [f_name, f_owner]
+placement_writable_by: ['role:it_admin']

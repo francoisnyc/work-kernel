@@ -1,0 +1,32 @@
+# The first bake-off's dev tokens, every person also holding role staff.
+# Bake-off dev tokens (the kernel's only auth in the proof of concept).
+# ana asks; bob is ana's manager (hr-directory.json); fay and gus are the
+# finance team; cora is the CFO; olaf owns the payroll system; ivy sets up
+# systems; prep-bot is the agent that prepares decisions.
+tokens:
+  - {name: ana,  token: dev-ana-not-a-secret,  principal: "user:ana",  namespace: acme, roles: [staff]}
+  - {name: bob,  token: dev-bob-not-a-secret,  principal: "user:bob",  namespace: acme, roles: [staff]}
+  - {name: fay,  token: dev-fay-not-a-secret,  principal: "user:fay",  namespace: acme, roles: [finance, staff]}
+  - {name: gus,  token: dev-gus-not-a-secret,  principal: "user:gus",  namespace: acme, roles: [finance, staff]}
+  - {name: cora, token: dev-cora-not-a-secret, principal: "user:cora", namespace: acme, roles: [cfo, staff]}
+  - {name: olaf, token: dev-olaf-not-a-secret, principal: "user:olaf", namespace: acme, roles: [staff]}
+  - {name: ivy,  token: dev-ivy-not-a-secret,  principal: "user:ivy",  namespace: acme, roles: [it_admin, staff]}
+  - {name: prep-bot, token: dev-prep-bot-not-a-secret, principal: "agent:prep-bot", namespace: acme, roles: [preparer]}
+grants:
+  # The agent acts for itself. The grant is deliberately generous (every
+  # power): the compromised-agent test shows the Types' rules, not a narrow
+  # grant, are what refuse it. The real agent starts a session with only
+  # read and edit_fields.
+  - agent: "agent:prep-bot"
+    user: ""
+    namespace: acme
+    scopes: [namespaces/acme]
+    powers: [read, create, edit_fields, "transition:*", move]
+  # And acting for the manager, a finance member, the CFO, the system owner
+  # and the requester, with every power: the worst case of an over-trusting
+  # deployment, for the compromised-agent test.
+  - {agent: "agent:prep-bot", user: "user:bob",  namespace: acme, scopes: [namespaces/acme], powers: [read, create, edit_fields, "transition:*", move]}
+  - {agent: "agent:prep-bot", user: "user:fay",  namespace: acme, scopes: [namespaces/acme], powers: [read, create, edit_fields, "transition:*", move]}
+  - {agent: "agent:prep-bot", user: "user:cora", namespace: acme, scopes: [namespaces/acme], powers: [read, create, edit_fields, "transition:*", move]}
+  - {agent: "agent:prep-bot", user: "user:olaf", namespace: acme, scopes: [namespaces/acme], powers: [read, create, edit_fields, "transition:*", move]}
+  - {agent: "agent:prep-bot", user: "user:ana",  namespace: acme, scopes: [namespaces/acme], powers: [read, create, edit_fields, "transition:*", move]}

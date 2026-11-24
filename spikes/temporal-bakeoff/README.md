@@ -21,12 +21,13 @@ in Go, as a team would: no kernel code is used.
 | `store/` | Postgres: the table the inbox reads (written by the workflows) and the audit trail | 160 |
 | `acts/` | The activity library: HR lookup, order, notice, the write to Postgres | 107 |
 | `httpapi/` | What every route shares; the inbox, reading a request and its history, the agent's to-do list | 172 |
-| `purchase/` | **Step 1.** The purchase workflow (updates with validators, a query), its routes, its tests; `change.go` is the bake-off's switch for the CFO change | 321 + 115 + 177 + 29 |
-| `access/` | **Step 2.** The access request, written by a separate builder from the step-1 code and the business's request only | 217 + 100 + 194 |
+| `purchase/` | **Step 1.** The purchase workflow (updates with validators, a query), its routes, its tests; `change.go` is the bake-off's switch for the CFO change; fixes after the review | |
+| `access/` | **Step 2.** The access request, written by a separate builder from the step-1 code and the business's request (217 + 100 + 194 as handed back; fixes after the review since) | |
 | `cmd/ptapp/` | The one program: HTTP API and Temporal worker | 98 |
 | `cmd/ptreplay/` | Replays recorded workflow histories against the code: Temporal's check before deploying a change | 85 |
 | `compose.yaml` | Its own Postgres and Temporal development server (ports 25432, 27233) | |
-| `kernel-blind/` | The kernel side's counterpart to step 2: the access request as Types, written by a separate builder from the purchase Type and the same request | |
+| `kernel-blind/` | The kernel side's counterpart to step 2: the access request as Types, rewritten by a separate builder from the purchase Type and the same request | |
+| `kernel-staff-role/` | The first bake-off's Types with what is asked, and the reason, writable only by role `staff` (every person, not the agent), and its dev tokens: the reviewer's suggestion, tested | |
 
 The API (port 28080, bearer dev tokens `dev-<name>-not-a-secret`):
 `POST /purchases`, `POST /purchases/{id}/preparation|claim|release|decision`,
@@ -50,19 +51,25 @@ the kernel side (the first spike's script) and the plain side, and runs:
 |---|---|---|
 | 3 (part): the inbox and the claim, on fresh data | `test_inbox.py` | `results/inbox.md` |
 | 4: the compromised agent, per process, both sides | `test_attacks.py` (`attacks_plain.py`, `attacks_kernel.py`) | `results/attacks-plain.md`, `results/attacks-kernel.md` |
+| 4: the reviewer's attempts (blocking a decision, a refused order, resubmission, a claim, reading) | `attacks_review.py` | `results/attacks-review.md` |
 | 4: side doors (no credentials) | `test_sidedoors.py` | `results/sidedoors.md` |
 | Footprint and start time | `footprint.sh` | `results/footprint.md`, `results/start-*.txt` |
 | 2: the CFO change with requests in flight | `test_change_plain.py`, `test_change_kernel.py` | `results/change-plain.md`, `results/change-kernel.md` |
+| 4: the kernel's rewritten access request; can a Type close the kernel's holes? | `test_kernel_blind.py`, `test_kernel_staff_role.py` | `results/attacks-kernel-blind.md`, `results/kernel-staff-role.md` |
 
 Made during the build, not by `run-all.sh`:
 
-- `results/timing.txt`: when each step started and ended.
+- `results/timing.txt`: when each step started and ended (the builders'
+  own clocks for the second processes).
 - `results/attacks-plain-access-before-hardening.md`: the access request's
   attack list, run on the code exactly as the second builder handed it back.
+- `results/attacks-review-plain-before-fixes.md`,
+  `attacks-review-plain-after-fixes.md`, `attacks-review-kernel.md`: the
+  reviewer's attempts, before and after the plain side's fixes (git tag
+  `bo2-before-review-fixes` marks the code before them).
 - `results/notes.md`: things noticed along the way.
-- `results/attacks-kernel-blind.md` and `kernel-blind/`: the kernel-side
-  blind build and its attack list (`scripts/test_kernel_blind.py`, which
-  restarts the kernel side on that folder).
+
+`run-all.sh` ends with the kernel side running on `kernel-staff-role/`.
 
 Piece by piece:
 
