@@ -1,6 +1,7 @@
 # Roadmap
 
-Status: proposal, 2026-11-22. Where the kernel is headed, and in what order.
+Status: proposal, 2026-11-22; refocused 2026-11-24 after two bake-offs ("Now:
+prove, then broaden"). Where the kernel is headed, and in what order.
 `docs/design.md` holds the settled design and the step-by-step build orders;
 this file is the direction those steps serve. It changes when the direction
 does, not with every step.
@@ -65,6 +66,85 @@ composition, and evidence for or against that claim.
 - **The yardstick stays four domains.** A pilot that succeeded only through
   kernel code made for it counts as a failure of the kernel.
 
+## Now: prove, then broaden
+
+Two bake-offs (`docs/research/camunda-bakeoff.md`,
+`docs/research/temporal-bakeoff.md`) built an approvals scenario on Camunda,
+on plain Temporal and on the kernel, and attacked each with a compromised
+agent. What they showed:
+
+- **The kernel's edge is real:** three to five times less to write per
+  process, rules read back in plain language, and its holes closed with a
+  few lines of YAML where plain Temporal needed 137 lines of Go.
+- **Its gaps are basic:** no inbox, no claim that binds, no way to change
+  requests already running, agents not closed out by default, an effect
+  that trusts its input.
+- **Untested:** real non-developer authoring (both bake-offs' Types were
+  written by agents), and many processes by many authors over months, which
+  is where the kernel should win.
+
+So until a decision point, the work is three tracks; the themes below wait.
+
+### Track 1: close the gaps
+
+General features, under "Pilots serve generality", each with the bake-off
+attack that found it as its test:
+
+1. **An effect re-checks what caused it** (`docs/design.md`, PR #65).
+2. **Fields closed to agents by default:** the fix that closed both holes in
+   the second bake-off (a role only people hold), made the default; a Type
+   opens a field to agents by saying so (fail closed).
+3. **Required means given by the mover**, where a Type asks for it.
+4. **"Only the requester" for drafts:** a draft's fields written only by
+   whoever created it, until it is submitted. (Who last wrote a value, in
+   full, is provenance: theme 2.)
+5. **Team queues with a claim that binds, and a "waiting on me" view** over
+   every Type.
+6. **Moving open Items to a new version, and retiring old versions**,
+   deliberately and checked: a change that must reach requests in flight;
+   includes starting work's step 2b (the latest version governs creates and
+   placement).
+
+**Done when** both bake-offs' scripts (`spikes/camunda-bakeoff/`,
+`spikes/temporal-bakeoff/`) pass in full on the kernel, re-run unchanged.
+
+### Track 2: test what is untested
+
+- **Real non-developer authoring.** A colleague who is not a developer
+  describes one real process from the BPM suite being retired, in plain
+  English; an assistant writes the Type; they read the kernel's explanation
+  and story back and correct it. Measured: whether they could, without a
+  developer, and what they got wrong. This is Slice 1's first claim, made
+  real (below).
+- **A third process of a different shape:** an open-ended case, not another
+  approval, written by a fresh author with no context, on the kernel and on
+  plain Temporal with the shared package. Measured as in the second
+  bake-off: what composing costs here, and what copying costs there.
+
+### Track 3: the work path, in parallel
+
+Where Temporal already runs, the first processes leave the old BPM suite on
+plain Temporal, from a shared approvals package holding what the second
+bake-off had to discover (who decides, the agent's cap, retries that never
+give up, a failed-step state, safe resubmission, the inbox and claim, a
+record that outlives retention, replay checks in the build, Temporal locked
+down), **shaped like the kernel's model**: states, moves, who may act, frozen
+fields. Kept outside this repository; nothing is lost whichever way the
+decision goes.
+
+### The decision point (about six weeks)
+
+- **If the kernel passes both bake-offs and a non-developer could author
+  with it:** it becomes the target for moving processes off the old suite,
+  and the shared package migrates into Types.
+- **If not:** its ideas (closed by default, declared rules, plain-language
+  readings, the attack scripts) fold into the shared package, and the
+  kernel stays the spike that shaped it.
+
+**Waiting until then:** a semantic diff, patterns, proofs, the security
+operations domain, cards in chat, context packs, hosting. Provenance (theme
+2) goes ahead only as far as track 1 needs it.
+
 ## What exists already
 
 - **Three domains proven:** the vacation request (workflow), the IT desk with
@@ -76,7 +156,11 @@ composition, and evidence for or against that claim.
   approval when it would widen who sees what it read; hooks read and write
   only what they declare; a connector's answer is a reason code, never stored
   free text; every outbound path goes through `policy.Project`.
-- **Parts of safe authoring:** every problem of a Type as data (V2a).
+- **Parts of safe authoring:** every problem of a Type as data (V2a),
+  `ValidateTypes` (V2b), the format as JSON Schema (V2c), action contracts
+  (V1), stories in simulated time (V5), plain-language readings (V6).
+- **Two bake-offs,** with runnable attack scripts the kernel must pass
+  (above).
 
 ## First: one thin slice through everything
 
@@ -101,6 +185,8 @@ mark the customer's text and the agent's output as untrusted, and one agent
 task. Security operations (theme 4) is then breadth, built on proven pieces.
 
 ## Themes, in order
+
+After the decision point, except what track 1 takes from them.
 
 ### 1. Safe authoring in plain English
 
