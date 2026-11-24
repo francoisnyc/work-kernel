@@ -3451,7 +3451,7 @@ one actor cannot exhaust, retries that never give up, safe resubmission, a recor
 **Assumptions** are numbered in the report (9). The session was paused about eight and a half hours mid-run;
 active work was about 75 minutes, inside the half-day box.
 
-**Numbers.** `go vet ./...` green; `go test ./spikes/...` green (the two workflows' tests, 17 in all, in
+**Numbers.** `go vet ./...` green; `go test ./spikes/...` green (the two workflows' tests, 18 in all, in
 Temporal's test environment).
 
 **Open:** the two new Later items above, and the first bake-off's, the first two (old versions; the worker's
