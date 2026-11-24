@@ -309,12 +309,24 @@ func (k *Service) lockUniqueContainer(ctx context.Context, tx pgx.Tx, ns string,
 // --- 10. who places an Item ---
 
 // checkPlacement refuses a move or a change of readers (narrowing, or
-// inheriting again) of an Item of ty by a principal the Type does not let
-// place it: placement_writable_by kernel lets no one; a list of roles,
-// their holders (an agent and the user it acts for must both hold one).
-// A Type that says nothing lets anyone who sees the Item, as before. The
-// kernel's own writes are not this rule's question.
-func checkPlacement(ctx context.Context, tx pgx.Tx, p item.Principal, ty *typedef.Type) error {
+// inheriting again) of an Item of the Type typeID by a principal the Type
+// does not let place it: placement_writable_by kernel lets no one; a list
+// of roles, their holders (an agent and the user it acts for must both
+// hold one). A Type that says nothing lets anyone who sees the Item, as
+// before. The kernel's own writes are not this rule's question.
+//
+// The rule is the latest registered version's (starting work, step 2b),
+// as for the start block: placement is access control, so an Item pinned
+// to an old version, or a create that names one, does not keep a rule a
+// later version tightened; and a later version that drops the rule
+// loosens every version at once. Only this follows the latest version:
+// the Item's lifecycle, a transition's allowed and a field's writable_by
+// stay its own version's.
+func (k *Service) checkPlacement(ctx context.Context, tx pgx.Tx, p item.Principal, typeID string) error {
+	ty, err := k.latestType(ctx, tx, typeID)
+	if err != nil {
+		return err
+	}
 	roles, limited := ty.PlacementRoles()
 	if !limited || item.IsKernelActor(p.Actor) {
 		return nil

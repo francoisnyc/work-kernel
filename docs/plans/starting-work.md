@@ -282,8 +282,9 @@ before any other check):
    ContainerFacts)`, which shares its entry matching with `MayTransition`.
    Otherwise `PERMISSION_DENIED` / `NOT_ALLOWED`; the item service's
    message names the reason `START_NOT_ALLOWED`.
-4. Then placement for a narrow, the write and `create` powers and the
-   agent write rule, as now. (A customer's `own`/`shared` check still runs
+4. Then placement for a narrow (judged by the latest version's
+   `placement_writable_by`, since step 2b), the write and `create` powers
+   and the agent write rule, as now. (A customer's `own`/`shared` check still runs
    before the transaction too, so for a customer it refuses before `in`;
    over the API both read `NOT_ALLOWED`.)
 
@@ -797,7 +798,7 @@ The SOC domain, in these pieces:
 | --- | --- | --- | --- | --- |
 | 1 | `create` power on `Create` | none | none | no (answer 1) |
 | 2 (**built** 2026-11-24) | `start` block; `policy.MayStart`; load checks; latest version governs; incident@4 with `in: [desk]` (option B) | none | none (reasons in the item service's message only; the API returns `NOT_ALLOWED`) | no |
-| 2b | the same "latest version governs" rule for placement (`placement_writable_by`), its own small step | none | none | no (review answer 2) |
+| 2b (**built** 2026-11-24) | the same "latest version governs" rule for placement (`placement_writable_by`): a move, a narrow, an un-narrow and a narrowed create of any version; a kernel rule, no opt-in on the Type (`design.md`, "Starting work, step 2b, as built") | none | none | no (review answer 2) |
 | 3 | first the intake kill switch (required before anything inbound); then source contracts (with `x-pli-personal`); intakes; the inbox; `intake:` principal; `Internal().Create`; the inbound endpoint and its conformance; the vendor precedents verified | `inbox` | a `SOURCE` kind in the actions' enum; the inbound endpoint is HTTP, outside `kernel.v1` | **yes**: a table, a door, a principal kind |
 | 4 | correlation: `external_keys`, `create_or_correlate`, `when_closed`, `unmatched` | `external_keys` | none | **yes**: a table |
 | 5 | create reaction `on: timer` | none | none | no |
@@ -821,7 +822,9 @@ migration or a contract change.
    returns only `NOT_ALLOWED` (1.6, corrected at step 1).
 2. **Latest version governs, for placement too**: yes, closing the same
    hole for `placement_writable_by`, as its own small step (2b in the
-   table), not in step 2.
+   table), not in step 2. **Built** (2026-11-24). It does not stop a
+   create from naming an older version's lifecycle: that is its own step
+   (`docs/roadmap.md`).
 3. **An intake on a Type with no `start` block**: refused at load
    (`INTAKE_NOT_ALLOWED`), fail closed (2.6, 1.7).
 4. **Erasure in the inbox**: an `x-pli-personal` flag on source outputs,

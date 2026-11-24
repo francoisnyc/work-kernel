@@ -187,10 +187,10 @@ func TestListItemEvents_ReactionTarget(t *testing.T) {
 		t.Fatalf("sla_answered after the end: %+v, %v", out, err)
 	}
 
-	targets := func(who string) map[string][]string {
+	targets := func(who, of string) map[string][]string {
 		t.Helper()
 		out := map[string][]string{}
-		for _, ev := range events(t, who, inc) {
+		for _, ev := range events(t, who, of) {
 			switch ev.Kind {
 			case kernelv1.ItemEventKind_ITEM_EVENT_KIND_REACTION_APPLIED, kernelv1.ItemEventKind_ITEM_EVENT_KIND_REACTION_FAILED,
 				kernelv1.ItemEventKind_ITEM_EVENT_KIND_REACTION_SKIPPED:
@@ -222,33 +222,101 @@ func TestListItemEvents_ReactionTarget(t *testing.T) {
 		"incident:sla_stop":                 both,
 		"incident:sla_answered":             {"none"},
 	}
-	if got := targets("ana"); fmt.Sprint(got) != fmt.Sprint(want) {
+	if got := targets("ana", inc); fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("the incident's reaction records name\n got %v\nwant %v", got, want)
 	}
 
-	// bob no longer sees the resolution goal: its records say restricted,
-	// and the stop's two records still stand in the same order.
+	// bob no longer sees one target: its records say restricted, and the
+	// stop's two records still stand in the same order. On apihost and
+	// apipart, Types of these tests: no person narrows a goal, since
+	// sla_goal@3's placement rule (kernel) judges every version.
+	host := mkIn(t, "ana", apiHostV1, "", map[string]any{"f_title": "h " + word()})
+	hid := itemID(t, host)
+	var parts [2]uuid.UUID
+	for i, r := range []string{"make_a", "make_b"} {
+		out, err := k.Internal().ReactCreate(testCtx(t), runReaction(hid, r, hid, 1))
+		if err != nil || out.Outcome != itemservice.ReactionApplied {
+			t.Fatalf("%s: %+v, %v", r, out, err)
+		}
+		parts[i] = out.Target
+	}
+	done, err := moveWith(t, "ana", host, "done", nil)
+	if err != nil {
+		t.Fatalf("the host to done: %v", err)
+	}
+	if out, err := k.Internal().ReactMove(testCtx(t), runReaction(hid, "stop", hid, done.ItemSeq)); err != nil || len(out.Each) != 2 {
+		t.Fatalf("stop: %+v, %v", out, err)
+	}
+	both = []string{nameOf(parts[0]), nameOf(parts[1])}
+	slices.Sort(both)
+	want = map[string][]string{
+		"apihost:make_a": {nameOf(parts[0])},
+		"apihost:make_b": {nameOf(parts[1])},
+		"apihost:stop":   both,
+	}
+	if got := targets("bob", host); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("the host's reaction records name\n got %v\nwant %v", got, want)
+	}
 	if _, err := as("ana").UpdateItem(testCtx(t), connect.NewRequest(&kernelv1.UpdateItemRequest{
-		Name: nameOf(res), RequestId: newID(), Policy: &kernelv1.PolicyChange{Change: &kernelv1.PolicyChange_Narrow{
+		Name: nameOf(parts[1]), RequestId: newID(), Policy: &kernelv1.PolicyChange{Change: &kernelv1.PolicyChange_Narrow{
 			Narrow: &kernelv1.Readers{Principals: []string{"user:ana"}}}},
 	})); err != nil {
-		t.Fatalf("narrow the resolution goal: %v", err)
+		t.Fatalf("narrow the second part: %v", err)
 	}
 	hidden := func(name string) string {
-		if name == nameOf(res) {
+		if name == nameOf(parts[1]) {
 			return "restricted"
 		}
 		return name
 	}
-	want["incident:sla_start_resolution"] = []string{"restricted"}
-	want["incident:sla_stop"] = []string{hidden(both[0]), hidden(both[1])}
-	if got := targets("bob"); fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Errorf("for bob, who cannot see the resolution goal:\n got %v\nwant %v", got, want)
+	want["apihost:make_b"] = []string{"restricted"}
+	want["apihost:stop"] = []string{hidden(both[0]), hidden(both[1])}
+	if got := targets("bob", host); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("for bob, who cannot see the second part:\n got %v\nwant %v", got, want)
 	}
-	// Reading the history is not reading the goal it names.
-	_, err = as("bob").GetItem(testCtx(t), connect.NewRequest(&kernelv1.GetItemRequest{Name: nameOf(res)}))
-	notFound(t, "bob reads the hidden goal", err)
+	// Reading the history is not reading the part it names.
+	_, err = as("bob").GetItem(testCtx(t), connect.NewRequest(&kernelv1.GetItemRequest{Name: nameOf(parts[1])}))
+	notFound(t, "bob reads the hidden part", err)
 }
+
+// apihost and apipart: a host whose create reactions make two parts inside
+// it and whose stop moves them, for the hidden-target half of the test
+// above. Neither says who places its Items. Registered in TestMain.
+const (
+	apiHostV1 = "namespaces/acme/types/apihost/versions/1"
+	apiHost   = `
+id: apihost
+version: 1
+initial_state: open
+fields:
+  - {id: f_title, type: string}
+states:
+  - {id: open, category: active}
+  - {id: done, category: done}
+transitions:
+  - {from: open, to: done}
+reactions:
+  - {id: make_a, kind: create, on: enter, state: open, type: apipart, version: 1, fields: {f_title: '"a"'}}
+  - {id: make_b, kind: create, on: enter, state: open, type: apipart, version: 1, fields: {f_title: '"b"'}}
+  - {id: stop, kind: move, on: enter, state: done, children: {of: [apipart]}, to: completed, target_from: [running]}
+`
+	apiPart = `
+id: apipart
+version: 1
+initial_state: running
+fields:
+  - {id: f_title, type: string}
+states:
+  - {id: running, category: active}
+  - {id: completed, category: done}
+transitions:
+  - {from: running, to: completed, allowed: [nobody]}
+accepts_reactions:
+  'apihost:make_a': {creates: [f_title]}
+  'apihost:make_b': {creates: [f_title]}
+  'apihost:stop': {moves: [completed]}
+`
+)
 
 // --- nobody to tell ---
 

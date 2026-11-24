@@ -6,6 +6,32 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
+- **Starting work, step 2b's Later items** (design.md, "Starting work, step 2b, as built"):
+  - **An opt-out on a Type ("pinned placement").** The latest version's
+    placement rule judges every version, for every Type, with no opt-in
+    (the owner's decision: placement is access control, and an opt-in would
+    fail open). If a real case ever needs old Items to keep their own rule,
+    it is an explicit opt-out on the Type, asked for then.
+  - **"Who may" follows the latest version for starting and placing only.**
+    A transition's `allowed` and a field's `writable_by` stay pinned to the
+    Item's version, with its lifecycle. So a create that names an older
+    version still gets that version's moves and who may make them
+    (docs/roadmap.md: "a requester creating on an older version skips a
+    newer rule", still open).
+  - **`GetType` on an older version shows that version's
+    `placement_writable_by`**, not the rule in force. Saying which rule is
+    in force is a contract change (with `start` in `kernel.v1.Type`, under
+    step 2's items).
+  - **The item service's tests depend on their order for shared Types.**
+    They register incident, reply, sla_goal and the rest piecemeal
+    (`newSLAWorld` registers the @1 versions; the hardening world @2 and
+    @3), and Types are global. So which version is "latest", and so which
+    start block and placement rule judge an incident@1, depends on the
+    tests that ran before. The full run's order is fixed and the setups
+    pass under either rule, so CI is not at risk; a test run alone can meet
+    a looser rule than in the full run. New tests use Types of their own.
+    Ends with Types per namespace (below).
+
 - **Left open by bake-off hole 1** (design.md, "An effect re-checks what caused it, as built"; each
   also in docs/roadmap.md, "Holes found by the bake-off"; all need a Temporal anyone can reach):
   - **An early reminder.** A scheduled acting timer's run leaves no event until its hook finishes, so
@@ -3702,3 +3728,60 @@ builds the real images and runs the pinned browser.
 
 **Open:** the "Left open by bake-off hole 1" items at the top of this file. **Next session:** the
 owner's choice among the roadmap's Track 1 items 2 to 6; locking down Temporal has no step yet.
+
+## 2026-11-24 — Starting work, step 2b: placement follows the latest version (Phase D)
+
+**Built:** the latest registered version's `placement_writable_by` judges a move, a narrow and an un-narrow of an
+Item of every version, and a narrowed create whatever version it names. `checkPlacement` reads the Type through
+step 2's `latestType` (one indexed lookup in the write's transaction, never cached). The readings' closing note
+says that the latest version decides who may move or narrow too. design.md: "Starting work, step 2b, as built",
+item 10 and the "Existing Items keep their version's rules" paragraph of Jira 2.4b corrected, the V6 note.
+starting-work.md: row 2b marked built, 1.6 and review answer 2.
+
+**Kernel changes (one, counted):** the placement check reads the latest version (about 20 lines in three files of
+the item service), and one line in the readings. No schema, proto, migration, JSON Schema or go.mod change.
+
+**Decided:** Phase A's answers: the latest version judges all of placement, not only a narrow (one rule, one
+function); both ways (a later version without the rule loosens every version); two lookups on a narrowed create;
+test-only Types with unique IDs; one refusal added to the scenario; no contract change (`GetType` on an old version
+still shows its own rule: Later). **The owner's decision (relayed by the coordinator): a kernel rule for every
+Type, with no opt-in.** The rule as he put it: the lifecycle stays pinned to the Item's version; where an Item
+starts and who places it follow the latest version. Why: placement is access control, and an opt-in would fail
+open. What it does not close: a create may still name an older version and get its lifecycle (roadmap, still open).
+
+**Tests:** 7 new test functions (item service 6, on `box_<suffix>` Types; reading 1). **Existing tests changed,
+each in its own commit, agreed:** `TestHardening_OlderVersionsKeepTheirRules` pinned the rule this step reverses:
+its two placement assertions now pin the new rule and it is renamed
+(`TestHardening_OlderVersions_KeepTheirLifecycle_PlacedByTheLatestRule`); its goal-version assertion stays. Five
+tests only needed a hidden Item and got a setup that still works: ana holds `desk_agent` to create a narrowed
+incident@1; the API's `portal()` gives hana `sla_admin` for two desk@2 narrows; the two "restricted reaction
+target" tests (item service and API) hid an sla_goal@1 by narrowing it, which no person can do once sla_goal@3
+says `kernel`, so that half runs on test-only Types (`host`/`part`, `apihost`/`apipart`) with the same assertions,
+and `TestListTypes_EveryVersionInOrder` gained the two API Types. The two layout tests and the three approved
+readings changed by the closing note's line. Scenario C13: ana is refused narrowing her incident@1.
+
+**Surprises:** no kernel actor can narrow (the internal door refuses policy and container changes), so there was
+no "kernel writes stay exempt" to pin, and no way to hide a goal for a test except Types of the test's own. The
+prototype run in Phase A found six affected tests where reading the code had found one. The item service's tests
+depend on their order for which version of a shared Type is latest (Later). And the two `-race` timing tests
+failed on this machine, on main too. The cause was not the wait: a new Service's first Search loads every
+registered Type, 441 versions by then, so the margin thinned with every step that registers test Types (this one
+added 18). Fixed in PR #70, apart from this step (a warm-up Search before the clock; Later, under step 2's items).
+
+**Numbers.** On the final head (rebased onto main with the two bake-offs, build_step@1, PR #70 and hole 1): `go vet` clean;
+`go test ./...` green, 28 packages (item service 78 s; workflow 330 s when not cached); `go test -race -count=1
+./...` green, 28 packages, no race (workflow 343 s, item service 210 s, story 24 s, reading 11 s). The placement,
+hardening and reworked tests `-race -count=10`: green (47 s). Scenario on the compose stack: passed, whole, in
+107 s (run word run430125ba), with the new C13 refusal. Web Playwright 9 in 10.2 s; apps/poc journeys 4 in 30.6 s.
+Before PR #70, `-race` failed here on the two timing tests only (1.03 to 1.15 s against 1 s; main the same); with
+the warm-up, measured before it merged, the timed Search took 1 to 8 ms.
+
+**Local workarounds, outside the repository (nothing committed):** dockerd started by hand, three times (it stops
+between phases and leaves a stale pid file); Docker Hub answered 429, so golang, node, nginx-unprivileged and
+temporal came from mirror.gcr.io; image builds cannot reach the network through the sandbox's proxy, so the stack
+ran from a compose override in the scratchpad (the Go binaries built on this machine into distroless images, the
+web and poc sites built here with `VITE_DEV_USERS=1` into nginx images); Playwright through scratchpad configs
+using the installed Chromium. CI builds the real images and runs the pinned browser.
+
+**Open:** the owner's approval of the closing note's wording in the three readings; the Later items above. **Next session:** creating on an older version (the roadmap's open item), or
+starting work, step 3 (the intake kill switch first).

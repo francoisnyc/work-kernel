@@ -132,9 +132,10 @@ func (k *Service) update(ctx context.Context, req UpdateRequest, kc *kernelCause
 		if err != nil {
 			return WriteResult{}, err
 		}
-		// Who may move or narrow it (Jira 2.4b): the Type's to say.
+		// Who may move or narrow it (Jira 2.4b): the Type's to say, by its
+		// latest version whatever version the Item is pinned to (step 2b).
 		if kc == nil && (req.Policy != nil || req.Move != nil) {
-			if err := checkPlacement(ctx, tx, req.Principal, ty); err != nil {
+			if err := k.checkPlacement(ctx, tx, req.Principal, it.TypeID); err != nil {
 				return WriteResult{}, err
 			}
 		}

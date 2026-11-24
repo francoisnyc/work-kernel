@@ -2611,7 +2611,9 @@ person at once are judged in turn and one lands. Refused:
 `FAILED_PRECONDITION / NOT_UNIQUE`.
 
 **10. `placement_writable_by`.** Who may move or narrow (or un-narrow) Items
-of a Type version: `[kernel]` (no person; they stay where they were made) or
+of a Type, **of every version: the latest registered version's rule judges**
+(since starting work, step 2b; see "Starting work, step 2b, as built"):
+`[kernel]` (no person; they stay where they were made) or
 a list of `role:<name>` (an agent and the user it acts for must both hold
 one). Leaving it out keeps the old rule: anyone who sees the Item. Checked
 after visibility, so a hidden Item stays `NOT_FOUND`. Refused:
@@ -2801,12 +2803,16 @@ sets; a load test checks both. PLAT's work Items (story, bug, task, epic,
 sprint, space) are unchanged: who places them, and whether narrowing an
 Item at its creation is placement, are open (Later).
 
-**Existing Items keep their version's rules.** The kernel has no operation
-that moves an Item to another Type version: an incident@2 created before
-this step is still narrowed by its requester, its sla_goal@1 goals are
-still completed by hand by anyone who sees them, and a reply@1 is still
-moved. Moving Items to a new version is a kernel change (Later, before
-real use).
+**Existing Items keep their version's lifecycle, not its placement rule.**
+The kernel has no operation that moves an Item to another Type version: the
+sla_goal@1 goals of an incident@2 created before this step are still
+completed by hand by anyone who sees them. Moving Items to a new version is
+a kernel change (Later, before real use). **Corrected by starting work,
+step 2b:** this paragraph used to say that an incident@2 is still narrowed
+by its requester and a reply@1 still moved. Placement now follows the
+latest version: only desk agents move or narrow an incident of any version,
+and no one moves or narrows a reply, a note, a comment or a goal of any
+version.
 
 **Which version a client creates.** A client names the version it
 creates. The **generic web UI creates the latest version** of the Type
@@ -4010,9 +4016,9 @@ options and count are the field list (the schema checks them on every
 write); who can see a given Item is set per Item and container, not by the
 Type; the kernel's own promises (retries, each write once, recovery) are
 the same for every Type; and, since starting work step 2, who may create
-an Item of the Type and where once a later version exists (the latest
-version's start block decides for every version, so no reading of one
-version can say it). These three are said in every reading's closing note.
+an Item of the Type and where, and who may move or narrow one, once a
+later version exists (the latest version's start block and placement rule
+decide for every version, so no reading of one version can say it). These three are said in every reading's closing note.
 
 **Witnesses and the guards.** Twelve witnesses (eleven, and step 2's `start`)
 (`internal/reading/witness_*_test.go`), each naming the exact sentences it
@@ -4180,6 +4186,79 @@ checks, `START_NOT_IN`, `Start.Admits`); `policy.MayStart` (with
 per-create latest-version lookup; the readings' *Who starts it* and closing
 line. No schema, proto, migration or go.mod change; the JSON Schema gained
 `start`.
+
+## Starting work, step 2b, as built: placement follows the latest version (2026-11-24)
+
+**The rule (the owner's decision, a kernel rule with no opt-in on the
+Type):** the lifecycle stays pinned to the Item's version; **where an Item
+starts and who places it follow the latest registered version** of its
+Type. Step 2 did the first half (the `start` block). Step 2b does the
+second: `placement_writable_by` of the latest version judges a move, a
+narrow and an un-narrow of an Item of **any** version, and a narrowed
+create **whatever version it names**.
+
+**Why, and why no opt-in.** Placement is access control: who may hide an
+Item from the desk, or move it out of its container. Before this step a
+client could dodge a rule a later version added by creating the older
+version, and an Item pinned to an old version kept the old rule for ever.
+A Type that had to ask for the new behaviour would fail open: the Types
+that forget are the ones left exposed.
+
+**How.** `checkPlacement` reads the Type through `latestType`, as the
+start check does: `select max(version) from types where id = $1` in the
+write's own transaction, never cached, so a version another process
+registers counts at once. Two callers: `Create` (only when the create
+narrows) and `Update` (a move or a change of readers, not the kernel's own
+writes, which never place). The order of checks, the refusal
+(`PlacementNotWritableError`, over the API `PERMISSION_DENIED` /
+`PLACEMENT_NOT_WRITABLE`) and the contract are unchanged. A narrowed create
+reads the latest version twice (start, then placement): two indexed
+lookups, kept apart for simplicity.
+
+**Both ways.** A later version that drops the rule loosens every version
+at once; one that says `kernel` stops everyone, role holders included.
+What `pli type validate` should say about either (the "governs earlier
+versions" and "loosened" notes) stays deferred with step 2's (journal,
+Later; Ventoux item 3).
+
+**What follows the latest version, and what does not:**
+
+| | Judged by |
+|---|---|
+| where an Item is created, and by whom (`start`) | the latest version |
+| who moves, narrows or un-narrows it (`placement_writable_by`) | the latest version |
+| its states and moves, guards, reactions, timers, invariants | the Item's own version |
+| who may make a move (a transition's `allowed`) | the Item's own version |
+| who may write a field (`writable_by`), what a customer sees | the Item's own version |
+
+**What this does not close.** A create may still name an older version, and
+that version's lifecycle then applies: a requester creating on an older
+version skips a rule a newer version put in the lifecycle (the roadmap's
+open item, found by the first bake-off, where a CFO approval was skipped
+this way). Step 2b closes that door for placement only. Retiring a version
+for creates needs its own step, decided before it is built.
+
+**What changed for the Types in `types/`** (the only ones whose versions
+differ in the rule):
+
+| Type | Older versions said | Now, for every version |
+|---|---|---|
+| incident | @1, @2: anyone who sees it | `role:desk_agent` (as @3, @4) |
+| desk | @1, @2: anyone who sees it | `role:sla_admin` (as @3) |
+| reply, note | @1: anyone who sees it | no one (as @2) |
+| comment | @1, @2: anyone who sees it | no one (as @3) |
+| sla_goal | @1, @2: anyone who sees it | no one (as @3) |
+
+**`GetType` on an older version still shows that version's
+`placement_writable_by`**, which may not be the rule in force: read the
+latest version to know who places an Item. No contract change was made for
+it (journal, Later). **Readings** say so in their closing note: "Who may
+create an incident, and where, and who may move or narrow one, once a later
+version exists: the latest version of incident decides, for every version."
+
+**Kernel changes (one, and a line in the readings):** `checkPlacement`
+reads the latest version. No schema, proto, migration, JSON Schema or
+go.mod change.
 
 ## build_step as built (2026-11-22)
 
