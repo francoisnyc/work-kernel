@@ -80,19 +80,29 @@ justification), approved by the system's owner.
 
 ## Where it runs
 
-- On the Mac (Docker and Java are needed: Camunda 8 Run or its Docker
-  Compose, plus the kernel's `make up`).
+- A cloud coding session on this repository (preferred: isolated, runs while
+  the owner's computer sleeps), or Claude Code on the Mac. Docker and Java
+  are needed: Camunda 8 Run or its Docker Compose, plus the kernel's
+  `make up`.
+- In a cloud session: start `dockerd` by hand if it isn't running, and pull
+  images through `mirror.gcr.io` when Docker Hub answers 429, as earlier
+  sessions did. Choose Camunda's lightest local setup that its docs support
+  (a relational or embedded store rather than Elasticsearch, if the current
+  version allows it), and record memory use. A daemon stopped by the
+  session's time limits is restarted, not worked around.
 - Branch `spike/camunda-bakeoff`; all code under `spikes/camunda-bakeoff/`
   (its own README, its own Compose file). Throwaway.
-- The kernel's stack and the tracker stack (`~/code/ori-tracker`) are not
-  touched: no `make reset`, no `down -v`, different ports.
+- On the Mac only: the kernel's stack and the tracker stack
+  (`~/code/ori-tracker`) are not touched: no `make reset`, no `down -v`,
+  different ports.
 
 ## Autonomy and when to stop
 
 Work without waiting for answers. Record each assumption in the report as
 you make it. Stop and report early, with what you have, if:
 
-- a step needs a paid licence, a sign-up, an account or a key you don't have;
+- a step needs a paid licence, a sign-up, an account or a key you don't have,
+  or a network host the session can't reach;
 - Docker or the registries can't provide an image after one retry through a
   mirror;
 - the kernel side would need a kernel code change to continue;
