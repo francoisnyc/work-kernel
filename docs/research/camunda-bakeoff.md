@@ -486,7 +486,10 @@ results of the run of 2026-11-24").
    requests start by message. **Stated.**
 7. *The draft recommendation leaned on a roadmap section that does not
    exist, and on roadmap items that are not there* (the inbox, queues and
-   claims). **Accepted; the recommendation was rewritten.**
+   claims). **Accepted; the recommendation was rewritten.** (True of the
+   branch the reviewer read. The section was merged to `main` during the
+   run and does list the "waiting on me" view as not built: see
+   assumption 2.)
 8. *Smaller points:* idle CPU understated for the kernel; "word for word"
    was not exact; the kernel's footprint leaves out its agent script; the
    template-version claim had no source. **All four corrected.**
@@ -537,11 +540,32 @@ and the counts now say "attempts".
 
 ## Assumptions, as they were made
 
-1. The brief was not on `main`; it was read from `docs/plan-camunda-bakeoff`
-   and copied into this branch unchanged.
-2. `docs/roadmap.md` has no section "A pilot candidate: approvals" (the
-   brief cites one). The brief's own scenario was taken as the pilot, and
-   its purpose as "approvals that real people use, with an agent preparing".
+1. The brief was not on `main` when the run started; it was read from its
+   own branch. It has since been merged, and this branch uses `main`'s copy.
+2. The roadmap sections the brief builds on, "A pilot candidate: approvals"
+   and "Pilots serve generality" (`docs/roadmap.md`), were merged to `main`
+   during the run. **The run did not read them.** It took the brief's
+   scenario as the pilot and its purpose as "approvals that real people
+   use, with an agent preparing". What the sections say, and what follows:
+   - A pilot is "a test of the kernel, not its purpose", chosen "only with
+     a team at work that owns the problem"; until then approvals is a
+     candidate, not a commitment. This is the case the recommendation's
+     second half names ("the pilot's real purpose being to mature the
+     kernel"): read with the roadmap, a pilot of the kernel runs on the
+     kernel, and this report's list of kernel gaps is what it must close
+     or accept first. The recommendation as written answers the brief's
+     narrower question: where approvals for real people would best be
+     built today.
+   - The roadmap already lists as not built several things this bake-off
+     found missing on the kernel (a "waiting on me" view across every
+     Type; reminders and escalation), and things the scenario did not ask
+     for (delegation, approval rules beyond one approver, an inbox for
+     approvals that stay in other systems). Camunda was not tested on
+     those either.
+   - "Pilots serve generality" asks that what a pilot needs lands in the
+     kernel only as a general feature. The gaps here fit that reading:
+     queues and claiming, "only the requester" and "only the decider"
+     fields, and retiring old versions are not approval features.
 3. Camunda version: 8.10 (images `camunda/camunda:8.10.10`,
    `camunda/connectors-bundle:8.10.8`), the current stable line. Lightest
    supported setup: the official lightweight Compose file, with the
@@ -624,3 +648,32 @@ only what both it and its person may do has no Camunda counterpart. For
 the kernel itself the bake-off is useful whichever way the pilot goes: it
 produced eleven concrete gaps, two of them (old versions, and the worker's
 trust in its input) worth fixing before anything else is built on it.
+
+**What this bake-off did not compare: the same approval as plain Temporal
+code.** The brief set Camunda against the kernel. Where Temporal already
+runs (it does here: the kernel is built on it), the realistic third option
+is neither: a developer writes the purchase approval directly as a Temporal
+workflow, with each decision a signal, each outside call an activity, and
+the agent one more activity. That costs no new platform and no licence,
+and nothing above says how it would score. A fair comparison would need
+the same scenario built a third time and the same four tests, by the same
+rules: (1) the CFO change as a code change: which files and lines, who
+could make it (a developer, and nobody else), what checks it before it
+runs (the compiler, workflow tests, replay of recorded histories), and
+what happens to requests in flight, which in Temporal means versioning
+the workflow code by hand; (2) the same attack script, once "the agent's
+credentials" is defined for Temporal: as the author understands it (not
+re-checked in this run), the open-source server lets any client that
+reaches it start or signal any workflow unless an authorization plug-in is
+added, and that plug-in decides per namespace, not per workflow or per
+signal; so who may approve would be enforced by a front door written for
+the purpose, and the side door found
+in test 2c (anyone who reaches the server can start a workflow) is the
+same question from the other end; (3) an inbox, which Temporal does not
+have: a "waiting on me" list and a claim would have to be built on its
+search or on a table of the application's own; (4) the footprint and the
+cost of a production Temporal (a secured cluster to run, or its paid
+cloud), and the cost of owning the code, which grows with every approval
+kind where the kernel and Camunda add a file. It would also need the same
+stand-in model, the same shared stubs, and a reviewer who built none of
+it. About a day of the same kind of work.

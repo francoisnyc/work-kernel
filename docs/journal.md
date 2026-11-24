@@ -3379,8 +3379,10 @@ it went in the report). Its notes and what changed are a section of the report.
   `string()` of a context is not JSON. Stub fidelity, not findings.
 
 **Assumptions** are numbered in the report (17). The two that shaped the work: no `ANTHROPIC_API_KEY`, so the
-live-model run was skipped; `docs/roadmap.md` has no "pilot candidate: approvals" section, so the brief's
-scenario was taken as the pilot.
+live-model run was skipped; the roadmap's "A pilot candidate: approvals" and "Pilots serve generality" were
+merged to main during the run and the run did not read them, so the brief's scenario was taken as the pilot and
+its purpose as delivering approvals. Read with the roadmap (a pilot is a test of the kernel, not its purpose),
+the report's answer is to the narrower question; its assumption 2 says so.
 
 **Not done:** Camunda's Modeler, Copilot (needs a model key), linter, process tests and task listeners; a
 production-like Camunda; the kernel's stories for the spike's Types; timers; load.
@@ -3394,6 +3396,7 @@ the session's proxy); docs.camunda.io was unreachable, so Camunda's docs were re
 on GitHub; BPMN diagrams generated with `bpmn-auto-layout` in the scratchpad.
 
 **Open:** the six Later items at the top of this file, the first two before anything else is built on the
-kernel. The owner decides whether the pilot's purpose is to deliver approvals (the report's answer) or to
-mature the kernel (then the kernel, after its gaps 1 to 5). **Next session:** the owner's decision on the
-report; otherwise starting work, step 2, as before.
+kernel. The roadmap says a pilot is a test of the kernel: then it runs on the kernel, after or with its gaps 1
+to 5; the report's Camunda answer is for delivering approvals to real people today. Not compared: the same
+approval as plain Temporal code (the report's last paragraph says what that would need). **Next session:** the
+owner's decision on the report; otherwise starting work, step 2, as before.
