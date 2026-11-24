@@ -198,16 +198,16 @@ func TestExplainType_Arguments(t *testing.T) {
 		invalid(t, c.what, err, c.field)
 	}
 	// The draft limits are ValidateTypes's.
-	many := make([]*kernelv1.TypeSource, 51)
+	many := make([]*kernelv1.TypeSource, maxSources+1)
 	for i := range many {
 		many[i] = tsrc(fmt.Sprintf("t%d.yaml", i), fmt.Sprintf("id: t%d\nversion: 1\n", i))
 	}
 	_, err := explainType(as("ana"), t, &kernelv1.ExplainTypeRequest{Parent: "namespaces/acme", Sources: many, TypeId: "t0", Version: 1})
-	invalid(t, "51 sources", err, "sources")
+	invalid(t, "201 sources", err, "sources")
 	big := tsrc("big.yaml", "id: big\nversion: 1\n# "+strings.Repeat("x", maxSourceBytes)+"\n")
 	_, err = explainType(as("ana"), t, &kernelv1.ExplainTypeRequest{Parent: "namespaces/acme",
 		Sources: []*kernelv1.TypeSource{big}, TypeId: "big", Version: 1})
-	invalid(t, "more than 256 KiB", err, "sources")
+	invalid(t, "more than 1 MiB", err, "sources")
 	// A version nobody registered, and another namespace, are not found.
 	_, err = explainType(as("ana"), t, &kernelv1.ExplainTypeRequest{Name: "namespaces/acme/types/vacation_request/versions/99"})
 	notFound(t, "an unknown version", err)
