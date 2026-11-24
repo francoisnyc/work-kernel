@@ -35,8 +35,7 @@ const (
 	FieldKernel Part = "field_kernel" // Only the kernel writes {f}: {writers}.
 	FieldRoles  Part = "field_roles"  // Only holders of {roles} write {f}.
 	FieldUnique Part = "field_unique" // No two {type}s in one container, both in {states}, hold the same {f}.
-	// Fields closed to agents by default. Phase B stub: declared and
-	// listed for the tests, not yet rendered.
+	// Fields closed to agents by default (who writes what).
 	FieldAgentsOnly      Part = "field_agents_only"      // Only agents[ and holders of {roles}] write {f}.
 	FieldAgents          Part = "field_agents"           // No agent writes its fields / An agent writes only {fields}
 	FieldAgentsRoles     Part = "field_agents.roles"     // , except one that names a role the agent holds / , and a field that names a role the agent holds
