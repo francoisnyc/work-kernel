@@ -336,8 +336,10 @@ func TestAgentScopes_WritesOutsideTheScopesAreNotFound(t *testing.T) {
 		t.Errorf("B has %d children, want its one ticket", n)
 	}
 
-	// Inside, the same writes work.
-	if err := agentUpdate(t, w.k, agent, w.inSub); err != nil {
+	// Inside, the same writes work (the update on an Item whose fields an
+	// agent may write: fields are closed to agents by default).
+	openInSub := createOpenAs(t, w.k, w.user, "open in A's sub-container", nil, &w.sub).ItemID
+	if err := agentUpdate(t, w.k, agent, openInSub); err != nil {
 		t.Errorf("Update inside: %v", err)
 	}
 	if _, err := w.k.Create(ctx, itemservice.CreateRequest{
