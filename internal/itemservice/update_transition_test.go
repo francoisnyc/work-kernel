@@ -210,7 +210,15 @@ func TestCreate_InvalidFields_AreInvalid(t *testing.T) {
 func TestUpdate_MergesFieldsAndRecordsTheEvent(t *testing.T) {
 	ctx := testCtx(t)
 	k := itemservice.New(pool)
-	id := createTicket(t, k, map[string]any{"f_title": "Call Jane Doe", "f_priority": 2})
+	// An agent_ticket: the agent below writes its fields (closed to agents
+	// by default).
+	req := newRequest()
+	req.TypeID, req.Fields = "agent_ticket", map[string]any{"f_title": "Call Jane Doe", "f_priority": 2}
+	created, err := k.Create(ctx, req)
+	if err != nil {
+		t.Fatalf("create agent_ticket: %v", err)
+	}
+	id := created.ItemID
 
 	var createdAt time.Time
 	if err := pool.QueryRow(ctx, `select updated_at from items where id = $1`, id).Scan(&createdAt); err != nil {
