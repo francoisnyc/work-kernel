@@ -339,11 +339,13 @@ func TestStart_AllowedContainerCreator(t *testing.T) {
 		t.Errorf("carl, the room was created for him: %v", err)
 	}
 	other := withSession(t, w.k, item.Principal{Actor: "agent:other-" + word(), OnBehalfOf: w.carl.Actor, Namespace: w.ns})
-	if _, err := w.create(t, other, w.id("ask"), 1, &carls, nil); err != nil {
+	// The agents' asks that must be created carry no fields: ask opens none
+	// to agents (fields are closed to agents by default).
+	if _, err := w.create(t, other, w.id("ask"), 1, &carls, map[string]any{}); err != nil {
 		t.Errorf("another agent acting for carl: %v", err)
 	}
 	forEve := withSession(t, w.k, item.Principal{Actor: maker, OnBehalfOf: w.eve.Actor, Namespace: w.ns})
-	if _, err := w.create(t, forEve, w.id("ask"), 1, &carls, nil); err != nil {
+	if _, err := w.create(t, forEve, w.id("ask"), 1, &carls, map[string]any{}); err != nil {
 		t.Errorf("the agent that created the room, now acting for eve: %v", err)
 	}
 	forEve2 := withSession(t, w.k, item.Principal{Actor: "agent:third-" + word(), OnBehalfOf: w.eve.Actor, Namespace: w.ns})
@@ -423,7 +425,8 @@ func TestStart_Agents(t *testing.T) {
 		}
 		return withSession(t, w.k, p)
 	}
-	if _, err := w.create(t, agent(true, w.lea), w.id("ask"), 1, &room, nil); err != nil {
+	// With no fields: ask opens none to agents (closed by default).
+	if _, err := w.create(t, agent(true, w.lea), w.id("ask"), 1, &room, map[string]any{}); err != nil {
 		t.Errorf("an agent with lead, for lea (lead): %v", err)
 	}
 	_, err := w.create(t, agent(false, w.lea), w.id("ask"), 1, &room, nil)
