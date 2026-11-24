@@ -38,7 +38,10 @@ func registerTicketType(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return itemservice.New(pool).RegisterType(ctx, ty)
+	if err := itemservice.New(pool).RegisterType(ctx, ty); err != nil {
+		return err
+	}
+	return registerAgentTicketType(ctx)
 }
 
 func newKey() string { return "key-" + uuid.NewString() }
