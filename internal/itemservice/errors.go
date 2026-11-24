@@ -182,8 +182,6 @@ func (e *PlacementNotWritableError) Unwrap() error { return ErrForbidden }
 // (start.allowed does not let the caller in). It is an ErrForbidden; the
 // API answers PERMISSION_DENIED / NOT_ALLOWED with that reason's fixed
 // message, so the reason stays in the item service's message.
-//
-// Phase B stub: declared only; Create never returns it yet.
 type StartRefusedError struct {
 	Reason string
 	TypeID string
