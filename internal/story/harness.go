@@ -76,6 +76,7 @@ type harness struct {
 	started   map[string]chan struct{}
 	runs      map[string]int
 	canned    map[string]int
+	sessions  map[string]string // an agent's session, by "agent for user"
 	lastErr   map[string]error // the relay adapter's last error, by Item
 	settle    sync.Mutex       // one settle at a time: the relay is single-instance
 
@@ -96,7 +97,7 @@ func run(ctx context.Context, env *Env, s *Story, opts runOptions) (*Result, err
 		ns:  "story-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:20],
 		ids: map[string]uuid.UUID{}, names: map[uuid.UUID]string{}, own: map[uuid.UUID]map[int64][]string{},
 		given: map[uuid.UUID]map[int64]bool{}, sideKeys: map[string]bool{}, current: -1,
-		running: map[string]bool{}, started: map[string]chan struct{}{}, runs: map[string]int{}, canned: map[string]int{},
+		running: map[string]bool{}, started: map[string]chan struct{}{}, runs: map[string]int{}, canned: map[string]int{}, sessions: map[string]string{},
 		lastErr: map[string]error{}, fresh: map[string]int{}, begun: map[string]bool{}}
 	h.steps = append(slices.Clone(s.Given), s.Steps...)
 	if err := h.setUp(ctx); err != nil {
@@ -259,6 +260,43 @@ func (h *harness) principal(person string) item.Principal {
 	return item.Principal{Actor: h.conv.people[person], Namespace: h.ns}
 }
 
+// actor is who acts in a step: a person, or an agent, alone or for a
+// person, in a session over the whole namespace with every power its user
+// may grant (a customer's agent: read, create, comment and every move),
+// started once per agent and user.
+func (h *harness) actor(ctx context.Context, st Step) (item.Principal, error) {
+	p := h.principal(st.Actor)
+	if !item.IsKind(p.Actor, item.KindAgent) {
+		return p, nil
+	}
+	if st.For != "" {
+		p.OnBehalfOf = h.principal(st.For).Actor
+	}
+	key := p.Actor + " for " + p.OnBehalfOf
+	h.mu.Lock()
+	session, ok := h.sessions[key]
+	h.mu.Unlock()
+	if !ok {
+		powers := []string{item.PowerRead, item.PowerCreate, item.PowerEditFields, item.PowerMove, item.PowerTransitionAll}
+		if item.IsKind(p.OnBehalfOf, item.KindCustomer) {
+			powers = []string{item.PowerRead, item.PowerCreate, item.PowerComment, item.PowerTransitionAll}
+		}
+		all := []uuid.UUID{uuid.Nil}
+		var err error
+		session, err = h.k.StartAgentSession(ctx, itemservice.StartAgentSessionRequest{
+			Principal: p, Scopes: all, Powers: powers, Grant: &itemservice.Grant{Scopes: all, Powers: powers},
+		})
+		if err != nil {
+			return p, fmt.Errorf("story: a session for %s: %w", key, err)
+		}
+		h.mu.Lock()
+		h.sessions[key] = session
+		h.mu.Unlock()
+	}
+	p.AgentSession = session
+	return p, nil
+}
+
 // failAt records a failure at an instant: it belongs to the step that ran
 // at that instant, if one did, and stops the run.
 func (h *harness) failAt(at time.Time, format string, args ...any) {
@@ -384,7 +422,10 @@ func (h *harness) step(ctx context.Context, i int) error {
 		h.ensureNamed(ctx)
 	}
 	given := i < len(h.story.Given)
-	p := h.principal(st.Actor)
+	p, err := h.actor(ctx, st)
+	if err != nil {
+		return err
+	}
 	key := "story-" + uuid.NewString()
 	fields, err := h.fields(st)
 	if err != nil {
@@ -518,7 +559,12 @@ func (h *harness) read(ctx context.Context, st Step) {
 	if h.id(st.Item) == uuid.Nil {
 		h.ensureNamed(ctx)
 	}
-	it, err := h.k.Get(ctx, h.principal(st.Actor), h.id(st.Item))
+	p, err := h.actor(ctx, st)
+	if err != nil {
+		h.failStep(st, "%s: %v", st.Text, err)
+		return
+	}
+	it, err := h.k.Get(ctx, p, h.id(st.Item))
 	if st.Verb == CannotSee {
 		if err == nil {
 			h.failStep(st, "%s can see %s", st.Actor, st.Item)
