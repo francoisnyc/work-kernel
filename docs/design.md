@@ -43,6 +43,16 @@ small; everything product-specific is a Type or an app.
   rules. Systems that fire on any change end with rules triggering rules.
   Outbound webhooks (`docs/roadmap.md`, theme 5) are subscribers to the event
   stream, not hooks, and change nothing.
+- **An effect re-checks what caused it.** A workflow's input is a request,
+  never proof. Before an action with a side effect (a contract with
+  `sideEffects: some`) calls its connector, the activity asks the item
+  service to confirm the cause it names: that event exists on that Item, at
+  the Type version named, and it is the event the hook is bound to (the entry
+  into its state, or the acting timer's run). A cause that does not check out
+  is refused for good, recorded on the Item, and nothing is sent. Found by
+  the first bake-off (`docs/research/camunda-bakeoff.md`): a forged workflow
+  start made an action place an order for an Item still waiting on its
+  manager.
 
 ## Item
 
