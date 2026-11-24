@@ -3284,3 +3284,30 @@ images and runs the pinned browser.
 **Open:** the readings' Later items (top of this file), the first two found by readings. **Next session:** the
 owner decides on the incident's moves; then starting work, step 2 (the `start` block), which will need a kind of
 sentence of its own.
+
+## 2026-11-24 — ValidateTypes' limits raised to 200 sources and 1 MiB (an ORI story)
+
+**Built:** one `ValidateTypes` or `ExplainType` call takes 1 to 200 draft sources and 1 MiB of content in all (was
+50 and 256 KiB): types/ was at exactly 50 files, so build_step@1 could not be validated. Over either limit, one
+refusal (`INVALID_ARGUMENT` / `INVALID_REQUEST`, field violation on `sources`) names both limits and the request's
+own count and size, in MiB rounded up to one decimal: "give 1 to 200 sources, 1 MiB in all; this request has 201
+sources, 0.1 MiB", so a tool can split a request without guessing. The proto comment changed with it (comment only:
+`buf breaking` green); gen/ and web/src/gen regenerated. design.md (its own commit, once the owner approves the
+wording): the two V2b places, with the owner's note, and a clause at "Messages are fixed".
+
+**Decided (Phase A and B):** the limits are the owner's (200, 1 MiB); the tests that pin them changed as agreed,
+their values and messages only; `TestValidateTypes_TheRepositoryTypes` is now a guard (types/ fits in one call)
+instead of pinning 50 files; ExplainType's argument test pins the same limits (PR #56 shared `draftSources`), so it
+changed too; the refusal's text is a promise, so it has a test (`TestValidateTypes_LimitsRefusalSaysTheSizes`, for
+both operations). No server-wide read limit: the check stays in the handler. No batching in pli.
+
+**Tests:** `go test ./...` green (workflow 367 s, item service 369 s). 3 changed (ValidateTypes limits and repository guard, ExplainType arguments, pli over-the-limit), 1 new.
+The new allowed edges (200 sources, 1 MiB, one source of 1 MiB) and every text assertion failed against main's code;
+the refused edges and the guard could not fail before the change (the old limits refuse more).
+
+**Surprises:** PR #56 landed mid-step and moved the limit checks into `draftSources`, shared with ExplainType,
+whose test pinned 51 sources. "Never a value" in a field violation (design.md) was written against leaking what
+someone typed; a request's own count and size are not that, and the new clause says so. Counting the bytes now comes
+before the name check, so an oversized request with a nameless source gets the size refusal (same code and field).
+
+**Open:** none. **Next session:** build_step@1 rebased onto this (its `TestPli_Types` count is its own).
