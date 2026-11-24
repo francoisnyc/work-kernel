@@ -239,6 +239,9 @@ func fields(t *testing.T, m map[string]any) *structpb.Struct {
 const (
 	ticketV1 = "namespaces/acme/types/ticket/versions/1"
 	ticketV3 = "namespaces/acme/types/ticket/versions/3"
+	// ticket@7 opens f_priority to agents (fields are closed to agents by
+	// default): the Type of the tests in which an agent writes a ticket.
+	ticketV7 = "namespaces/acme/types/ticket/versions/7"
 	channel  = "namespaces/acme/types/channel/versions/1"
 )
 
