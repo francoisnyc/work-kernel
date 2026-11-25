@@ -135,7 +135,74 @@ reactions:
 
 The difference from BPMN's tokens: a branch is an Item a person or an agent
 works, visible in a queue, with its own rules and history; a join is a
-condition over Items, not tokens arriving.
+condition over Items, not tokens arriving. BPMN's inclusive (OR) join, hard
+because an engine must infer which branches are still alive, is one query
+here: every child that was started is in a done category.
+
+## Beyond containment: joins over links
+
+Containment is one parent per Item and carries permissions. Three shapes
+do not fit it:
+
+- **Work that waits on work it does not own:** a release waiting on issues
+  from several projects; a security case waiting on a change in another
+  team's tracker.
+- **One Item feeding two joins:** a security review that a launch and an
+  audit both wait on.
+- **Order between peers:** B starts when A is done, without the case
+  counting.
+
+These are links. Guards already read `links.<name>` and lock the linked
+Items FOR SHARE ("Links, containment and people"), so an epic refuses
+"done" until its issues are. What is missing is the automatic move: a move
+reaction targets only `container`, so when the last blocker finishes,
+nothing moves the Item waiting on it.
+
+The same construct with one more source would close it: `on: linked_entered`,
+`of: [<link name>]`, `states`, `from`, `to`, `when` over `links.<name>`,
+declared on the waiting Item and judged under its lock, with the linked
+Items locked as guards already lock them. The relay delivers a linked Item's
+state change to the Items linking to it, as it delivers a child's to its
+case.
+
+When a join needs an owner, a deadline or its own history (a release gate,
+a milestone across teams), it is an Item: a gate Type whose links are its
+inputs. A pattern, not a construct.
+
+The rule of thumb: **containment for "part of", links for "waits on", an
+Item when the join is itself a piece of work.** No gateway as a separate
+kind of thing.
+
+## Orchestrating Items from Temporal code
+
+A team's own Temporal workflow can drive Items as a client of the item
+service: create the review, wait for it, create a deploy task per region,
+retry what fails. The item service still judges every write, so who may
+act, fields closed to agents and the guards all hold. This is the landing
+positioning (the human-and-agent work layer for Temporal), and how track 3's
+shared package would meet the kernel.
+
+The line between the two:
+
+- **A rule that must hold whoever acts** (a person, an agent, a timer, or
+  that workflow) lives in the Type. A join kept only in an orchestrating
+  workflow is not enforced: a person can move the release before its review
+  is done, and the kernel cannot read the rule back, check it at load or
+  show it in a queue.
+- **A plan of what to do next** (an order across many Items, loops, retries,
+  calls to other systems, compensation) may live in code. The Type says
+  what is allowed; the workflow chooses among the allowed moves.
+
+What it would need, none built:
+
+- **Events out to a team's workflows:** a subscription that signals an
+  external workflow when an Item it follows changes. A new outbound path,
+  so through `policy.Project` (kernel rule).
+- **The workflow's identity:** a service principal per orchestrator, named
+  in `writable_by` and `allowed` like any principal; closed by default, as
+  agents are.
+- **A Go and TypeScript client** with idempotency keys derived from the
+  workflow's run and step, so a replayed workflow repeats no write.
 
 ## Tests it would come with
 
@@ -154,3 +221,8 @@ condition over Items, not tokens arriving.
    event)?
 3. Several reactions matching one child event: in declaration order, each
    judged after the last has written?
+4. Build `linked_entered` with `child_entered`, or after it? Same judging
+   and locks; the relay's fan-out to linking Items is the new part.
+5. Orchestration from code: wait for track 3 and the decision point, or
+   build the subscription and service principal earlier as part of the
+   landing?
