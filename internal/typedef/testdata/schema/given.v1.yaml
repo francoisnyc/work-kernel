@@ -1,0 +1,16 @@
+# Corpus for the schema tests (Ventoux V2c): a transition's given
+# ("required means given by the mover", track 1 item 3). It loads on its
+# own (stages a and b).
+id: corpus_given
+version: 1
+initial_state: review
+
+fields:
+  - {id: f_reason, type: string}
+
+states:
+  - {id: review,   category: active}
+  - {id: rejected, category: canceled, frozen: [f_reason]}
+
+transitions:
+  - {from: review, to: rejected, required: [f_reason], given: [f_reason]}
