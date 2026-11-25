@@ -139,6 +139,10 @@ attack that found it as its test:
    transitions now), not a container: a container is where an Item belongs,
    a queue is who must act next. A transfer to the team that now owns an
    Item is a move; an approval step is not.
+   How others make it fast, and what that suggests (who may act stored per
+   open Item in the same write, roles resolved at query time, guards not
+   pre-evaluated, the claim checked against those rows):
+   `docs/research/task-queue-internals.md`.
 6. **Moving open Items to a new version, and retiring old versions**,
    deliberately and checked: a change that must reach requests in flight;
    includes starting work's step 2b (the latest version governs creates and
