@@ -112,13 +112,20 @@ attack that found it as its test:
    Camunda bake-off's kernel list 32 of 32; the Temporal bake-off's purchase
    27 of 27, its access request 17 of 18, the one left being a person's).
    They do not yet pass in full: a colleague can still change someone's
-   draft (item 4).
+   draft (item 4, since built).
 3. **Required means given by the mover**, where a Type asks for it. To weigh
    in its Phase A, with item 4: a transition that declares the fields it may
    set, and sets nothing else (OpenNSW scopes a step's submission this way).
 4. **"Only the requester" for drafts:** a draft's fields written only by
    whoever created it, until it is submitted. (Who last wrote a value, in
    full, is provenance: theme 2.)
+   **Built** (PR #79; `docs/design.md`, "Only the requester edits a draft,
+   as built"): a state's `requester_only: [fields]` limits those fields to
+   the Item's requester while it is in that state, on top of `writable_by`;
+   anyone else is refused `FIELD_NOT_WRITABLE`. An opt-in: the two
+   staff-role spike Types gained one line each, and the Temporal bake-off's
+   staff-role run, its script unchanged, now refuses the colleague (7 of 7,
+   was 6 of 7). No Type in `types/` uses it yet.
 5. **Team queues with a claim that binds, and a "waiting on me" view** over
    every Type.
    For its Phase A, from the established human-task designs
@@ -138,6 +145,17 @@ it is the front door of the landing positioning below.
 
 **Done when** both bake-offs' scripts (`spikes/camunda-bakeoff/`,
 `spikes/temporal-bakeoff/`) pass in full on the kernel, re-run unchanged.
+"Unchanged" means the scripts; a Type may close a hole with one line (the
+owner's reading, at item 4: the staff-role Types gained `requester_only`).
+Two failing rows are covered by no item above; the owner decides later
+whether they count:
+
+- **A colleague with no part in it reads ana's purchase, and its history**
+  (`attacks_review.py`, kernel side): every member of staff reads every
+  request, because these Types narrow nothing.
+- **An access request for no system** (the Temporal bake-off's access
+  request): ana submits it and nobody owns the decision; a gap in that Type
+  (the blind-written Type refuses it with an invariant).
 
 ### Track 2: test what is untested
 
@@ -312,9 +330,10 @@ test:
    requester's draft (amount, vendor) before she submitted it, and the
    manager approved the agent's version. This is provenance's first real
    case, so it moves up: next in theme 1's order of work. **The agent's
-   part is closed** (track 1 item 2, PR #75); a colleague can still edit the
-   draft, which waits on track 1 item 4 ("only the requester"), and the
-   bake-offs' "pass in full" with it.
+   part is closed** (track 1 item 2, PR #75), and **a person's edit of
+   another's draft is closed where a Type says so** (track 1 item 4, PR #79:
+   `requester_only` on the draft). Who last wrote a value, in full, is still
+   provenance.
 4. **Still open: a requester creating on an older version skips a newer
    rule.** The CFO approval was skipped this way. Starting work, steps 2 and
    2b make the latest version decide where an Item starts and who places it,
