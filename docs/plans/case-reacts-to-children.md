@@ -161,8 +161,8 @@ nothing moves the Item waiting on it.
 The same construct with one more source would close it: `on: linked_entered`,
 `of: [<link name>]`, `states`, `from`, `to`, `when` over `links.<name>`,
 declared on the waiting Item and judged under its lock, with the linked
-Items locked as guards already lock them. The relay delivers a linked Item's
-state change to the Items linking to it, as it delivers a child's to its
+Items locked as guards already lock them. The relay would deliver a linked Item's
+state change to the Items linking to it, as it would a child's to its
 case.
 
 When a join needs an owner, a deadline or its own history (a release gate,
