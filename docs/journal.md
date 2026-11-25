@@ -96,6 +96,25 @@ Ideas noted during the spike, not built yet.
     **Fixed 2026-11-25** (the owner agreed): the test now asserts exactly that. Checked with an older
     transaction holding an xid open beside it: the old assertion fails (0 rows), the new one holds.
 
+- **Required means given by the mover: its Later items** (design.md, "Required means given by the mover, as built"):
+  - **Held moves.** `given` on a transition a check or a held reaction holds is refused at load (the
+    owner's decision, Q1 = B). Supporting it: judge the requester's patch when the hold is asked,
+    freeze the given fields while it is open, pass the request's patch (its `field_ids`) as given when
+    it resolves, and refuse a check that writes a given field. For when a real Type needs it.
+  - **A Type in `types/` using it.** `incident` and `ticket` (`f_resolution` on resolving),
+    `approval@1` (`f_delegate`, which a colleague could plant). None in this step.
+  - **`""` as unset for every rule.** An empty string counts as set for `required` and as given; a
+    Type that wants a real reason says `size(f_reason) > 0` in a guard.
+  - **`GetType` cannot say which fields are given** (the proto's `Transition` has `required` only),
+    so the web form cannot either. It sends only the required fields that changed: a decider who
+    confirms a pre-filled planted reason without editing it is refused `MISSING_FIELDS`, and the UI
+    cannot say why. Fails closed; the fix is the contract field, then a form that always sends the
+    given fields.
+  - **Only the decider writes the field** (`writable_by: ['field:f_x']`): closes the write itself,
+    not the move. Complementary to `given`.
+  - **A transition that declares every field it may set**, and sets nothing else (the roadmap's note
+    from OpenNSW, to weigh with items 3 and 4): not taken up in this step.
+
 - **Found by the Temporal bake-off** (docs/research/temporal-bakeoff.md):
   - **Fields are open to the agent by default.** **Built** (PR #75): a
     field without `writable_by` is people's only; `writable_by` lists
@@ -122,7 +141,10 @@ Ideas noted during the spike, not built yet.
     values). A decision's reason can be planted before the decider acts,
     which defeats `required` (the Requests area already lists "a decision
     field only the approver may write"). `writable_by: [creator]` and
-    `writable_by: ['field:f_x']` would cover both.
+    `writable_by: ['field:f_x']` would cover both. **Both closed where a
+    Type says so:** a draft's fields, by `requester_only` (track 1 item 4,
+    PR #79); a planted reason, by `given` on the decision (track 1 item 3,
+    PR #85). "Only the decider writes it" is still Later (the item above).
   - **Queues.** No "what waits on me" search, no way to ask the caller's
     roles, no claim tied to the caller (`sets` has no `caller`): the
     bake-off's inbox rebuilt it from `GetType` with one search per move.
@@ -3928,3 +3950,58 @@ configs (in `.git/info/exclude`) using the preinstalled Chromium.
 **Open:** the Later items above (Types using it, `GetType`, a draft's links, readers and placement, the xmin test); the
 done-when's two residues, the owner's to decide. **Next session:** track 1 item 3 (required means given by the mover),
 whose tests wait on this branch.
+
+## 2026-11-25 — Track 1, item 3: required means given by the mover (Phase D)
+
+**Built:** a transition's `given: [fields]`, beside `required` (both lists), asks that the move's own patch set them,
+with a value. A value written before, by anyone, does not count; the same value given again does; `""` counts; a null
+does not. A missing given field is the existing `MISSING_FIELDS`, in one sorted list with the missing required ones,
+in its place in the order of checks (unchanged); the item service's reason says which is which, and the API's fixed
+message now reads "the transition needs fields that are not set or not given in the move". What it means is
+`lifecycle.checkRequired`'s; the item service passes in the patch's fields and nothing else. Load checks: UNKNOWN_FIELD,
+DUPLICATE, MISSING_COUNTERPART (not in required), WRITES_KERNEL_FIELD, WRITES_FROZEN_FIELD (frozen in the state left),
+CONFLICT (its own allowed names it; `requester_only` in the state left when the move excepts the creator), HELD_TRANSITION
+(a held move), TIMER_NOT_ALLOWED (a timer's move), CONFLICT on a reaction that would make the move. The reading's clause
+"once the mover gives `f` in the move itself" (part `move.given`). design.md: "Required means given by the mover, as
+built", the Type section, the errors table, V6's move sentence. Roadmap: track 1 item 3 built; bake-off hole 2.
+
+**Kernel changes (four, counted):** the rule (`lifecycle.checkRequired` and the item service passing the patch's fields),
+the load checks, the reading's clause, the API's message (text). No schema, migration, proto or go.mod change. Data: the
+bake-offs' kernel Types, `given: [f_reason]` on every rejection (15 lines in 9 files), edited in place with a header note.
+
+**Decided (the owner, through the coordinator):** Phase A's defaults, and on Q1 option B: **held moves refused at load**
+(HELD_TRANSITION, as clears and sets), supporting them Later. The message reworded (Q2); the spike Types (Q3); `""` counts
+(Q4); the kernel's own moves refused at load and failing closed (Q5); `given` also in `required` (Q6); an agent for the
+decider gives a field only where the Type opens it to agents (Q7); no Type in `types/` (Q8); the scripts unchanged, no
+person-planted row added. Phase B's tests OK'd as listed; Phase C approved by the coordinator's review.
+
+**Tests:** new: item service 7 (the bake-offs' attack first), lifecycle 5, typedef 7 (ten load-check cases among them),
+reading 2 and a witness (`w_reject@1`), API 1. **Existing tests changed:** none. Two new fixture files make existing
+tests read them: a schema corpus Type (`TestSchema_TheCorpusLoadsAndValidates` failed until `given` was built) and the
+witness Type (seven reading tests that load the fixture folder failed at setup until then). One stub,
+`lifecycle.Input.Given`, landed with the tests.
+
+**Surprises:** none in the rule. The Phase A prototype measured the effect on the suite: one existing test (the schema
+corpus must use every key), answered by a fixture. My own new test of an agent for the decider first failed for the
+wrong reason: an agent acting for someone passes a role in `allowed` only if it holds the role too; the test now grants
+it (a fix to a test of this branch, before the tests gate). The kernel's own moves never carry a patch, so a `given` on
+one could never be met; refusing those at load reuses the places that already refuse a held target. In the first re-run
+of `test0-paths.py` on main, this branch's kernel still held the ports: discarded and re-run clean.
+
+**Numbers.** `go vet` clean; `go test ./...` green; `go test -race -count=1 ./...` green, 28 packages, no race (item
+service 215 s, workflow 340 s); the new tests `-race -count=10` green. Scenario on the compose stack: passed, whole, in
+107 s (run word rundae57e95). Web Playwright 9 in 10.0 s; apps/poc journeys 4 in 40.5 s. **The bake-offs, scripts
+unchanged**, each compared row by row with the same script on main (kernel side; `results/` kept as the earlier record):
+every outcome the same. The Camunda bake-off's kernel list 32 of 32 refused, identical; its `test0-paths.py` (with
+Camunda up): "gus rejects without a reason" refused, "with a reason" applied, as before, with the reworded message; the
+Temporal bake-off's measure 4, the blind-written access request and the staff-role run (7 of 7) identical but for the
+same message on "fay can reject without giving a reason".
+
+**Local workarounds, outside the repository (nothing committed):** dockerd started by hand (the machine was replaced once);
+postgres from mirror.gcr.io; image builds cannot reach the module proxy, so the stack ran from a compose override in the
+scratchpad (Go binaries and the web and poc bundles built here, into the same base images); Playwright through scratchpad
+configs that extend the projects' own, using the preinstalled Chromium.
+
+**Open:** the Later items above (held moves, Types using it, `""`, `GetType` and the web form, only the decider, a
+transition that declares what it may set). **Next session:** track 1 item 5 (team queues and "waiting on me") or item 6
+(moving open Items to a new version), as the owner decides.
