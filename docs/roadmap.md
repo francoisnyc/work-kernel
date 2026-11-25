@@ -147,6 +147,9 @@ attack that found it as its test:
    deliberately and checked: a change that must reach requests in flight;
    includes starting work's step 2b (the latest version governs creates and
    placement).
+   Before Items move, each is checked against the new version's rules from
+   its state and history (as Cognitive Fab's polyflow vets a new version
+   against runs in flight: `docs/research/agent-governance-cognitive-fab-polyflow.md`).
 
 Item 5's "waiting on me" view is the visible milestone of the six weeks:
 it is the front door of the landing positioning below.
@@ -269,6 +272,8 @@ order" in `docs/design.md` sets.
   bake-off found.
 - **Then:** a semantic diff (item 7); patterns (item 8); checks that prove
   properties (item 3).
+  Item 3's concrete shape: path rules over a Type's states, checked at load
+  over everything the Type declares (`docs/research/agent-governance-cognitive-fab-polyflow.md`).
 - **Presentation hints on the Type; screens beside it.** A Type carries
   only hints every interface can use: labels and help text for fields,
   states and moves; field order and groups; which fields summarise an Item
