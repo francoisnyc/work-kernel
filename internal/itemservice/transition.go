@@ -1,6 +1,7 @@
 package itemservice
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"maps"
@@ -182,6 +183,26 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 		if tr, ok := ty.Transition(it.State, req.ToState); ok {
 			declared = &tr
 		}
+		// The claim (track 1 item 5, step 2). A person's move into a
+		// claimed state records them in its claim field: the user an
+		// agent acts for, else the actor. A patch may name the field only
+		// with that same person. The field then counts as named by the
+		// write, so writable_by is asked of the claimant like any field.
+		fromSt, _ := ty.State(it.State)
+		toSt, _ := ty.State(req.ToState)
+		if kc == nil && toSt.Claim != "" && fromSt.Claim != toSt.Claim {
+			claimant := cmp.Or(req.Principal.OnBehalfOf, req.Principal.Actor)
+			if v, named := req.Fields[toSt.Claim]; named && v != claimant {
+				return WriteResult{}, &FieldNotWritableError{Fields: []string{toSt.Claim},
+					Reason: fmt.Sprintf("a move into %s claims the Item for whoever makes it: the request may not write %s for someone else",
+						req.ToState, toSt.Claim)}
+			}
+			req.Fields = maps.Clone(req.Fields)
+			if req.Fields == nil {
+				req.Fields = map[string]any{}
+			}
+			req.Fields[toSt.Claim] = claimant
+		}
 		// A field the move computes (`sets`) is the Type's to write: a
 		// patch that names it, with a value or with null, contradicts the
 		// move. Malformed, before anything else. Such a field is not
@@ -211,6 +232,12 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 				}
 				named[id] = nil
 			}
+		}
+		// A move out of a claimed state that clears the claim field (a
+		// release, or the claimant's own move) is not a write of it by
+		// the mover: who may make the move is asked below, with allowed.
+		if declared != nil && fromSt.Claim != "" && slices.Contains(declared.Clears, fromSt.Claim) {
+			delete(named, fromSt.Claim)
 		}
 		var writer *policy.Who
 		if kc == nil {
@@ -392,7 +419,7 @@ func authorize(ctx context.Context, tx pgx.Tx, p item.Principal, ty *typedef.Typ
 	tr, _ := ty.Transition(from, to) // lifecycle.Transition has just found it
 	// Anyone who can see the Item, with no need to read roles; never a
 	// customer, who takes only the moves whose allowed names creator.
-	if len(tr.Allowed) == 0 && len(tr.Except) == 0 && policy.CustomerOf(p) == "" {
+	if len(tr.Allowed) == 0 && len(tr.Except) == 0 && policy.CustomerOf(p) == "" && ty.ClaimIn(from) == "" {
 		return nil
 	}
 	who := policy.Who{Actor: p.Actor, OnBehalfOf: p.OnBehalfOf}
@@ -408,6 +435,9 @@ func authorize(ctx context.Context, tx pgx.Tx, p item.Principal, ty *typedef.Typ
 	}
 	if !policy.MayTransition(tr, who, it) {
 		return fmt.Errorf("%w: %s may not move this Item from %q to %q", ErrForbidden, p.Actor, from, to)
+	}
+	if st, _ := ty.State(from); !policy.MayLeaveClaimed(st, tr, who, it) {
+		return fmt.Errorf("%w: %s may not move this Item from %q to %q: someone else has claimed it", ErrForbidden, p.Actor, from, to)
 	}
 	return nil
 }

@@ -74,9 +74,10 @@ func (k *Service) waitingConds(ctx context.Context, p item.Principal, all []*typ
 	for _, t := range all {
 		for _, st := range t.States {
 			for _, tr := range policy.WaitingMoves(t, st.ID) {
-				cond, ok := "true", slices.Contains(tr.Allowed, typedef.AllowedRolePrefix+role)
+				// A claimed Item is its claimant's, not the queue's.
+				cond, ok := "true", st.Claim == "" && slices.Contains(tr.Allowed, typedef.AllowedRolePrefix+role)
 				if !isRole {
-					cond, ok = moveCond(tr, who, fields)
+					cond, ok = moveCond(st, tr, who, fields)
 				}
 				if !ok {
 					continue
@@ -151,7 +152,7 @@ func (f waitFieldArgs) arg(field string) string {
 // It mirrors policy.MayTransition on the move's named entries: the actor
 // passes, and so does the user it acts for; `except` refuses whoever took
 // part in creating the Item, or its container.
-func moveCond(tr typedef.Transition, who policy.Who, fields waitFieldArgs) (string, bool) {
+func moveCond(st typedef.State, tr typedef.Transition, who policy.Who, fields waitFieldArgs) (string, bool) {
 	named := policy.NamedEntries(tr)
 	cond, ok := principalCond(named, who.Actor, who.ActorRoles, "w_actor", fields)
 	if !ok {
@@ -168,6 +169,10 @@ func moveCond(tr typedef.Transition, who policy.Who, fields waitFieldArgs) (stri
 	const people = `(@w_actor, coalesce(nullif(@w_behalf, ''), @w_actor))`
 	if slices.Contains(tr.Except, typedef.AllowedCreator) {
 		cond += ` and m.created_by not in ` + people + ` and coalesce(m.created_on_behalf_of, '') not in ` + people
+	}
+	// policy.MayLeaveClaimed: in a claimed state, the claimant only.
+	if st.Claim != "" {
+		cond += fmt.Sprintf(` and m.fields ->> @%s = coalesce(nullif(@w_behalf, ''), @w_actor)`, fields.arg(st.Claim))
 	}
 	if slices.Contains(tr.Except, typedef.AllowedContainerCreator) {
 		cond += ` and not exists (select 1 from items c where c.id = m.container_id and (c.created_by in ` + people +

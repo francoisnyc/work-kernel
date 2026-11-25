@@ -616,6 +616,11 @@ func (t *Type) checkCreatedInside(rep reporter, p string, r *Reaction, where str
 				"%s: transition %s -> %s is held by the check %q; a reaction may not ask for a held move", where, from, r.To, h)
 			return
 		}
+		if c := t.ClaimIn(r.To); c != "" && from != r.To {
+			rep.fail(CodeConflict, at(p, "to"), "Move into a state that is not claimed, or let a person make the move",
+				"%s: state %s is claimed (%s); a reaction claims nothing", where, r.To, c)
+			return
+		}
 		if given := t.givenOn(from, r.To); len(given) > 0 {
 			rep.fail(CodeConflict, at(p, "to"), "Move into a state whose transitions ask nothing to be given, or let a person make the move",
 				"%s: transition %s -> %s needs %s given in the move; a reaction gives no fields", where, from, r.To, strings.Join(given, ", "))
@@ -820,6 +825,10 @@ func checkMoveInto(rep reporter, p string, r Reaction, tgt *Type) error {
 		if h, held := tgt.heldBy(from, r.To); held {
 			return rep.fail(CodeHeldTransition, at(p, "to"), "Move into a state whose transitions are not held",
 				"reaction %s: %s holds %s -> %s by %s; a reaction may not ask for a held move", r.ID, tat, from, r.To, h)
+		}
+		if c := tgt.ClaimIn(r.To); c != "" && from != r.To {
+			return rep.fail(CodeConflict, at(p, "to"), "Move into a state that is not claimed, or let a person make the move",
+				"reaction %s: %s's state %s is claimed (%s); a reaction claims nothing", r.ID, tat, r.To, c)
 		}
 		if given := tgt.givenOn(from, r.To); len(given) > 0 {
 			return rep.fail(CodeConflict, at(p, "to"), "Move into a state whose transitions ask nothing to be given, or let a person make the move",

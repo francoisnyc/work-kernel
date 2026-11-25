@@ -954,7 +954,8 @@ and its scope: the insert already holds those key locks.)
   are described in "Links, containment and people" (Step 1).
 - `waiting_on` (`me`, or `role:<name>`): only the open Items that wait on
   the caller, or on a role; one more condition, with the others. See
-  "Waiting on me, step 1, as built".
+  "Waiting on me, step 1, as built". A claimed Item waits on its claimant
+  only ("A claim that binds, as built").
 - `min_seq` on search for read-your-writes; `UNAVAILABLE` / `NOT_CAUGHT_UP`
   after 2 s. `GetItem` always reads the latest state.
 - Every read goes through `Project`. `Watch` comes later, after the sequencer.
@@ -994,7 +995,7 @@ A rule's refusal answers with its code; every kernel rejection carries one
 | `ErrRejected`, a max-one side of a link type already has its link | `FAILED_PRECONDITION` | `LINK_CARDINALITY` (+ link_type, side) |
 | `ErrRejected`, the link exists / does not exist / its target's Type is not allowed | `FAILED_PRECONDITION` | `ALREADY_LINKED` / `NOT_LINKED` / `LINK_TARGET_TYPE` |
 | `ErrForbidden`, a write names a field it may not write (kernel-written, closed to the writer by `writable_by`, e.g. to an agent by default, limited by the Item's state to its requester (`requester_only`), or named by its transition's `allowed`) | `PERMISSION_DENIED` | `FIELD_NOT_WRITABLE` (+ fields) |
-| `ErrRejected`, a write names a field the Item's state freezes | `FAILED_PRECONDITION` | `FIELD_FROZEN` (+ fields, state) |
+| `ErrRejected`, a write names a field the Item's state freezes, or its claim field while it is claimed | `FAILED_PRECONDITION` | `FIELD_FROZEN` (+ fields, state) |
 | `ErrRejected`, a transition's required field is not set, or one its `given` lists is not given in the move itself | `FAILED_PRECONDITION` | `MISSING_FIELDS` (+ fields, from_state, to_state); its message: "the transition needs fields that are not set or not given in the move" |
 | `ErrRejected`, a write would break one of the Type's invariants | `FAILED_PRECONDITION` | `INVARIANT_FAILED` (+ invariant) |
 | `ErrForbidden`, LinkItems / UnlinkItems on a link only the kernel sets | `PERMISSION_DENIED` | `LINK_NOT_WRITABLE` (+ link_type) |
@@ -5029,11 +5030,160 @@ service and the API's one field), the reading's sentence, pli's command
 and flag. No schema, migration or go.mod change; the proto grew by one
 field.
 
-**What is left** (the owner's split): step 2, a claim that binds; step 3,
+**What is left** (the owner's split): step 2, a claim that binds (since
+built: "A claim that binds, as built"); step 3,
 who may act stored per open Item, if these numbers ask for it; step 4, a
 container as a filter, capped counts, "who am I" with roles, and the web
 Inbox on the view; step 5, a state that waits on its requester (and so a
 customer's view).
+
+## A claim that binds, as built (2026-11-25)
+
+Track 1, item 5 of `docs/roadmap.md`, the second of its five steps. Both
+bake-offs' inbox test asked "does a claim hold?": gus claims a purchase,
+fay, in finance like him, approves it. The kernel let her: the claim was
+only a field. Now a Type can say that a state is claimed, and the kernel
+holds it.
+
+**Two Type keys, both opt-in:**
+
+```yaml
+states:
+  - id: finance_review
+    category: active
+    claim: f_claimed_by          # a principal field holding one person
+transitions:
+  - {from: finance_queue,  to: finance_review, allowed: ['role:finance']}
+  - {from: finance_review, to: finance_queue,  allowed: ['role:finance'], release: true, clears: [f_claimed_by]}
+  - {from: finance_review, to: approved,       allowed: ['role:finance']}
+```
+
+**The rule** (`policy.MayLeaveClaimed`, pure, in
+`internal/policy/waiting.go`, beside `MayTransition`):
+
+- **Claiming records the mover.** A person's move into a claimed state
+  writes them into the claim field. For an agent acting for a user it is
+  the user; for an agent on its own, the agent. The move's patch may name
+  the field only with that same person (the bake-offs' scripts do); with
+  anyone else it is refused. The field's own `writable_by` is asked of the
+  writer as for any field, so an agent claims only where the Type opens
+  the claim field to agents (the owner's decision).
+- **A release says so.** A move out of a claimed state with
+  `release: true` gives the claim up. `allowed` and `except` alone decide
+  who may make it: the claimant, a colleague in the role, a lead the Type
+  names. It must clear the claim field (a load check).
+- **Every other move out is the claimant's only,** on top of `allowed` and
+  `except`. A colleague is refused. A claim field that holds nobody lets
+  nobody through.
+- **The kernel's own moves are exempt** (the state's timer, a hook), so an
+  escalation can take a claimed Item back.
+- **A claimant who lost the role cannot decide:** `allowed` still asks for
+  the role. A colleague releases the Item (the owner's decision).
+
+**Why the release is explicit (the owner's decision).** The first design
+took any move that clears the claim field as a release. A Type whose
+reject move also clears the field would then have opened that decision to
+the whole team, by accident. So a move is a release only if it says so. A
+decision may still clear the field; it stays the claimant's.
+
+**While claimed, nobody writes the claim field,** the claimant included
+(`lifecycle.CheckFrozen` treats it as frozen in that state). Only a move
+out changes it: a release clears it; a decision leaves the claimant's
+name, unless the move clears it. So an approved purchase still says who
+decided it.
+
+**Refusals,** all ones the API already had; no contract change:
+
+| Who asks what | Answer |
+|---|---|
+| A colleague asks for a move that is not a release | `PERMISSION_DENIED` / `NOT_ALLOWED` |
+| A move into the claimed state names someone else in the claim field | `PERMISSION_DENIED` / `FIELD_NOT_WRITABLE` (+ fields) |
+| Anyone writes the claim field while the Item is claimed | `FAILED_PRECONDITION` / `FIELD_FROZEN` (+ fields, state) |
+
+Order: a write is first asked whether the writer may write the fields it
+names, then whether they may make the move. So where the claim field's
+`writable_by` refuses the writer (an agent, where the field is closed to
+agents), the answer is `FIELD_NOT_WRITABLE`, not `NOT_ALLOWED`.
+
+**Where the test sits.** In the item service's `authorize`, the one place
+that already asks `allowed`, right after `MayTransition`. A held decision
+(one a check must allow) is therefore judged when it is asked, so a
+colleague's request opens no hold, and again when the hold resolves. The
+claim is checked by the move's own rules, under the Item's lock; nothing
+is stored beside the field.
+
+**The view** (step 1's `waiting_on`):
+
+- A claimed Item waits on its claimant only. It is in nobody else's `me`.
+- A role's queue (`role:<name>`) shows what nobody has claimed: a claimed
+  state is never in it.
+- The release is not work: a state whose only named move is its release
+  waits on nobody.
+- After a release, the Item is back in the queue at once (nothing stored).
+
+**Load checks** (`internal/typedef/claim.go`), each a problem with a code
+and a path:
+
+- The claim field: declared, a principal holding one person, one that
+  people write (not `writable_by: kernel`), and not also listed in the
+  state's `frozen` or `requester_only`.
+- The state: not the initial state (nobody moves an Item into it), and
+  with at least one release out, so a claimant who leaves strands nothing.
+- A move into it must be a person's: not held by a check, not the state's
+  timer or at-timer, not a reaction's (held moves: Later). It may not name
+  the claim field in `given`, `clears` or `sets`.
+- A release: out of a claimed state, to another state, clearing the claim
+  field.
+
+A move between two states that claim the same field keeps the claim: it
+does not record the mover again.
+
+**The reading** says it in the state's section and on the release:
+
+- "Whoever moves it into finance_review claims it: `f_claimed_by` names
+  them, and only they move it on from there, unless a move releases the
+  claim."
+- "While it is in finance_review, it waits on whoever claimed it."
+- "Anyone with the role finance moves it from finance_review to
+  finance_queue, which releases the claim; the move clears `f_claimed_by`."
+
+The claimant rule is said once, on the state, not on every decision
+(the owner's choice at the tests gate). Parts `claim`, `waits.claimant`,
+`move.release`; a witness with a story (`w_claim@1`).
+
+**The bake-offs.** The five purchase Types gained the two keys, edited in
+place with a header note; the scripts are unchanged. "Does a claim hold?"
+now reads refused on the kernel in both (`test3-inbox.py`,
+`test_inbox.py`: `PERMISSION_DENIED NOT_ALLOWED`), and a colleague can
+still take over a purchase fay claimed and left (`attacks_review.py`:
+gus put it back in the queue). The committed result files are the record
+of the bake-offs as they were run on 24 November and were not
+regenerated.
+
+**What it does not cover** (journal, Later):
+
+- **A held move into a claimed state** (a claim a check must allow):
+  refused at load.
+- **Reassigning to a named person:** today a colleague releases and the
+  other person claims.
+- **`GetType` does not show the keys' meaning to a UI:** a screen that
+  offers moves from `allowed` alone may offer a colleague a decision the
+  kernel then refuses.
+- **An agent given the team's role by mistake** claims and decides like
+  any member, where the Type opens the claim field to that role (the
+  bake-off's agent-among-approvers rows).
+
+**Tests.** New: item service 11 (the bake-off row first), policy 2 (a
+table of 20 cases), typedef 7 (16 problems, 11 valid shapes), API 1,
+reading 2 and a witness. Two new fixture files (the witness Type, the
+schema corpus file). One existing test changed, approved at the tests
+gate: the cite test's `elements()` counts a state's `claim`, so a missing
+claim sentence is caught. No approved reading changed.
+
+**Kernel changes (counted):** the two keys and their load checks
+(`typedef`, the JSON Schema), the rule (`policy`), the item service's
+transition (record, freeze, authorize) and its `waiting_on` query, the
+reading's sentences. No proto, migration or go.mod change.
 
 ## Out of scope for the spike
 

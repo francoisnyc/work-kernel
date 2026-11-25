@@ -194,6 +194,12 @@ type State struct {
 	// (policy.MayWriteInState). Never a kernel-written field, nor one this
 	// state freezes.
 	RequesterOnly []string `yaml:"requester_only" json:"requester_only,omitempty"`
+	// Claim names the principal field that holds who claimed the Item
+	// while it is in this state (track 1 item 5, step 2): whoever moves it
+	// into the state is recorded there, and only they move it on, besides
+	// what `allowed` asks; a move marked release gives the claim up.
+	// Packages policy and itemservice judge it.
+	Claim string `yaml:"claim" json:"claim,omitempty"`
 	// Acting are the state's acting timers (Step 2, part 3): each runs an
 	// action hook after a delay, without a transition, optionally again at
 	// an interval, at most Max times per entry into the state.
@@ -251,6 +257,10 @@ type Transition struct {
 	// Except refuses whoever matches it, even if `allowed` lets them in
 	// (ErrForbidden). For now it takes only "creator".
 	Except []string `yaml:"except" json:"except,omitempty"`
+	// Release marks a move out of a claimed state that gives the claim up:
+	// `allowed` alone decides it, where every other move out is the
+	// claimant's only. It must clear the claim field.
+	Release bool `yaml:"release" json:"release,omitempty"`
 	// Escape marks a move that may leave a state while a hold is open on it
 	// (cancel, say). Making it cancels the hold.
 	Escape bool `yaml:"escape" json:"escape,omitempty"`
@@ -541,6 +551,8 @@ func (t *Type) check() error {
 	// What the move itself must give: fields a patch may name, on a move
 	// a person makes.
 	t.checkGiven(r)
+	// A claimed state, and the moves that claim and release.
+	t.checkClaim(r)
 
 	// A field only the kernel writes needs a writer: a hook that writes it,
 	// or another Type's reaction this Type accepts for it.

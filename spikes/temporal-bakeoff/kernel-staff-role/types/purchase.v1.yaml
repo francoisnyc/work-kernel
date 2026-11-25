@@ -26,6 +26,11 @@
 # the owner's decision): each rejection gains given: [f_reason], so a
 # reason written before the decision, by anyone, does not count. Each
 # run registers it fresh.
+# Edited in place for track 1 item 5 (a claim that binds, the owner's
+# decision): finance_review gains claim: f_claimed_by, and the move back
+# to the queue release: true, so only whoever claimed a purchase decides
+# it and any finance member may still put it back. Each run registers it
+# fresh.
 id: purchase
 version: 1
 initial_state: draft
@@ -53,6 +58,7 @@ states:
     frozen: [f_amount, f_vendor, f_cost_centre, f_justification, f_manager, f_summary, f_policy, f_flags]
   - id: finance_review
     category: active
+    claim: f_claimed_by
     frozen: [f_amount, f_vendor, f_cost_centre, f_justification, f_manager, f_summary, f_policy, f_flags]
   - id: approved
     category: done
@@ -73,7 +79,7 @@ transitions:
   - {from: manager_review, to: rejected,      allowed: ['field:f_manager'], except: [creator], required: [f_reason], given: [f_reason]}
   # Finance: claim from the shared queue, hand back, decide.
   - {from: finance_queue,  to: finance_review, allowed: ['role:finance'], except: [creator], required: [f_claimed_by]}
-  - {from: finance_review, to: finance_queue,  allowed: ['role:finance'], clears: [f_claimed_by]}
+  - {from: finance_review, to: finance_queue,  allowed: ['role:finance'], release: true, clears: [f_claimed_by]}
   - {from: finance_review, to: approved,       allowed: ['role:finance'], except: [creator]}
   - {from: finance_review, to: rejected,       allowed: ['role:finance'], except: [creator], required: [f_reason], given: [f_reason]}
 

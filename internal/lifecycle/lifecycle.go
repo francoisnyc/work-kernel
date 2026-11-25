@@ -97,7 +97,8 @@ func CheckFrozen(t *typedef.Type, state string, fieldIDs []string) error {
 	s, _ := t.State(state)
 	var frozen []string
 	for _, id := range fieldIDs {
-		if slices.Contains(s.Frozen, id) {
+		// A claimed state keeps its claim field as if it froze it.
+		if slices.Contains(s.Frozen, id) || (s.Claim != "" && id == s.Claim) {
 			frozen = append(frozen, id)
 		}
 	}
