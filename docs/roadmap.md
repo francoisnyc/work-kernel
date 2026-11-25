@@ -283,46 +283,67 @@ down), **shaped like the kernel's model**: states, moves, who may act, frozen
 fields. Kept outside this repository; nothing is lost whichever way the
 decision goes.
 
-### Orchestration from code: Temporal and LangGraph (proposed)
+### Ask a person: one brick behind every agent's pause (proposed)
 
-Teams that already orchestrate in code, with a Temporal workflow or an
-agent graph, need the same thing behind every pause: who may decide, a
-queue and a claim, escalation, an audit that outlives the run, and rules
-that hold whatever the agent was told. Today each team builds its own
-approval hub. The kernel can be that layer, with the orchestrator as an
-ordinary client (`docs/plans/case-reacts-to-children.md`, "Orchestrating
-Items from Temporal code"): the Type holds the rules, the code holds the
-plan.
+Every agent framework now has a way to pause for a person: Google ADK's
+long-running tools and tool confirmation, Pydantic AI's deferred tools
+(`requires_approval`, the run ends with `DeferredToolRequests`), a Temporal
+signal or update, LangGraph's `interrupt()`; Claude Code and the others
+reach MCP servers, and MCP's tasks (call now, fetch later) carry a slow
+answer. None has the other end: who answers, where, under which rules, and
+what happens when nobody does. Each team builds that hub itself. The
+kernel can be it, for every framework, with the orchestrator as an ordinary
+client (`docs/plans/case-reacts-to-children.md`, "Orchestrating Items from
+Temporal code"): the Type holds the rules, the code holds the plan.
 
-One general feature, three pieces, none built:
+**Two Types,** composed like any other (nothing in the kernel is named
+question or approval):
 
-1. **Events out to a subscriber:** a signal to an external workflow or an
-   adapter when an Item it follows changes; a new outbound path, so through
-   `policy.Project`.
-2. **A service principal per orchestrator,** named in `writable_by` and
-   `allowed` like any principal, closed by default as agents are.
-3. **Clients with idempotency keys from the caller's run and step,** so a
-   replayed workflow or a resumed graph repeats no write: Go first, then
-   Python generated from the Connect API.
+- `question@1`: an agent asks, with optional choices; the answer is a
+  people-only field (closed to agents by default, so an agent never answers
+  its own question); `asked`, `answered`, `expired`, `withdrawn`; a timer
+  escalates or expires it.
+- `approval@1` (exists): what is approved lives in structured fields
+  (amount, target, action), not only in the agent's prose, and the agent's
+  text is shown as the agent's.
 
-Two consumers, as the test of generality:
+**Two ways in:**
 
-- **A Temporal workflow** driving Items (track 3's shared package, meeting
-  the kernel).
-- **A LangGraph adapter** (about 200 lines): an `interrupt()` creates an
-  Item from its payload, keyed on the thread and the interrupt's position,
-  so a redeployed graph that pauses again finds the same Item; the decision
-  is made under the Type's rules; entering a decided state resumes the
-  thread with `Command(resume=…)`, carrying the decision and opaque IDs.
-  LangChain's Agent Inbox can stay the screen, reading from the kernel.
+1. **An MCP server** with `ask_person` and `request_approval`: each creates
+   an Item and returns its ID at once, as an MCP task. One server, no code
+   in the agent: Claude Code, ADK, Pydantic AI and anything else that speaks
+   MCP.
+2. **Thin adapters** from each framework's own pause to an Item, resuming
+   it when the Item enters a decided state: a Temporal signal first (track
+   3's shared package meeting the kernel), then ADK's confirmation over its
+   REST resume and Pydantic AI's `DeferredToolResults`. LangGraph's
+   `interrupt()` fits the same way. Idempotency keys come from the caller's
+   run and pause, so an agent that is redeployed and pauses again finds the
+   same Item.
 
-Scope: approval of consequential work that becomes an Item (a refund,
-access, a purchase, a deployment), not every tool call an agent makes.
+**What every way in needs, none built:**
+
+1. **Events out to a subscriber:** a signal to an external workflow, an
+   adapter or an MCP task when an Item it follows changes; a new outbound
+   path, so through `policy.Project`.
+2. **A service principal per orchestrator or agent,** named in
+   `writable_by` and `allowed` like any principal, closed by default.
+3. **Clients with replay-safe idempotency keys:** Go first, then Python
+   generated from the Connect API.
+
+**The strongest form:** the approved action is carried out by the kernel's
+own action hook, which re-checks the approval first (an effect re-checks
+what caused it, track 1 item 1). When the agent carries it out after
+resuming, the gate is as strong as the agent framework's code.
+
+Scope: questions and approvals of consequential work, not every tool call
+an agent makes (agent tool-call governance is not this kernel's job).
 
 Depends on track 1, item 5: without queues, a binding claim and "waiting
 on me", the kernel adds little over the inboxes that exist. Proposed for
 the six weeks, after item 5, as part of the landing (the plan's open
-question 5); the owner decides.
+question 5); the owner decides. A pilot candidate at work below ("A pilot
+candidate: ask a person").
 
 ### The decision point (about six weeks)
 
@@ -659,6 +680,23 @@ Prior art: `docs/research/task-inboxes-taskana-polyflow.md` (queues that a
 team claims from; the inbox as a projection fed by events).
 
 Chosen only with a team at work that owns the problem; until then, a
+candidate, not a commitment.
+
+### A pilot candidate: ask a person
+
+Teams at work build agents with Google ADK, Pydantic AI, Temporal and
+Claude Code, and each needs a person to answer a question or approve a step.
+"Ask a person" ("Now", above) as a service for those teams: the MCP server
+and the Temporal adapter, the two Types, a team queue and "waiting on me".
+
+Why it may come before the approvals pilot: no process moves and no system
+is retired; every agent team needs it whatever its framework; and it
+exercises exactly what track 1 builds (queues, a binding claim, fields
+closed to agents). Measured by: questions answered without the agent's
+team building a hub of its own, time to answer, and whether an injected
+agent ever got a decision it should not have.
+
+Chosen only with an agent team at work that wants it; until then, a
 candidate, not a commitment.
 
 ### 6. The tracker as the showcase
