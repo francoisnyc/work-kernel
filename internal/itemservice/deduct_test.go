@@ -390,6 +390,7 @@ invariants:
   - {id: insufficient_balance, rule: 'f_used == null || f_used <= f_allowance'}
 accepts_reactions:
 %s
+start: {older_versions: all}
 `, v, accepts)
 }
 
