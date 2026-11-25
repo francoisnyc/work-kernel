@@ -63,6 +63,7 @@ fields:
 links:
   - {name: rel, inverse: rel_by, targets: [vticket]}
 customer_fields: [f_title, f_code, rel]
+start: {older_versions: all}
 `
 
 type vworld struct {
