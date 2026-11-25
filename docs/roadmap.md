@@ -608,6 +608,31 @@ Only what the domains force, in the order they force it. Likely first:
 - issue keys, totals, `update_time`, search inside a container (the PoC apps'
   list in `docs/design.md`, "PoC apps as built: what the API lacked").
 
+**Scaling: known limits.** The check runs per Item, in parallel, under the
+Item's row lock, and the item service is stateless, so it scales out; the
+bench measured about 1,300–1,500 writes/s with 16 writers and no lock waits
+on one shared 4-vCPU Postgres (`docs/journal.md`), far above human work.
+The limits are where Items are tied together, and none bind at that
+volume; each waits until a domain (security alerts, bulk agent work, large
+campaigns) brings it close:
+
+- **The bench on real, separate machines,** to find the ceiling (run-to-run
+  noise is ±20% today).
+- **The relay is one process:** partition it by Item (order matters only
+  per Item), or replace it with the write-ahead-log reader above.
+- **Large joins serialize on the container's row:** a case with thousands of
+  children finishing together handles them one by one, re-counting
+  `children` each time. Counters kept in the same write, read by guards.
+- **Link guards lock linked Items `FOR SHARE`:** a popular target (a sprint,
+  a release) becomes contended. Rollups in place of scans over large link
+  sets.
+- **One Postgres:** scale it up first; then shard by `namespace_id`, or by
+  containment tree so a case and its children share a shard. The open rule:
+  a guard locks only within its shard; links across shards are read
+  unlocked, or not used in guards.
+- **Temporal at volume** is a cost question (actions billed per Item event),
+  not a capacity one (`docs/research/policy-permissions-and-spike-prep.md`).
+
 ### A pilot candidate: approvals
 
 Most companies have many separate apps for asking approval. A first real use
