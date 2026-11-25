@@ -286,7 +286,7 @@ func TestSchema_KeysAreTypedefs(t *testing.T) {
 			rt = rt.Elem()
 		}
 		switch {
-		case rt == writableByType:
+		case rt == writableByType, rt == olderVersionsType:
 			return // its shapes: TestSchema_NeverStricterThanStageA
 		case rt == acceptedType:
 			if branchOf(t, root, node, "array") == nil {
@@ -385,7 +385,7 @@ func positions() []slot {
 			rt = rt.Elem()
 		}
 		out = append(out, slot{slices.Clone(steps), rt})
-		if depth > 6 || rt == writableByType {
+		if depth > 6 || rt == writableByType || rt == olderVersionsType {
 			return
 		}
 		if rt == acceptedType {
@@ -646,7 +646,7 @@ func used(n *yaml.Node, rt reflect.Type, path string, out map[string]bool) {
 		out[path] = true
 	}
 	switch {
-	case rt == writableByType:
+	case rt == writableByType, rt == olderVersionsType:
 		if n.Kind == yaml.SequenceNode {
 			out[path+" as list"] = true
 		} else {
@@ -705,7 +705,7 @@ func TestSchema_TheCorpusUsesEveryKey(t *testing.T) {
 		}
 		want = append(want, pos.String())
 		switch pos.rt {
-		case writableByType:
+		case writableByType, olderVersionsType:
 			want = append(want, pos.String()+" as scalar", pos.String()+" as list")
 		case acceptedType:
 			want = append(want, pos.String()+" as list", pos.String()+" as map")
