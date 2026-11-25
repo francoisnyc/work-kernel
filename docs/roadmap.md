@@ -157,6 +157,9 @@ attack that found it as its test:
    deliberately and checked: a change that must reach requests in flight;
    includes starting work's step 2b (the latest version governs creates and
    placement).
+   Before Items move, each is checked against the new version's rules from
+   its state and history (as Cognitive Fab's polyflow vets a new version
+   against runs in flight: `docs/research/agent-governance-cognitive-fab-polyflow.md`).
 
 Item 5's "waiting on me" view is the visible milestone of the six weeks:
 it is the front door of the landing positioning below.
@@ -279,6 +282,8 @@ order" in `docs/design.md` sets.
   bake-off found.
 - **Then:** a semantic diff (item 7); patterns (item 8); checks that prove
   properties (item 3).
+  Item 3's concrete shape: path rules over a Type's states, checked at load
+  over everything the Type declares (`docs/research/agent-governance-cognitive-fab-polyflow.md`).
 - **Presentation hints on the Type; screens beside it.** A Type carries
   only hints every interface can use: labels and help text for fields,
   states and moves; field order and groups; which fields summarise an Item
@@ -288,6 +293,13 @@ order" in `docs/design.md` sets.
   the Type allows, never less, and enforces nothing: moves still go through
   the item service, visibility through `policy.Project`. Rules and screens
   change at different speeds and are reviewed apart.
+  **A diagram of the Type, as a second view of the same model:** its states
+  and transitions, who may make each, where hooks fire and timers run,
+  drawn from the Type (it is a state machine), beside the YAML and the
+  plain-language reading; later, edits made in the diagram written back to
+  the same model. As Ballerina shows code and a sequence diagram of one
+  program, because each construct has one picture. A help for the
+  non-developer test (track 2): a state diagram is read faster than a list.
 - **Open-ended cases, as Type features:** what was built so far is mostly
   flows. Three pieces, each checkable data, in the spirit of CMMN (the ideas,
   not the notation): the work that *may* be added to a case at each point
