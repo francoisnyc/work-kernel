@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"cmp"
 	"slices"
 	"strings"
 
@@ -67,7 +68,8 @@ func WaitingMoves(ty *typedef.Type, state string) []typedef.Transition {
 	}
 	var moves []typedef.Transition
 	for _, tr := range ty.Transitions {
-		if tr.From == state && len(NamedEntries(tr)) > 0 {
+		// Giving a claim up is not work waiting on anyone.
+		if tr.From == state && !tr.Release && len(NamedEntries(tr)) > 0 {
 			moves = append(moves, tr)
 		}
 	}
@@ -84,11 +86,12 @@ func WaitsOn(ty *typedef.Type, state string, who Who, it ItemFacts) bool {
 	if item.IsKernelActor(who.Actor) {
 		return false
 	}
+	st, _ := ty.State(state)
 	for _, tr := range WaitingMoves(ty, state) {
 		// tr is a copy (range copies each element), so narrowing its list
 		// to the named entries changes nothing in the Type.
 		tr.Allowed = NamedEntries(tr)
-		if MayTransition(tr, who, it) {
+		if MayTransition(tr, who, it) && MayLeaveClaimed(st, tr, who, it) {
 			return true
 		}
 	}
@@ -99,7 +102,9 @@ func WaitsOn(ty *typedef.Type, state string, who Who, it ItemFacts) bool {
 // the role (a bare name: finance): one of its waiting moves names it.
 // `except` is not asked: it is judged for a person, in WaitsOn.
 func WaitsOnRole(ty *typedef.Type, state, role string) bool {
-	if role == "" {
+	// A claimed Item waits on its claimant, not on the team: a role's queue
+	// holds what nobody has claimed yet.
+	if st, _ := ty.State(state); role == "" || st.Claim != "" {
 		return false
 	}
 	for _, tr := range WaitingMoves(ty, state) {
@@ -110,13 +115,20 @@ func WaitsOnRole(ty *typedef.Type, state, role string) bool {
 	return false
 }
 
-// MayLeaveClaimed reports whether who may make the move tr out of the
-// state st as far as st's claim goes (track 1 item 5, step 2): a state
-// with no claim, a release and the kernel's own moves pass; any other move
-// is the claimant's only. `allowed` and `except` are judged apart
-// (MayTransition).
+// MayLeaveClaimed answers the claim's part of "may this principal make
+// this move?" (track 1 item 5, step 2), asked besides MayTransition. st is
+// the state the move leaves. While an Item is in a state with `claim`, a
+// move out of it is its claimant's only: the principal's effective user
+// (the user an agent acts for, else the actor) is the person the claim
+// field holds. A claim field that holds nobody lets nobody through.
 //
-// Not built yet: it lets everyone through.
+// Three moves pass whoever asks: one out of a state with no claim; a
+// release, which `allowed` alone decides; and the kernel's own (the timer,
+// a hook), so that an escalation can take a claim back.
 func MayLeaveClaimed(st typedef.State, tr typedef.Transition, who Who, it ItemFacts) bool {
-	return true
+	if st.Claim == "" || tr.Release || item.IsKernelActor(who.Actor) {
+		return true
+	}
+	claimant, _ := it.Fields[st.Claim].(string)
+	return claimant != "" && claimant == cmp.Or(who.OnBehalfOf, who.Actor)
 }
