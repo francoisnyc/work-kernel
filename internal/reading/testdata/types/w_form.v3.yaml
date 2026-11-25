@@ -1,0 +1,8 @@
+# A form, version 3, the latest: a form of version 2 may still be created,
+# one of version 1 may not.
+id: w_form
+version: 3
+fields:
+  - {id: f_title, type: string}
+start:
+  older_versions: [2]

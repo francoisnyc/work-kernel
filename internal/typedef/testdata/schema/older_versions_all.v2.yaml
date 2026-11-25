@@ -1,0 +1,8 @@
+# Corpus for the schema tests (Ventoux V2c): start.older_versions as the
+# word all, beside the block's other keys (track 1, item 6, step 1).
+id: corpus_older_all
+version: 2
+
+start:
+  in: [top]
+  older_versions: all

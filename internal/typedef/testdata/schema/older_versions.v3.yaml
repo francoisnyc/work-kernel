@@ -1,0 +1,8 @@
+# Corpus for the schema tests (Ventoux V2c): start.older_versions as a
+# list (track 1, item 6, step 1). It loads on its own (stages a and b);
+# the versions it lists are not loaded.
+id: corpus_older
+version: 3
+
+start:
+  older_versions: [1, 2]
