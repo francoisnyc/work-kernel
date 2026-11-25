@@ -283,6 +283,47 @@ down), **shaped like the kernel's model**: states, moves, who may act, frozen
 fields. Kept outside this repository; nothing is lost whichever way the
 decision goes.
 
+### Orchestration from code: Temporal and LangGraph (proposed)
+
+Teams that already orchestrate in code, with a Temporal workflow or an
+agent graph, need the same thing behind every pause: who may decide, a
+queue and a claim, escalation, an audit that outlives the run, and rules
+that hold whatever the agent was told. Today each team builds its own
+approval hub. The kernel can be that layer, with the orchestrator as an
+ordinary client (`docs/plans/case-reacts-to-children.md`, "Orchestrating
+Items from Temporal code"): the Type holds the rules, the code holds the
+plan.
+
+One general feature, three pieces, none built:
+
+1. **Events out to a subscriber:** a signal to an external workflow or an
+   adapter when an Item it follows changes; a new outbound path, so through
+   `policy.Project`.
+2. **A service principal per orchestrator,** named in `writable_by` and
+   `allowed` like any principal, closed by default as agents are.
+3. **Clients with idempotency keys from the caller's run and step,** so a
+   replayed workflow or a resumed graph repeats no write: Go first, then
+   Python generated from the Connect API.
+
+Two consumers, as the test of generality:
+
+- **A Temporal workflow** driving Items (track 3's shared package, meeting
+  the kernel).
+- **A LangGraph adapter** (about 200 lines): an `interrupt()` creates an
+  Item from its payload, keyed on the thread and the interrupt's position,
+  so a redeployed graph that pauses again finds the same Item; the decision
+  is made under the Type's rules; entering a decided state resumes the
+  thread with `Command(resume=…)`, carrying the decision and opaque IDs.
+  LangChain's Agent Inbox can stay the screen, reading from the kernel.
+
+Scope: approval of consequential work that becomes an Item (a refund,
+access, a purchase, a deployment), not every tool call an agent makes.
+
+Depends on track 1, item 5: without queues, a binding claim and "waiting
+on me", the kernel adds little over the inboxes that exist. Proposed for
+the six weeks, after item 5, as part of the landing (the plan's open
+question 5); the owner decides.
+
 ### The decision point (about six weeks)
 
 - **If the kernel passes both bake-offs and a non-developer could author
