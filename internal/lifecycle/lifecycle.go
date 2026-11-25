@@ -18,7 +18,7 @@ type Code string
 
 const (
 	NoTransition  Code = "no_transition"  // the Type declares no such move
-	MissingFields Code = "missing_fields" // a required field is not set
+	MissingFields Code = "missing_fields" // a required field is not set, or one the move must give is not given
 	GuardFailed   Code = "guard_failed"   // the guard does not hold
 	FieldFrozen   Code = "field_frozen"   // a write names a field the current state freezes
 	EffectFailed  Code = "effect_failed"  // a `sets` expression failed, or its result is no value of the field
@@ -68,8 +68,7 @@ type Input struct {
 	EachField typedef.Field
 	// Given are the fields this move's own patch sets, with a value: what
 	// a transition's `given` asks for (track 1 item 3). Nil for a move with
-	// no patch, the kernel's own moves included.
-	// Phase B stub: not read yet.
+	// no patch, the kernel's own moves included, which so never give one.
 	Given map[string]bool
 }
 
@@ -145,18 +144,8 @@ func TransitionWith(t *typedef.Type, current string, in Input, to string) (Resul
 		}
 	}
 
-	var missing []string
-	for _, id := range tr.Required {
-		if fields[id] == nil { // absent and null both count as not set
-			missing = append(missing, id)
-		}
-	}
-	if len(missing) > 0 {
-		slices.Sort(missing)
-		return Result{}, &Rejection{
-			Code: MissingFields, From: current, To: to, Missing: missing,
-			Reason: fmt.Sprintf("transition from %q to %q needs these fields set: %s", current, to, strings.Join(missing, ", ")),
-		}
+	if err := checkRequired(tr, fields, in.Given); err != nil {
+		return Result{}, err
 	}
 
 	if !guardHolds(t, tr, fields, links, in.Around, in.Today) {
@@ -179,6 +168,41 @@ func TransitionWith(t *typedef.Type, current string, in Input, to string) (Resul
 		return Result{}, err
 	}
 	return Result{State: state.ID, Category: state.Category, Clears: clears, Sets: sets}, nil
+}
+
+// checkRequired judges a move's required fields: each must be set, and
+// each its `given` lists must also be given in the move itself (Given: set
+// by its own patch), so a value written before, by anyone, does not count
+// for those (track 1 item 3). Absent and null both count as not set. The
+// refusal names both kinds in one sorted list, Missing, and its reason
+// says which is which.
+func checkRequired(tr typedef.Transition, fields map[string]any, given map[string]bool) error {
+	var unset, notGiven []string
+	for _, id := range tr.Required {
+		switch {
+		case slices.Contains(tr.Given, id) && (fields[id] == nil || !given[id]):
+			notGiven = append(notGiven, id)
+		case fields[id] == nil:
+			unset = append(unset, id)
+		}
+	}
+	if len(unset)+len(notGiven) == 0 {
+		return nil
+	}
+	slices.Sort(unset)
+	slices.Sort(notGiven)
+	missing := append(slices.Clone(unset), notGiven...)
+	slices.Sort(missing)
+	reason := fmt.Sprintf("transition from %q to %q needs these fields ", tr.From, tr.To)
+	switch {
+	case len(notGiven) == 0:
+		reason += "set: " + strings.Join(unset, ", ")
+	case len(unset) == 0:
+		reason += "given in the move: " + strings.Join(notGiven, ", ")
+	default:
+		reason += "set: " + strings.Join(unset, ", ") + "; and given in the move: " + strings.Join(notGiven, ", ")
+	}
+	return &Rejection{Code: MissingFields, From: tr.From, To: tr.To, Missing: missing, Reason: reason}
 }
 
 // evalSets evaluates a transition's `sets` expressions, each on the fields
