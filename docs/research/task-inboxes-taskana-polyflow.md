@@ -156,9 +156,7 @@ they started with, with no migration (track 1, item 6).
 Read for track 1, item 5 (team queues with a claim that binds): the
 WS-HumanTask standard (OASIS, 2007 to 2010; implemented by jBPM, Oracle,
 Informatica and others), Orkes Conductor's human tasks, and Camunda 8's user
-tasks. Not read: Temporal's own approvals pattern ("Reliable document
-approvals with human-in-the-loop workflows"); the fetch needed an approval
-nobody gave. To read before item 5's Phase A closes.
+tasks. Temporal's own approvals pattern is summarised at the end of this section.
 
 **Worth borrowing:**
 
@@ -189,3 +187,35 @@ nobody gave. To read before item 5's Phase A closes.
 **A design signal:** Camunda 8 no longer uses candidate users and groups for
 who may see or work on a task; its authorization does. A queue should be
 defined by the kernel's permissions, not by a separate list.
+
+**Temporal's approvals pattern** ([guide](https://docs.temporal.io/guides/reliable-document-approvals),
+read 2026-11-24). One long-running workflow per document waits for the
+reviewer, sends reminders, escalates once, and keeps an audit trail in its
+state (carried across Continue-As-New). It confirms the gap rather than
+filling it:
+
+- no inbox: approvals are found by search attributes per workflow
+  (document, submitter, status); nothing lists what waits on one reviewer;
+- no authorization: the decision signal stores whatever it receives, without
+  checking that the sender is the assigned approver;
+- one escalation contact, then an automatic rejection on timeout (the
+  kernel's rule is the opposite: nothing is skipped automatically);
+- good practice to keep: idempotency keys for notifications, deduplicated
+  updates, and Temporal's event-history limits (51,200 events or 50 MB) for
+  long-running processes.
+
+**A queue is not a container** (decided for item 5's Phase A). A container
+says where an Item belongs: who can see it, under which policy; it is
+stable for the Item's life. A queue says who must act next, and changes at
+each step. So a queue is a view derived from the Type: the Items, in
+containers the reader can see, whose open transitions in their current state
+the reader (or the reader's role) may make, minus `except`. "Waiting on me"
+is that view for one person; a team queue is it for a role; a container is
+a filter on it ("finance, for the Purchasing desk"); the claim binds on top.
+
+Items do move between containers today (`Update` with a `Move` patch; both
+ends visible to the mover; widening confirmed; `placement_writable_by`), and
+that is right when an Item's home changes: a case transferred to the team
+that now owns it, TASKANA's "transfer". A step of a process (manager, then
+finance, then the CFO) is not a move: made one, every approval would also
+change who can see the Item.

@@ -128,6 +128,10 @@ attack that found it as its test:
    reassign a stuck task but not decide it; claim, release and reassign as
    transitions, so checks apply; an escalation chain with a time limit per
    tier that resets the claim; due and follow-up dates.
+   A queue is a view derived from the Type (who may make the open
+   transitions now), not a container: a container is where an Item belongs,
+   a queue is who must act next. A transfer to the team that now owns an
+   Item is a move; an approval step is not.
 6. **Moving open Items to a new version, and retiring old versions**,
    deliberately and checked: a change that must reach requests in flight;
    includes starting work's step 2b (the latest version governs creates and
