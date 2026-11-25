@@ -144,6 +144,7 @@ func TestPli_TypeValidate_ARegisteredVersion(t *testing.T) {
 	checkLines(t, r,
 		"namespaces/acme/types/vacation_request/versions/2: CONSENT_MISSING typedef vacation_request v2: reaction deduct ",
 		"namespaces/acme/types/vacation_request/versions/3: CONSENT_MISSING typedef vacation_request v3: reaction deduct ",
+		"namespaces/acme/types/vacation_request/versions/4: CONSENT_MISSING typedef vacation_request v4: reaction deduct ",
 	)
 }
 

@@ -134,6 +134,7 @@ states:
   - {id: rung, category: done}
 transitions:
   - {from: armed, to: rung}
+start: {older_versions: all}
 `))
 	if err != nil {
 		t.Fatalf("parse alarm v2: %v", err)

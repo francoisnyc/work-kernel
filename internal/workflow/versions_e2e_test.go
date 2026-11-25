@@ -55,6 +55,7 @@ transitions:
   - {from: in_progress, to: waiting}
   - {from: waiting, to: in_progress}
   - {from: in_progress, to: done}
+start: {older_versions: all}
 `
 
 func (s *stack) registerShiftTypes() {

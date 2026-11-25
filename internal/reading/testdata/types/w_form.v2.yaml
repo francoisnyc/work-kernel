@@ -1,0 +1,6 @@
+# A form, version 2: an older version of w_form, whose latest (version 3)
+# keeps version 2 open and closes version 1.
+id: w_form
+version: 2
+fields:
+  - {id: f_title, type: string}

@@ -89,6 +89,9 @@ func elements(ty *typedef.Type) []string {
 	if ty.Start != nil {
 		add("start")
 	}
+	if ty.Start != nil && ty.Start.OlderVersions != nil {
+		add("start.older_versions")
+	}
 	sort.Strings(out)
 	return out
 }

@@ -84,10 +84,12 @@ _, res = pli("cora", "item", "get", new)
 say(f"- cora (cfo) approves: state `{res['item']['state']}`, order `{res['item']['fields'].get('f_order_id')}`")
 state, how = k_through_finance(before)
 say(f"- The in-flight purchase@1 {before}: {how} (it keeps the rules it was created under)")
-old = k_new(1)
-state, how = k_through_finance(old)
-say(f"- After the change, ana asks for the OLD version by name (purchase@1), 6,000: {how}. "
-    f"The CFO is skipped: the kernel lets a creator pick any registered version.")
+# Since track 1, item 6, step 1 the kernel refuses this create; the row records the refusal (it used to run the purchase to its end).
+ok, res = pli("ana", "item", "create", "--type", "purchase@1", "--set", "f_amount=6000", "--set", "f_vendor=cloudhost",
+              "--set", "f_cost_centre=CC-100", "--set", "f_justification=Three servers for the data team", check=False)
+say("- After the change, ana asks for the OLD version by name (purchase@1), 6,000: "
+    + ("created: the kernel lets a creator pick any registered version, and the CFO can be skipped." if ok
+       else "refused: " + " ".join(str(res).split())[:200]))
 
 # ------------------------------------------------------------- camunda
 say("\n## Camunda\n")

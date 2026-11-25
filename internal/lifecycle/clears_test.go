@@ -90,9 +90,9 @@ func TestHasListeners_PLATTypesHaveNone(t *testing.T) {
 		switch ty.ID {
 		case "story", "bug", "task", "epic", "sprint", "space", "comment", "subscription":
 			seen[ty.ID] = true
-			if ty.ID == "sprint" && ty.Version == 2 {
+			if ty.ID == "sprint" && ty.Version >= 2 { // sprint@3 is sprint@2 with start.older_versions
 				if !lifecycle.HasListeners(ty) {
-					t.Errorf("sprint v2 has no listeners: its at-timer needs a workflow")
+					t.Errorf("sprint v%d has no listeners: its at-timer needs a workflow", ty.Version)
 				}
 				continue
 			}

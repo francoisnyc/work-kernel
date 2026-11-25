@@ -6,6 +6,34 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
+- **A create names the latest version, step 1's Later items** (design.md, "A create names the latest version, as built"):
+  - **A reason of its own for a closed version** (`VERSION_CLOSED`, with
+    the latest version in metadata), so a client can retry on the latest.
+    Today it is `INVALID_REQUEST` with a violation on `type`. A contract
+    change, the owner's to decide.
+  - **`pli item create --type purchase`** (no version) resolving to the
+    latest, client-side: no contract change.
+  - **A note at load when a registered source's create reaction names a
+    closed version** (an `incident@3` still makes `sla_goal@3` goals after
+    `sla_goal@4`). It needs a severity other than ERROR (with Ventoux item
+    3): as an error it would refuse `types/` as it is.
+  - **Which versions are open, in `GetType` and `ListTypes`**, with the
+    number of open Items on each (item 6, step 4). `kernel.v1.Type` does
+    not show `start` at all yet.
+  - **Should a reading of a version without the key say that older
+    versions close?** The owner left the three approved readings
+    unchanged; the closing note says the latest version decides.
+  - **Test order still decides "latest" for the tests' own Types.** The 13
+    fixture Types are now registered newest-first in three packages, so
+    they no longer depend on it. A test's inline Type with several
+    versions still does, where it registers them one at a time.
+  - **A stack kept between sessions meets the rule at once:** a client
+    that pins an older version of a Type whose latest version does not
+    keep it open is refused after the upgrade. In `types/` that is only
+    `build_step@1`.
+  - **Nothing stops a new version from retyping a field** (only single
+    against multi-value and link inverses are held across versions). Item
+    6, step 2's fit check will catch it per Item; a load check could.
 - **A claim that binds, step 2's Later items** (design.md, "A claim that binds, as built"):
   - **A held move into a claimed state** (a claim a check must allow) is
     refused at load. It needs a rule for who is recorded when the hold
@@ -4197,3 +4225,73 @@ override in the scratchpad; Playwright through scratchpad configs using the prei
 
 **Open:** the Later items above; a fresh recorded run of both bake-offs. **Next session:** step 3 (who may act,
 stored), step 4 (queue extras and the web Inbox, which should read `claim`), or item 6, as the owner chooses.
+
+## 2026-11-25 — Track 1, item 6, step 1: a create names the latest version (Phase D)
+
+**Built:** one kernel rule and one opt-in Type key. A create on the public door must name the latest registered
+version of its Type; an older one is created only if the newest one's `start: {older_versions: [...]}` (or `all`)
+keeps it open. Absent, only the latest: it fails closed. Judged in `checkStart` with the latest version it already
+reads in the create's transaction, after what is NOT_FOUND and before `start.in`. Create reactions are exempt. The
+refusal is an `InvalidError` on `type` (`INVALID_ARGUMENT` / `INVALID_REQUEST`, a field violation, one fixed text).
+Load checks for the key, the JSON Schema, one reading sentence (parts `start_older`, `start_older.all`) with a
+witness. design.md: "A create names the latest version, as built". Roadmap: item 6 split into five steps, step 1
+built; the bake-off's hole 4 done for creates.
+
+**Kernel changes (counted):** the key, its checks and `Start.Creatable` (typedef, schema); the check in `Create`
+(nine lines); the reading. No proto, migration or go.mod change.
+
+**Decided (the owner, through the coordinator):** Phase A, "defaults, 1 is B": the rule and the key as proposed; the
+existing `INVALID_REQUEST` on `type`, no new reason; create reactions exempt; the split in five, this step first;
+**fixtures by new versions, never an edit to a registered one** (a kept database would refuse to start on a changed
+definition). When B alone left 426 tests failing: "Option 1", the newest versions registered up front in the three
+packages that register Types one at a time, and the one line added to the tests' own inline Types. The two tests
+whose setup met `incident@5`: fixed as proposed. The third bake-off script place creating `purchase@2`: accepted.
+Wording: the refusal as drafted; no change to the three approved readings.
+
+**Measured in Phase A** (a throwaway rule, never committed): 2,268 public creates in the suite named a non-latest
+version; "latest only" with no way out failed 560 of 1,805 tests.
+
+**Tests:** new: item service 9 (the bake-off row first), typedef 6 (13 problem cases), API 2, reading 2 and a
+witness (`w_form@1..3`, `w_slip@1..2`, `w_stub@1..2`), two schema corpus files. **Data:** 13 new latest versions
+in `types/` (all multi-version Types but build_step), each the one before plus the line. **Existing tests
+changed, assertions:** the Type lists and counts (54 to 67), three vacation_request versions reported where two
+were, sprint@3's listeners, incident@5's block, two drafts of "the next version" (@4 to @5), the reading's cite
+test. **Fixture only:** `TestMain` of itemservice, relay and workflow registers the 13 newest versions first; the
+line added to eleven test files' own Types and to `w_ask@2`; the schema tests learn the key's two shapes. **Setup
+of two tests** (assertions unchanged): `TestIncident_StartRefusals` creates its incident in a desk and a desk
+agent moves it out; `TestE2E_Incident_Breach_AnAssigneeWhoCannotSeeIt_IsNotTold` makes ana a desk agent.
+
+**The bake-offs, both run in full, both sides up.** Three script places changed, with the owner's agreement:
+`test1-cfo.py` and `test_change_kernel.py` record the refusal in the row "the old version by name" (was: approved,
+the CFO skipped; now: refused, `INVALID_ARGUMENT INVALID_REQUEST`); `test2-compromised.py agent-among-approvers`
+creates `purchase@2`, since it runs on types-v2 and needs a purchase. Counts as on the earlier record: the first
+bake-off's kernel list 32 of 32 refused; the second's purchase 27 of 27, access 17 of 18, blind-written access 18 of
+18, staff-role 7 of 7. Unchanged and still open: the purchases in flight are approved by finance with no CFO, and
+"there is no way to move an open Item". The fresh result files were kept out of the repository.
+
+**Surprises:**
+- The cost was in the tests, not the kernel: nine lines of rule against some thirty commits of fixtures and tests.
+- New versions in `types/` fixed only the packages that load the whole folder. Three packages register versions
+  one at a time, so "latest" there was whatever had run before; the rule made that bite. Registering the newest
+  versions first also removed the old order dependence for those Types.
+- Registering `incident@5` up front changed what 64 tests meet (its `in: [desk]`) and 6 more (desk-agent
+  placement). All but two passed as they were: they already created incidents in a desk.
+- Two tests used `vacation_request@4` as "the next version" of a draft; it exists now.
+- A third bake-off place was hit only because it runs after `purchase@2` is registered: it never meant to test
+  versions.
+- The tests' new files broke nothing by name this time, but a helper called `clPurchaseSrc` already existed
+  (the claim step's).
+
+**Numbers.** `go vet` clean; `go test ./...` green, 28 packages; `go test -race ./...` green; the new tests
+`-race -count=10` green. Scenario on the stack: passed, with one new step (build_step@1 refused, ticket@1 still
+created). Web: 464 unit tests, Playwright 9; apps/poc: 408 unit tests, journeys 4.
+
+**Local workarounds, outside the repository (nothing committed):** dockerd started by hand, several times; images
+pulled through mirror.gcr.io; the stack from a scratchpad override with binaries and web bundles built on the host
+(a build inside a container cannot download modules here); Playwright through temporary configs using the
+preinstalled Chromium.
+
+**Open:** the Later items above; a fresh recorded run of both bake-offs (the owner's decision). For step 2's own
+Phase A: who may migrate, the fit checks, quiet Items only, the names; and the wording of CLAUDE.md's list of write
+operations and design.md's "an Item never changes version", which a migrate makes untrue. **Next session:** item 6,
+step 2 (move one quiet Item), or item 5's steps 3 to 5, as the owner chooses.

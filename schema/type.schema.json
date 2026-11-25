@@ -94,7 +94,12 @@
       "additionalProperties": false,
       "properties": {
         "in": {"description": "Container Type IDs, or top for no container. Absent: anywhere.", "$ref": "#/$defs/texts"},
-        "allowed": {"description": "role:<name>, principal:user:<id>, field:<id> (the container's), container_creator or nobody. Absent: anyone who sees the container.", "$ref": "#/$defs/texts"}
+        "allowed": {"description": "role:<name>, principal:user:<id>, field:<id> (the container's), container_creator or nobody. Absent: anyone who sees the container.", "$ref": "#/$defs/texts"},
+        "older_versions": {
+          "description": "The older versions of the Type that may still be created while this version is the latest: all, or a list of version numbers. Absent: only the latest version is created.",
+          "type": ["string", "number", "boolean", "null", "array"],
+          "items": {"$ref": "#/$defs/text"}
+        }
       }
     },
     "timer": {

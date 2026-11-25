@@ -1,0 +1,134 @@
+# ticket@8 (track 1, item 6, step 1: a create names the latest version):
+# ticket@7 with one line added, start.older_versions: all, and nothing else
+# changed. Once a newer version of a Type is registered, its older versions
+# are closed to new Items unless the newest one lists them. This version
+# keeps every older version of ticket open, for the tests, stories, scenario
+# and apps that still create them. The text below is ticket@7's.
+#
+# Version 7 of the ticket (fields closed to agents by default): v6, with
+# f_priority open to agents. An agent (the triage bot) sets a ticket's
+# priority; every other field stays closed to agents, so it cannot retitle
+# a ticket or set who it is assigned to.
+id: ticket
+version: 8
+initial_state: triage
+
+fields:
+  - {id: f_title,       type: string}
+  # The triage agent's field: open to agents as well as people. Every
+  # other field is closed to agents (the default).
+  - {id: f_priority,    type: int,  writable_by: [people, agents]}
+  - {id: f_reporter,    type: string}
+  - {id: f_assignee,    type: principal}
+  - {id: f_urgent,      type: bool}
+  - {id: f_resolution,  type: enum, options: [fixed, wontfix, duplicate]}
+  - {id: f_customer_id, type: string}
+  - {id: f_plan,        type: enum, options: [free, pro, enterprise, unknown]}
+  - {id: f_on_hold,     type: bool}
+  - {id: f_amount,      type: int}
+  - {id: f_cost_center, type: string}
+  - {id: f_invoice_id,  type: string}
+
+links:
+  - {name: blocks,       inverse: blocked_by, targets: [ticket]}
+  - {name: duplicate_of, inverse: duplicates, targets: [ticket], max: one}
+
+states:
+  - {id: triage,      category: triage}
+  - {id: open,        category: todo}
+  - {id: in_progress, category: active,  timer: {after: 24h, to: open}}
+  - {id: waiting,     category: waiting, timer: {after: 72h, to: in_progress}}
+  - {id: waiting_for_customer, category: waiting}
+  - {id: approved,    category: active}
+  - {id: resolved,    category: done}
+  - {id: canceled,    category: canceled}
+
+transitions:
+  - {from: triage, to: open}
+  - {from: triage, to: canceled}
+  - from: open
+    to: in_progress
+    guard: 'f_assignee != null'
+  - {from: in_progress, to: open}
+  - {from: in_progress, to: waiting}
+  - {from: waiting, to: in_progress}
+  - {from: in_progress, to: waiting_for_customer}
+  - from: waiting_for_customer
+    to: in_progress
+    allowed: ['role:support']
+    guard: 'f_assignee != null'
+  - {from: waiting_for_customer, to: canceled}
+  - from: in_progress
+    to: approved
+    required: [f_customer_id, f_amount]
+    guard: 'f_on_hold != true'
+    allowed: ['role:approver']
+  - {from: in_progress, to: canceled, escape: true}
+  # Close: not while blocked by a ticket that is neither done nor canceled.
+  - from: in_progress
+    to: resolved
+    required: [f_resolution]
+    guard: 'links.blocked_by.all(b, b.category in ["done", "canceled"])'
+  - from: approved
+    to: resolved
+    required: [f_resolution]
+    guard: 'links.blocked_by.all(b, b.category in ["done", "canceled"])'
+  - from: resolved
+    to: open
+    guard: 'f_resolution != "wontfix"'
+  - {from: open, to: canceled}
+
+hooks:
+  - id: get_plan
+    on: enter
+    state: triage
+    kind: enrich
+    action: crm.get_plan
+    reads: [f_customer_id]
+    writes: [f_plan]
+    fallback: {f_plan: unknown}
+  - id: get_credit_status
+    on: enter
+    state: triage
+    kind: enrich
+    action: erp.get_credit_status
+    reads: [f_customer_id]
+    writes: [f_on_hold]
+  - id: erp_check
+    on: transition
+    from: in_progress
+    to: approved
+    kind: check
+    action: erp.check_credit
+    reads: [f_customer_id, f_amount]
+    writes: [f_cost_center]
+  - id: create_invoice
+    on: enter
+    state: approved
+    kind: action
+    action: erp.create_invoice
+    reads: [f_customer_id, f_amount]
+    writes: [f_invoice_id]
+
+reactions:
+  - id: reopen
+    kind: move
+    on: created_inside
+    of: [comment]
+    when: 'child.f_public == true'
+    by: creator
+    to: in_progress
+    from: [waiting_for_customer]
+  - id: open_checklist
+    kind: create
+    on: enter
+    state: in_progress
+    from: [open]
+    type: checklist
+    version: 1
+    fields:
+      f_title: '"Checklist: " + f_title'
+      f_opened_at: 'cause.at'
+
+start:
+  older_versions: all

@@ -1,0 +1,6 @@
+# A stub, version 2. Its latest (version 2) says nothing of older
+# versions: once it is registered, a stub of version 1 is closed.
+id: w_stub
+version: 2
+fields:
+  - {id: f_title, type: string}

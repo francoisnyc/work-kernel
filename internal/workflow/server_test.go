@@ -87,6 +87,10 @@ func runTests(m *testing.M) int {
 		log.Printf("register job type: %v", err)
 		return 1
 	}
+	if err := registerNewestTypes(ctx); err != nil {
+		log.Printf("register the newest Types: %v", err)
+		return 1
+	}
 
 	return m.Run()
 }

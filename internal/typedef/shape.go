@@ -62,11 +62,12 @@ func typeOf(root *yaml.Node) (string, int) {
 type shapeWalker struct{ r reporter }
 
 var (
-	acceptedType   = reflect.TypeFor[Accepted]()
-	acceptedDocTyp = reflect.TypeFor[acceptedDoc]()
-	writableByType = reflect.TypeFor[WritableBy]()
-	fieldType      = reflect.TypeFor[Field]()
-	linkType       = reflect.TypeFor[LinkType]()
+	acceptedType      = reflect.TypeFor[Accepted]()
+	acceptedDocTyp    = reflect.TypeFor[acceptedDoc]()
+	writableByType    = reflect.TypeFor[WritableBy]()
+	fieldType         = reflect.TypeFor[Field]()
+	olderVersionsType = reflect.TypeFor[OlderVersions]()
+	linkType          = reflect.TypeFor[LinkType]()
 )
 
 // walk checks that node n has the shape of Go type t, at path.
@@ -93,6 +94,17 @@ func (w shapeWalker) walk(n *yaml.Node, t reflect.Type, path string) {
 		return
 	case t == writableByType:
 		// Checked by the struct that holds it, which knows its owner.
+		return
+	case t == olderVersionsType:
+		// all, or a list of versions: checkStart judges the values.
+		if n.Kind == yaml.MappingNode {
+			w.wrongShape(n, path, "all, or a list of versions")
+		}
+		for i, item := range n.Content {
+			if n.Kind == yaml.SequenceNode && resolveAlias(item).Kind != yaml.ScalarNode {
+				w.wrongShape(resolveAlias(item), at(path, i), "a version number")
+			}
+		}
 		return
 	}
 	switch t.Kind() {

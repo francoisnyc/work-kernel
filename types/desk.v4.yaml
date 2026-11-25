@@ -1,0 +1,31 @@
+# desk@4 (track 1, item 6, step 1: a create names the latest version):
+# desk@3 with one line added, start.older_versions: all, and nothing else
+# changed. Once a newer version of a Type is registered, its older versions
+# are closed to new Items unless the newest one lists them. This version
+# keeps every older version of desk open, for the tests, stories, scenario
+# and apps that still create them. The text below is desk@3's.
+#
+# A service desk, version 3 (Jira 2.4b): desk@2, and only sla_admin places
+# it. Under desk@2 anyone who sees a desk may narrow it, and so hide every
+# Item under it, or move it into another Item; under desk@3 only a holder of
+# the role sla_admin may (placement_writable_by). Everything else is as in
+# desk@2: the container of its incidents, linked to a calendar and an SLA
+# policy that only sla_admin sets, open to customers as a portal.
+id: desk
+version: 4
+# The name first: a page shows a portal by its first string field.
+fields:
+  - {id: f_name, type: string}
+  - {id: f_key,  type: string}
+
+links:
+  - {name: calendar,   inverse: desks,          targets: [calendar],   max: one, writable_by: ['role:sla_admin']}
+  - {name: sla_policy, inverse: governed_desks, targets: [sla_policy], max: one, writable_by: ['role:sla_admin']}
+
+own: [incident]
+customer_fields: [f_key, f_name]
+
+placement_writable_by: ['role:sla_admin']
+
+start:
+  older_versions: all

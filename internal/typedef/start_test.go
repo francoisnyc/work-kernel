@@ -61,8 +61,11 @@ func TestStart_Parses(t *testing.T) {
 	}
 }
 
-// The repository's Types: incident@4 is the one with a block, in: [desk]
-// and no allowed (owner's decision, option B); no other has one.
+// The repository's Types: incident@4 is the one with a block that says
+// where, in: [desk] and no allowed (owner's decision, option B), and
+// incident@5 carries it on. No other says where or who: the latest
+// versions added by track 1, item 6, step 1 hold start.older_versions
+// alone (start_older_test.go checks them).
 func TestStart_TheRepositoryTypes(t *testing.T) {
 	types, err := typedef.ParseDir("../../types")
 	if err != nil {
@@ -71,13 +74,13 @@ func TestStart_TheRepositoryTypes(t *testing.T) {
 	found := false
 	for _, ty := range types {
 		switch {
-		case ty.ID == "incident" && ty.Version == 4:
+		case ty.ID == "incident" && ty.Version >= 4:
 			found = true
 			if ty.Start == nil || !slices.Equal(ty.Start.In, []string{"desk"}) || len(ty.Start.Allowed) != 0 {
-				t.Errorf("incident@4 Start = %+v, want in [desk], no allowed", ty.Start)
+				t.Errorf("incident@%d Start = %+v, want in [desk], no allowed", ty.Version, ty.Start)
 			}
-		case ty.Start != nil:
-			t.Errorf("%s@%d has a start block %+v; only incident@4 should", ty.ID, ty.Version, ty.Start)
+		case ty.Start != nil && (ty.Start.In != nil || ty.Start.Allowed != nil):
+			t.Errorf("%s@%d has a start block %+v that says where or who; only incident@4 and @5 should", ty.ID, ty.Version, ty.Start)
 		}
 	}
 	if !found {

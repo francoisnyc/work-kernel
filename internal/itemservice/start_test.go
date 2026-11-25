@@ -20,7 +20,10 @@
 // Types are global, not per namespace, and every test of this package
 // shares one Postgres: each test registers Types of its own, with IDs no
 // other test uses, so that a start block here never judges a create
-// elsewhere. incident@4 is never registered in this package.
+// elsewhere. The one start block of types/ that says where is incident's
+// (in: [desk]): incident@5 is registered before any test runs
+// (newest_types_test.go), so every incident of this package is created
+// inside a desk.
 package itemservice_test
 
 import (
@@ -234,7 +237,7 @@ func TestStart_TheLatestVersionGoverns(t *testing.T) {
 		t.Fatalf("an ask@1 at the top level, before @2: %v", err)
 	}
 
-	w.reg(t, stAskSrc("2", "start:\n  in: [room_{s}]\n"))
+	w.reg(t, stAskSrc("2", "start:\n  in: [room_{s}]\n  older_versions: all\n"))
 	_, err := w.create(t, w.eve, w.id("ask"), 1, nil, nil)
 	assertStartRefused(t, "an ask@1 at the top level, judged by @2", err, itemservice.StartNotIn, w.id("ask"))
 	res1, err := w.create(t, w.eve, w.id("ask"), 1, &room, nil)
@@ -244,7 +247,7 @@ func TestStart_TheLatestVersionGoverns(t *testing.T) {
 		t.Errorf("the ask created as @1: version %d, %v; want pinned to 1", got.TypeVersion, err)
 	}
 
-	w.reg(t, stAskSrc("3", ""))
+	w.reg(t, stAskSrc("3", "start:\n  older_versions: all\n"))
 	if _, err := w.create(t, w.eve, w.id("ask"), 1, nil, nil); err != nil {
 		t.Errorf("an ask@1 at the top level, once @3 dropped the block: %v", err)
 	}

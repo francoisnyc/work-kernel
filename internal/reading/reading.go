@@ -148,6 +148,8 @@ const (
 	StartWhoNobody           Part = "start_who.nobody"            // No person creates a {type}: only a reaction does.
 	StartWhoCustomers        Part = "start_who.customers"         // ; a customer creates one only where a container lets them
 	StartLatest              Part = "start_latest"                // While this is the latest version of {type}, these rules apply to creating a {type} of any version.
+	StartOlder               Part = "start_older"                 // While this is the latest version of {type}, a {type} of version {n} may still be created; one of any other older version may not.
+	StartOlderAll            Part = "start_older.all"             // ... a {type} of any older version may still be created.
 )
 
 // Parts is the closed list of parts, in the order of the constants.
@@ -166,7 +168,7 @@ func Parts() []Part {
 		Create, CreateForEach, Set,
 		ConsentAdd, ConsentSet, ConsentCreate, ConsentMove, ConsentWildcard, Readable, Offer,
 		CustomerFields, CustomerFieldsNone, Own, Shared, PlacementAnyone, PlacementRoles, PlacementKernel,
-		StartIn, StartInTop, StartWho, StartWhoField, StartWhoContainerCreator, StartWhoNobody, StartWhoCustomers, StartLatest,
+		StartIn, StartInTop, StartWho, StartWhoField, StartWhoContainerCreator, StartWhoNobody, StartWhoCustomers, StartLatest, StartOlder, StartOlderAll,
 	}
 }
 

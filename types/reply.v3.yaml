@@ -1,0 +1,23 @@
+# reply@3 (track 1, item 6, step 1: a create names the latest version):
+# reply@2 with one line added, start.older_versions: all, and nothing else
+# changed. Once a newer version of a Type is registered, its older versions
+# are closed to new Items unless the newest one lists them. This version
+# keeps every older version of reply open, for the tests, stories, scenario
+# and apps that still create them. The text below is reply@2's.
+#
+# A reply, version 2 (the hardening step after Jira 2.4): version 1,
+# placed by the kernel only: a reply stays in the incident it was written in;
+# nobody moves or narrows it.
+#
+# A reply (Jira part 2, step 4a): the public conversation on a request.
+# Customers see it where the request shares it (incident@2).
+id: reply
+version: 3
+fields:
+  - {id: f_body, type: string}
+customer_fields: [f_body]
+
+placement_writable_by: [kernel]
+
+start:
+  older_versions: all

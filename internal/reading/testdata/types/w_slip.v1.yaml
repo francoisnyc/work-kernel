@@ -1,0 +1,5 @@
+# A slip, version 1: an older version its latest keeps open.
+id: w_slip
+version: 1
+fields:
+  - {id: f_title, type: string}

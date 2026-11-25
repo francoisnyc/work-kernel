@@ -1,0 +1,7 @@
+# A slip, version 2, the latest: every older version stays open.
+id: w_slip
+version: 2
+fields:
+  - {id: f_title, type: string}
+start:
+  older_versions: all
