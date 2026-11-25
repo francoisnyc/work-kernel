@@ -38,6 +38,7 @@ states:
   - {id: done, category: done}
 transitions:
   - {from: open, to: done` + moveAllowed + `}
+start: {older_versions: all}
 ` + rest
 }
 
