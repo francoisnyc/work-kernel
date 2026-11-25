@@ -66,6 +66,11 @@ type Input struct {
 	Container ContainerFields
 	Each      string
 	EachField typedef.Field
+	// Given are the fields this move's own patch sets, with a value: what
+	// a transition's `given` asks for (track 1 item 3). Nil for a move with
+	// no patch, the kernel's own moves included.
+	// Phase B stub: not read yet.
+	Given map[string]bool
 }
 
 func (r *Rejection) Error() string { return r.Reason }
