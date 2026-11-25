@@ -1,0 +1,20 @@
+# Witness fixture: who a state waits on (track 1 item 5, step 1). In
+# review, one move names the owner a field holds and a role: the request
+# waits on them. Its requester may take it back, a move that names nobody:
+# it does not wait on them. Done has a move the role may make, a reopen:
+# a done state never waits.
+id: w_queue
+version: 1
+initial_state: draft
+fields:
+  - {id: f_what,  type: string}
+  - {id: f_owner, type: principal}
+states:
+  - {id: draft,  category: todo}
+  - {id: review, category: waiting}
+  - {id: done,   category: done}
+transitions:
+  - {from: draft,  to: review, allowed: [creator], required: [f_owner]}
+  - {from: review, to: done,   allowed: ['field:f_owner', 'role:w_desk']}
+  - {from: review, to: draft,  allowed: [creator]}
+  - {from: done,   to: review, allowed: ['role:w_desk']}
