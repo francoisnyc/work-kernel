@@ -20,7 +20,10 @@
 // Types are global, not per namespace, and every test of this package
 // shares one Postgres: each test registers Types of its own, with IDs no
 // other test uses, so that a start block here never judges a create
-// elsewhere. incident@4 is never registered in this package.
+// elsewhere. The one start block of types/ that says where is incident's
+// (in: [desk]): incident@5 is registered before any test runs
+// (newest_types_test.go), so every incident of this package is created
+// inside a desk.
 package itemservice_test
 
 import (
