@@ -113,7 +113,9 @@ attack that found it as its test:
    27 of 27, its access request 17 of 18, the one left being a person's).
    They do not yet pass in full: a colleague can still change someone's
    draft (item 4).
-3. **Required means given by the mover**, where a Type asks for it.
+3. **Required means given by the mover**, where a Type asks for it. To weigh
+   in its Phase A, with item 4: a transition that declares the fields it may
+   set, and sets nothing else (OpenNSW scopes a step's submission this way).
 4. **"Only the requester" for drafts:** a draft's fields written only by
    whoever created it, until it is submitted. (Who last wrote a value, in
    full, is provenance: theme 2.)
@@ -361,7 +363,10 @@ test:
     kernel, never by the model calling the same tool.
   - **First check before building:** whether the kernel can tell a call
     from the card (the person) from a call by the model. If it cannot,
-    gated moves go through a signed link or an out-of-band step instead.
+    gated moves go through a signed link or an out-of-band step instead:
+    single-use, naming one person, one Item and one transition, with an
+    expiry, the click still judged by the Type's rules (from OpenNSW,
+    `docs/research/task-inboxes-taskana-polyflow.md`).
   - **What the Type adds for chat:** each move becomes a tool whose input
     schema comes from the Type's JSON Schema (V2c), so a move's `required`
     fields are its form; a short "when to suggest this" line per move for
