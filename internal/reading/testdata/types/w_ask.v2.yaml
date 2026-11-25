@@ -1,4 +1,6 @@
 # An ask, created only inside a room, by those its start block names.
+# Version 1 stays open (older_versions), so that its witness can show this
+# block judging a create of the older version too.
 id: w_ask
 version: 2
 fields:
@@ -7,3 +9,4 @@ customer_fields: [f_title]
 start:
   in: [w_room]
   allowed: ['role:lead', 'principal:user:root', 'field:f_lead', container_creator]
+  older_versions: all
