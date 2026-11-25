@@ -1,0 +1,19 @@
+# Corpus for the schema tests (Ventoux V2c): a state's claim and a
+# transition's release ("a claim that binds", track 1 item 5, step 2). It
+# loads on its own (stages a and b).
+id: corpus_claim
+version: 1
+initial_state: queue
+
+fields:
+  - {id: f_claimed_by, type: principal}
+
+states:
+  - {id: queue,  category: waiting}
+  - {id: review, category: active, claim: f_claimed_by}
+  - {id: done,   category: done}
+
+transitions:
+  - {from: queue,  to: review}
+  - {from: review, to: queue, release: true, clears: [f_claimed_by]}
+  - {from: review, to: done}
