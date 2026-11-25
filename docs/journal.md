@@ -37,9 +37,10 @@ Ideas noted during the spike, not built yet.
     evaluated, could be said per Item on a page (one call with everything
     a screen needs: OpenNSW's `GetTaskRenderInfo`).
   - **cmd/bench -waiting loads Items with one INSERT**, the only place
-    that writes Item rows from the side: accepted for a measuring tool on
-    its own container, or to be replaced by a load through the item
-    service at a smaller size (the owner's call, PR #89).
+    that writes Item rows from the side. The owner accepted it for this
+    measuring tool (PR #89): it runs only on the container the bench
+    starts itself and measures reads only. If a bench ever measures
+    writes, or events, it loads through the item service.
 
 - **Starting work, step 2b's Later items** (design.md, "Starting work, step 2b, as built"):
   - **An opt-out on a Type ("pinned placement").** The latest version's
@@ -4065,7 +4066,10 @@ view before the claim; a filter, not an operation; what counts; the claim's desi
 its session's; any staff member may ask for a role's queue), and at the tests gate seven choices the tests made:
 `creator` beside a role waits on the role; a role's queue ignores `except`; another person's inbox is refused; the
 story step; the sentence and its place; the incident oddity showing in an approved reading; `pli inbox`'s words and
-`--role`. Phase C approved by the coordinator's review. **Open for the owner in the PR:** the bench's loader.
+`--role`. Phase C approved by the coordinator's review. **The bench's loader** (one direct INSERT, in `cmd/bench` only): the
+owner accepted this exception to "every write goes through the item service" for a measuring tool. The mode starts its
+own Postgres container (`testdb.Start`), runs the INSERT on that container's pool and takes no database address, so it
+can reach no other database; reads only are measured.
 
 **Tests:** new: policy 5 (a property test over 5,000 generated cases), item service 13 (the bake-offs' four of six
 first), API 3, pli 3, story 4, reading 2 and a witness (`w_queue@1`). **Existing tests changed:** none. One new

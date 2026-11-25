@@ -5003,10 +5003,13 @@ Items in one namespace, 55,000 of them open and waiting; a page of 50,
   size, for about 0.01 ms more on each move. Whether the pilot needs
   that is the owner's decision on these numbers.
 - **The bench loads its Items with one INSERT,** not through the item
-  service: reads only are measured, and a Create each would take most of
-  an hour. It runs only against the Postgres container it starts itself
-  (`testdb.Start`); it takes no database address, by flag or by
-  environment.
+  service: an exception to "every write goes through the item service",
+  **accepted by the owner for this measuring tool** (2026-11-25). Reads
+  only are measured, and a Create each would take most of an hour. The
+  loader can reach only the bench's own database: the mode starts a fresh
+  Postgres container itself (`testdb.Start`, removed when it returns),
+  runs the INSERT on that container's pool, and takes no database
+  address, by flag or by environment. Nothing else may load Items so.
 
 **The bake-offs.** The Temporal bake-off's `test_inbox.py`, unchanged,
 gives the same rows as before: the script's own four for fay, and "Does a
