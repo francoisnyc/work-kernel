@@ -121,6 +121,13 @@ attack that found it as its test:
    full, is provenance: theme 2.)
 5. **Team queues with a claim that binds, and a "waiting on me" view** over
    every Type.
+   For its Phase A, from the established human-task designs
+   (`docs/research/task-inboxes-taskana-polyflow.md`): a queue defined by
+   the kernel's permissions, not a separate list; potential and excluded
+   owners (excluded is `except`, which exists); an administrator who can
+   reassign a stuck task but not decide it; claim, release and reassign as
+   transitions, so checks apply; an escalation chain with a time limit per
+   tier that resets the claim; due and follow-up dates.
 6. **Moving open Items to a new version, and retiring old versions**,
    deliberately and checked: a change that must reach requests in flight;
    includes starting work's step 2b (the latest version governs creates and
@@ -466,7 +473,8 @@ almost every theme at once. Two products, in this order:
 What it needs that is not built:
 
 - a "waiting on me" view across every Type, fast enough to be a daily inbox;
-- delegation and out of office, recorded as who acted for whom;
+- delegation and out of office, recorded as who acted for whom (vacation
+  rules that add alternates for an absent approver, as Oracle's do);
 - approval rules beyond one approver: n of m, in sequence, in parallel, and
   chains from the org chart (the HR `manager_of` hook is a start);
 - reminders and escalation on top of timers;
