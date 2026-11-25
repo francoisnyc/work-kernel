@@ -15,7 +15,10 @@ package main
 // The Items are loaded with one INSERT, not through the item service: at
 // this size a Create each would take the best part of an hour, and only
 // reads are measured here. They have no events and no workflow; nothing
-// else may ever load Items this way.
+// else may ever load Items this way. It can only reach the throwaway
+// Postgres this mode starts itself (testdb.Start, a fresh container that
+// is removed when it returns): the mode takes no database address, by
+// flag or by environment, and the INSERT runs on that container's pool.
 //
 // Each read is the item service's own Search (so its own SQL), a page of
 // 50, timed 30 times after a warm-up; the plan printed is that same
