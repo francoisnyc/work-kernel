@@ -246,9 +246,16 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 			return WriteResult{}, fieldsInvalid(err)
 		}
 		merged, set, cleared := applyPatch(it.Fields, req.Fields)
+		// What the move's own patch sets, with a value: what a
+		// transition's `given` asks for. The kernel's own moves carry
+		// none. Whether that meets the rule is the lifecycle's to say.
+		given := make(map[string]bool, len(set))
+		for id := range set {
+			given[id] = true
+		}
 		next, err := lifecycle.TransitionWith(ty, it.State,
 			lifecycle.Input{Fields: merged, Links: links, Today: k.today(), CauseAt: causeAt,
-				Around: around.around, Container: around.container}, req.ToState)
+				Around: around.around, Container: around.container, Given: given}, req.ToState)
 		if err != nil {
 			return WriteResult{}, fromLifecycle(err)
 		}
