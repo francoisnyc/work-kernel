@@ -73,6 +73,10 @@ const (
 	CannotSee  Verb = "cannot see"
 	Places     Verb = "places"  // places ITEM in ITEM | places ITEM at the top level
 	Narrows    Verb = "narrows" // narrows ITEM to person, person, ...
+	// FindsWaiting is a STUB (Phase B): finds waiting ITEM, ITEM, ... |
+	// finds nothing waiting. Parse does not read it yet and Run does not
+	// run it; waiting_test.go is the spec.
+	FindsWaiting Verb = "finds waiting"
 )
 
 // Step is one step of the timeline (or of given).
@@ -99,6 +103,7 @@ type Step struct {
 
 	Values []Assignment // with ...
 	Fields []string     // sees ... fields
+	Items  []string     // finds waiting: the Items' names (none: nothing waiting); a stub, as FindsWaiting
 
 	Refused string // "-> refused REASON": the reason the write must be refused with
 }
