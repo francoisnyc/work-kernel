@@ -29,6 +29,11 @@ type Filter struct {
 	Fields []FieldFilter
 	// Links keeps Items linked to or from given Items (see LinkFilter).
 	Links []LinkFilter
+	// WaitingOn keeps the open Items that wait on someone ("waiting on
+	// me", track 1 item 5): "me", the caller, or "role:<name>", a role's
+	// queue. STUB (Phase B): not read yet; waiting_test.go is the spec.
+	// omitempty keeps the page tokens of requests without it as they were.
+	WaitingOn string `json:",omitempty"`
 }
 
 // FieldFilter is a condition on one field: Eq, or a range of one or two
