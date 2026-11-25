@@ -184,6 +184,26 @@ func (r *renderer) whoStarts() {
 	}
 	r.say([]Part{StartLatest}, path,
 		at("While this is the latest version of %s, these rules apply to creating %s of any version.", t.ID, withArticle(t.ID)))
+	// Which older versions may still be created (track 1, item 6, step 1).
+	// A block without the key says nothing: only the latest version is
+	// created then, the kernel's rule for every Type.
+	if o := s.OlderVersions; o != nil {
+		older := []string{"start.older_versions"}
+		if o.All {
+			r.say([]Part{StartOlder, StartOlderAll}, older,
+				at("While this is the latest version of %s, %s of any older version may still be created.", t.ID, withArticle(t.ID)))
+		} else {
+			versions := slices.Clone(o.Versions)
+			slices.Sort(versions)
+			var names []string
+			for _, v := range versions {
+				names = append(names, strconv.Itoa(v))
+			}
+			r.say([]Part{StartOlder}, older,
+				at("While this is the latest version of %s, %s of version %s may still be created; one of any other older version may not.",
+					t.ID, withArticle(t.ID), joinOr(names)))
+		}
+	}
 }
 
 // --- Who writes what ---
