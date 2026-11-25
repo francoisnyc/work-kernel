@@ -4254,6 +4254,8 @@ version skips a rule a newer version put in the lifecycle (the roadmap's
 open item, found by the first bake-off, where a CFO approval was skipped
 this way). Step 2b closes that door for placement only. Retiring a version
 for creates needs its own step, decided before it is built.
+**Since closed for creates** (track 1, item 6, step 1): see "A create names
+the latest version, as built".
 
 **What changed for the Types in `types/`** (the only ones whose versions
 differ in the rule):
@@ -5184,6 +5186,112 @@ claim sentence is caught. No approved reading changed.
 (`typedef`, the JSON Schema), the rule (`policy`), the item service's
 transition (record, freeze, authorize) and its `waiting_on` query, the
 reading's sentences. No proto, migration or go.mod change.
+
+## A create names the latest version, as built (2026-11-25)
+
+Track 1, item 6, step 1 of five (the split is in `docs/roadmap.md`). The
+first bake-off found the hole (`docs/research/camunda-bakeoff.md`, test 1):
+after `purchase@2` added the CFO's approval, a requester created a
+`purchase@1` by naming it, and it was approved without the CFO.
+
+**The rule (a kernel rule; it fails closed).** A create on the public door
+must name the latest registered version of its Type. Once a newer version
+is registered, an older one is created only if the newest one keeps it
+open:
+
+```yaml
+start:
+  older_versions: [5, 6]   # or: all. Absent: only the latest version is created
+```
+
+The key sits in `start` because the latest version's block already judges
+a create of every version (step 2). A block may hold it alone; it then
+says nothing of where or by whom. It is the latest version's word only: a
+newer version without the key closes the older ones again, and one that
+lists them reopens them. The Item stays pinned to the version named.
+
+**Who.** A person, an agent, a customer, an agent acting for a customer,
+and a person creating for a customer (`requester`). **A create reaction is
+exempt:** it is the kernel's own create and does not pass through this
+check, so an Item in flight keeps making the children its own version
+names (an `incident@3` its `sla_goal@3` goals). The cost: an older Item
+goes on producing older-version children until it is moved to a newer
+version, which is a later step.
+
+**How.** `checkStart` (`internal/itemservice/start.go`) asks
+`Start.Creatable(version, latest)` with the latest version it already
+reads through `latestType`: in the create's own transaction, never cached,
+so a version another process registers counts at once. No extra query.
+
+**The order of a create's checks** (step 2's list, with one line added):
+
+1. What answers `NOT_FOUND`.
+2. **The version** (this step).
+3. `in`: `START_NOT_IN`.
+4. `allowed`: `START_NOT_ALLOWED`.
+5. The rest, as before.
+
+A retry of an earlier create, with its idempotency key, still answers with
+what that create made, even if a newer version has closed the version
+since: the key is looked up before any of this.
+
+**The refusal.** An `*InvalidError` on the path `type`, an `ErrInvalid`;
+over the API `INVALID_ARGUMENT` / `INVALID_REQUEST` with a field violation
+on `type`, the answer a version that is not registered gets. Its text is
+fixed and names no Type, version or Item: "this version of the Type is
+closed to new Items: create its latest version". No contract change. A
+refused create writes nothing and uses up no idempotency key. A reason of
+its own, with the latest version in metadata, is Later.
+
+**Load checks** (`typedef.Check`): stage 1, a map, or a map or list inside
+the list (`WRONG_SHAPE`); stage 2 (`checkOlderVersions`), a word other
+than `all`, a bare number, a list that names nothing, an entry that is not
+a version number, a version below 1 or not older than the Type's own
+(`INVALID_VALUE`), a version twice (`DUPLICATE`, on the second); stage 3
+(`CheckStart`), a listed version that is not loaded (`UNKNOWN_TYPE`, also
+for a draft against the registered versions). The stored form keeps the
+key as written: `"all"`, or the list.
+
+**Retiring a version, for creates, is this rule:** a version is closed the
+moment a newer one is registered that does not list it. Nothing is stored
+for it. Showing which versions are open in `GetType` and `ListTypes`, and
+counting the open Items on each, is a later step.
+
+**Readings.** A block with the key says, last under *Who starts it*:
+"While this is the latest version of w_form, a w_form of version 2 may
+still be created; one of any other older version may not.", or "… a
+w_slip of any older version may still be created." (parts `start_older`,
+`start_older.all`, citing `start.older_versions`). A version without the
+key says nothing of it; the closing note already says the latest version
+decides who may create one. No approved reading changed.
+
+**What follows the latest version, and what does not** (step 2b's table,
+with one row added):
+
+| | Judged by |
+|---|---|
+| where an Item is created, and by whom (`start`) | the latest version |
+| **which versions may be created** (`start.older_versions`) | the latest version |
+| who moves, narrows or un-narrows it (`placement_writable_by`) | the latest version |
+| its states and moves, guards, reactions, timers, invariants | the Item's own version |
+| who may make a move; who may write a field; what a customer sees | the Item's own version |
+
+**What this does not close.** Items already on an older version keep its
+lifecycle: the three purchases in flight in the bake-offs are still
+approved without the CFO. Moving an open Item to a newer version is step 2.
+
+**The Types in `types/`.** Thirteen Types whose older versions are still
+created by tests, stories, the scenario, the PoC apps or the browser tests
+gained a new latest version, each the version before it plus
+`start.older_versions: all` and nothing else (no registered version was
+edited): bug@4, comment@4, desk@4, incident@5, note@3, reply@3, sprint@3,
+story@4, task@4, ticket@8, vacation_request@4, sla_goal@4, sla_policy@3.
+`build_step` gained none: `build_step@1` is closed since `build_step@2`,
+which the scenario shows.
+
+**Kernel changes (three):** the key, its load checks and `Start.Creatable`
+(`typedef`, the JSON Schema); the check in `Create`; the reading's
+sentence. No schema migration, proto or go.mod change.
 
 ## Out of scope for the spike
 

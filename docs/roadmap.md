@@ -274,6 +274,31 @@ attack that found it as its test:
    Before Items move, each is checked against the new version's rules from
    its state and history (as Cognitive Fab's polyflow vets a new version
    against runs in flight: `docs/research/agent-governance-cognitive-fab-polyflow.md`).
+   Split into five steps (the owner's, at its Phase A):
+   1. **A create names the latest version. Built** (`docs/design.md`, "A
+      create names the latest version, as built"): once a newer version of
+      a Type is registered, an older one is created only if the newest
+      one's `start.older_versions` lists it (or says `all`); otherwise the
+      create is refused, `INVALID_ARGUMENT` on `type`. A kernel rule that
+      fails closed; create reactions are exempt. Thirteen Types in `types/`
+      gained a new latest version that keeps their older versions open.
+      Both bake-offs, run in full: the row "ana asks for the old version
+      by name" now reads refused (`test1-cfo.py`, `test_change_kernel.py`);
+      three script places that created `purchase@1` after `purchase@2`
+      were changed, with the owner's agreement. No proto or database
+      change. **Still open:** the three purchases in flight are still
+      approved without the CFO, and no open Item can be moved.
+   2. **Move one quiet Item** to the latest version, checked against it
+      (its state, fields, invariants, links, container, claim and path),
+      with a dry run: a new operation in kernel.v1 and a Type key for who
+      may. Refused for an Item with a hold, an unfinished action or a
+      timer.
+   3. **Items with timers:** the workflow reloads under the new version.
+   4. **Bulk and status:** every open Item of a version, with a dry-run
+      list; which versions are open, and how many open Items each holds,
+      in `ListTypes`.
+   5. **The author's mappings** (a state map, dropped fields), if a real
+      case asks.
 
 Item 5's "waiting on me" view is the visible milestone of the six weeks:
 it is the front door of the landing positioning below.
@@ -632,13 +657,12 @@ test:
    another's draft is closed where a Type says so** (track 1 item 4, PR #79:
    `requester_only` on the draft). Who last wrote a value, in full, is still
    provenance.
-4. **Still open: a requester creating on an older version skips a newer
-   rule.** The CFO approval was skipped this way. Starting work, steps 2 and
-   2b make the latest version decide where an Item starts and who places it,
-   but a create may still name an older version, and that version's
-   lifecycle then applies. It needs its own step, decided before it is built
-   (for example: a create takes only the latest version unless the Type says
-   otherwise).
+4. **Done for creates: a requester creating on an older version skipped a
+   newer rule.** The CFO approval was skipped this way. Since track 1, item
+   6, step 1 a create names the latest version unless that version keeps
+   the older one open (`start.older_versions`). **Still open:** a request
+   already in flight keeps the rules of the version it was created on, and
+   nothing moves it (track 1, item 6, steps 2 to 4).
 5. **Known, and planned elsewhere:** a claim is only a field, so a colleague
    can still decide (team queues with an enforced claim, under "Pilots serve
    generality"). Since built: track 1, item 5, step 2 (a state's `claim`).
