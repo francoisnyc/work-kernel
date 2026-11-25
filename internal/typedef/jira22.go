@@ -616,6 +616,11 @@ func (t *Type) checkCreatedInside(rep reporter, p string, r *Reaction, where str
 				"%s: transition %s -> %s is held by the check %q; a reaction may not ask for a held move", where, from, r.To, h)
 			return
 		}
+		if given := t.givenOn(from, r.To); len(given) > 0 {
+			rep.fail(CodeConflict, at(p, "to"), "Move into a state whose transitions ask nothing to be given, or let a person make the move",
+				"%s: transition %s -> %s needs %s given in the move; a reaction gives no fields", where, from, r.To, strings.Join(given, ", "))
+			return
+		}
 	}
 	t.compileChildWhen(rep, p, r, where)
 }
@@ -815,6 +820,11 @@ func checkMoveInto(rep reporter, p string, r Reaction, tgt *Type) error {
 		if h, held := tgt.heldBy(from, r.To); held {
 			return rep.fail(CodeHeldTransition, at(p, "to"), "Move into a state whose transitions are not held",
 				"reaction %s: %s holds %s -> %s by %s; a reaction may not ask for a held move", r.ID, tat, from, r.To, h)
+		}
+		if given := tgt.givenOn(from, r.To); len(given) > 0 {
+			return rep.fail(CodeConflict, at(p, "to"), "Move into a state whose transitions ask nothing to be given, or let a person make the move",
+				"reaction %s: %s's transition %s -> %s needs %s given in the move; a reaction gives no fields",
+				r.ID, tat, from, r.To, strings.Join(given, ", "))
 		}
 	}
 	return nil

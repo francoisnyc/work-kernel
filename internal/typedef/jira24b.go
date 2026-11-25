@@ -474,6 +474,12 @@ func checkMoveContainer(rep reporter, p string, types []*Type, src *Type, r Reac
 					"reaction %s: %s holds %s -> %s by %s; a reaction may not ask for a held move", r.ID, tat, from, r.To, h)
 				return
 			}
+			if given := tgt.givenOn(from, r.To); len(given) > 0 {
+				rep.fail(CodeConflict, at(p, "to"), "Move into a state whose transitions ask nothing to be given, or let a person make the move",
+					"reaction %s: %s's transition %s -> %s needs %s given in the move; a reaction gives no fields",
+					r.ID, tat, from, r.To, strings.Join(given, ", "))
+				return
+			}
 		}
 	}
 	if consenting == 0 {

@@ -138,6 +138,7 @@
         "to": {"$ref": "#/$defs/text"},
         "guard": {"description": "A CEL expression that must be true.", "$ref": "#/$defs/text"},
         "required": {"description": "Fields that must be set.", "$ref": "#/$defs/texts"},
+        "given": {"description": "Required fields the move itself must give: set in its own patch; a value written before does not count.", "$ref": "#/$defs/texts"},
         "allowed": {"description": "Who may make the move (empty: anyone who sees the Item).", "$ref": "#/$defs/texts"},
         "except": {"description": "Who may not, even if allowed.", "$ref": "#/$defs/texts"},
         "escape": {"description": "May leave a state while a hold is open.", "$ref": "#/$defs/flag"},

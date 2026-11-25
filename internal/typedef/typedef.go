@@ -240,6 +240,10 @@ type Transition struct {
 	To       string   `yaml:"to" json:"to"`
 	Guard    string   `yaml:"guard" json:"guard,omitempty"`       // a CEL expression; see compileGuard
 	Required []string `yaml:"required" json:"required,omitempty"` // field IDs that must be set
+	// Given are fields of Required the move itself must give: set, with a
+	// value, in its own patch (track 1 item 3). A value written before,
+	// by anyone, does not count. Package lifecycle judges it.
+	Given []string `yaml:"given" json:"given,omitempty"`
 	// Allowed says who may make the move: entries are "role:<name>" or
 	// "principal:<id>". Empty means anyone who can see the Item. The list is
 	// only checked for shape here; package policy decides.
@@ -534,6 +538,9 @@ func (t *Type) check() error {
 	// Computed effects: the same, and each expression compiles to a value
 	// of its field.
 	t.checkSets(r)
+	// What the move itself must give: fields a patch may name, on a move
+	// a person makes.
+	t.checkGiven(r)
 
 	// A field only the kernel writes needs a writer: a hook that writes it,
 	// or another Type's reaction this Type accepts for it.
