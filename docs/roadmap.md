@@ -306,6 +306,8 @@ order" in `docs/design.md` sets.
   (so an agent suggests only from that list), stages that group parallel
   work, and conditions that switch work on when the case changes. Today a
   case can gather linked Items and carry rollups and invariants, no more.
+  Joins already work (the access request); the proposal to declare them, and
+  sentries, on the case itself: `docs/plans/case-reacts-to-children.md`.
 - **Throughout:** every way of writing a Type (YAML, a builder, plain English)
   fills in the same semantic model (`typedef`); checks, readings and the diff
   work on the model, never on one syntax.
