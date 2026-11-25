@@ -364,8 +364,15 @@ func TestIncident_StartRefusals(t *testing.T) {
 	if out.Outcome != itemservice.ReactionFailed || out.Reason != "not_linked" {
 		t.Errorf("start in a desk without a policy = %+v; want failed, not_linked", out)
 	}
-	// An incident outside any desk: no_container.
-	alone := w.create(t, w.ana, "incident", nil, map[string]any{"f_title": "no desk " + word(), "f_priority": "P1"})
+	// An incident outside any desk: no_container. An incident is created
+	// only inside a desk (incident's latest start block), so this one is
+	// created in the desk and moved out of it by a desk agent.
+	grantRoleIn(t, w.ns, w.sam, "desk_agent")
+	alone := w.create(t, w.ana, "incident", &w.desk, map[string]any{"f_title": "no desk " + word(), "f_priority": "P1"})
+	if _, err := w.k.Update(testCtx(t), itemservice.UpdateRequest{IdempotencyKey: newKey(), Principal: w.sam, ItemID: alone,
+		Move: &itemservice.Move{ConfirmWiden: true}}); err != nil {
+		t.Fatalf("sam moves the incident out of the desk: %v", err)
+	}
 	if out := w.reactCreate(t, entered(alone, 1, "sla_start_first_response")); out.Outcome != itemservice.ReactionFailed || out.Reason != "no_container" {
 		t.Errorf("start outside a desk = %+v; want failed, no_container", out)
 	}
