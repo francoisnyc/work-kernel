@@ -463,6 +463,12 @@ func TestE2E_Incident_Breach_NobodyAssigned_NoMail_OneRecord(t *testing.T) {
 // A recipient who cannot see the incident is told nothing.
 func TestE2E_Incident_Breach_AnAssigneeWhoCannotSeeIt_IsNotTold(t *testing.T) {
 	s := newIncStack(t, 0)
+	// Narrowing an incident is placement, which incident's latest version
+	// leaves to desk agents: ana is one here.
+	if _, err := pool.Exec(serverCtx(t),
+		`insert into principal_roles (namespace_id, principal, role) values ('default', $1, 'desk_agent')`, s.ana.Actor); err != nil {
+		t.Fatalf("grant desk_agent: %v", err)
+	}
 	res, err := s.k.Create(serverCtx(t), itemservice.CreateRequest{
 		IdempotencyKey: "key-" + uuid.NewString(), Principal: s.ana, TypeID: "incident", TypeVersion: 1, ContainerID: &s.desk,
 		Narrow: &itemservice.Narrow{Readers: []string{s.ana.Actor, s.admin.Actor}},
