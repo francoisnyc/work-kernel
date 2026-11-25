@@ -415,14 +415,20 @@ notes for the two Types and the MCP server, not yet built):
 1. **"Not yet" is not "no"** (hitloop): an approval can be deferred with a
    note, a transition of its own, and the agent waits again.
 2. **A refusal says why** (HumanLayer, RobotRock): a reason the agent can
-   read, in a field, never in `item_events.payload` (kernel rule).
+   read, in a field, never in `item_events.payload` (kernel rule). Built:
+   `required` with `given` (track 1 item 3) makes the decider give it in
+   the move itself.
 3. **The approver edits, the action uses the approved values** (gotoHuman
    lets a reviewer edit before approving): the approver writes the approved
    amount or target, and the action carries out those, not what the agent
-   proposed. Approving a $500 refund cannot send $5,000.
+   proposed. Approving a $500 refund cannot send $5,000. Two things make
+   it hold: those fields are closed to agents (built, track 1 item 2), and
+   the approved state freezes them, since an action reads the fields as
+   they are when it runs, not as they were at the approval.
 4. **Agents look up past answers before asking again** (hitloop's decisions
    log): a `find_answer` tool over answered `question@1` Items, through
-   `policy.Project`; answered questions also feed an agent's context.
+   `policy.Project`; answered questions also feed an agent's context
+   (context packs, which wait until the decision point).
 5. **Questions come with a recommended answer** and why it matters
    (hitloop): a person accepts most and changes a few. A batch of questions
    is a case with `question@1` children; a follow-up is created by a
@@ -447,9 +453,12 @@ coding agent from finishing while a decision is pending (hitloop).
 Already given by the kernel's design: custom response buttons are
 transitions (RobotRock); one of two simultaneous approvers wins under the
 row lock (Agno guards with `expected_status`); typed responses are typed
-fields (Placet). Not copied: rich review screens (diffs, image annotation,
-swipe review), the screen race above; the kernel needs only attachments, so
-an agent can put files and links on an Item.
+fields (Placet); only the person who took a request decides it (a claim
+that binds, track 1 item 5). Not copied: rich review screens (diffs, image
+annotation, swipe review), the screen race above; the kernel needs only
+attachments, so an agent can put files and links on an Item. Attachments
+are not built: a fourth unbuilt piece beside the three under "What every
+way in needs".
 
 Depends on track 1, item 5: without queues, a binding claim and "waiting
 on me", the kernel adds little over the inboxes that exist. Proposed for
