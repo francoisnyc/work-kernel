@@ -61,6 +61,10 @@ func runTests(m *testing.M) int {
 			return 1
 		}
 	}
+	if err := registerNewestTypes(ctx); err != nil {
+		log.Print(err)
+		return 1
+	}
 	return m.Run()
 }
 
