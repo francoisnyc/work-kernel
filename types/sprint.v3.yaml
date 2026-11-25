@@ -1,0 +1,40 @@
+# sprint@3 (track 1, item 6, step 1: a create names the latest version):
+# sprint@2 with one line added, start.older_versions: all, and nothing else
+# changed. Once a newer version of a Type is registered, its older versions
+# are closed to new Items unless the newest one lists them. This version
+# keeps every older version of sprint open, for the tests, stories, scenario
+# and apps that still create them. The text below is sprint@2's.
+#
+# A sprint in a software project, version 2 (Jira part 2, step 1). Issues
+# join it by their link type `sprint`, as in version 1.
+#
+# New: f_end_at, the instant the sprint ends, and an active sprint closes
+# itself when that instant passes (`at`), as system:timer. Moving f_end_at
+# moves the timer; without one the sprint stays open until closed by hand,
+# which anyone may still do. f_start and f_end stay calendar dates, for
+# display: a date has no time zone, so no timer hangs on one.
+#
+# The timer makes this Type listen: every event of a sprint@2 gets an
+# outbox row, and an active sprint has a workflow.
+id: sprint
+version: 3
+initial_state: planned
+
+fields:
+  - {id: f_name,   type: string}
+  - {id: f_start,  type: date}
+  - {id: f_end,    type: date}
+  - {id: f_end_at, type: datetime}
+  - {id: f_goal,   type: string}
+
+states:
+  - {id: planned, category: backlog}
+  - {id: active,  category: active, at: {field: f_end_at, to: closed}}
+  - {id: closed,  category: done}
+
+transitions:
+  - {from: planned, to: active}
+  - {from: active,  to: closed}
+
+start:
+  older_versions: all

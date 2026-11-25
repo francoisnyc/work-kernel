@@ -1,0 +1,175 @@
+# incident@5 (track 1, item 6, step 1: a create names the latest version):
+# incident@4 with one line added, start.older_versions: all, and nothing else
+# changed. Once a newer version of a Type is registered, its older versions
+# are closed to new Items unless the newest one lists them. This version
+# keeps every older version of incident open, for the tests, stories, scenario
+# and apps that still create them. The text below is incident@4's.
+#
+# An incident, version 4 (starting work, step 2): incident@3, with one
+# change.
+#
+#   - An incident is created only inside a desk: never at the top level,
+#     never in another container (start: {in: [desk]}). The latest
+#     version's start block judges a create of every version, so this
+#     holds for incident@1, @2 and @3 too.
+#   - Who may create one is unchanged: anyone on staff who sees the desk
+#     (in scenario B, ana opens her own incident), and a customer where a
+#     desk's Type owns incidents (desk@2, desk@3: own: [incident]).
+#
+# What @3 says, unchanged otherwise:
+#
+# An incident, version 3 (the hardening step after Jira 2.4): incident@2,
+# with two changes.
+#
+#   - Only desk agents move or narrow an incident (placement_writable_by):
+#     under @2 its requester, or anyone who sees it, may narrow it or move
+#     it out of its desk.
+#   - Its goals are sla_goal@3, which no person moves, narrows or completes
+#     by hand.
+#
+# What @2 says, unchanged otherwise:
+#
+# An incident, version 2 (Jira part 2, step 4a): incident@1 opened by a
+# customer in a portal (desk@2). What changes from version 1:
+#
+#   - The conversation is two Types, so its audience is its Type: a reply
+#     (reply@1) is public and shared with the requester (shared: [reply]);
+#     a note (note@1) is internal, because nothing shares it. The goals
+#     (sla_goal) are shared with nobody either.
+#   - Someone else's reply stops first response; the requester's own reply
+#     sets a waiting incident back in progress (which resumes resolution).
+#     Neither reads a field: the Type is the rule.
+#   - A customer sees and sets the title, the priority and the impact, and
+#     sees the resolution (customer_fields); never the assignee, the due
+#     instants or the bugs behind it.
+#   - The requester may cancel a new incident and reopen a resolved one;
+#     staff do both with the role desk_agent (allowed: [creator,
+#     role:desk_agent]). A customer takes no other move.
+#
+# Otherwise as version 1:
+#
+#   - new -> in_progress <-> waiting_for_customer -> resolved -> closed.
+#     Resolving says how (f_resolution); reopening (resolved -> in_progress)
+#     clears it. A resolved incident is closed by a timer 120 hours later,
+#     and by nobody else. new and in_progress may be canceled.
+#   - Priority (P1 to P4) is required from creation: the goals' targets are
+#     picked by it, from the desk's SLA policy.
+#   - Both goals start when the incident is created. Only resolution
+#     pauses, and only while the incident waits for its customer.
+#     Resolving stops the goals; reopening starts a new resolution goal
+#     (first response is measured once); canceling cancels them.
+#   - f_due_first_response and f_due_resolution are written by the goals,
+#     nobody else: a queue sorts by them.
+#   - The goals tell the assignee of a breach (offers: breach_contact), as
+#     assigned at that moment.
+#   - caused_by links the bugs behind it.
+id: incident
+version: 5
+initial_state: new
+
+fields:
+  - {id: f_title,      type: string}
+  - {id: f_priority,   type: enum, options: [P1, P2, P3, P4]}
+  - {id: f_impact,     type: enum, options: [extensive, significant, moderate, minor]}
+  - {id: f_assignee,   type: principal}
+  - {id: f_resolution, type: enum, options: [fixed, workaround, wontfix, duplicate]}
+  - {id: f_due_first_response, type: datetime, writable_by: kernel}
+  - {id: f_due_resolution,     type: datetime, writable_by: kernel}
+
+invariants:
+  - {id: priority_missing, rule: 'f_priority != null'}
+
+links:
+  - {name: caused_by, inverse: causes, targets: [bug]}
+
+offers:
+  breach_contact: f_assignee
+
+states:
+  - {id: new,                  category: triage}
+  - {id: in_progress,          category: active}
+  - {id: waiting_for_customer, category: waiting}
+  - {id: resolved,             category: done, timer: {after: 120h, to: closed}}
+  - {id: closed,               category: done}
+  - {id: canceled,             category: canceled}
+
+transitions:
+  - {from: new,                  to: in_progress}
+  - {from: in_progress,          to: waiting_for_customer}
+  - {from: waiting_for_customer, to: in_progress}
+  - {from: in_progress,          to: resolved, required: [f_resolution]}
+  - {from: waiting_for_customer, to: resolved, required: [f_resolution]}
+  - {from: resolved,             to: closed, allowed: ['principal:system:timer']}
+  - {from: resolved,             to: in_progress, clears: [f_resolution], allowed: [creator, 'role:desk_agent']}
+  - {from: new,                  to: canceled, allowed: [creator, 'role:desk_agent']}
+  - {from: in_progress,          to: canceled}
+
+reactions:
+  # The contract of the sla package: these IDs, moving or creating sla_goals.
+  - id: sla_start_first_response
+    kind: create
+    on: enter
+    state: new
+    type: sla_goal
+    version: 3
+    fields:
+      f_metric: '"first_response"'
+      f_target_s: 'f_priority == "P1" ? container.linked.sla_policy.f_first_response_s_p1 : f_priority == "P2" ? container.linked.sla_policy.f_first_response_s_p2 : f_priority == "P3" ? container.linked.sla_policy.f_first_response_s_p3 : container.linked.sla_policy.f_first_response_s_p4'
+      f_started_at: 'cause.at'
+      f_week: 'container.linked.calendar.f_week'
+      f_days_off: 'container.linked.calendar.f_days_off'
+      f_zone: 'container.linked.calendar.f_zone'
+      f_due_at: >-
+        working_after(cause.at,
+        f_priority == "P1" ? container.linked.sla_policy.f_first_response_s_p1 : f_priority == "P2" ? container.linked.sla_policy.f_first_response_s_p2 : f_priority == "P3" ? container.linked.sla_policy.f_first_response_s_p3 : container.linked.sla_policy.f_first_response_s_p4,
+        calendar(container.linked.calendar.f_week, container.linked.calendar.f_days_off, container.linked.calendar.f_zone))
+  - id: sla_start_resolution
+    kind: create
+    on: enter
+    state: new
+    type: sla_goal
+    version: 3
+    fields: &resolution
+      f_metric: '"resolution"'
+      f_target_s: 'f_priority == "P1" ? container.linked.sla_policy.f_resolution_s_p1 : f_priority == "P2" ? container.linked.sla_policy.f_resolution_s_p2 : f_priority == "P3" ? container.linked.sla_policy.f_resolution_s_p3 : container.linked.sla_policy.f_resolution_s_p4'
+      f_started_at: 'cause.at'
+      f_week: 'container.linked.calendar.f_week'
+      f_days_off: 'container.linked.calendar.f_days_off'
+      f_zone: 'container.linked.calendar.f_zone'
+      f_due_at: >-
+        working_after(cause.at,
+        f_priority == "P1" ? container.linked.sla_policy.f_resolution_s_p1 : f_priority == "P2" ? container.linked.sla_policy.f_resolution_s_p2 : f_priority == "P3" ? container.linked.sla_policy.f_resolution_s_p3 : container.linked.sla_policy.f_resolution_s_p4,
+        calendar(container.linked.calendar.f_week, container.linked.calendar.f_days_off, container.linked.calendar.f_zone))
+  - {id: sla_restart_resolution, kind: create, on: enter, state: in_progress, from: [resolved], type: sla_goal, version: 3, fields: *resolution}
+  - {id: sla_pause,  kind: move, on: enter, state: waiting_for_customer,
+     children: {of: [sla_goal], when: 'child.f_metric == "resolution"'}, to: paused, target_from: [running]}
+  - {id: sla_resume, kind: move, on: enter, state: in_progress, from: [waiting_for_customer],
+     children: {of: [sla_goal], when: 'child.f_metric == "resolution"'}, to: running, target_from: [paused]}
+  - {id: sla_stop,   kind: move, on: enter, state: resolved, children: {of: [sla_goal]}, to: completed, target_from: [running, paused]}
+  - {id: sla_cancel, kind: move, on: enter, state: canceled, children: {of: [sla_goal]}, to: canceled,  target_from: [running, paused]}
+  - {id: sla_answered, kind: move, on: created_inside, of: [reply], by: not_creator,
+     children: {of: [sla_goal], when: 'child.f_metric == "first_response"'}, to: completed, target_from: [running]}
+  # The incident's own rule: the requester's reply brings it back.
+  - {id: customer_replied, kind: move, on: created_inside, of: [reply], by: creator,
+     from: [waiting_for_customer], to: in_progress}
+
+shared: [reply]
+customer_fields: [f_title, f_priority, f_impact, f_resolution]
+
+accepts_reactions:
+  sla_goal:show_first_response:   {sets: [f_due_first_response]}
+  sla_goal:hide_first_response:   {sets: [f_due_first_response]}
+  sla_goal:clear_first_response:  {sets: [f_due_first_response]}
+  sla_goal:cancel_first_response: {sets: [f_due_first_response]}
+  sla_goal:show_resolution:       {sets: [f_due_resolution]}
+  sla_goal:hide_resolution:       {sets: [f_due_resolution]}
+  sla_goal:clear_resolution:      {sets: [f_due_resolution]}
+  sla_goal:cancel_resolution:     {sets: [f_due_resolution]}
+
+# Only desk agents move or narrow an incident.
+placement_writable_by: ['role:desk_agent']
+
+# Created only inside a desk (any version of desk), by anyone who sees it.
+start:
+  in: [desk]
+  older_versions: all
