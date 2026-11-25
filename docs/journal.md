@@ -93,6 +93,8 @@ Ideas noted during the spike, not built yet.
     `pg_xact_status(xid) = 'committed'` still hold. **Proposed, for the owner (a protected test, as the
     two timing tests were):** assert `pg_visible_in_snapshot(xid, pg_current_snapshot())` instead: the
     event's transaction has committed and is no longer in progress, which is what the test pins.
+    **Fixed 2026-11-25** (the owner agreed): the test now asserts exactly that. Checked with an older
+    transaction holding an xid open beside it: the old assertion fails (0 rows), the new one holds.
 
 - **Found by the Temporal bake-off** (docs/research/temporal-bakeoff.md):
   - **Fields are open to the agent by default.** **Built** (PR #75): a
