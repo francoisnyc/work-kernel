@@ -92,6 +92,11 @@ engine, the task attributes, and authorisation rules.
 4. **The inbox as a projection** (Polyflow). The "waiting on me" view across
    every Type is a read model fed by events: the event reader of roadmap
    theme 5, not a query over every Type.
+   (Superseded, 2026-11-25: `task-queue-internals.md` found that every
+   engine read stores who may act in the same write as the task, and
+   item 5's Phase A kept a read model fed by events for the inbox over
+   other systems only. As built, step 1 derives the view at read time;
+   rows written in the same write are its step 3.)
 5. **Collectors and enrichment** for one inbox over other systems: intakes,
    enrich hooks, and an object reference per Item (`external_keys`). Enriched
    copies of business data fall under the erasure rule.

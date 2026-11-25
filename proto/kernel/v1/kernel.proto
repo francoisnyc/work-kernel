@@ -351,6 +351,21 @@ message ItemFilter {
   repeated FieldFilter fields = 4;
   // Conditions on links: Items linked to (or from) an Item.
   repeated LinkFilter links = 5;
+  // "Waiting on me": only the open Items that wait on someone, read from
+  // the moves out of each Item's state in its own Type version. "me": the
+  // caller (for an agent, what its session may act on: the agent and the
+  // user it acts for both pass). "role:<name>": that role's queue, which
+  // any member of staff may ask for; they see of it what they can see.
+  //
+  // A move counts when its `allowed` names a role, a person or a field;
+  // a move open to anyone, the creator's own, nobody's or the kernel's
+  // does not, and a state in category DONE or CANCELED never waits.
+  // `except` is applied to the caller. Guards, required and given fields
+  // are not evaluated, so the move may still be refused when asked; an
+  // Item with an open hold is left out. Anything else, or a customer
+  // asking, is INVALID_ARGUMENT on filter.waiting_on. Part of what a page
+  // token is bound to.
+  string waiting_on = 6;
 }
 
 // Items with a link of this name to or from item, as the result Items see

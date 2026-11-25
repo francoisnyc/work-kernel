@@ -116,6 +116,7 @@ const usage = `usage: pli [--server URL] [--tokens FILE] --as NAME [--session ID
   item transition ITEM --to STATE [--set ID=VALUE]... [--add ID=VALUE]... [--remove ID=VALUE]... [--wait D] [--etag E] [--request-id ID]
   item search [WORDS...] [--min-seq N] [FILTERS] [PAGING]
   item list [ITEM] [FILTERS] [PAGING]           (no ITEM: the top level)
+  inbox [WORDS...] [--role NAME] [FILTERS] [PAGING]   (what waits on you, or on a role: item search --waiting-on)
   item history ITEM [PAGING]
   item link SRC LINK_TYPE TARGET [--etag E] [--request-id ID]     (LINK_TYPE: the declared name)
   item unlink SRC LINK_TYPE TARGET [--etag E] [--request-id ID]
@@ -133,6 +134,7 @@ const usage = `usage: pli [--server URL] [--tokens FILE] --as NAME [--session ID
 
 FILTERS: [--type TYPE]... [--state S]... [--category C]... [--where F=V|F>V|F>=V|F<V|F<=V]... [--empty F]... [--not-empty F]...
          [--linked out:NAME=ITEM | in:NAME=ITEM]...   (on a principal field, --where F=me is the caller)
+         [--waiting-on me|role:NAME]                 (the open Items that wait on you, or on a role)
          [--order-by 'FIELD [asc|desc]']             (default: newest first)
 PAGING:  [--page-size N] [--page-token T]`
 
@@ -164,6 +166,11 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 	rest := global.Args()
+	// inbox is one word: every other command is two ("item search").
+	inbox := len(rest) >= 1 && rest[0] == "inbox"
+	if inbox {
+		rest = append([]string{"inbox", ""}, rest[1:]...)
+	}
 	if len(rest) < 2 {
 		fmt.Fprintln(stderr, usage)
 		return exitUsage
@@ -219,6 +226,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	name := rest[0] + " " + rest[1]
 	cmd, ok := commands[name]
 	cmdArgs := rest[2:]
+	if inbox {
+		name, cmd, ok, cmdArgs = "inbox", c.inbox, true, rest[2:]
+	}
 	if rest[0] == "rank" {
 		// rank's second word is an Item (or "rebalance"), not a verb.
 		name, cmd, ok, cmdArgs = "rank", c.rank, true, rest[1:]
@@ -622,13 +632,36 @@ func (c *cli) itemTransition(ctx context.Context, args []string) error {
 	return c.print(res.Msg)
 }
 
+// inbox is what waits on the caller, or with --role NAME on that role:
+// item search --waiting-on me (or role:NAME), with the same words, filters
+// and paging, printed the same way.
+func (c *cli) inbox(ctx context.Context, args []string) error { return c.search(ctx, "inbox", args) }
+
 func (c *cli) itemSearch(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("item search", flag.ContinueOnError)
+	return c.search(ctx, "item search", args)
+}
+
+// search is item search and inbox: name says which.
+func (c *cli) search(ctx context.Context, name string, args []string) error {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	minSeq := fs.Int64("min-seq", 0, "answer only once the write with this commit_seq is visible")
 	fl, pg := filterFlags(fs), pagingFlags(fs)
+	var role string
+	if name == "inbox" {
+		fs.StringVar(&role, "role", "", "a role's queue (finance) instead of what waits on you")
+	}
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
+	}
+	if name == "inbox" {
+		if fl.waitingOn != "" {
+			return usagef("inbox is --waiting-on me, and with --role NAME that role's queue: give --role or use item search --waiting-on, not both")
+		}
+		fl.waitingOn = "me"
+		if role != "" {
+			fl.waitingOn = "role:" + role
+		}
 	}
 	filter, err := fl.filter(c.ns)
 	if err != nil {

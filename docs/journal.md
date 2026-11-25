@@ -6,6 +6,42 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
+- **Waiting on me, step 1's Later items** (design.md, "Waiting on me, step 1, as built"):
+  - **A `waiting: true|false` key on a transition** (step 5), so that a
+    Type can say what the rule cannot guess: a request sent back waits on
+    its requester (and so a customer has a view); `incident@4`'s pick-up
+    move, open to anyone, is the desk's work, where today `new` is in the
+    desk's queue only because its cancel move names the role;
+    `leave_balance@1`'s close move is not an HR admin's work; `ticket@7`
+    in `in_progress` shows for every approver because its guard is not
+    evaluated.
+  - **Oldest-waiting first.** An Item has no "time in its state", so the
+    derived view sorts newest first or by a declared field. Stored rows
+    (step 3) would carry it.
+  - **Counts.** None yet: counting a 22,500-Item queue after visibility
+    took about 95 ms in the Phase A prototype, so a count is capped ("50+").
+  - **Another person's inbox**, for a manager covering someone, or an
+    administrator: `waiting_on: user:fay` is refused today. It needs a
+    rule for who may ask (delegation, out of office).
+  - **"What waits on the person I act for".** An agent's `me` is what its
+    session may act on; a field that names fay never names her agent, so
+    an agent cannot list fay's inbox to summarise it.
+  - **Agent powers `transition:<state>` are stored, not enforced**, so an
+    agent's view cannot honour them; when they are, the view must too.
+  - **The web Inbox page** still runs one search per `field:` move and
+    misses roles; switching it to `waiting_on: me` is a small change
+    (step 4, with "who am I" and the caller's roles).
+  - **A container as a filter on the view, at any depth** ("finance, for
+    the Purchasing desk"): `ListItems` gives direct children only.
+  - **Guards on the page.** The moves really open to the caller, guards
+    evaluated, could be said per Item on a page (one call with everything
+    a screen needs: OpenNSW's `GetTaskRenderInfo`).
+  - **cmd/bench -waiting loads Items with one INSERT**, the only place
+    that writes Item rows from the side. The owner accepted it for this
+    measuring tool (PR #89): it runs only on the container the bench
+    starts itself and measures reads only. If a bench ever measures
+    writes, or events, it loads through the item service.
+
 - **Starting work, step 2b's Later items** (design.md, "Starting work, step 2b, as built"):
   - **An opt-out on a Type ("pinned placement").** The latest version's
     placement rule judges every version, for every Type, with no opt-in
@@ -145,9 +181,12 @@ Ideas noted during the spike, not built yet.
     Type says so:** a draft's fields, by `requester_only` (track 1 item 4,
     PR #79); a planted reason, by `given` on the decision (track 1 item 3,
     PR #85). "Only the decider writes it" is still Later (the item above).
-  - **Queues.** No "what waits on me" search, no way to ask the caller's
-    roles, no claim tied to the caller (`sets` has no `caller`): the
-    bake-off's inbox rebuilt it from `GetType` with one search per move.
+  - **Queues.** No way to ask the caller's roles, no claim tied to the
+    caller (`sets` has no `caller`; and a `sets` would refuse the
+    bake-offs' scripts, which name `f_claimed_by` in the claim's patch).
+    **The "what waits on me" search is built** (track 1 item 5, step 1,
+    PR #89): the bake-off's inbox had rebuilt it from `GetType` with one
+    search per move.
   - **Stories for Types outside `types/`.** The story runner reads only
     `../../types` and `../../stories`; a spike's Types cannot use it.
   - **A Type goes live only at start; a request in flight cannot move to
@@ -4005,3 +4044,66 @@ configs that extend the projects' own, using the preinstalled Chromium.
 **Open:** the Later items above (held moves, Types using it, `""`, `GetType` and the web form, only the decider, a
 transition that declares what it may set). **Next session:** track 1 item 5 (team queues and "waiting on me") or item 6
 (moving open Items to a new version), as the owner decides.
+
+## 2026-11-25 — Track 1, item 5, step 1: the waiting-on-me view (Phase D)
+
+**Built:** `ItemFilter.waiting_on` (`me`, or `role:<name>`) on `SearchItems` and `ListItems`: the open Items that wait
+on the caller, or a role's queue, for every Type with no per-Type code. The rule is `policy.WaitingMoves`, `WaitsOn`
+and `WaitsOnRole`, beside `MayTransition` and sharing its matching: a move counts when its `allowed` names a role, a
+person or a field; an empty `allowed`, the creator's own moves, nobody's and the kernel's do not; done and canceled never
+wait; `except` is the asker's; guards, required and given fields are not evaluated; an open hold leaves the Item out.
+The item service turns it into one more SQL condition, with visibility before the limit and `policy.Project` after, so
+it composes with every filter, `order_by` and paging. Nothing is stored. `pli inbox [--role NAME]` and `--waiting-on`;
+the reading's "While it is in s, it waits on who" (part `waits`); a story step, `finds waiting`; `cmd/bench -waiting`.
+design.md: "Waiting on me, step 1, as built", Reads, the story grammar. Roadmap: item 5 split into five steps, step 1
+built. Research notes corrected (`except` at read; the claim checked by the move's own rules, not against rows).
+
+**Kernel changes (four, counted):** the rule (policy), the filter (item service, API), the reading's sentence, pli. The
+proto grew by one field (`waiting_on = 6`); no schema, migration or go.mod change.
+
+**Decided (the owner, through the coordinator):** Phase A's seven defaults (derived first, the table as step 3; the
+view before the claim; a filter, not an operation; what counts; the claim's design left to step 2; an agent's `me` is
+its session's; any staff member may ask for a role's queue), and at the tests gate seven choices the tests made:
+`creator` beside a role waits on the role; a role's queue ignores `except`; another person's inbox is refused; the
+story step; the sentence and its place; the incident oddity showing in an approved reading; `pli inbox`'s words and
+`--role`. Phase C approved by the coordinator's review. **The bench's loader** (one direct INSERT, in `cmd/bench` only): the
+owner accepted this exception to "every write goes through the item service" for a measuring tool. The mode starts its
+own Postgres container (`testdb.Start`), runs the INSERT on that container's pool and takes no database address, so it
+can reach no other database; reads only are measured.
+
+**Tests:** new: policy 5 (a property test over 5,000 generated cases), item service 13 (the bake-offs' four of six
+first), API 3, pli 3, story 4, reading 2 and a witness (`w_queue@1`). **Existing tests changed:** none. One new
+fixture file (the witness Type). **Assertion changes, approved:** the three approved readings, one sentence each.
+Stubs landed with the tests: the proto field, `Filter.WaitingOn`, the three policy functions, `reading.Waits`,
+`story.FindsWaiting`.
+
+**Surprises:**
+- Phase A's own measurement undersold the cost: on the real SQL, the (type, version, state) lists made Postgres read
+  every Item, 50 to 83 ms a page. Saying the Types and states again as two `= any` tests lets it use
+  `items_namespace_type_state`: 28 to 58 ms. Still twenty to forty times a plain filter (1.4 ms).
+- The cost follows the open Items in the states involved, not the caller's view: someone nothing names pays 40 ms.
+- The rule, run over `types/`, is right for the approval Types and tells the truth about the others: trackers name
+  nobody; `leave_balance@1` waits on `hr_admin` (my own story test expected otherwise and was wrong, fixed before the
+  tests gate); `incident@4` in `new` is the desk's only through its cancel move.
+- The claim cannot be composed from today's keys: `allowed` entries are alternatives, a release's `clears` is refused
+  on a frozen or kernel-written field, and every bake-off script names `f_claimed_by` in the claim's patch, so a
+  `sets` would refuse them. Step 2's Phase A starts there.
+- Writing each test against a throwaway implementation, kept outside the repository, before the tests gate, found
+  two mistakes in the tests themselves and none after it.
+
+**Numbers.** `go vet` clean; `go test ./...` green, 28 packages; `go test -race -count=1 ./...` green, no race (item
+service 247 s, workflow 346 s); the new tests `-race -count=10` green. Web: typecheck, 464 unit tests, build; apps/poc:
+typecheck, 408, build. Scenario on the compose stack: passed (run word run5bcc5a3d). Web Playwright 9; apps/poc
+journeys 4. `cmd/bench -waiting`, Postgres 17, 400,000 Items, 55,000 open, a page of 50: 28 to 58 ms median by case
+(table in design.md); a plain Type and state filter 1.4 ms. **The bake-offs:** the Temporal bake-off's
+`test_inbox.py`, unchanged, both sides up: the same rows as recorded; the claim row still "allowed", as expected until
+step 2. The Camunda bake-off's `test3-inbox.py` was not run (Camunda not brought up); its kernel half is the same six
+requests, the same script and the same claim check.
+
+**Local workarounds, outside the repository (nothing committed):** dockerd started by hand (the machine was replaced
+twice); the stack from a compose override in the scratchpad (Go binaries and both web bundles built here, into the
+same base images); Playwright through scratchpad configs that extend the projects' own, using the preinstalled
+Chromium.
+
+**Open:** the Later items above. **Next session:** step 2, the claim that binds (its own Phase A: a state key, or two
+transition keys), unless the owner takes step 3 or item 6 first.

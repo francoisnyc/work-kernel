@@ -51,6 +51,7 @@ const (
 	Rollup         Part = "rollup"           // When it is read, {id} counts its {over} by {count_by}.
 
 	// A state: what entering it does, what happens while it is there.
+	Waits         Part = "waits"          // While it is in {s}, it waits on {who}.
 	Frozen        Part = "frozen"         // While it is in {s}, nobody changes {fields}.
 	RequesterOnly Part = "requester_only" // While it is in {s}, only the requester changes {fields}.
 	Timer         Part = "timer"          // {d} after it enters {s}, if it is still there, the timer moves it to {to}.
@@ -152,7 +153,7 @@ func Parts() []Part {
 		Starts, Closed, NoLifecycle, Invariant,
 		FieldKernel, FieldRoles, FieldUnique, FieldAgentsOnly, FieldAgents, FieldAgentsRoles, FieldAgentsCustomers,
 		Link, LinkOne, LinkInverseOne, LinkKernel, LinkRoles, Incoming, Rollup,
-		Frozen, RequesterOnly, Timer, TimerWaits, AtTimer, Acting, ActingEvery, ActingAt, ActingAtWhen, ActingAtSets,
+		Waits, Frozen, RequesterOnly, Timer, TimerWaits, AtTimer, Acting, ActingEvery, ActingAt, ActingAtWhen, ActingAtSets,
 		Enrich, EnrichFallbk, Action, ActionWrites, Resolve, Final, ReactionFrom, ReactionWhen, ReactionSkip, ReactionHook,
 		Move, MoveRequired, MoveGiven, MoveGuard, MoveEscape, MoveClears, MoveSets,
 		WhoStaff, WhoCreator, WhoRole, WhoField, WhoPrincipal, WhoTimer, WhoHook, WhoNobody, ExceptCreator, ExceptContainerCreatr,

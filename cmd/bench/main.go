@@ -53,8 +53,12 @@ func main() {
 	explainSets := flag.Bool("explain-sets", false, "print query plans for the contains and empty filters on multi-value fields (Jira part 2)")
 	sla := flag.Bool("sla", false, "print the plans of the queue and the breached search, and a goal's row size (Jira part 2, step 3b)")
 	rankBench := flag.Bool("rank", false, "measure ranking a backlog by hand: key length, move latency, a rebalance, the write path (Jira part 1)")
+	waiting := flag.Bool("waiting", false, "measure the waiting-on-me view, derived at read time, on 400,000 Items (track 1 item 5)")
 	flag.Parse()
 	run := run
+	if *waiting {
+		run = func() error { return waitingMode(context.Background()) }
+	}
 	if *explain {
 		run = func() error { return explainMode(context.Background()) }
 	}

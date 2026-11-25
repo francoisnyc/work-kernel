@@ -29,7 +29,7 @@ var KeyParts = map[string][]Part{
 	"transitions[].guard":      {MoveGuard},
 	"transitions[].required":   {MoveRequired},
 	"transitions[].given":      {MoveGiven},
-	"transitions[].allowed":    {WhoStaff, WhoCreator, WhoRole, WhoField, WhoPrincipal, WhoTimer, WhoHook, WhoNobody},
+	"transitions[].allowed":    {WhoStaff, WhoCreator, WhoRole, WhoField, WhoPrincipal, WhoTimer, WhoHook, WhoNobody, Waits},
 	"transitions[].except":     {ExceptCreator, ExceptContainerCreatr},
 	"transitions[].escape":     {MoveEscape, HoldEscape, HoldNone},
 	"transitions[].clears":     {MoveClears},

@@ -2144,7 +2144,22 @@ type ItemFilter struct {
 	// empty (a string and a principal count as one for eq).
 	Fields []*FieldFilter `protobuf:"bytes,4,rep,name=fields,proto3" json:"fields,omitempty"`
 	// Conditions on links: Items linked to (or from) an Item.
-	Links         []*LinkFilter `protobuf:"bytes,5,rep,name=links,proto3" json:"links,omitempty"`
+	Links []*LinkFilter `protobuf:"bytes,5,rep,name=links,proto3" json:"links,omitempty"`
+	// "Waiting on me": only the open Items that wait on someone, read from
+	// the moves out of each Item's state in its own Type version. "me": the
+	// caller (for an agent, what its session may act on: the agent and the
+	// user it acts for both pass). "role:<name>": that role's queue, which
+	// any member of staff may ask for; they see of it what they can see.
+	//
+	// A move counts when its `allowed` names a role, a person or a field;
+	// a move open to anyone, the creator's own, nobody's or the kernel's
+	// does not, and a state in category DONE or CANCELED never waits.
+	// `except` is applied to the caller. Guards, required and given fields
+	// are not evaluated, so the move may still be refused when asked; an
+	// Item with an open hold is left out. Anything else, or a customer
+	// asking, is INVALID_ARGUMENT on filter.waiting_on. Part of what a page
+	// token is bound to.
+	WaitingOn     string `protobuf:"bytes,6,opt,name=waiting_on,json=waitingOn,proto3" json:"waiting_on,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2212,6 +2227,13 @@ func (x *ItemFilter) GetLinks() []*LinkFilter {
 		return x.Links
 	}
 	return nil
+}
+
+func (x *ItemFilter) GetWaitingOn() string {
+	if x != nil {
+		return x.WaitingOn
+	}
+	return ""
 }
 
 // Items with a link of this name to or from item, as the result Items see
@@ -6591,7 +6613,7 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\border_by\x18\a \x01(\tR\aorderBy\"d\n" +
 	"\x13SearchItemsResponse\x12%\n" +
 	"\x05items\x18\x01 \x03(\v2\x0f.kernel.v1.ItemR\x05items\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\xd1\x01\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\xf0\x01\n" +
 	"\n" +
 	"ItemFilter\x12\x14\n" +
 	"\x05types\x18\x01 \x03(\tR\x05types\x12\x16\n" +
@@ -6600,7 +6622,9 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"categories\x18\x03 \x03(\x0e2\x18.kernel.v1.StateCategoryR\n" +
 	"categories\x12.\n" +
 	"\x06fields\x18\x04 \x03(\v2\x16.kernel.v1.FieldFilterR\x06fields\x12+\n" +
-	"\x05links\x18\x05 \x03(\v2\x15.kernel.v1.LinkFilterR\x05links\"u\n" +
+	"\x05links\x18\x05 \x03(\v2\x15.kernel.v1.LinkFilterR\x05links\x12\x1d\n" +
+	"\n" +
+	"waiting_on\x18\x06 \x01(\tR\twaitingOn\"u\n" +
 	"\n" +
 	"LinkFilter\x12\x1b\n" +
 	"\tlink_type\x18\x01 \x01(\tR\blinkType\x126\n" +

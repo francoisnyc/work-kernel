@@ -34,53 +34,54 @@ Links
 new (to triage)
 8. On entering new, `sla_start_first_response` creates a sla_goal@3 inside it, with `f_days_off` = `f_days_off` of its container's `calendar`, `f_metric` = first_response, `f_started_at` = the time of the write, `f_week` = `f_week` of its container's `calendar`, `f_zone` = `f_zone` of its container's `calendar`, and `f_due_at` and `f_target_s` computed from `f_priority`, the time of the write, its container's `calendar` and its container's `sla_policy`.
 9. On entering new, `sla_start_resolution` creates a sla_goal@3 inside it, with `f_days_off` = `f_days_off` of its container's `calendar`, `f_metric` = resolution, `f_started_at` = the time of the write, `f_week` = `f_week` of its container's `calendar`, `f_zone` = `f_zone` of its container's `calendar`, and `f_due_at` and `f_target_s` computed from `f_priority`, the time of the write, its container's `calendar` and its container's `sla_policy`.
-10. Any staff member who can see it moves it from new to in_progress.
-11. The requester, or anyone with the role desk_agent, moves it from new to canceled.
+10. While it is in new, it waits on anyone with the role desk_agent.
+11. Any staff member who can see it moves it from new to in_progress.
+12. The requester, or anyone with the role desk_agent, moves it from new to canceled.
 
 in_progress (active)
-12. On entering in_progress from resolved, `sla_restart_resolution` creates a sla_goal@3 inside it, with `f_days_off` = `f_days_off` of its container's `calendar`, `f_metric` = resolution, `f_started_at` = the time of the write, `f_week` = `f_week` of its container's `calendar`, `f_zone` = `f_zone` of its container's `calendar`, and `f_due_at` and `f_target_s` computed from `f_priority`, the time of the write, its container's `calendar` and its container's `sla_policy`.
-13. On entering in_progress from waiting_for_customer, `sla_resume` moves the sla_goals inside it whose `f_metric` is resolution from paused to running.
-14. Any staff member who can see it moves it from in_progress to waiting_for_customer.
-15. Any staff member who can see it moves it from in_progress to resolved, once `f_resolution` is set.
-16. Any staff member who can see it moves it from in_progress to canceled.
+13. On entering in_progress from resolved, `sla_restart_resolution` creates a sla_goal@3 inside it, with `f_days_off` = `f_days_off` of its container's `calendar`, `f_metric` = resolution, `f_started_at` = the time of the write, `f_week` = `f_week` of its container's `calendar`, `f_zone` = `f_zone` of its container's `calendar`, and `f_due_at` and `f_target_s` computed from `f_priority`, the time of the write, its container's `calendar` and its container's `sla_policy`.
+14. On entering in_progress from waiting_for_customer, `sla_resume` moves the sla_goals inside it whose `f_metric` is resolution from paused to running.
+15. Any staff member who can see it moves it from in_progress to waiting_for_customer.
+16. Any staff member who can see it moves it from in_progress to resolved, once `f_resolution` is set.
+17. Any staff member who can see it moves it from in_progress to canceled.
 
 waiting_for_customer (waiting)
-17. On entering waiting_for_customer, `sla_pause` moves the sla_goals inside it whose `f_metric` is resolution from running to paused.
-18. Any staff member who can see it moves it from waiting_for_customer to in_progress.
-19. Any staff member who can see it moves it from waiting_for_customer to resolved, once `f_resolution` is set.
+18. On entering waiting_for_customer, `sla_pause` moves the sla_goals inside it whose `f_metric` is resolution from running to paused.
+19. Any staff member who can see it moves it from waiting_for_customer to in_progress.
+20. Any staff member who can see it moves it from waiting_for_customer to resolved, once `f_resolution` is set.
 
 resolved (done)
-20. On entering resolved, `sla_stop` moves the sla_goals inside it from running or paused to completed.
-21. 120 hours after it enters resolved, if it is still there, the timer moves it to closed.
-22. Only the timer moves it from resolved to closed.
-23. The requester, or anyone with the role desk_agent, moves it from resolved to in_progress; the move clears `f_resolution`.
+21. On entering resolved, `sla_stop` moves the sla_goals inside it from running or paused to completed.
+22. 120 hours after it enters resolved, if it is still there, the timer moves it to closed.
+23. Only the timer moves it from resolved to closed.
+24. The requester, or anyone with the role desk_agent, moves it from resolved to in_progress; the move clears `f_resolution`.
 
 closed (done)
-24. Nothing leaves closed.
+25. Nothing leaves closed.
 
 canceled (canceled)
-25. On entering canceled, `sla_cancel` moves the sla_goals inside it from running or paused to canceled.
-26. Nothing leaves canceled.
+26. On entering canceled, `sla_cancel` moves the sla_goals inside it from running or paused to canceled.
+27. Nothing leaves canceled.
 
 When something is created inside it
-27. When a person other than the requester creates a reply inside it, `sla_answered` moves the sla_goals inside it whose `f_metric` is first_response from running to completed.
-28. When the requester creates a reply inside it while it is in waiting_for_customer, `customer_replied` moves it to in_progress.
+28. When a person other than the requester creates a reply inside it, `sla_answered` moves the sla_goals inside it whose `f_metric` is first_response from running to completed.
+29. When the requester creates a reply inside it while it is in waiting_for_customer, `customer_replied` moves it to in_progress.
 
 What other Types may do to it
-29. sla_goal's reaction `cancel_first_response` may set `f_due_first_response`.
-30. sla_goal's reaction `cancel_resolution` may set `f_due_resolution`.
-31. sla_goal's reaction `clear_first_response` may set `f_due_first_response`.
-32. sla_goal's reaction `clear_resolution` may set `f_due_resolution`.
-33. sla_goal's reaction `hide_first_response` may set `f_due_first_response`.
-34. sla_goal's reaction `hide_resolution` may set `f_due_resolution`.
-35. sla_goal's reaction `show_first_response` may set `f_due_first_response`.
-36. sla_goal's reaction `show_resolution` may set `f_due_resolution`.
-37. Items inside it may read `f_assignee` as `breach_contact`.
+30. sla_goal's reaction `cancel_first_response` may set `f_due_first_response`.
+31. sla_goal's reaction `cancel_resolution` may set `f_due_resolution`.
+32. sla_goal's reaction `clear_first_response` may set `f_due_first_response`.
+33. sla_goal's reaction `clear_resolution` may set `f_due_resolution`.
+34. sla_goal's reaction `hide_first_response` may set `f_due_first_response`.
+35. sla_goal's reaction `hide_resolution` may set `f_due_resolution`.
+36. sla_goal's reaction `show_first_response` may set `f_due_first_response`.
+37. sla_goal's reaction `show_resolution` may set `f_due_resolution`.
+38. Items inside it may read `f_assignee` as `breach_contact`.
 
 Who sees it
-38. A customer who sees it sees only `f_title`, `f_priority`, `f_impact` and `f_resolution`, and sets only those when creating it.
-39. The customer who requested it sees every reply inside it, and may create one there.
-40. Only holders of desk_agent move it to another container or narrow who sees it.
+39. A customer who sees it sees only `f_title`, `f_priority`, `f_impact` and `f_resolution`, and sets only those when creating it.
+40. The customer who requested it sees every reply inside it, and may create one there.
+41. Only holders of desk_agent move it to another container or narrow who sees it.
 
 Not covered by this reading
 - Who can see a given incident: that is set for each Item and its container, not by its Type.

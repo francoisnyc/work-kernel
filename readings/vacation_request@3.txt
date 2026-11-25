@@ -35,39 +35,40 @@ draft (to do)
 
 submitted (waiting)
 10. On entering submitted, the kernel links `balance` to the requester's open leave_balance (the one whose `f_owner` is the requester); if there is none, or more than one, the move into submitted is refused.
-11. While it is in submitted, nobody changes `f_start`, `f_end`, `f_days`, `f_leave_type` or `f_approver`.
-12. 120 hours after it enters submitted, if it is still there, the timer moves it to expired; if a hold is open then, the timer waits for it to close and looks again.
-13. 48 hours after it enters submitted, then every 24 hours, `remind_approver` calls `email.notify@1` with to = `f_approver`, at most 2 times while it stays there.
-14. Whoever `f_approver` names, but never anyone who took part in creating it, moves it from submitted to approved.
-15. Asking for this move opens a hold instead: `deduct` adds `f_days` to `f_used` on the leave_balance linked as `balance`; the move happens only if that Item accepts the write, else it is denied with that Item's reason.
-16. While that hold is open, nobody changes `f_days`, and the only move out of submitted is to withdrawn.
-17. Whoever `f_approver` names, but never anyone who took part in creating it, moves it from submitted to rejected.
-18. The requester moves it from submitted to draft.
-19. The requester moves it from submitted to withdrawn, even while a hold is open on it, which cancels the hold.
-20. Only the timer moves it from submitted to expired.
+11. While it is in submitted, it waits on whoever `f_approver` names.
+12. While it is in submitted, nobody changes `f_start`, `f_end`, `f_days`, `f_leave_type` or `f_approver`.
+13. 120 hours after it enters submitted, if it is still there, the timer moves it to expired; if a hold is open then, the timer waits for it to close and looks again.
+14. 48 hours after it enters submitted, then every 24 hours, `remind_approver` calls `email.notify@1` with to = `f_approver`, at most 2 times while it stays there.
+15. Whoever `f_approver` names, but never anyone who took part in creating it, moves it from submitted to approved.
+16. Asking for this move opens a hold instead: `deduct` adds `f_days` to `f_used` on the leave_balance linked as `balance`; the move happens only if that Item accepts the write, else it is denied with that Item's reason.
+17. While that hold is open, nobody changes `f_days`, and the only move out of submitted is to withdrawn.
+18. Whoever `f_approver` names, but never anyone who took part in creating it, moves it from submitted to rejected.
+19. The requester moves it from submitted to draft.
+20. The requester moves it from submitted to withdrawn, even while a hold is open on it, which cancels the hold.
+21. Only the timer moves it from submitted to expired.
 
 approved (done)
-21. On entering approved, `notify_approved` calls `email.notify@1` with to = the requester, once per entry, even if it has moved on.
-22. While it is in approved, nobody changes `f_start`, `f_end`, `f_days`, `f_leave_type` or `f_approver`.
-23. The requester moves it from approved to withdrawn, only if `f_start` is on or after today.
+22. On entering approved, `notify_approved` calls `email.notify@1` with to = the requester, once per entry, even if it has moved on.
+23. While it is in approved, nobody changes `f_start`, `f_end`, `f_days`, `f_leave_type` or `f_approver`.
+24. The requester moves it from approved to withdrawn, only if `f_start` is on or after today.
 
 rejected (canceled)
-24. On entering rejected, `notify_rejected` calls `email.notify@1` with to = the requester, once per entry, even if it has moved on.
-25. While it is in rejected, nobody changes `f_start`, `f_end`, `f_days`, `f_leave_type` or `f_approver`.
-26. Nothing leaves rejected.
+25. On entering rejected, `notify_rejected` calls `email.notify@1` with to = the requester, once per entry, even if it has moved on.
+26. While it is in rejected, nobody changes `f_start`, `f_end`, `f_days`, `f_leave_type` or `f_approver`.
+27. Nothing leaves rejected.
 
 withdrawn (canceled)
-27. On entering withdrawn from approved, `refund` gives back what `deduct` added.
-28. When `refund` has applied, `refund_email` calls `email.notify@1` with to = the requester.
-29. Nothing leaves withdrawn.
+28. On entering withdrawn from approved, `refund` gives back what `deduct` added.
+29. When `refund` has applied, `refund_email` calls `email.notify@1` with to = the requester.
+30. Nothing leaves withdrawn.
 
 expired (canceled)
-30. On entering expired, `notify_expired` calls `email.notify@1` with to = the requester, once per entry, even if it has moved on.
-31. Nothing leaves expired.
+31. On entering expired, `notify_expired` calls `email.notify@1` with to = the requester, once per entry, even if it has moved on.
+32. Nothing leaves expired.
 
 Who sees it
-32. A customer who sees it sees none of its fields, only its header.
-33. Anyone who can see it moves it to another container or narrows who sees it.
+33. A customer who sees it sees none of its fields, only its header.
+34. Anyone who can see it moves it to another container or narrows who sees it.
 
 Actions it calls
 - `hr.manager_of@1` (a check, low risk): Finds who approves for a requester: their manager in the HR directory. The requester is onBehalfOf when set, else createdBy.
