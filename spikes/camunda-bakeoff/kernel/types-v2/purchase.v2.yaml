@@ -15,6 +15,11 @@
 #   - Approved, the purchase system receives the order (erp.create_invoice,
 #     the vendor standing in for the ERP's customer); rejected, the
 #     requester is told (email.notify) and the reason is on the Item.
+#
+# Edited in place for track 1 item 3 (required means given by the mover,
+# the owner's decision): each rejection gains given: [f_reason], so a
+# reason written before the decision, by anyone, does not count. Each
+# run registers it fresh.
 id: purchase
 version: 2
 initial_state: draft
@@ -62,16 +67,16 @@ transitions:
   # The manager.
   - {from: manager_review, to: approved,      allowed: ['field:f_manager'], except: [creator], guard: 'f_amount < 1000'}
   - {from: manager_review, to: finance_queue, allowed: ['field:f_manager'], except: [creator], guard: 'f_amount >= 1000'}
-  - {from: manager_review, to: rejected,      allowed: ['field:f_manager'], except: [creator], required: [f_reason]}
+  - {from: manager_review, to: rejected,      allowed: ['field:f_manager'], except: [creator], required: [f_reason], given: [f_reason]}
   # Finance: claim from the shared queue, hand back, decide.
   - {from: finance_queue,  to: finance_review, allowed: ['role:finance'], except: [creator], required: [f_claimed_by]}
   - {from: finance_review, to: finance_queue,  allowed: ['role:finance'], clears: [f_claimed_by]}
   - {from: finance_review, to: approved,       allowed: ['role:finance'], except: [creator], guard: 'f_amount <= 5000'}
   - {from: finance_review, to: cfo_review,     allowed: ['role:finance'], except: [creator], guard: 'f_amount > 5000'}
-  - {from: finance_review, to: rejected,       allowed: ['role:finance'], except: [creator], required: [f_reason]}
+  - {from: finance_review, to: rejected,       allowed: ['role:finance'], except: [creator], required: [f_reason], given: [f_reason]}
   # The CFO, over 5,000.
   - {from: cfo_review,     to: approved,       allowed: ['role:cfo'],     except: [creator]}
-  - {from: cfo_review,     to: rejected,       allowed: ['role:cfo'],     except: [creator], required: [f_reason]}
+  - {from: cfo_review,     to: rejected,       allowed: ['role:cfo'],     except: [creator], required: [f_reason], given: [f_reason]}
 
 hooks:
   - id: manager_check

@@ -116,6 +116,16 @@ attack that found it as its test:
 3. **Required means given by the mover**, where a Type asks for it. To weigh
    in its Phase A, with item 4: a transition that declares the fields it may
    set, and sets nothing else (OpenNSW scopes a step's submission this way).
+   **Built** (PR #85; `docs/design.md`, "Required means given by the mover,
+   as built"): a transition's `given: [fields]`, beside `required`, asks
+   that the move's own patch set them; a value written before, by anyone,
+   does not count, and the move is refused `MISSING_FIELDS`. An opt-in:
+   the bake-offs' kernel Types gained it on every rejection (15 lines in 9
+   files, edited in place); their scripts, unchanged, give the same outcomes
+   as on main (no script plants a reason as a person; the item service's
+   test of that attack is the proof). Held moves and the kernel's own moves
+   are refused at load. No Type in `types/` uses it yet. A transition that
+   declares every field it may set was not taken up (Later).
 4. **"Only the requester" for drafts:** a draft's fields written only by
    whoever created it, until it is submitted. (Who last wrote a value, in
    full, is provenance: theme 2.)
@@ -332,8 +342,9 @@ test:
    in advance, so a person could reject without giving one although the Type
    requires it. A Type can ask that a `required` field be set in the move
    itself, by whoever makes it. **The agent's part is closed** (track 1 item
-   2, PR #75: no agent writes a field its Type does not open to it); a
-   person other than the decider can still plant it.
+   2, PR #75: no agent writes a field its Type does not open to it), and **a
+   person other than the decider planting it is closed where a Type says
+   so** (track 1 item 3, PR #85: `given: [f_reason]` on the rejection).
 3. **Who last wrote a value shows, and can be refused.** An agent edited a
    requester's draft (amount, vendor) before she submitted it, and the
    manager approved the agent's version. This is provenance's first real

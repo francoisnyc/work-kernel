@@ -584,13 +584,30 @@ func (r *renderer) move(ti int) {
 	subject, verb, parts := whoMoves(tr)
 	parts = append([]Part{Move}, parts...)
 	text := at("%s %s it from %s to %s", capitalize(subject), verb, tr.From, tr.To)
-	if len(tr.Required) > 0 {
+	// Required fields are to be set; those the move itself must give
+	// (given) read apart: a value written before does not count for them.
+	var setOnly []string
+	for _, id := range tr.Required {
+		if !slices.Contains(tr.Given, id) {
+			setOnly = append(setOnly, id)
+		}
+	}
+	if len(setOnly) > 0 {
 		be := "is"
-		if len(tr.Required) > 1 {
+		if len(setOnly) > 1 {
 			be = "are"
 		}
-		text += at(", once %s %s set", joinAnd(ticked(tr.Required)), be)
+		text += at(", once %s %s set", joinAnd(ticked(setOnly)), be)
 		parts = append(parts, MoveRequired)
+	}
+	if len(tr.Given) > 0 {
+		if len(setOnly) > 0 {
+			text += " and"
+		} else {
+			text += ", once"
+		}
+		text += at(" the mover gives %s in the move itself", joinAnd(ticked(tr.Given)))
+		parts = append(parts, MoveGiven)
 	}
 	if tr.Guard != "" {
 		text += ", only if " + r.ctx.condition(tr.Guard)

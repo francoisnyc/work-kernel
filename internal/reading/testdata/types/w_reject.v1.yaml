@@ -1,0 +1,17 @@
+# Witness fixture: "required means given by the mover" (track 1, item 3).
+# Rejecting needs a reason, given in the move itself: a reason written
+# before, by anyone, does not count.
+id: w_reject
+version: 1
+initial_state: review
+
+fields:
+  - {id: f_reason, type: string}
+  - {id: f_note,   type: string}
+
+states:
+  - {id: review,   category: active}
+  - {id: rejected, category: canceled, frozen: [f_reason]}
+
+transitions:
+  - {from: review, to: rejected, allowed: ['role:finance'], required: [f_reason], given: [f_reason]}

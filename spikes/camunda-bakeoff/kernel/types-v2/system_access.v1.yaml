@@ -3,6 +3,11 @@
 # system's owner. Submitting copies the owner from the system, in the same
 # write: a request outside a system cannot be submitted (the invariant).
 # The agent prepares it as it prepares a purchase.
+#
+# Edited in place for track 1 item 3 (required means given by the mover,
+# the owner's decision): each rejection gains given: [f_reason], so a
+# reason written before the decision, by anyone, does not count. Each
+# run registers it fresh.
 id: system_access
 version: 1
 initial_state: draft
@@ -38,7 +43,7 @@ transitions:
       f_owner: 'container.f_owner'
       f_system_name: 'container.f_name'
   - {from: owner_review, to: approved, allowed: ['field:f_owner'], except: [creator]}
-  - {from: owner_review, to: rejected, allowed: ['field:f_owner'], except: [creator], required: [f_reason]}
+  - {from: owner_review, to: rejected, allowed: ['field:f_owner'], except: [creator], required: [f_reason], given: [f_reason]}
 
 invariants:
   - {id: no_owner, rule: 'f_system_name == null || f_owner != null'}
