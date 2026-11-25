@@ -75,6 +75,7 @@ transitions:
   - {from: finance_review, to: rejected,       allowed: ['role:%[2]s'], except: [creator]}
   - {from: approved,       to: finance_review, allowed: ['role:%[2]s']}
   - {from: rejected,       to: draft,          allowed: ['field:f_manager']}
+start: {older_versions: all}
 `
 
 // wq_access is the bake-off's second kind: the owner a field names decides.
