@@ -13,7 +13,12 @@ import (
 )
 
 // checkStart applies the start block (starting work, step 2) to a create,
-// inside its transaction. The block is the latest registered version's,
+// inside its transaction, and first the rule that a create names the
+// latest version (track 1, item 6, step 1): once a newer version of a Type
+// is registered, an older one is created only if the newest one's
+// start.older_versions keeps it open; otherwise the create is an
+// *InvalidError on type. A create reaction does not come through here: an
+// Item in flight keeps making the children its own version names. The block is the latest registered version's,
 // whatever version the caller names: a client still creating an old
 // version cannot dodge a rule a later one adds, and a later version that
 // drops the block loosens every version at once. The container is read
@@ -30,6 +35,12 @@ func (k *Service) checkStart(ctx context.Context, tx pgx.Tx, req CreateRequest, 
 		return err
 	}
 	st := latest.Start
+	// Which version may be created (track 1, item 6, step 1): the latest,
+	// and the older ones its block keeps open. Before in and allowed: a
+	// version closed to new Items is refused whoever asks, and wherever.
+	if !st.Creatable(req.TypeVersion, latest.Version) {
+		return &InvalidError{Path: "type", Reason: versionClosed}
+	}
 	if st == nil {
 		return nil
 	}
@@ -65,6 +76,11 @@ func (k *Service) checkStart(ctx context.Context, tx pgx.Tx, req CreateRequest, 
 	}
 	return nil
 }
+
+// versionClosed is the one text of the refusal of a create that names a
+// version closed to new Items: fixed, naming no Type, version or Item.
+// Over the API it is the description of a field violation on type.
+const versionClosed = "this version of the Type is closed to new Items: create its latest version"
 
 // latestType is the latest registered version of a Type. Which version
 // that is is read in the write's transaction every time (one indexed
