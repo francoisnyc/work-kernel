@@ -29,43 +29,58 @@ type Start struct {
 	Allowed []string `yaml:"allowed" json:"allowed,omitempty"`
 	// OlderVersions (track 1, item 6, step 1) lists the older versions of
 	// the Type that may still be created while this version is the latest:
-	// version numbers, or all. A stub: it parses and is stored; nothing
-	// checks or reads it yet.
+	// version numbers, or all. Absent: only the latest version is created
+	// (fail closed). The item service applies it to every public create.
 	OlderVersions *OlderVersions `yaml:"older_versions" json:"older_versions,omitempty"`
 }
 
-// OlderVersions is start.older_versions: all, or a list of versions.
+// OlderVersions is start.older_versions: the word all, or a list of
+// version numbers. It is stored as written: "all", or the list.
 type OlderVersions struct {
 	All      bool
 	Versions []int
-	bad      []string // list entries that are not whole numbers, as written
+
+	// What the YAML held that is neither: a word other than all (or a
+	// bare number), and the entries of the list that are not whole
+	// numbers, by index. checkStart reports them; a stored definition has
+	// none. Lower-case names are private to the package, like Java's
+	// package-private fields.
+	word string
+	bad  map[int]bool
 }
 
 // StartAllOlder is the word that keeps every older version open.
 const StartAllOlder = "all"
 
+// UnmarshalYAML reads the word or the list. It never fails: what is wrong
+// is kept for checkStart, which reports every problem with its path.
 func (o *OlderVersions) UnmarshalYAML(n *yaml.Node) error {
 	switch n.Kind {
 	case yaml.ScalarNode:
 		if n.Value == StartAllOlder {
 			o.All = true
 		} else {
-			o.bad = append(o.bad, n.Value)
+			o.word = n.Value
 		}
 	case yaml.SequenceNode:
-		o.Versions = []int{}
-		for _, c := range n.Content {
+		o.Versions = make([]int, len(n.Content))
+		for i, c := range n.Content {
 			v, err := strconv.Atoi(c.Value)
 			if err != nil || c.Kind != yaml.ScalarNode {
-				o.bad = append(o.bad, c.Value)
-				v = 0
+				if o.bad == nil {
+					o.bad = map[int]bool{}
+				}
+				o.bad[i] = true
+				continue
 			}
-			o.Versions = append(o.Versions, v)
+			o.Versions[i] = v
 		}
 	}
 	return nil
 }
 
+// MarshalJSON stores the key as written. The receiver is a value, not a
+// pointer, so that both a value and a pointer are encoded this way.
 func (o OlderVersions) MarshalJSON() ([]byte, error) {
 	if o.All {
 		return json.Marshal(StartAllOlder)
@@ -76,6 +91,7 @@ func (o OlderVersions) MarshalJSON() ([]byte, error) {
 	return json.Marshal(o.Versions)
 }
 
+// UnmarshalJSON reads the stored form.
 func (o *OlderVersions) UnmarshalJSON(data []byte) error {
 	var word string
 	if json.Unmarshal(data, &word) == nil {
@@ -86,6 +102,20 @@ func (o *OlderVersions) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 	return json.Unmarshal(data, &o.Versions)
+}
+
+// Creatable reports whether a create may name version, when latest is the
+// latest registered version of the Type and s its start block: the latest
+// version always; an older one only if the block lists it, or says all.
+// A nil block keeps nothing open (a method may be called on a nil pointer).
+func (s *Start) Creatable(version, latest int) bool {
+	if version == latest {
+		return true
+	}
+	if s == nil || s.OlderVersions == nil || version > latest {
+		return false
+	}
+	return s.OlderVersions.All || slices.Contains(s.OlderVersions.Versions, version)
 }
 
 // StartTop in start.in means "at the top level, in no container". A Type
@@ -147,6 +177,7 @@ func (t *Type) checkStart(r reporter) {
 		r.fail(CodeInvalidValue, "start.in", "List the container Types, or top, or leave in out to allow anywhere",
 			"start.in lists nothing: no create could pass")
 	}
+	t.checkOlderVersions(r)
 	top := slices.Contains(s.In, StartTop)
 	for i, id := range s.In {
 		p := at("start", "in", i)
@@ -160,6 +191,35 @@ func (t *Type) checkStart(r reporter) {
 	}
 	for i, e := range s.Allowed {
 		t.checkStartEntry(r, at("start", "allowed", i), s, i, e, top)
+	}
+}
+
+// checkOlderVersions checks start.older_versions on this Type alone:
+// all, or a list of versions older than this one, each once. Whether the
+// versions exist is stage c's question (CheckStart).
+func (t *Type) checkOlderVersions(r reporter) {
+	o := t.Start.OlderVersions
+	if o == nil || o.All {
+		return
+	}
+	const key = "start.older_versions"
+	if o.word != "" || len(o.Versions) == 0 {
+		r.fail(CodeInvalidValue, key, "Write all, or a list of older version numbers such as [1, 2], or leave the key out",
+			"start.older_versions is neither all nor a list of version numbers")
+		return
+	}
+	for i, v := range o.Versions {
+		p := at("start", "older_versions", i)
+		switch {
+		case o.bad[i]:
+			r.fail(CodeInvalidValue, p, "Write a version number; all stands alone, not in a list",
+				"start.older_versions: this entry is not a version number")
+		case v < 1 || v >= t.Version:
+			r.fail(CodeInvalidValue, p, "List only versions older than this one, from 1 up",
+				"start.older_versions names version %d, which is not older than this version (%d)", v, t.Version)
+		case slices.Contains(o.Versions[:i], v):
+			r.fail(CodeDuplicate, p, "Remove the second one", "start.older_versions names version %d twice", v)
+		}
 	}
 }
 
@@ -206,6 +266,7 @@ func (t *Type) checkStartEntry(r reporter, p string, s *Start, i int, e string, 
 }
 
 // CheckStart checks the start blocks across a set of Types (stage c):
+//   - start.older_versions names loaded versions of the Type;
 //   - start.in names loaded Types; field: names a principal field of every
 //     version of each of them;
 //   - what creates Items of a Type is let in by its latest version's
@@ -225,6 +286,15 @@ func CheckStart(types []*Type) error {
 	for _, t := range types {
 		if t.Start == nil {
 			continue
+		}
+		if o := t.Start.OlderVersions; o != nil {
+			for i, v := range o.Versions {
+				loaded := slices.ContainsFunc(byID[t.ID], func(x *Type) bool { return x.Version == v })
+				if !loaded {
+					c.on(t).fail(CodeUnknownType, at("start", "older_versions", i), "Load that version too, or take it off the list",
+						"start.older_versions names %s v%d, which is not loaded", t.ID, v)
+				}
+			}
 		}
 		for i, id := range t.Start.In {
 			if id != StartTop && len(byID[id]) == 0 {
