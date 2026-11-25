@@ -409,6 +409,57 @@ team that only wants approvals next week is better served by one of the
 products above; the kernel is for where the rules and the shared queue
 matter, and where data and rules must stay on its own infrastructure.
 
+**Borrowed from them** (read from their docs and code, November 2026; design
+notes for the two Types and the MCP server, not yet built):
+
+1. **"Not yet" is not "no"** (hitloop): an approval can be deferred with a
+   note, a transition of its own, and the agent waits again.
+2. **A refusal says why** (HumanLayer, RobotRock): a reason the agent can
+   read, in a field, never in `item_events.payload` (kernel rule). Built:
+   `required` with `given` (track 1 item 3) makes the decider give it in
+   the move itself.
+3. **The approver edits, the action uses the approved values** (gotoHuman
+   lets a reviewer edit before approving): the approver writes the approved
+   amount or target, and the action carries out those, not what the agent
+   proposed. Approving a $500 refund cannot send $5,000. Two things make
+   it hold: those fields are closed to agents (built, track 1 item 2), and
+   the approved state freezes them, since an action reads the fields as
+   they are when it runs, not as they were at the approval.
+4. **Agents look up past answers before asking again** (hitloop's decisions
+   log): a `find_answer` tool over answered `question@1` Items, through
+   `policy.Project`; answered questions also feed an agent's context
+   (context packs, which wait until the decision point).
+5. **Questions come with a recommended answer** and why it matters
+   (hitloop): a person accepts most and changes a few. A batch of questions
+   is a case with `question@1` children; a follow-up is created by a
+   reaction.
+6. **Expiry by default, failing closed** (Placet expires reviews after 24
+   hours): an expired approval means no.
+7. **What an agent or a requester wrote is untrusted in the browser too**
+   (hitloop sanitizes markdown, sandboxes HTML, serves SVG without script):
+   screens built on the kernel render outside text inertly. Injection has a
+   twin in rendering.
+8. **A command line for scripts** (hitloop's `approve` exits 0 on yes, 1 on
+   no, 2 on no answer yet): `pli approve "…" && ./deploy.sh` makes the
+   kernel usable from CI and shell on day one.
+
+Smaller, for later: callback failures shown and retried apart from the
+decision, with a callback per request (Placet); an agent's liveness beside
+its question, and its open questions withdrawn when its run dies (Placet);
+act now and review after, for a sample of low-risk actions (Agno's audit
+approvals), an answer to approval fatigue; a Claude Code hook that keeps a
+coding agent from finishing while a decision is pending (hitloop).
+
+Already given by the kernel's design: custom response buttons are
+transitions (RobotRock); one of two simultaneous approvers wins under the
+row lock (Agno guards with `expected_status`); typed responses are typed
+fields (Placet); only the person who took a request decides it (a claim
+that binds, track 1 item 5). Not copied: rich review screens (diffs, image
+annotation, swipe review), the screen race above; the kernel needs only
+attachments, so an agent can put files and links on an Item. Attachments
+are not built: a fourth unbuilt piece beside the three under "What every
+way in needs".
+
 Depends on track 1, item 5: without queues, a binding claim and "waiting
 on me", the kernel adds little over the inboxes that exist. Proposed for
 the six weeks, after item 5, as part of the landing (the plan's open
