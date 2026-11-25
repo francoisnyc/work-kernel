@@ -988,7 +988,7 @@ A rule's refusal answers with its code; every kernel rejection carries one
 | `ErrRejected`, an approval's audience changed since shown | `FAILED_PRECONDITION` | `AUDIENCE_CHANGED` (+ audience, expected_audience) |
 | `ErrRejected`, a max-one side of a link type already has its link | `FAILED_PRECONDITION` | `LINK_CARDINALITY` (+ link_type, side) |
 | `ErrRejected`, the link exists / does not exist / its target's Type is not allowed | `FAILED_PRECONDITION` | `ALREADY_LINKED` / `NOT_LINKED` / `LINK_TARGET_TYPE` |
-| `ErrForbidden`, a write names a field it may not write (kernel-written, closed to the writer by `writable_by`, e.g. to an agent by default, or named by its transition's `allowed`) | `PERMISSION_DENIED` | `FIELD_NOT_WRITABLE` (+ fields) |
+| `ErrForbidden`, a write names a field it may not write (kernel-written, closed to the writer by `writable_by`, e.g. to an agent by default, limited by the Item's state to its requester (`requester_only`), or named by its transition's `allowed`) | `PERMISSION_DENIED` | `FIELD_NOT_WRITABLE` (+ fields) |
 | `ErrRejected`, a write names a field the Item's state freezes | `FAILED_PRECONDITION` | `FIELD_FROZEN` (+ fields, state) |
 | `ErrRejected`, a write would break one of the Type's invariants | `FAILED_PRECONDITION` | `INVARIANT_FAILED` (+ invariant) |
 | `ErrForbidden`, LinkItems / UnlinkItems on a link only the kernel sets | `PERMISSION_DENIED` | `LINK_NOT_WRITABLE` (+ link_type) |
@@ -4535,7 +4535,9 @@ create), so their follow-on attempts no longer run. Five attempts on
 frozen fields now read `FIELD_NOT_WRITABLE` instead of `FIELD_FROZEN`. Still
 allowed: ana's own request for no system (a person, the Type), and a
 colleague changing ana's draft (track 1 item 4, "only the requester"), so
-the bake-offs do not yet pass in full.
+the bake-offs do not yet pass in full. (Item 4 has since closed the
+colleague's edit where a Type says so: "Only the requester edits a draft,
+as built", below.)
 
 **Tests:** item service 11 new (the two attacks and the preparation; who
 writes each kind of field, create, a transition's patch, clears, sets,
@@ -4550,6 +4552,133 @@ the line.
 item service's field rules and Create's order), the load checks, the
 readings' sentence. No schema, migration or go.mod change; the proto change
 is comments.
+
+## Only the requester edits a draft, as built (2026-11-25)
+
+Track 1, item 4 of `docs/roadmap.md`. After item 2 closed the agent's way
+in, the bake-offs still showed one hole in a draft: a colleague (olaf, who
+holds role staff like every person) changed ana's purchase before she
+submitted it, and the manager then approved what olaf wrote
+(`spikes/temporal-bakeoff/results/kernel-staff-role.md`). No Type could
+say "only the requester". Now a Type can, state by state.
+
+**The rule.** A state lists the fields only the Item's requester writes
+while the Item is in it, shaped like `frozen`:
+
+```yaml
+states:
+  - {id: draft, category: todo, requester_only: [f_amount, f_vendor, f_cost_centre, f_justification]}
+```
+
+Frozen means nobody changes a field in that state; `requester_only` means
+only the requester does.
+
+- **On top of `writable_by`, never instead of it.** The writer must pass
+  `writable_by` (people, agents, roles) **and** be the requester. So an
+  agent acting for ana writes her draft's field only where the field is
+  also open to agents; a field `role:staff` writes stays the staff's and,
+  in the draft, ana's alone among them.
+- **The requester is `IsRequester`'s**, as for `allowed: [creator]`: the
+  effective user (the user an agent acts for, else the actor) is the
+  Item's effective creator (`created_on_behalf_of`, else `created_by`).
+  Not `TookPartInCreation`: an agent that filed ana's draft does not
+  write it later acting alone. An agent that filed a draft for itself is
+  its requester. An Item a reaction created has a kernel actor as creator
+  (or the user it is attributed to), so on the public door its listed
+  fields are nobody's, or that user's: fail closed.
+- **When it applies:** only while the Item is in a listed state, and again
+  each time it comes back (a request sent back to its draft is the
+  requester's again). A transition's patch is judged against the state it
+  leaves, like frozen: ana submits with a patch; a colleague's patch on a
+  move out of the draft is refused; a patch on the move into the draft is
+  judged by the state it leaves. A move's `clears` is a write of the field
+  it clears (as for `writable_by`); a move's `sets` is the Type's, untouched.
+  A create always passes: whoever creates the Item is its requester.
+- **The internal door is untouched:** hooks, timers and reactions write as
+  before. A customer writes fields only on create, where they are the
+  requester, so the customer rules and this one never meet.
+- `policy.MayWriteInState(state, field, who, facts)` is the one pure
+  answer; the item service asks it beside the field rules.
+
+**The owner's decisions (Phase A):** all the proposed defaults.
+
+- The syntax, `requester_only: [fields]` on a state, field by field; no
+  "all fields" shorthand.
+- The requester is `IsRequester`'s, and an agent for the requester needs
+  the field open to agents as well.
+- **An opt-in, by nature**: no Type changes meaning until it lists fields,
+  so nothing in flight changes. No Type in `types/` uses it in this step.
+- **"Re-run unchanged":** the bake-offs' scripts stay unchanged; the two
+  staff-role spike Types (`spikes/temporal-bakeoff/kernel-staff-role/types/`,
+  `purchase.v1.yaml` and `system_access.v1.yaml`) gain one
+  `requester_only` line each, edited in place with a header comment (each
+  run registers them fresh). A new version would not do: the scripts
+  create `purchase@1`, and a create on the latest version is track 1
+  item 6. A kernel default (an initial state's fields the requester's)
+  would break every Type triaged by someone else (incident, ticket, PLAT).
+- No proto change; the rule lives in `policy`, frozen stays in `lifecycle`.
+
+**The refusal.** The existing `PERMISSION_DENIED` / `FIELD_NOT_WRITABLE`
+with `fields` (no new code, no contract change), part of "not writable":
+after who may write each field (`writable_by`), before frozen and held. A
+field already refused by `writable_by` is named once, for that cause.
+The item service's message: "only the requester writes these fields while
+the Item is in draft: the request may not write f_amount". One refusal
+names every field and says each cause, joined by "; "; an agent refused
+only by this rule is not told about fields "open to agents". A refusal
+without this cause reads as before, byte for byte.
+
+**Load checks and schema.** Field by field, like frozen: an undeclared
+field is `UNKNOWN_FIELD`, a field listed twice `DUPLICATE`, a field only the
+kernel writes `CONFLICT` (no requester writes it), a field the same state
+freezes `CONFLICT` (frozen means nobody). A field frozen in another state is
+the normal case. The JSON Schema's state gains `requester_only`; the stored
+definition carries it only when set, so every registered version is
+byte-identical.
+
+**Readings.** One sentence kind, `requester_only`, among what holds while
+the Item is in the state, after what it freezes: "While it is in draft,
+only the requester changes `f_amount` or `f_vendor`.", citing
+`states[i].requester_only`. Its witness (`w_draft@1`): olaf refused with
+`FIELD_NOT_WRITABLE`, olaf writing a field the draft does not list, ana
+writing hers, and `FIELD_FROZEN` for ana once sent. No approved reading
+changes: no Type in `types/` uses it.
+
+**Not covered (Later):** a draft's links, readers and placement; a Type in
+`types/` using it (`vacation_request@4`, `access_request@2`); `GetType`
+showing it (the proto's `State` has `frozen` only); who last wrote a value,
+in full, which is provenance (theme 2).
+
+**The bake-offs, re-run with their scripts unchanged** (kernel side;
+`results/` stay the earlier record):
+
+| Run | After item 2 | Now |
+|---|---|---|
+| Camunda bake-off, `test2-compromised.py kernel` | 32 of 32 refused | 32 of 32 |
+| Temporal bake-off, purchase | 27 of 27 | 27 of 27 |
+| Temporal bake-off, access request | 17 of 18 | 17 of 18 |
+| The access request written blind | 18 of 18 | 18 of 18 |
+| **The staff-role Types** | 6 of 7: olaf changes ana's draft | **7 of 7: olaf refused** |
+| The reviewer's list, kernel side | 2 allowed | the same 2 |
+
+Still allowed, and outside this item: ana's own request for no system (the
+Type, a person), and a colleague with no part in it reading ana's purchase
+and its history (who sees what: these Types narrow nothing). They are the
+roadmap's residues for the owner to decide.
+
+**Tests:** item service 10 new (the attack first; only the listed fields;
+agents and their messages; the effective creator; a transition's patch;
+the rule again on return; clears and sets; frozen after submit; kernel
+writes; a create); policy 1 (16 cases); typedef 5; reading 1 and a
+witness. One existing test changed, agreed: `cite_test.go`'s list of what
+a reading must cite gained `states[i].requester_only` (stricter, nothing
+loosened). No API test: a test-only Type there would change
+`TestListTypes_EveryVersionInOrder`; the refusal's mapping is the one
+already tested.
+
+**Kernel changes (counted):** the rule (`policy.MayWriteInState` and the
+item service's field rules), the load checks, the reading's sentence. No
+schema, migration, proto or go.mod change.
 
 ## Out of scope for the spike
 
