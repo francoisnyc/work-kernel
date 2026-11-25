@@ -81,6 +81,7 @@
         "id": {"$ref": "#/$defs/text"},
         "category": {"description": "What the state means to every Type.", "enum": ["triage", "backlog", "todo", "active", "waiting", "done", "canceled", "none"]},
         "frozen": {"description": "Fields no write may change in this state.", "$ref": "#/$defs/texts"},
+        "claim": {"description": "The principal field that holds who claimed the Item in this state: whoever moves it in is recorded there, and only they move it on; a move marked release gives the claim up.", "$ref": "#/$defs/text"},
         "requester_only": {"description": "Fields only the requester writes while an Item is in this state (or an agent acting for them, where writable_by opens the field to agents).", "$ref": "#/$defs/texts"},
         "timer": {"$ref": "#/$defs/timer"},
         "at": {"$ref": "#/$defs/atTimer"},
@@ -141,6 +142,7 @@
         "given": {"description": "Required fields the move itself must give: set in its own patch; a value written before does not count.", "$ref": "#/$defs/texts"},
         "allowed": {"description": "Who may make the move (empty: anyone who sees the Item).", "$ref": "#/$defs/texts"},
         "except": {"description": "Who may not, even if allowed.", "$ref": "#/$defs/texts"},
+        "release": {"description": "Gives up the claim of the state the move leaves: allowed alone decides it. It must clear the claim field.", "$ref": "#/$defs/flag"},
         "escape": {"description": "May leave a state while a hold is open.", "$ref": "#/$defs/flag"},
         "clears": {"description": "Fields the move unsets.", "$ref": "#/$defs/texts"},
         "sets": {"description": "Computed effects: field -> CEL expression.", "$ref": "#/$defs/textMap"}

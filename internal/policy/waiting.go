@@ -109,3 +109,14 @@ func WaitsOnRole(ty *typedef.Type, state, role string) bool {
 	}
 	return false
 }
+
+// MayLeaveClaimed reports whether who may make the move tr out of the
+// state st as far as st's claim goes (track 1 item 5, step 2): a state
+// with no claim, a release and the kernel's own moves pass; any other move
+// is the claimant's only. `allowed` and `except` are judged apart
+// (MayTransition).
+//
+// Not built yet: it lets everyone through.
+func MayLeaveClaimed(st typedef.State, tr typedef.Transition, who Who, it ItemFacts) bool {
+	return true
+}

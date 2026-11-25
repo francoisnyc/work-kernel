@@ -52,6 +52,8 @@ const (
 
 	// A state: what entering it does, what happens while it is there.
 	Waits         Part = "waits"          // While it is in {s}, it waits on {who}.
+	WaitsClaimant Part = "waits.claimant" // While it is in {s}, it waits on whoever claimed it. (Not built yet.)
+	Claim         Part = "claim"          // Whoever moves it into {s} claims it: {f} names them, and only they move it on from there, unless a move releases the claim. (Not built yet.)
 	Frozen        Part = "frozen"         // While it is in {s}, nobody changes {fields}.
 	RequesterOnly Part = "requester_only" // While it is in {s}, only the requester changes {fields}.
 	Timer         Part = "timer"          // {d} after it enters {s}, if it is still there, the timer moves it to {to}.
@@ -80,6 +82,7 @@ const (
 	MoveGuard    Part = "move.guard"
 	MoveEscape   Part = "move.escape"
 	MoveClears   Part = "move.clears"
+	MoveRelease  Part = "move.release" // , which releases the claim (Not built yet.)
 	MoveSets     Part = "move.sets"
 
 	WhoStaff              Part = "who.staff"     // Any staff member who can see it
