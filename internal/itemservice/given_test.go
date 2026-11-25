@@ -73,7 +73,8 @@ func gvSource(typeID string) string {
 }
 
 // gvWorld: ana asks; bob is her manager; fay is in finance; gus is a
-// colleague with no role in the purchase. bot is an agent acting for fay.
+// colleague with no role in the purchase. bot is an agent acting for fay,
+// holding finance like her.
 type gvWorld struct {
 	k                  *itemservice.Service
 	ana, bob, fay, gus item.Principal
@@ -95,7 +96,10 @@ func newGVWorld(t *testing.T) gvWorld {
 	w := gvWorld{k: k, ana: person("ana"), bob: person("bob"), fay: person("fay"), gus: person("gus")}
 	grantRole(t, w.bob, "gv_manager")
 	grantRole(t, w.fay, "gv_finance")
+	// An agent acting for someone passes allowed only where both pass: it
+	// holds the finance role too.
 	agent := "agent:gv-bot-" + uuid.NewString()[:8]
+	grantRole(t, item.Principal{Actor: agent}, "gv_finance")
 	w.forFay = withSession(t, k, item.Principal{Actor: agent, OnBehalfOf: w.fay.Actor})
 	return w
 }
