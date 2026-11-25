@@ -188,10 +188,11 @@ type State struct {
 	// Frozen are the fields no write may change while an Item is in this
 	// state. The transition entering the state may set them.
 	Frozen []string `yaml:"frozen" json:"frozen,omitempty"`
-	// RequesterOnly are the fields only the Item's requester (IsRequester:
-	// its effective creator, or an agent acting for them) writes on the
-	// public door while the Item is in this state, besides what
-	// writable_by asks. Phase B stub: parsed only.
+	// RequesterOnly are the fields only the Item's requester (its effective
+	// creator, or an agent acting for them) writes on the public door while
+	// the Item is in this state, besides what writable_by asks
+	// (policy.MayWriteInState). Never a kernel-written field, nor one this
+	// state freezes.
 	RequesterOnly []string `yaml:"requester_only" json:"requester_only,omitempty"`
 	// Acting are the state's acting timers (Step 2, part 3): each runs an
 	// action hook after a delay, without a transition, optionally again at
@@ -626,6 +627,29 @@ func (t *Type) checkState(r reporter, i int, seen map[string]bool) {
 			r.fail(CodeDuplicate, at(p, "frozen", j), "Remove the second one", "state %s: frozen field %q is listed twice", s.ID, id)
 		}
 		frozen[id] = true
+	}
+	// requester_only, field by field like frozen: a field only the kernel
+	// writes has no requester to limit it to, and one the state freezes is
+	// nobody's, so listing either contradicts the Type.
+	mine := map[string]bool{}
+	for j, id := range s.RequesterOnly {
+		f, ok := t.Field(id)
+		switch {
+		case !ok:
+			r.fail(CodeUnknownField, at(p, "requester_only", j), "Declare the field, or remove it from requester_only",
+				"state %s: requester_only field %q is not declared", s.ID, id)
+			continue
+		case mine[id]:
+			r.fail(CodeDuplicate, at(p, "requester_only", j), "Remove the second one",
+				"state %s: requester_only field %q is listed twice", s.ID, id)
+		case f.WritableBy == WritableByKernel:
+			r.fail(CodeConflict, at(p, "requester_only", j), "Remove it from requester_only: only the kernel writes it",
+				"state %s: requester_only field %s is writable_by kernel; the requester never writes it", s.ID, id)
+		case frozen[id]:
+			r.fail(CodeConflict, at(p, "requester_only", j), "Keep it in frozen or in requester_only, not both",
+				"state %s: field %s is both frozen and requester_only; frozen means nobody writes it", s.ID, id)
+		}
+		mine[id] = true
 	}
 }
 
