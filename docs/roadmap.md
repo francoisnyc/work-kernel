@@ -303,9 +303,12 @@ question or approval):
   people-only field (closed to agents by default, so an agent never answers
   its own question); `asked`, `answered`, `expired`, `withdrawn`; a timer
   escalates or expires it.
-- `approval@1` (exists): what is approved lives in structured fields
-  (amount, target, action), not only in the agent's prose, and the agent's
-  text is shown as the agent's.
+- An approval of an agent's step: what is approved lives in structured
+  fields (amount, target, action), not only in the agent's prose, and the
+  agent's text is shown as the agent's. `approval@1` exists, but as the
+  child approval of a request (a kernel-written title, the approver, a
+  delegate); it has no such fields, so this is a new version of it or a
+  Type of its own.
 
 **Two ways in:**
 
@@ -326,10 +329,20 @@ question or approval):
 1. **Events out to a subscriber:** a signal to an external workflow, an
    adapter or an MCP task when an Item it follows changes; a new outbound
    path, so through `policy.Project`.
-2. **A service principal per orchestrator or agent,** named in
-   `writable_by` and `allowed` like any principal, closed by default.
+2. **A service principal per orchestrator or agent,** closed by default.
+   A new kind of principal (its own decision, as the starting-work plan
+   says of `intake:`), and a Type-format change with it: today
+   `writable_by` takes `people`, `agents` and `role:<name>`, never a named
+   principal, and `principal:` in `allowed` names a person.
 3. **Clients with replay-safe idempotency keys:** Go first, then Python
    generated from the Connect API.
+
+So this pulls three unbuilt pieces of the kernel into the six weeks, each
+a build step with its own questions: events out (theme 5's event stream,
+brought forward), the new principal kind, and the clients; the MCP server
+and the adapters come on top. A question's timer also needs the effect
+re-check's follow-up first (track 1 item 1: state timers still trust the
+workflow's clock).
 
 **The strongest form:** the approved action is carried out by the kernel's
 own action hook, which re-checks the approval first (an effect re-checks
