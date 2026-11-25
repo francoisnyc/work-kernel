@@ -247,8 +247,18 @@ attack that found it as its test:
       kernel.v1; no table. At 400,000 Items with 55,000 open, a page costs
       about 30 to 60 ms (a plain filter: 1.4 ms). The bake-offs' scripts,
       unchanged, give the same rows: no script row tests the view.
-   2. **The claim that binds:** what the bake-offs' failing row needs (fay
-      approves the purchase gus claimed). A Type key; its own Phase A.
+   2. **The claim that binds. Built** (PR #91; `docs/design.md`, "A claim
+      that binds, as built"): a state's `claim: <principal field>` records
+      whoever moves an Item into it, and only they move it on, on top of
+      `allowed` and `except`. A move marked `release: true`, which must
+      clear the field, gives the claim up; `allowed` alone decides it (the
+      owner's decision: a move that only clears the field is not a
+      release). The kernel's own moves are exempt. A claimed Item waits on
+      its claimant only; a role's queue shows the unclaimed ones. An
+      opt-in: the five bake-off purchase Types gained the two keys, edited
+      in place. Both bake-offs, scripts unchanged, now answer "does a claim
+      hold?" with refused, and a colleague still takes over a claim left
+      behind. No proto or database change. No Type in `types/` uses it yet.
    3. **Who may act, stored per open Item,** in the same write, if step 1's
       numbers ask for it (a prototype read a page in under 1 ms): the same
       view, fast, and oldest-waiting first.
@@ -272,8 +282,9 @@ it is the front door of the landing positioning below.
 `spikes/temporal-bakeoff/`) pass in full on the kernel, re-run unchanged.
 "Unchanged" means the scripts; a Type may close a hole with one line (the
 owner's reading, at item 4: the staff-role Types gained `requester_only`).
-Two failing rows are covered by no item above; the owner decides later
-whether they count:
+The claim row ("does a claim hold?") passes in both bake-offs since item
+5, step 2. Two failing rows are covered by no item above; the owner decides
+later whether they count:
 
 - **A colleague with no part in it reads ana's purchase, and its history**
   (`attacks_review.py`, kernel side): every member of staff reads every
@@ -281,6 +292,10 @@ whether they count:
 - **An access request for no system** (the Temporal bake-off's access
   request): ana submits it and nobody owns the decision; a gap in that Type
   (the blind-written Type refuses it with an invariant).
+
+The first bake-off's agent-among-approvers rows also still read "allowed"
+(the agent claims and approves): they test a role given to an agent by
+mistake, which these Types do not refuse.
 
 ### Track 2: test what is untested
 
@@ -575,7 +590,7 @@ test:
    otherwise).
 5. **Known, and planned elsewhere:** a claim is only a field, so a colleague
    can still decide (team queues with an enforced claim, under "Pilots serve
-   generality").
+   generality"). Since built: track 1, item 5, step 2 (a state's `claim`).
 
 ### 3. Agents as task performers
 

@@ -6,6 +6,33 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
+- **A claim that binds, step 2's Later items** (design.md, "A claim that binds, as built"):
+  - **A held move into a claimed state** (a claim a check must allow) is
+    refused at load. It needs a rule for who is recorded when the hold
+    resolves, and what the claimant sees meanwhile.
+  - **Reassign to a named person.** Today a colleague releases and the
+    other person claims. A lead who hands a purchase to fay needs a move
+    that writes someone else into the claim field, and a rule for who may.
+  - **`GetType` and the claim.** A screen that offers moves from `allowed`
+    alone may offer a colleague a decision the kernel then refuses
+    (`NOT_ALLOWED`). The web UI and the PoC apps do not read `claim` yet.
+  - **The bake-off's own `kernel-inbox.py`** still lists a purchase gus
+    claimed under fay, "for your team": it computes its own list from the
+    Types and does not use `waiting_on`. The script is the bake-off's
+    record, so it was left; `pli inbox` is right.
+  - **The API tests depend on file order.**
+    `TestListTypes_EveryVersionInOrder` (types_test.go) lists every
+    registered Type. `apiwq` (waiting_test.go) and `apicl`
+    (waiting_claim_test.go) are registered when their tests run, which is
+    after it only because Go runs test files in name order. A test Type
+    registered from a file that sorts before `types_test.go`, or
+    `-shuffle`, breaks the list. Fix: register them in `main_test.go` and
+    add them to the list, or make the list test ask only for the Types it
+    names.
+  - **An agent holding the team's role** claims and decides like a member
+    where the Type opens the claim field to that role (the first
+    bake-off's agent-among-approvers rows). A role given to an agent by
+    mistake is not something the claim catches.
 - **Waiting on me, step 1's Later items** (design.md, "Waiting on me, step 1, as built"):
   - **A `waiting: true|false` key on a transition** (step 5), so that a
     Type can say what the rule cannot guess: a request sent back waits on
@@ -4107,3 +4134,66 @@ Chromium.
 
 **Open:** the Later items above. **Next session:** step 2, the claim that binds (its own Phase A: a state key, or two
 transition keys), unless the owner takes step 3 or item 6 first.
+
+## 2026-11-25 — Track 1, item 5, step 2: a claim that binds (Phase D)
+
+**Built:** two opt-in Type keys. A state's `claim: <principal field>`: a person's move into the state records them in
+the field (the user an agent acts for, else the actor), and every move out is then theirs only, on top of `allowed` and
+`except`. A transition's `release: true`: the move that gives the claim up, decided by `allowed` alone; it must clear
+the field. The kernel's own moves are exempt. The rule is `policy.MayLeaveClaimed`, pure, asked in the item service's
+`authorize` right after `MayTransition`, so a held decision is judged at the request and again at resolution. The
+claim field is frozen for everyone while claimed (`lifecycle.CheckFrozen`). The view follows: a claimed Item waits on
+its claimant only, a role's queue shows the unclaimed, the release is not work. Load checks in
+`internal/typedef/claim.go`; the JSON Schema; three reading sentences (parts `claim`, `waits.claimant`,
+`move.release`) and a witness with a story. design.md: "A claim that binds, as built". Roadmap: item 5, step 2 built;
+the done-when's claim row passes.
+
+**Kernel changes (counted):** the keys and load checks (typedef, schema), the rule (policy), the transition and the
+`waiting_on` query (item service, one line in lifecycle), the reading. No proto, migration or go.mod change.
+
+**Decided (the owner, through the coordinator):** Phase A, "defaults, 2 explicit": one state key naming a principal
+field; **the release is explicit** (a move that only clears the field is not a release: a reject that clears it would
+otherwise open the decision to the team by accident); a claimant who lost the role cannot decide, a colleague
+releases; a role's queue shows only unclaimed Items; an agent claims only where the Type opens the field to agents;
+timers, reactions and held moves into a claimed state refused at load; reassign and `GetType` left for later. At the
+tests gate, five choices: the name `release`; a claimed state needs a release; the claim field frozen for everyone
+while claimed; `FIELD_NOT_WRITABLE` where `writable_by` refuses first; the claimant rule said once in the reading, on
+the state. Phase C approved by the coordinator's review. The committed bake-off results stay as the record of the
+runs of 24 November; whether to record a fresh run of both once track 1 is done is open (the coordinator asks the
+owner).
+
+**Tests:** new: item service 11 (the bake-off row first), policy 2 (20 cases), typedef 7 (16 problems, 11 valid
+shapes), API 1, reading 2 and a witness (`w_claim@1`). Two new fixture files (the witness Type, the schema corpus
+file). **Existing tests changed:** one, an assertion: `internal/reading/cite_test.go`, `elements()` counts
+`states[i].claim`, so `TestEveryElementIsCited` asks for a sentence that cites it (approved at the tests gate).
+**Approved readings changed:** none. Stubs landed with the tests: the two keys, `policy.MayLeaveClaimed`, three part
+names.
+
+**The bake-offs, both run in full, scripts unchanged** (the five purchase Types gained two lines each and a header
+note). "Does a claim hold?": the kernel now refuses, `PERMISSION_DENIED NOT_ALLOWED`, in `test3-inbox.py` and
+`test_inbox.py` (was "allowed: the claim is only a field"). `attacks_review.py`: a colleague takes over a purchase fay
+claimed and left, PASS (gus put it back in the queue). Every path of `test0-paths.py` completes. Kernel rows still
+failing, all known: a colleague reads ana's purchase and its history; an access request for no system; the
+agent-among-approvers pair. The fresh result files differ from the committed ones in many rows that earlier items
+changed (drafts and planted reasons refused, the workflow side door closed); they were kept out of the repository.
+
+**Surprises:**
+- The Camunda images pulled here this time, so the first bake-off ran with both sides up.
+- A new API test file named `claim_test.go` broke `TestListTypes_EveryVersionInOrder`: it registered its Type before
+  the list was read. Step 1's `apiwq` had the same dependence unnoticed. The file is `waiting_claim_test.go`; the fix
+  is in Later.
+- "The claim field is also frozen" can never be a problem on its own: the release then clears a frozen field, which
+  is already refused. Its test looks for the problem among several.
+- The what-to-do text of a load problem must be a string literal (`TestEveryProblemHasACode` reads the source).
+- The force-push of the rebased branch was refused by the session's permission check. The branch carries a merge of
+  main instead; the tree is the same.
+
+**Numbers.** `go vet` clean; `go test ./...` green, 28 packages; `go test -race ./...` green; the new tests
+`-race -count=10` green. Scenario on the compose stack: passed (run word runfe27c2c5). Web Playwright 9; apps/poc
+journeys 4.
+
+**Local workarounds, outside the repository (nothing committed):** dockerd started by hand; the stack from a compose
+override in the scratchpad; Playwright through scratchpad configs using the preinstalled Chromium.
+
+**Open:** the Later items above; a fresh recorded run of both bake-offs. **Next session:** step 3 (who may act,
+stored), step 4 (queue extras and the web Inbox, which should read `claim`), or item 6, as the owner chooses.
