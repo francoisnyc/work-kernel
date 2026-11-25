@@ -29,6 +29,9 @@ func elements(ty *typedef.Type) []string {
 		if len(s.Frozen) > 0 {
 			add("states[%d].frozen", i)
 		}
+		if len(s.RequesterOnly) > 0 {
+			add("states[%d].requester_only", i)
+		}
 		if s.Timer != nil {
 			add("states[%d].timer", i)
 		}

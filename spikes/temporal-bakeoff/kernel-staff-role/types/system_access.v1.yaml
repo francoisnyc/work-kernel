@@ -1,3 +1,8 @@
+# Bake-off 2, the staff-role run: what is asked and the reason are writable
+# only by holders of role staff. Edited in place for track 1 item 4 (only the
+# requester edits a draft, the owner's decision): the draft's requester_only
+# line. Each run registers it fresh.
+#
 # Bake-off: the second approval kind, an access request (system, role,
 # justification), made inside the system it asks for and decided by the
 # system's owner. Submitting copies the owner from the system, in the same
@@ -18,7 +23,7 @@ fields:
   - {id: f_reason,        type: string,    writable_by: ['role:staff']}
 
 states:
-  - {id: draft, category: todo}
+  - {id: draft, category: todo, requester_only: [f_role, f_justification]}
   - id: owner_review
     category: waiting
     frozen: [f_system_name, f_owner, f_role, f_justification]

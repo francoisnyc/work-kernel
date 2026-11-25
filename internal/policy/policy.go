@@ -310,6 +310,22 @@ func MayWriteField(f typedef.Field, who Who) bool {
 	return who.OnBehalfOf == "" || writes(f, who.OnBehalfOf, who.OnBehalfOfRoles)
 }
 
+// MayWriteInState answers the requester's part of who writes a field
+// ("only the requester" for drafts): while an Item is in st, a field the
+// state lists under requester_only is written on the public door only by
+// the Item's requester (IsRequester: the effective creator, or an agent
+// acting for them). A field the state does not list is not limited by it;
+// writable_by is MayWriteField's question, asked as well, so an agent
+// acting for the requester also needs the field open to agents. The
+// kernel's own actors are no one's requester; the internal door does not
+// ask.
+func MayWriteInState(st typedef.State, id string, who Who, it ItemFacts) bool {
+	if !slices.Contains(st.RequesterOnly, id) {
+		return true
+	}
+	return IsRequester(who.Actor, who.OnBehalfOf, it.CreatedBy, it.CreatedOnBehalfOf)
+}
+
 // writes answers for one principal: an agent as agents, anyone else (a
 // user, a customer) as people, and either by holding one of the roles.
 func writes(f typedef.Field, principal string, roles []string) bool {

@@ -427,6 +427,10 @@ func (r *renderer) state(i int) {
 		r.say([]Part{Frozen}, []string{at("states[%d].frozen", i)},
 			at("While it is in %s, nobody changes %s.", s.ID, joinOr(ticked(s.Frozen))))
 	}
+	if len(s.RequesterOnly) > 0 {
+		r.say([]Part{RequesterOnly}, []string{at("states[%d].requester_only", i)},
+			at("While it is in %s, only the requester changes %s.", s.ID, joinOr(ticked(s.RequesterOnly))))
+	}
 	if s.Timer != nil {
 		parts := []Part{Timer}
 		text := at("%s after it enters %s, if it is still there, the timer moves it to %s", duration(s.Timer.Duration), s.ID, s.Timer.To)

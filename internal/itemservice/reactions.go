@@ -286,7 +286,7 @@ func (k *Service) applyAdd(ctx context.Context, tx pgx.Tx, id uuid.UUID, tgt loc
 	for _, f := range ids {
 		patch[f] = adds[f]
 	}
-	if err := checkPatch(ty, tgt.State, nil, patch, nil); err != nil {
+	if err := checkPatch(ty, tgt.State, nil, patch, nil, policy.ItemFacts{}); err != nil {
 		return WriteResult{}, err
 	}
 	hold, err := readOpenHold(ctx, tx, id)

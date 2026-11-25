@@ -218,7 +218,7 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 				return WriteResult{}, err
 			}
 		}
-		if err := checkPatch(ty, it.State, declared, named, writer); err != nil {
+		if err := checkPatch(ty, it.State, declared, named, writer, facts(it)); err != nil {
 			return WriteResult{}, err
 		}
 		// While a hold is open, only an escape leaves the state, and it

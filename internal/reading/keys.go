@@ -11,6 +11,7 @@ var KeyParts = map[string][]Part{
 	"fields[].unique_among_siblings": {FieldUnique},
 
 	"states[].frozen":          {Frozen},
+	"states[].requester_only":  {RequesterOnly},
 	"states[].timer.after":     {Timer, TimerWaits},
 	"states[].timer.to":        {Timer},
 	"states[].at.field":        {AtTimer},

@@ -1,0 +1,18 @@
+# Witness fixture: "only the requester" for drafts (track 1, item 4). The
+# draft's amount and vendor are its requester's; once sent, nobody changes
+# them.
+id: w_draft
+version: 1
+initial_state: draft
+
+fields:
+  - {id: f_amount, type: int}
+  - {id: f_vendor, type: string}
+  - {id: f_note,   type: string}
+
+states:
+  - {id: draft, category: todo, requester_only: [f_amount, f_vendor]}
+  - {id: sent,  category: waiting, frozen: [f_amount, f_vendor]}
+
+transitions:
+  - {from: draft, to: sent, allowed: [creator]}
