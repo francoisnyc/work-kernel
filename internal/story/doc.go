@@ -85,6 +85,9 @@
 //	                                                 category or state (0: it counts nothing)
 //	time person sees ITEM fields field, field, ...   exactly the fields set and visible to the person
 //	time person cannot see ITEM
+//	time person finds waiting ITEM, ITEM, ...        the person's "waiting on me" view (Search with
+//	                                                 waiting_on = me, every page) holds exactly these
+//	time person finds nothing waiting                that view is empty
 //
 // A place that would widen who can see is sent unconfirmed, so it is
 // refused WIDEN_NOT_CONFIRMED. A step may name an Item the kernel created

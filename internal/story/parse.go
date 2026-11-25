@@ -588,7 +588,7 @@ func parseStep(day1 time.Time, line string, timed bool) (Step, error) {
 		}
 		i += 2
 	}
-	verb, err := word(i+1, "what "+st.Actor+" does: creates, updates, moves, links, unlinks, places, narrows, sees or cannot see")
+	verb, err := word(i+1, "what "+st.Actor+" does: creates, updates, moves, links, unlinks, places, narrows, sees, cannot see or finds")
 	if err != nil {
 		return st, err
 	}
@@ -763,6 +763,33 @@ func parseStep(day1 time.Time, line string, timed bool) (Step, error) {
 			}
 			break
 		}
+	case "finds":
+		st.Verb = FindsWaiting
+		switch {
+		case j+1 < len(toks) && toks[j].is("nothing") && toks[j+1].is("waiting"):
+			if err := end(j + 2); err != nil {
+				return st, err
+			}
+		case j < len(toks) && toks[j].is("waiting"):
+			k := j + 1
+			for {
+				name, err := word(k, "an Item's name")
+				if err != nil {
+					return st, err
+				}
+				st.Items = append(st.Items, name)
+				if k+1 < len(toks) && toks[k+1].is(",") {
+					k += 2
+					continue
+				}
+				if err := end(k + 1); err != nil {
+					return st, err
+				}
+				break
+			}
+		default:
+			return st, fmt.Errorf("want finds waiting ITEM, ITEM, ... or finds nothing waiting")
+		}
 	case "cannot":
 		if j >= len(toks) || !toks[j].is("see") {
 			return st, fmt.Errorf("want cannot see ITEM")
@@ -775,9 +802,9 @@ func parseStep(day1 time.Time, line string, timed bool) (Step, error) {
 			return st, err
 		}
 	default:
-		return st, fmt.Errorf("%q is not something a step does: creates, updates, moves, links, unlinks, places, narrows, sees or cannot see", verb)
+		return st, fmt.Errorf("%q is not something a step does: creates, updates, moves, links, unlinks, places, narrows, sees, cannot see or finds", verb)
 	}
-	if st.Refused != "" && (st.Verb == Sees || st.Verb == SeesFields || st.Verb == CannotSee) {
+	if st.Refused != "" && (st.Verb == Sees || st.Verb == SeesFields || st.Verb == CannotSee || st.Verb == FindsWaiting) {
 		return st, fmt.Errorf("only a write may be refused: a read says what it sees")
 	}
 	return st, nil
