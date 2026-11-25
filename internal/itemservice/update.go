@@ -162,7 +162,7 @@ func (k *Service) update(ctx context.Context, req UpdateRequest, kc *kernelCause
 				return WriteResult{}, err
 			}
 		}
-		if err := checkPatch(ty, it.State, nil, req.Fields, writer); err != nil {
+		if err := checkPatch(ty, it.State, nil, req.Fields, writer, facts(it)); err != nil {
 			return WriteResult{}, err
 		}
 		// While a hold is open, the fields its check reads are frozen: the

@@ -308,7 +308,7 @@ func (in *Internal) ResolveHold(ctx context.Context, req ResolveHoldRequest) (Wr
 		// A correction travels with the move out of the held state: it may
 		// not write what that state freezes. (What the transition's allowed
 		// names, it may not write either: refused at load.)
-		if err := checkPatch(ty, it.State, nil, req.Fields, nil); err != nil {
+		if err := checkPatch(ty, it.State, nil, req.Fields, nil, policy.ItemFacts{}); err != nil {
 			return WriteResult{}, err
 		}
 

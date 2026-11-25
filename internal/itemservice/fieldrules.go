@@ -17,11 +17,14 @@ import (
 // this order, on create, update and a transition, before an open hold is:
 //
 //  1. Not writable (FieldNotWritableError, an ErrForbidden): on the public
-//     door, a field only the kernel writes (writable_by: kernel), and a
-//     field the writer may not write (policy.MayWriteField: people, agents
-//     and roles; a field that lists none is closed to agents); on every
-//     door, in a transition's patch, a field the transition's own `allowed`
-//     names through field:<id> (the caller would choose who may move).
+//     door, a field only the kernel writes (writable_by: kernel), a field
+//     the writer may not write (policy.MayWriteField: people, agents and
+//     roles; a field that lists none is closed to agents), and a field the
+//     Item's current state limits to its requester when the writer is not
+//     the requester (policy.MayWriteInState; judged, like frozen, against
+//     the state a transition leaves); on every door, in a transition's
+//     patch, a field the transition's own `allowed` names through
+//     field:<id> (the caller would choose who may move).
 //  2. Frozen (field_frozen, an ErrRejected): a field the Item's current
 //     state freezes, on every door. A transition is checked against the
 //     state it leaves, so the one entering a state may set its frozen
@@ -35,24 +38,27 @@ import (
 // before the write ("" for a create, which enters its initial state).
 // writer is who writes on the public door (with roles read, when the patch
 // names a role-written field), nil on the internal door: the kernel's own
-// writers are bound by their declarations, not by writable_by.
-func checkPatch(ty *typedef.Type, state string, tr *typedef.Transition, fields map[string]any, writer *policy.Who) error {
+// writers are bound by their declarations, not by writable_by nor by
+// requester_only. facts says who created the Item (its requester).
+func checkPatch(ty *typedef.Type, state string, tr *typedef.Transition, fields map[string]any,
+	writer *policy.Who, facts policy.ItemFacts) error {
 	if len(fields) == 0 {
 		return nil
 	}
 	ids := slices.Sorted(maps.Keys(fields))
-	var refused []string
+	var refused, notRequester []string
 	agent := false
 	if writer != nil {
 		refused = ty.KernelWritten(ids)
 		var byWriter []string
 		byWriter, agent = writerRefuses(ty, ids, *writer)
 		refused = append(refused, byWriter...)
+		notRequester = requesterRefuses(ty, state, ids, refused, *writer, facts)
 	}
 	if tr != nil {
 		refused = append(refused, tr.AllowedFields(ids)...)
 	}
-	if err := notWritable(refused, agent); err != nil {
+	if err := notWritable(refused, agent, state, notRequester); err != nil {
 		return err
 	}
 	if state == "" {
@@ -64,14 +70,14 @@ func checkPatch(ty *typedef.Type, state string, tr *typedef.Transition, fields m
 // checkKernelFields is rule 1 for a create, without the writer's part: a
 // field only the kernel writes is refused at once.
 func checkKernelFields(ty *typedef.Type, fields map[string]any) error {
-	return notWritable(ty.KernelWritten(slices.Sorted(maps.Keys(fields))), false)
+	return notWritable(ty.KernelWritten(slices.Sorted(maps.Keys(fields))), false, "", nil)
 }
 
 // checkWriter is the writer's part of rule 1 alone: Create asks it after
 // what is not found, the start block and the create power.
 func checkWriter(ty *typedef.Type, fields map[string]any, writer policy.Who) error {
 	refused, agent := writerRefuses(ty, slices.Sorted(maps.Keys(fields)), writer)
-	return notWritable(refused, agent)
+	return notWritable(refused, agent, "", nil)
 }
 
 // writerRefuses returns the fields among ids, other than kernel-written
@@ -91,19 +97,54 @@ func writerRefuses(ty *typedef.Type, ids []string, who policy.Who) (refused []st
 	return refused, agent
 }
 
-// notWritable is the refusal of fields not writable, sorted, or nil. An
-// agent is told that its Type opens only some fields to agents.
-func notWritable(refused []string, agent bool) error {
-	if len(refused) == 0 {
+// requesterRefuses returns the fields among ids that the Item's state
+// limits to its requester when who is not the requester, leaving out those
+// already refused (one cause per field: who may write it comes first). A
+// create (state "") is always its requester's.
+func requesterRefuses(ty *typedef.Type, state string, ids, refused []string, who policy.Who, facts policy.ItemFacts) []string {
+	st, ok := ty.State(state)
+	if !ok || len(st.RequesterOnly) == 0 {
 		return nil
 	}
-	slices.Sort(refused)
-	refused = slices.Compact(refused)
-	reason := "the request may not write " + strings.Join(refused, ", ")
-	if agent {
-		reason = "an agent writes only the fields its Type opens to agents, or to a role it holds: " + reason
+	var out []string
+	for _, id := range ids {
+		if !slices.Contains(refused, id) && !policy.MayWriteInState(st, id, who, facts) {
+			out = append(out, id)
+		}
 	}
-	return &FieldNotWritableError{Fields: refused, Reason: reason}
+	return out
+}
+
+// notWritable is the refusal of fields not writable, sorted, or nil. Its
+// reason says each cause, with its fields: an agent is told that its Type
+// opens only some fields to agents; anyone else not the requester, that
+// only the requester writes the fields the state limits to them.
+func notWritable(refused []string, agent bool, state string, notRequester []string) error {
+	if len(refused) == 0 && len(notRequester) == 0 {
+		return nil
+	}
+	var causes []string
+	if len(refused) > 0 {
+		refused = sortedSet(refused)
+		reason := "the request may not write " + strings.Join(refused, ", ")
+		if agent {
+			reason = "an agent writes only the fields its Type opens to agents, or to a role it holds: " + reason
+		}
+		causes = append(causes, reason)
+	}
+	if len(notRequester) > 0 {
+		notRequester = sortedSet(notRequester)
+		causes = append(causes, "only the requester writes these fields while the Item is in "+state+
+			": the request may not write "+strings.Join(notRequester, ", "))
+	}
+	return &FieldNotWritableError{Fields: sortedSet(append(refused, notRequester...)), Reason: strings.Join(causes, "; ")}
+}
+
+// sortedSet returns ids sorted, without duplicates.
+func sortedSet(ids []string) []string {
+	out := slices.Clone(ids)
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 // publicWriter is the public door's writer for checkPatch: the principal,
