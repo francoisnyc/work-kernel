@@ -334,6 +334,13 @@ err_has "pli agent start"
 step "INVALID_REQUEST: a value that is not an int"
 refuse ana "INVALID_ARGUMENT INVALID_REQUEST" item update "$t1" --set f_priority=high
 
+step "a create names the latest version: build_step@1 is closed since build_step@2; ticket@1 stays open, because ticket@8 keeps it"
+refuse ana "INVALID_ARGUMENT INVALID_REQUEST" item create --type build_step@1 --set "f_title=old $w"
+err_has "type"
+err_has "closed to new Items: create its latest version"
+expect "a ticket@1 is still a ticket@1" \
+	"$(ok ana item create --type ticket@1 --set "f_title=old ticket $w" | j .item.type)" "namespaces/acme/types/ticket/versions/1"
+
 step "NOT_ALLOWED: ana does not hold role:approver"
 refuse ana "PERMISSION_DENIED NOT_ALLOWED" item transition "$t3" --to approved
 
