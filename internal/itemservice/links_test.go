@@ -74,6 +74,7 @@ hooks:
     action: erp.check_credit
     reads: [f_customer_id, f_amount]
     writes: [f_cost_center]
+start: {older_versions: all}
 `
 
 // otherTypeYAML is a second Type that also declares `blocks` (to TYPE), so
