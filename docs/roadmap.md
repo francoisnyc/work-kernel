@@ -103,6 +103,50 @@ guardrails hold:
 6. **Changing rules in flight is part of the product** (track 1, item 6),
    not an afterthought.
 
+### Developer adoption: the rulebook as a contract
+
+Developers adopt declarative rules when a real language and good tools
+surround them, and leave when the YAML is all they get. How others do it:
+
+- **Code first** (Temporal, Inngest, Restate): workflows are functions, with
+  the IDE, types and tests developers already use. Temporal's own advice on
+  YAML layers: if the authors are engineers, code serves them better, and a
+  DSL that grows past a list of steps should become code.
+- **Data as the contract, a typed SDK to write it** (AWS Step Functions with
+  the CDK, Kubernetes manifests with CEL): the system trusts the data;
+  developers write it from TypeScript, Python or Go.
+- **YAML first** (Kestra, GitHub Actions): works for engineers already at
+  home in config files; the logic lives in scripts the YAML calls.
+- **One source, many views** (Ballerina): its diagram is a canonical view
+  of the code, drawn from it. Elegant, but it asks developers to adopt a new
+  language.
+
+The kernel's YAML and CEL stay the contract: they are what make load-time
+checks, readings and injection resistance possible. Around them:
+
+1. **A typed builder:** Types written in TypeScript (or Go) that emit the
+   YAML, as the CDK emits Step Functions' JSON. Autocomplete, compile errors,
+   refactoring and tests in the developer's language. It only produces data:
+   nothing in it runs at runtime, and the kernel checks its output at load
+   like any Type. One language first; which one follows the first adopters.
+2. **The data as a first-class surface:** the JSON Schema in editors (it
+   exists); `pli validate`, `pli fmt` (block-style YAML, cleaner diffs) and
+   `pli lint`; a CEL playground that knows a Type's fields; stories run as
+   ordinary `go test` in CI; a language server later.
+3. **Named conditions,** like Kubernetes' variables (a named CEL expression
+   other expressions use): short guards, and names a reviewer and a reading
+   can show. A small construct that removes repetition (guardrail 2).
+4. **Readings that cover CEL's list operations** (`filter`, `exists`, `all`,
+   `size` over `children.<type>` and `links.<name>`): today a guard outside
+   the reading's subset reads "a rule over … holds", so the approvals join,
+   the most important rule in its Type, cannot be checked by reading it. A
+   guard that still reads that way is flagged at load.
+5. **The way out to code stays obvious:** anything past the rulebook's
+   budget is a Go activity.
+
+Items 4 and 2's `fmt` come before track 2's authoring test, which checks the
+readings; the builder and the rest wait for the decision point.
+
 ## Now: prove, then broaden
 
 Two bake-offs (`docs/research/camunda-bakeoff.md`,
@@ -249,7 +293,8 @@ decision goes.
   readings, the attack scripts) fold into the shared package, and the
   kernel stays the spike that shaped it.
 
-**Waiting until then:** a semantic diff, patterns, proofs, the security
+**Waiting until then:** a semantic diff, patterns, proofs, the typed
+builder and developer tools (except what track 2 needs), the security
 operations domain, cards in chat, context packs, hosting. Provenance (theme
 2) goes ahead only as far as track 1 needs it.
 
