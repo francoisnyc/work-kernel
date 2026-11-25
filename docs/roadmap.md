@@ -283,6 +283,13 @@ order" in `docs/design.md` sets.
   the Type allows, never less, and enforces nothing: moves still go through
   the item service, visibility through `policy.Project`. Rules and screens
   change at different speeds and are reviewed apart.
+  **A diagram of the Type, as a second view of the same model:** its states
+  and transitions, who may make each, where hooks fire and timers run,
+  drawn from the Type (it is a state machine), beside the YAML and the
+  plain-language reading; later, edits made in the diagram written back to
+  the same model. As Ballerina shows code and a sequence diagram of one
+  program, because each construct has one picture. A help for the
+  non-developer test (track 2): a state diagram is read faster than a list.
 - **Open-ended cases, as Type features:** what was built so far is mostly
   flows. Three pieces, each checkable data, in the spirit of CMMN (the ideas,
   not the notation): the work that *may* be added to a case at each point
