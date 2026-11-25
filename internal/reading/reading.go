@@ -75,6 +75,7 @@ const (
 	// A move, and who may make it.
 	Move         Part = "move" // {Who} moves it from {a} to {b}[clauses].
 	MoveRequired Part = "move.required"
+	MoveGiven    Part = "move.given"
 	MoveGuard    Part = "move.guard"
 	MoveEscape   Part = "move.escape"
 	MoveClears   Part = "move.clears"
@@ -153,7 +154,7 @@ func Parts() []Part {
 		Link, LinkOne, LinkInverseOne, LinkKernel, LinkRoles, Incoming, Rollup,
 		Frozen, RequesterOnly, Timer, TimerWaits, AtTimer, Acting, ActingEvery, ActingAt, ActingAtWhen, ActingAtSets,
 		Enrich, EnrichFallbk, Action, ActionWrites, Resolve, Final, ReactionFrom, ReactionWhen, ReactionSkip, ReactionHook,
-		Move, MoveRequired, MoveGuard, MoveEscape, MoveClears, MoveSets,
+		Move, MoveRequired, MoveGiven, MoveGuard, MoveEscape, MoveClears, MoveSets,
 		WhoStaff, WhoCreator, WhoRole, WhoField, WhoPrincipal, WhoTimer, WhoHook, WhoNobody, ExceptCreator, ExceptContainerCreatr,
 		Check, CheckCorrect, Held, Hold, HoldFrozen, HoldEscape, HoldNone, Undo,
 		MoveLink, MoveContainer, MoveChildren, MoveChildrenWhen,
