@@ -20,7 +20,7 @@ type filter struct{ itemservice.Filter }
 
 func (f filter) empty() bool {
 	return len(f.TypeIDs) == 0 && len(f.States) == 0 && len(f.Categories) == 0 && len(f.Fields) == 0 &&
-		len(f.Links) == 0
+		len(f.Links) == 0 && f.WaitingOn == ""
 }
 
 // parseTypeID reads a Type's name without a version: namespaces/{ns}/types/{type}.
@@ -52,6 +52,9 @@ func (s *server) filterIn(ctx context.Context, p item.Principal, f *kernelv1.Ite
 		out.TypeIDs = append(out.TypeIDs, id)
 	}
 	out.States = f.States
+	// "Waiting on me": the kernel reads the value (me, role:<name>) and
+	// refuses anything else, at filter.waiting_on.
+	out.WaitingOn = f.WaitingOn
 	for _, c := range f.Categories {
 		name, ok := categoryNames[c]
 		if !ok {
