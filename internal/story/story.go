@@ -73,6 +73,9 @@ const (
 	CannotSee  Verb = "cannot see"
 	Places     Verb = "places"  // places ITEM in ITEM | places ITEM at the top level
 	Narrows    Verb = "narrows" // narrows ITEM to person, person, ...
+	// FindsWaiting: finds waiting ITEM, ITEM, ... | finds nothing waiting.
+	// The person's "waiting on me" view holds exactly these Items.
+	FindsWaiting Verb = "finds waiting"
 )
 
 // Step is one step of the timeline (or of given).
@@ -99,6 +102,7 @@ type Step struct {
 
 	Values []Assignment // with ...
 	Fields []string     // sees ... fields
+	Items  []string     // finds waiting: the Items' names (none: nothing waiting)
 
 	Refused string // "-> refused REASON": the reason the write must be refused with
 }

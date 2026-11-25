@@ -139,6 +139,14 @@ func (c *checker) step(st Step) {
 		}
 		return
 	}
+	if st.Verb == FindsWaiting {
+		for _, name := range st.Items {
+			if _, ok := c.known(name); !ok {
+				c.fail(st.Line, "%s: no step created it before, and no name rule names it", name)
+			}
+		}
+		return
+	}
 	tys, ok := c.known(st.Item)
 	if !ok {
 		c.fail(st.Line, "%s: no step created it before, and no name rule names it", st.Item)

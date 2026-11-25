@@ -29,6 +29,12 @@ type Filter struct {
 	Fields []FieldFilter
 	// Links keeps Items linked to or from given Items (see LinkFilter).
 	Links []LinkFilter
+	// WaitingOn keeps the open Items that wait on someone ("waiting on
+	// me", track 1 item 5; waiting.go): "me", the caller, or
+	// "role:<name>", a role's queue. Anything else, or a customer asking,
+	// is an *InvalidError at filter.waiting_on.
+	// omitempty keeps the page tokens of requests without it as they were.
+	WaitingOn string `json:",omitempty"`
 }
 
 // FieldFilter is a condition on one field: Eq, or a range of one or two
@@ -51,7 +57,7 @@ type FieldFilter struct {
 // empty reports whether the filter says nothing.
 func (f Filter) empty() bool {
 	return len(f.TypeIDs) == 0 && len(f.States) == 0 && len(f.Categories) == 0 && len(f.Fields) == 0 &&
-		len(f.Links) == 0
+		len(f.Links) == 0 && f.WaitingOn == ""
 }
 
 // sqlFilter is a Filter checked against the registered Types and turned into
@@ -130,6 +136,13 @@ func (k *Service) resolveFilter(ctx context.Context, p item.Principal, f Filter)
 		if policy.CustomerOf(p) != "" {
 			out.conds = append(out.conds, rowListing(all, ff.Field, fmt.Sprintf("f_vis_%d", i), out.args))
 		}
+	}
+	if f.WaitingOn != "" {
+		conds, err := k.waitingConds(ctx, p, all, f.WaitingOn, out.args)
+		if err != nil {
+			return out, err
+		}
+		out.conds = append(out.conds, conds...)
 	}
 	for i, lf := range f.Links {
 		cond, err := k.linkCond(ctx, p, all, lf, i, out.args)

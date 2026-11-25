@@ -556,6 +556,10 @@ func (h *harness) fields(st Step) (map[string]any, error) {
 // read runs a read step through the item service's public read, as its
 // person: what they see, through policy.Project.
 func (h *harness) read(ctx context.Context, st Step) {
+	if st.Verb == FindsWaiting {
+		h.findsWaiting(ctx, st)
+		return
+	}
 	if h.id(st.Item) == uuid.Nil {
 		h.ensureNamed(ctx)
 	}
@@ -920,4 +924,45 @@ func failFirst(fn any, n int, name string) any {
 		out[len(out)-1] = reflect.ValueOf(&err).Elem()
 		return out
 	}).Interface()
+}
+
+// findsWaiting runs "finds waiting": the person's waiting-on-me view,
+// every page, holds exactly the Items named.
+func (h *harness) findsWaiting(ctx context.Context, st Step) {
+	if slices.ContainsFunc(st.Items, func(n string) bool { return h.id(n) == uuid.Nil }) {
+		h.ensureNamed(ctx)
+	}
+	p, err := h.actor(ctx, st)
+	if err != nil {
+		h.failStep(st, "%s: %v", st.Text, err)
+		return
+	}
+	var got []string
+	token := ""
+	for {
+		res, err := h.k.Search(ctx, itemservice.SearchRequest{
+			Principal: p, Filter: itemservice.Filter{WaitingOn: "me"}, PageToken: token,
+		})
+		if err != nil {
+			h.failStep(st, "%s: %s", st.Text, api.Refusal(err))
+			return
+		}
+		for _, it := range res.Items {
+			got = append(got, h.nameOf(it.ID))
+		}
+		if token = res.NextPageToken; token == "" {
+			break
+		}
+	}
+	slices.Sort(got)
+	want := slices.Sorted(slices.Values(st.Items))
+	if !slices.Equal(got, want) {
+		show := func(names []string) string {
+			if len(names) == 0 {
+				return "nothing"
+			}
+			return strings.Join(names, ", ")
+		}
+		h.failStep(st, "%s finds waiting %s, want %s", st.Actor, show(got), show(want))
+	}
 }
