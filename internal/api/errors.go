@@ -40,7 +40,7 @@ var messages = map[string]string{
 	"INTERNAL":               "internal error",
 	// A rule's refusal: the kernel's rejection codes, upper-cased.
 	"NO_TRANSITION":       "the Type has no such transition",
-	"MISSING_FIELDS":      "the transition needs fields that are not set",
+	"MISSING_FIELDS":      "the transition needs fields that are not set or not given in the move",
 	"GUARD_FAILED":        "the transition's guard does not hold",
 	"NOT_INITIAL_STATE":   "the Type does not start in that state",
 	"HOP_LIMIT":           "the chain of kernel writes went too deep",
