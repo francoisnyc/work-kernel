@@ -12,6 +12,7 @@ var KeyParts = map[string][]Part{
 
 	"states[].frozen":          {Frozen},
 	"states[].requester_only":  {RequesterOnly},
+	"states[].claim":           {Claim, WaitsClaimant},
 	"states[].timer.after":     {Timer, TimerWaits},
 	"states[].timer.to":        {Timer},
 	"states[].at.field":        {AtTimer},
@@ -32,6 +33,7 @@ var KeyParts = map[string][]Part{
 	"transitions[].allowed":    {WhoStaff, WhoCreator, WhoRole, WhoField, WhoPrincipal, WhoTimer, WhoHook, WhoNobody, Waits},
 	"transitions[].except":     {ExceptCreator, ExceptContainerCreatr},
 	"transitions[].escape":     {MoveEscape, HoldEscape, HoldNone},
+	"transitions[].release":    {MoveRelease},
 	"transitions[].clears":     {MoveClears},
 	"transitions[].sets":       {MoveSets},
 	"hooks[].id":               {Check, Enrich, Action, Acting, ActingAt, ReactionHook},

@@ -424,7 +424,12 @@ func (r *renderer) state(i int) {
 	}
 
 	// While it is there.
-	r.waits(s)
+	if s.Claim != "" {
+		r.say([]Part{Claim}, []string{at("states[%d].claim", i)},
+			at("Whoever moves it into %s claims it: `%s` names them, and only they move it on from there, unless a move releases the claim.",
+				s.ID, s.Claim))
+	}
+	r.waits(i, s)
 	if len(s.Frozen) > 0 {
 		r.say([]Part{Frozen}, []string{at("states[%d].frozen", i)},
 			at("While it is in %s, nobody changes %s.", s.ID, joinOr(ticked(s.Frozen))))
@@ -614,6 +619,10 @@ func (r *renderer) move(ti int) {
 	if tr.Guard != "" {
 		text += ", only if " + r.ctx.condition(tr.Guard)
 		parts = append(parts, MoveGuard)
+	}
+	if tr.Release {
+		text += ", which releases the claim"
+		parts = append(parts, MoveRelease)
 	}
 	if tr.Escape {
 		text += ", even while a hold is open on it, which cancels the hold"
@@ -1314,7 +1323,13 @@ func (r *Reading) Text() string {
 // words a move's own sentence uses. The rule is policy.WaitingMoves, the
 // one the item service's waiting_on filter reads, so a state whose moves
 // name nobody, or in category done or canceled, has no such sentence.
-func (r *renderer) waits(s typedef.State) {
+func (r *renderer) waits(i int, s typedef.State) {
+	// A claimed Item waits on its claimant, whoever its moves name.
+	if s.Claim != "" && len(policy.WaitingMoves(r.t, s.ID)) > 0 {
+		r.say([]Part{Waits, WaitsClaimant}, []string{at("states[%d].claim", i)},
+			at("While it is in %s, it waits on whoever claimed it.", s.ID))
+		return
+	}
 	var phrases, paths []string
 	for _, tr := range policy.WaitingMoves(r.t, s.ID) {
 		for ti, other := range r.t.Transitions {
