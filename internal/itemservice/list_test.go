@@ -123,6 +123,7 @@ states:
 transitions:
   - {from: s_open, to: s_work}
   - {from: s_work, to: s_done}
+start: {older_versions: all}
 `, id, version, def.mixed, def.workCategory))
 		if err != nil {
 			t.Fatalf("parse filter Type v%d: %v", version, err)
