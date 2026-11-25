@@ -103,11 +103,14 @@ func TestSchema_CommitSeqIsASequenceAndEventsCarryTheirTransaction(t *testing.T)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	// The transaction has committed, so its ID is below the current xmin.
+	// The transaction has committed, so the current snapshot sees its ID as
+	// done. (Not "below the snapshot's xmin": any older transaction still
+	// open anywhere in the database, a background ANALYZE for one, holds
+	// xmin back and has nothing to do with this event.)
 	n = count(t, `select count(*) from item_events
-	              where item_id = $1 and xid < pg_snapshot_xmin(pg_current_snapshot())`, res.ItemID)
+	              where item_id = $1 and pg_visible_in_snapshot(xid, pg_current_snapshot())`, res.ItemID)
 	if n != 1 {
-		t.Error("the committed event's xid is not below the snapshot xmin")
+		t.Error("the committed event's xid is not visible in the current snapshot")
 	}
 }
 
