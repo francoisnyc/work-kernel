@@ -72,6 +72,28 @@ Ideas noted during the spike, not built yet.
     one; the browser suites ran here through scratchpad configs pointing at
     `/opt/pw-browsers/chromium`. CI installs the pinned browser.
 
+- **Only the requester edits a draft: its Later items** (design.md, "Only the requester edits a draft, as built"):
+  - **A Type in `types/` using it.** `vacation_request@4` (the draft's dates, days, type and comment)
+    and `access_request@2` (title and reason). None in this step, by the owner's decision.
+  - **`GetType` cannot show it.** The proto's `State` has `frozen` only; showing `requester_only`
+    is a contract change.
+  - **A draft's links, readers and placement** are not covered: a colleague can still link to, narrow
+    or move someone's draft where the Type lets them.
+  - **An "all fields" shorthand** on a state. Not now: field by field, like frozen.
+  - **A test that fails when another transaction is open: `TestSchema_CommitSeqIsASequenceAndEventsCarryTheirTransaction`**
+    (`internal/itemservice/watermark_test.go`), seen failing once in a full package run during this
+    step (then green in two full runs, the race run and 10 runs alone). Its last assertion says the
+    committed event's xid is below `pg_snapshot_xmin(pg_current_snapshot())`, which holds only if no
+    older transaction holding an xid is still open anywhere in the database. Confirmed with a
+    throwaway test, not committed: with another connection holding a transaction that has an xid
+    (`begin; select pg_current_xact_id();`), the assertion fails (0 rows); a transaction with only a
+    snapshot does not do it; an `ANALYZE` left open in its transaction does (it takes an xid when it
+    writes `pg_statistic`), so an autovacuum ANALYZE at that instant plausibly does too (not
+    observed). In every case `pg_visible_in_snapshot(xid, pg_current_snapshot())` and
+    `pg_xact_status(xid) = 'committed'` still hold. **Proposed, for the owner (a protected test, as the
+    two timing tests were):** assert `pg_visible_in_snapshot(xid, pg_current_snapshot())` instead: the
+    event's transaction has committed and is no longer in progress, which is what the test pins.
+
 - **Found by the Temporal bake-off** (docs/research/temporal-bakeoff.md):
   - **Fields are open to the agent by default.** **Built** (PR #75): a
     field without `writable_by` is people's only; `writable_by` lists
@@ -3854,3 +3876,53 @@ the same base images); Playwright through scratchpad configs using the preinstal
 **Open:** the Later items above (the contract field, links, a Type-wide opening, trust). **Next session:** track 1
 item 3 (required means given by the mover) or item 4 (only the requester edits a draft), which the bake-offs' "pass in
 full" waits on.
+
+## 2026-11-25 — Track 1, item 4: only the requester edits a draft (Phase D)
+
+**Built:** a state's `requester_only: [fields]` limits those fields to the Item's requester (the effective creator,
+`IsRequester`, or an agent acting for them) while the Item is in that state, on top of `writable_by`. Anyone else is
+refused `FIELD_NOT_WRITABLE`, part of "not writable", before frozen and held. A transition's patch, and what its move
+clears, is judged against the state it leaves; it applies again when the Item comes back; a move's `sets`, a create and
+the internal door are untouched. Load checks like frozen's (UNKNOWN_FIELD, DUPLICATE; CONFLICT for a kernel-written
+field or one the state freezes); the JSON Schema's state key; the reading "While it is in {s}, only the requester changes
+{fields}." design.md: "Only the requester edits a draft, as built", and the errors table. Roadmap: track 1 item 4 built,
+the done-when's reading and its two residues, bake-off hole 3.
+
+**Kernel changes (three, counted):** `policy.MayWriteInState` and the item service's field rules (one refusal names every
+field and says each cause), the load checks, the reading's sentence. No schema, migration, proto or go.mod change. Data:
+the two staff-role spike Types, one line each, edited in place.
+
+**Decided (the owner, through the coordinator):** Phase A's defaults, all of them: the syntax on a state, field by field;
+ANDed with `writable_by`; `IsRequester`, so an agent for the requester also needs the field open to agents; the state a
+move leaves; `requester_only` as the name; no Type in `types/` and no proto change in this step; the rule in `policy`.
+**"Re-run unchanged" means the scripts**: the staff-role Types gain one line each, since a new version would never be
+created by scripts that name `purchase@1` (creates on the latest version are item 6). The two rows no item covers (a
+colleague reading ana's purchase and its history; an access request for no system) are named in the done-when for him
+to decide. Phase B's tests (OK'd as listed), and one existing test changed with the coordinator's review.
+
+**Tests:** new: item service 10 (the bake-off's attack first), policy 1 (16 cases), typedef 5, reading 1 and a witness
+(`w_draft@1`). **Existing tests changed:** one, agreed: `cite_test.go`'s `elements` lists `states[i].requester_only`, as
+it lists frozen (stricter; nothing loosened). No fixture-only changes. No API test (a test Type there changes
+`TestListTypes_EveryVersionInOrder`), no scenario step (no Type in `types/` uses the rule).
+
+**Surprises:** the prototype in Phase A showed that the agent acting alone on a field open to agents was told about fields
+"open to agents", though the requester rule refused it: each cause now gets its own sentence. An existing test listed every
+element a reading must cite, and knew nothing of the new key: the only test change. And a protected test,
+`TestSchema_CommitSeqIsASequenceAndEventsCarryTheirTransaction`, failed once: confirmed that any older transaction holding an
+xid makes its xmin assertion fail (Later, with the smallest fix, for the owner).
+
+**Numbers.** `go vet` clean; `go test ./...` green; `go test -race -count=1 ./...` green, 28 packages, no race (item service
+268 s, workflow 364 s); the new tests `-race -count=10` green. Scenario on the compose stack: passed, whole (run word
+rund1be076d). Web Playwright 9 in 12.9 s; apps/poc journeys 4 in 48.7 s. **The bake-offs, scripts unchanged** (kernel
+side; `results/` kept as the earlier record): the Camunda bake-off's kernel list 32 of 32; the Temporal bake-off's purchase
+27 of 27, access request 17 of 18 (ana's request for no system), the blind-written access request 18 of 18, **the
+staff-role run 7 of 7 (was 6 of 7: olaf is now refused on ana's draft)**, the reviewer's list the same two reads allowed.
+
+**Local workarounds, outside the repository (nothing committed):** dockerd started by hand (it stops between turns);
+postgres, temporal and nginx-unprivileged from mirror.gcr.io after Docker Hub's 429; the stack from a compose override in
+the scratchpad (Go binaries and the web and poc bundles built here, into the same base images); Playwright through local
+configs (in `.git/info/exclude`) using the preinstalled Chromium.
+
+**Open:** the Later items above (Types using it, `GetType`, a draft's links, readers and placement, the xmin test); the
+done-when's two residues, the owner's to decide. **Next session:** track 1 item 3 (required means given by the mover),
+whose tests wait on this branch.
