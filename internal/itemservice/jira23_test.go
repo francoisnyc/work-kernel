@@ -66,6 +66,7 @@ fields:
   - {id: f_days_off, type: date,   multiple: true, max: 366}
   - {id: f_zone,     type: string}
 readable_by_reactions: [f_week]
+start: {older_versions: all}
 `
 
 const r3Yard = `
