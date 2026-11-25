@@ -1,0 +1,20 @@
+# Witness fixture: a claim that binds (track 1 item 5, step 2). Anyone in
+# w_fin takes a request from the queue; in review it is theirs: only they
+# approve it. Any member of w_fin may put it back, which releases it.
+id: w_claim
+version: 1
+initial_state: queue
+
+fields:
+  - {id: f_what,       type: string}
+  - {id: f_claimed_by, type: principal}
+
+states:
+  - {id: queue,    category: waiting}
+  - {id: review,   category: active, claim: f_claimed_by}
+  - {id: approved, category: done}
+
+transitions:
+  - {from: queue,  to: review,   allowed: ['role:w_fin']}
+  - {from: review, to: queue,    allowed: ['role:w_fin'], release: true, clears: [f_claimed_by]}
+  - {from: review, to: approved, allowed: ['role:w_fin']}
