@@ -19,6 +19,7 @@ page are marked UNVERIFIED. `docs/design.md` is the spec; these explain why.
 | [How open-source task engines build "waiting on me"](task-queue-internals.md) | 2026-11-24 | Track 1 item 5: who may act stored per Item, roles resolved at query time, a claim that binds |
 | [Bake-off: the approvals pilot on Camunda 8 and on the kernel](camunda-bakeoff.md) | 2026-11-24 | The approvals pilot; a measured result, not web research (code in `spikes/camunda-bakeoff/`) |
 | [Bake-off 2: the kernel, or each process written on Temporal](temporal-bakeoff.md) | 2026-11-24 | The cost of a process and of a change; a measured result (code in `spikes/temporal-bakeoff/`) |
+| [Prior art: a fast transactional clerk in front, durable queues and timers behind](prior-art-clerk-and-durable-backend.md) | 2026-11-25 | Is the high-level design new? (No: CICS, sagas, ConTracts, Helland; what the kernel adds) |
 
 Later decisions sometimes supersede a report; the decision log and
 `docs/design.md` win. For example, the permissions report reverses the
