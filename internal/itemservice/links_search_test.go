@@ -252,7 +252,7 @@ func TestSearch_StringAndPrincipalVersionsFilterTogether(t *testing.T) {
 	ana := in(person("ana"), ns)
 	id := "who-" + uuid.NewString()[:8]
 	for v, kind := range map[int]string{1: "string", 2: "principal"} {
-		ty, err := typedef.Parse(fmt.Appendf(nil, "id: %s\nversion: %d\nfields:\n  - {id: f_who, type: %s}\n", id, v, kind))
+		ty, err := typedef.Parse(fmt.Appendf(nil, "id: %s\nversion: %d\nfields:\n  - {id: f_who, type: %s}\nstart: {older_versions: all}\n", id, v, kind))
 		if err != nil {
 			t.Fatalf("parse v%d: %v", v, err)
 		}
