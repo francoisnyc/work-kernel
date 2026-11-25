@@ -339,6 +339,25 @@ resuming, the gate is as strong as the agent framework's code.
 Scope: questions and approvals of consequential work, not every tool call
 an agent makes (agent tool-call governance is not this kernel's job).
 
+**Who else does this.** The category is crowded: HumanLayer (an API for
+agents to contact people, framework-neutral; its company now leads with a
+coding-agent IDE), gotoHuman (review templates, an inbox, an MCP server,
+webhooks), RobotRock, the open-source Placet and hitloop (CLI and MCP,
+"questions, reviews, approvals, one inbox"), approvals APIs inside agent
+platforms (Agno, Gumloop, LangChain's Agent Inbox), and approvals bundled
+into MCP gateways and control planes (Gravitee, Contro1). Standalone
+approval products are rare; most come bundled.
+
+So the inbox screen is not the kernel's edge, and the kernel does not race
+on it. In those products a review is a message with a form; here it is a
+work item under rules: who may decide comes from the Type and is checked at
+load, an agent never answers its own request, people's work and agents'
+questions share one queue and one "waiting on me", the approved action can
+be re-checked before it runs, and the rules are versioned and readable. A
+team that only wants approvals next week is better served by one of the
+products above; the kernel is for where the rules and the shared queue
+matter, and where data and rules must stay on its own infrastructure.
+
 Depends on track 1, item 5: without queues, a binding claim and "waiting
 on me", the kernel adds little over the inboxes that exist. Proposed for
 the six weeks, after item 5, as part of the landing (the plan's open
@@ -689,7 +708,8 @@ Claude Code, and each needs a person to answer a question or approve a step.
 "Ask a person" ("Now", above) as a service for those teams: the MCP server
 and the Temporal adapter, the two Types, a team queue and "waiting on me".
 
-Why it may come before the approvals pilot: no process moves and no system
+Why it may come before the approvals pilot (as a test of the kernel's
+generality, not a product bet; see "Who else does this" above): no process moves and no system
 is retired; every agent team needs it whatever its framework; and it
 exercises exactly what track 1 builds (queues, a binding claim, fields
 closed to agents). Measured by: questions answered without the agent's
