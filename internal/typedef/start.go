@@ -1,8 +1,13 @@
 package typedef
 
 import (
+	"encoding/json"
+	"fmt"
 	"slices"
+	"strconv"
 	"strings"
+
+	"go.yaml.in/yaml/v3"
 
 	"github.com/francoisnyc/work-kernel/internal/item"
 )
@@ -22,6 +27,65 @@ import (
 type Start struct {
 	In      []string `yaml:"in" json:"in,omitempty"`
 	Allowed []string `yaml:"allowed" json:"allowed,omitempty"`
+	// OlderVersions (track 1, item 6, step 1) lists the older versions of
+	// the Type that may still be created while this version is the latest:
+	// version numbers, or all. A stub: it parses and is stored; nothing
+	// checks or reads it yet.
+	OlderVersions *OlderVersions `yaml:"older_versions" json:"older_versions,omitempty"`
+}
+
+// OlderVersions is start.older_versions: all, or a list of versions.
+type OlderVersions struct {
+	All      bool
+	Versions []int
+	bad      []string // list entries that are not whole numbers, as written
+}
+
+// StartAllOlder is the word that keeps every older version open.
+const StartAllOlder = "all"
+
+func (o *OlderVersions) UnmarshalYAML(n *yaml.Node) error {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		if n.Value == StartAllOlder {
+			o.All = true
+		} else {
+			o.bad = append(o.bad, n.Value)
+		}
+	case yaml.SequenceNode:
+		o.Versions = []int{}
+		for _, c := range n.Content {
+			v, err := strconv.Atoi(c.Value)
+			if err != nil || c.Kind != yaml.ScalarNode {
+				o.bad = append(o.bad, c.Value)
+				v = 0
+			}
+			o.Versions = append(o.Versions, v)
+		}
+	}
+	return nil
+}
+
+func (o OlderVersions) MarshalJSON() ([]byte, error) {
+	if o.All {
+		return json.Marshal(StartAllOlder)
+	}
+	if o.Versions == nil {
+		return json.Marshal([]int{})
+	}
+	return json.Marshal(o.Versions)
+}
+
+func (o *OlderVersions) UnmarshalJSON(data []byte) error {
+	var word string
+	if json.Unmarshal(data, &word) == nil {
+		if word != StartAllOlder {
+			return fmt.Errorf("start.older_versions: %q is not all or a list of versions", word)
+		}
+		o.All = true
+		return nil
+	}
+	return json.Unmarshal(data, &o.Versions)
 }
 
 // StartTop in start.in means "at the top level, in no container". A Type
@@ -75,7 +139,7 @@ func (t *Type) checkStart(r reporter) {
 		return
 	}
 	// YAML gives an empty list for in: [], and nil for a key left out.
-	if s.In == nil && s.Allowed == nil {
+	if s.In == nil && s.Allowed == nil && s.OlderVersions == nil {
 		r.fail(CodeRequired, "start", "Say where (in) or who (allowed), or remove start",
 			"start says nothing")
 	}
