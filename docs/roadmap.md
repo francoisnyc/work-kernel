@@ -66,6 +66,43 @@ composition, and evidence for or against that claim.
 - **The yardstick stays four domains.** A pilot that succeeded only through
   kernel code made for it counts as a failure of the kernel.
 
+### Traps others fell into: BPEL and the service bus
+
+Two earlier generations promised much of what the kernel promises, and
+failed in ways worth naming:
+
+- **BPEL** promised processes that business people would author. Only
+  developers could, and it grew into a weak programming language in XML. Its
+  diagrams (BPMN) and its code never round-tripped, and changing a process
+  with instances in flight was painful.
+- **The enterprise service bus** began as plumbing and became where business
+  logic collected (routing, transformation, rules): a monolith owned by a
+  central team that every project queued behind.
+
+The kernel is shaped differently: its unit is the work item, not a chain of
+service calls; its pipes (outbox, relay) only deliver; its durability is
+Temporal, not an engine of its own. Where it is still exposed, these
+guardrails hold:
+
+1. **The authoring claim is tested, not argued.** Track 2's non-developer
+   test is the BPEL test. If a non-developer cannot author without a
+   developer, the claim leaves the pitch.
+2. **The rulebook has a budget.** A new construct in the Type format must
+   replace code that many Types would otherwise write, across domains (the
+   membership test, `docs/design.md`); anything else is a Go activity. The
+   way out to code is a feature, not a failure. Each step's journal entry
+   names any construct it added, so the growth is visible.
+3. **One source of truth.** A diagram or other view of a Type is generated
+   from the Type and read-only; nothing is edited in two places.
+4. **No integration logic in the kernel.** The kernel judges changes to
+   Items. Mapping data between systems, routing messages and calling
+   services belong to activities and connectors at the edges.
+5. **No central bottleneck.** Types are owned and versioned by the teams that
+   use them; the checks at load are the gatekeeper, not a review by the
+   kernel's owners.
+6. **Changing rules in flight is part of the product** (track 1, item 6),
+   not an afterthought.
+
 ## Now: prove, then broaden
 
 Two bake-offs (`docs/research/camunda-bakeoff.md`,
@@ -182,7 +219,7 @@ whether they count:
   English; an assistant writes the Type; they read the kernel's explanation
   and story back and correct it. Measured: whether they could, without a
   developer, and what they got wrong. This is Slice 1's first claim, made
-  real (below).
+  real (below), and the BPEL test ("Traps others fell into", above).
 - **A third process of a different shape:** an open-ended case, not another
   approval, written by a fresh author with no context, on the kernel and on
   plain Temporal with the shared package. Measured as in the second
