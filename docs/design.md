@@ -104,7 +104,9 @@ A Type is versioned YAML data that **names code but never contains it**.
   `none` means "not work": work views leave it out. A Type that declares no
   states gets one implicit state, `default`, with category `none`. A state may
   declare `frozen: [fields]`: no write changes them while the Item is in it.
-- Transitions: from/to, guard expression, required fields, fields to clear
+- Transitions: from/to, guard expression, required fields (and those of
+  them the move itself must give, `given`: see "Required means given by
+  the mover, as built"), fields to clear
   (`clears`, see "Jira part 1 as built"), fields to compute (`sets`, see
   "Jira part 2, step 1 as built"), who may act, action references.
   - Who may act is the transition's `allowed` list. An entry is `role:<name>`,
@@ -990,6 +992,7 @@ A rule's refusal answers with its code; every kernel rejection carries one
 | `ErrRejected`, the link exists / does not exist / its target's Type is not allowed | `FAILED_PRECONDITION` | `ALREADY_LINKED` / `NOT_LINKED` / `LINK_TARGET_TYPE` |
 | `ErrForbidden`, a write names a field it may not write (kernel-written, closed to the writer by `writable_by`, e.g. to an agent by default, limited by the Item's state to its requester (`requester_only`), or named by its transition's `allowed`) | `PERMISSION_DENIED` | `FIELD_NOT_WRITABLE` (+ fields) |
 | `ErrRejected`, a write names a field the Item's state freezes | `FAILED_PRECONDITION` | `FIELD_FROZEN` (+ fields, state) |
+| `ErrRejected`, a transition's required field is not set, or one its `given` lists is not given in the move itself | `FAILED_PRECONDITION` | `MISSING_FIELDS` (+ fields, from_state, to_state); its message: "the transition needs fields that are not set or not given in the move" |
 | `ErrRejected`, a write would break one of the Type's invariants | `FAILED_PRECONDITION` | `INVARIANT_FAILED` (+ invariant) |
 | `ErrForbidden`, LinkItems / UnlinkItems on a link only the kernel sets | `PERMISSION_DENIED` | `LINK_NOT_WRITABLE` (+ link_type) |
 | `ErrRejected`, a direct transition into a state that sets a link found no single target | `FAILED_PRECONDITION` | `LINK_UNRESOLVED` (+ link_type, reason) |
@@ -3997,7 +4000,7 @@ the list is closed, `reading.Parts()`):
 | timer, at_timer | {d} after it enters {s}, if it is still there, the timer moves it to {to}[; if a hold is open then, the timer waits for it to close and looks again]. / When it is in {s} and the instant in {f} has passed, the timer moves it to {to}. |
 | acting, acting_at | {d} after it enters {s}[, then every {e}], {hook} calls {action} with {inputs}, at most {n} times while it stays there. / When it is in {s} and the instant in {f} has passed, [if {when}, ][{id} sets {f} to that instant and ]{hook} calls {action} with {inputs}. |
 | enrich, action, resolve | On entering {s}, {hook} calls {action} with {inputs} and writes its answer into {fields}[; with no answer within 15 minutes it writes {fallback}]. / ... [and writes what it made into {fields}], once per entry, even if it has moved on. / On entering {s}, the kernel links {link} to the requester's {state} {T} (the one whose {f} is the requester); if there is none, or more than one, the move into {s} is refused. |
-| move | {Who} moves it from {a} to {b}[, once {fields} are set][, only if {guard}][, even while a hold is open on it, which cancels the hold][; the move clears {fields}][; the move sets {f} to {value}]. Who: Any staff member who can see it / The requester / Anyone with the role R / Whoever {f} names / `principal` / Only the timer / Only the hook {h} may move it / Only a reaction; [but never anyone who took part in creating it / its container]. |
+| move | {Who} moves it from {a} to {b}[, once {fields} are set][ and / , once][ the mover gives {fields} in the move itself][, only if {guard}][, even while a hold is open on it, which cancels the hold][; the move clears {fields}][; the move sets {f} to {value}]. Who: Any staff member who can see it / The requester / Anyone with the role R / Whoever {f} names / `principal` / Only the timer / Only the hook {h} may move it / Only a reaction; [but never anyone who took part in creating it / its container]. |
 | check, held, hold, undo | Asking for this move opens a hold instead: {hook} calls {action} with {inputs}; if it allows[, or corrects {fields},] the move happens; it may deny it ({reasons}); with no answer within 15 minutes the move fails. / Asking for this move opens a hold instead: {id} adds {v} to {f} on the {T} linked as {link}; the move happens only if that Item accepts the write, else it is denied with that Item's reason. / While that hold is open, [nobody changes {fields}, and] {the only move out of {a} is to {escape} / nothing moves it}. / On entering {s} from {from}, {id} gives back what {held} added. |
 | move_children, move_container, move_link, create, set, reaction_hook | On entering {s}[ from {from}][, if {when}], {id} moves the {T}s inside it[ whose {when}] from {states} to {to} / moves its container from {states} to {to}[; if its container's rules refuse the move, it is skipped] / moves the {T} it links to as {link} from {states} to {to} / creates a {T}@{v} inside it[, one for each value of {f}], with {values} / sets {f} on its container to {value}. / When {reaction} has applied, {hook} calls {action} with {inputs}. |
 | created_inside | When {the requester / a person other than the requester / anyone} creates a {T} inside it[ while it is in {s}], {id} moves it to {to} / moves the {T}s inside it[ whose {when}] from {states} to {to}. |
@@ -4679,6 +4682,158 @@ already tested.
 **Kernel changes (counted):** the rule (`policy.MayWriteInState` and the
 item service's field rules), the load checks, the reading's sentence. No
 schema, migration, proto or go.mod change.
+
+## Required means given by the mover, as built (2026-11-25)
+
+Track 1, item 3 of `docs/roadmap.md`. Both bake-offs planted the reason for
+a rejection before the decider acted, so the decider rejected without
+giving one, though the Type requires it (`docs/research/camunda-bakeoff.md`,
+test 2b; `docs/research/temporal-bakeoff.md`). Item 2 closed the agent's
+way in; a colleague could still write `f_reason` first. A transition's
+`required` was met by any value on the Item, whoever wrote it and
+whenever. Now a Type can say that a required field must be given in the
+move itself.
+
+**The rule.** A transition lists, in `given`, fields of its `required`
+that the move's own patch must set:
+
+```yaml
+- {from: finance_review, to: rejected, allowed: ['role:finance'], except: [creator],
+   required: [f_reason], given: [f_reason]}
+```
+
+- **Both lists.** A `given` field is also in `required`, so `GetType`,
+  the web form (which asks for the required fields) and every reader of
+  `required` keep working without a contract change.
+- **Given in the move** means the move's patch names the field and the
+  write leaves it with a value. **The same value as before counts**: the
+  decider re-sending the planted text is the decider's own choice. **An
+  empty string counts**, as it counts as set for `required`; a Type that
+  wants a non-empty reason says so in a guard (`size(f_reason) > 0`). A
+  null in the patch unsets the field: not given.
+- **The mover:** a person, through their patch. An agent acting for a
+  person gives the field only where the Type opens it to agents
+  (`writable_by`, item 2); a closed field is `FIELD_NOT_WRITABLE` first.
+  `writable_by` says who may give a field; `given` says when. A customer
+  moves with no patch, so never gives one.
+- **The kernel's own moves carry no patch** (timers, reactions): they can
+  never give a field. Such a Type is refused at load (below); at run time
+  the move fails closed, as `MISSING_FIELDS`.
+- **What it means is the lifecycle's.** `lifecycle.TransitionWith` judges
+  required and given in one place (`checkRequired`): a `given` field counts
+  only when `Input.Given` holds it. The item service passes in the fields
+  the move's patch sets, and nothing else.
+
+**The owner's decisions (Phase A):** the defaults, and on Q1 option B.
+
+- **Q1, held moves: refused at load** (`HELD_TRANSITION`), as `clears` and
+  `sets` are on a held move. Supporting them (judge the requester's patch
+  when asked, freeze the given fields while the hold is open, let no check
+  write them) is Later, for when a real Type needs it. Holds are unchanged.
+- **Q2:** the API's one fixed message for `MISSING_FIELDS` now says both
+  cases (below). Text only.
+- **Q3:** the bake-offs' kernel Types gain `given: [f_reason]` on every
+  rejection (15 lines in 9 files under `spikes/`), edited in place with a
+  header note: the spike stacks register their Types fresh on every run.
+  The scripts are unchanged.
+- **Q4:** `""` counts as given. `""` as unset for every rule is Later.
+- **Q5:** the kernel's own moves are refused at load, and fail closed at
+  run time.
+- **Q6:** `given` fields also in `required` (`MISSING_COUNTERPART`
+  otherwise).
+- **Q7:** an agent for the decider may give a field its Type opens to
+  agents.
+- **Q8:** no Type in `types/` uses it in this step.
+
+**Order of checks and the refusal.** Unchanged: malformed -> not writable
+-> frozen -> held -> **required fields (with given) and the guard** -> the
+clears -> the sets -> invariants -> `allowed` and `except`. The refusal is
+the existing `FAILED_PRECONDITION` / `MISSING_FIELDS`, with `fields`,
+`from_state` and `to_state` (no new code, no proto change). Its `fields`
+are the missing required and the missing given fields, in one sorted list.
+The item service's reason has three wordings:
+
+- only required fields missing: today's, word for word: `transition from
+  "a" to "b" needs these fields set: f_amount`;
+- only given fields missing: `... needs these fields given in the move:
+  f_reason`;
+- both: `... needs these fields set: f_amount; and given in the move:
+  f_reason`.
+
+The API's fixed message was "the transition needs fields that are not
+set"; it is now **"the transition needs fields that are not set or not
+given in the move"**.
+
+**Load checks and schema.** Field by field, on `transitions[i].given[j]`:
+an undeclared field is `UNKNOWN_FIELD`; a field listed twice
+`DUPLICATE`; a field the move does not require `MISSING_COUNTERPART`; a
+field no patch may name is refused: one only the kernel writes
+(`WRITES_KERNEL_FIELD`), one the state the move leaves freezes
+(`WRITES_FROZEN_FIELD`), one the move's own `allowed` names (`CONFLICT`),
+and **one the state it leaves keeps for the requester (`requester_only`,
+item 4) when the move has `except: [creator]`** (`CONFLICT`: only the
+requester could give it, and the requester may not make the move; a move
+`allowed` to a role still loads, since the requester may hold the role).
+A field frozen in the state the move enters is the normal case: the move
+entering a state may set what it freezes, so a reason given in a
+rejection then stays. On the move, at `transitions[i].given`: a held
+move (a check or a held reaction) is `HELD_TRANSITION`; a move a state's
+timer or at-timer makes is `TIMER_NOT_ALLOWED`. On the reaction, at its
+`to`, where a held target is refused: a move the Type's own
+`created_inside` reaction makes, another Type's move reaction into it, or a
+container move, is `CONFLICT`. (`clears` and `sets` of a given field were
+already refused, as of a required one.) The JSON Schema's transition gains
+`given`; the stored definition carries it only when set, so every
+registered version is byte-identical.
+
+**Readings.** A new part, `move.given`, read from `transitions[].given`.
+The move sentence reads the required fields only to be set as before, then
+the given ones: "Anyone with the role finance, but never anyone who took
+part in creating it, moves it from finance_review to rejected, once the
+mover gives `f_reason` in the move itself." With both: "..., once
+`f_amount` is set and the mover gives `f_reason` in the move itself, only
+if ...". Its witness (`w_reject@1`): a colleague plants a reason; the
+decider's move without one, or with another field only, is refused
+`MISSING_FIELDS`; with one, even the planted text, it is applied. No
+approved reading changes: no Type in `types/` uses it.
+
+**Not covered (Later):** held moves (above); a Type in `types/` using it
+(`incident` and `ticket`'s `f_resolution`, `approval`'s `f_delegate`);
+`GetType` saying which fields are given (the proto's `Transition` has
+`required` only); and the web form, which sends only the required fields
+that changed, so a decider confirming a pre-filled planted reason without
+editing it is refused `MISSING_FIELDS` and the UI cannot say why. A
+transition that declares every field it may set, and sets nothing else
+(the roadmap's note from OpenNSW), was not taken up in this step. "Only
+the decider writes the field" (`writable_by: ['field:f_x']`) would close the
+write itself rather than the move: complementary, Later.
+
+**The bake-offs, re-run with their scripts unchanged**, each compared row
+by row with the same script run on `main` (kernel side; `results/` stay
+the earlier record): every outcome is the same. No script plants a reason
+as a person; the agent's plant is refused first, since item 2. Two rows
+show the reworded message: the Camunda bake-off's `test0-paths.py`, "gus
+rejects without a reason" (refused, then applied with one), and the
+staff-role run's "fay can reject without giving a reason" (refused). The
+Camunda bake-off's kernel list 32 of 32 refused; the Temporal bake-off's
+measure 4 (purchase all refused, the access request's one row allowed
+being ana's own request for no system), the blind-written access request
+and the staff-role run (7 of 7), all unchanged. The proof of this item is
+the item service's test of the attack (`TestGiven_Bakeoff_APlantedReasonDoesNotCount`).
+
+**Tests:** item service 7 new (the attack first; the manager's rejection;
+what counts as given; null or other fields; unchanged without `given`; an
+agent for the decider; the order against `allowed`); lifecycle 5; typedef
+7 (round trip, nothing new stored, what loads, ten load-check cases, held
+moves, reactions' moves, the schema); reading 2 and a witness; API 1. No
+existing test's code or assertion changed. Two fixture files, each a new
+file: a schema corpus Type (`internal/typedef/testdata/schema/given.v1.yaml`)
+and the witness Type (`internal/reading/testdata/types/w_reject.v1.yaml`).
+One stub, `lifecycle.Input.Given`, landed with the tests.
+
+**Kernel changes (counted):** the rule (`lifecycle.checkRequired`, the
+item service passing the patch's fields), the load checks, the reading's
+clause, the API's message. No schema, migration, proto or go.mod change.
 
 ## Out of scope for the spike
 
