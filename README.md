@@ -134,6 +134,13 @@ pli --as carol item get "$T"                      # NOT_FOUND: carol is in anoth
 pli --as ana item search printer --state approved
 pli --as bob item history "$T"
 
+# What waits on me, over every Type: the open Items whose rules name me
+# (a role I hold, or a field that names me) for a move out of their state.
+# With --role, a role's queue. It is item search --waiting-on me|role:NAME,
+# so it takes words, filters and paging.
+pli --as ana inbox
+pli --as bob inbox --role approver --type ticket
+
 # An agent, scoped to one room. ana makes a room (ana, bob and the agent
 # read it), a narrower room inside it, and a ticket in each.
 ROOM=$(pli --as ana item create --type channel@1 --set f_name=project \
