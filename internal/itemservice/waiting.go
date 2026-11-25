@@ -97,10 +97,16 @@ func (k *Service) waitingConds(ctx context.Context, p item.Principal, all []*typ
 	var ors []string
 	for i, g := range groups {
 		ta, va, sa := fmt.Sprintf("w_types_%d", i), fmt.Sprintf("w_versions_%d", i), fmt.Sprintf("w_states_%d", i)
+		tda, sda := fmt.Sprintf("w_type_ids_%d", i), fmt.Sprintf("w_state_ids_%d", i)
 		args[ta], args[va], args[sa] = g.types, g.versions, g.states
+		args[tda], args[sda] = distinct(g.types), distinct(g.states)
+		// The two "= any" tests say nothing the triples do not: they are
+		// there for the planner, which can walk items_namespace_type_state
+		// on them and cannot on the triples (cmd/bench -waiting).
 		ors = append(ors, fmt.Sprintf(
-			`((m.type_id, m.type_version, m.state) in (select * from unnest(@%s::text[], @%s::int[], @%s::text[])) and %s)`,
-			ta, va, sa, g.cond))
+			`(m.type_id = any(@%s::text[]) and m.state = any(@%s::text[])`+
+				` and (m.type_id, m.type_version, m.state) in (select * from unnest(@%s::text[], @%s::int[], @%s::text[])) and %s)`,
+			tda, sda, ta, va, sa, g.cond))
 	}
 	return []string{"(" + strings.Join(ors, " or ") + ")", noOpenHold}, nil
 }
@@ -194,4 +200,11 @@ func principalCond(named []string, principal string, roles []string, arg string,
 		return "", false
 	}
 	return "(" + strings.Join(tests, " or ") + ")", true
+}
+
+// distinct returns the values of s, each once, sorted.
+func distinct(s []string) []string {
+	out := slices.Clone(s)
+	slices.Sort(out)
+	return slices.Compact(out)
 }
