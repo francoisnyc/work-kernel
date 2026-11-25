@@ -1,6 +1,9 @@
 # Bake-off 2: the first bake-off's purchase@1, with what is asked and the
 # reason writable only by holders of role staff (people; the agent holds
 # preparer only). The reviewer's suggestion, tested in results/kernel-staff-role.md.
+# Edited in place for track 1 item 4 (only the requester edits a draft, the
+# owner's decision): the draft's requester_only line, so that a colleague
+# holding staff no longer changes ana's draft. Each run registers it fresh.
 #
 # Bake-off: the purchase approval (docs/plans/camunda-bakeoff.md).
 #
@@ -36,7 +39,7 @@ fields:
   - {id: f_order_id,      type: string,    writable_by: kernel}
 
 states:
-  - {id: draft, category: todo}
+  - {id: draft, category: todo, requester_only: [f_amount, f_vendor, f_cost_centre, f_justification]}
   - id: manager_review
     category: waiting
     frozen: [f_amount, f_vendor, f_cost_centre, f_justification, f_manager]
