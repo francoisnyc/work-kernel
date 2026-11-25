@@ -952,6 +952,9 @@ and its scope: the insert already holds those key locks.)
   the selected Types, or across every Type that declares the field when
   none is selected. A filter alone is a valid search. Link conditions and "me"
   are described in "Links, containment and people" (Step 1).
+- `waiting_on` (`me`, or `role:<name>`): only the open Items that wait on
+  the caller, or on a role; one more condition, with the others. See
+  "Waiting on me, step 1, as built".
 - `min_seq` on search for read-your-writes; `UNAVAILABLE` / `NOT_CAUGHT_UP`
   after 2 s. `GetItem` always reads the latest state.
 - Every read goes through `Project`. `Watch` comes later, after the sequencer.
@@ -3796,6 +3799,8 @@ step   = time person creates ITEM as TYPE@V [in ITEM] [with values]
        | time person sees ITEM with values             (each field holds that value)
        | time person sees ITEM fields f, f, ...        (exactly the fields set and visible)
        | time person cannot see ITEM
+       | time person finds waiting ITEM, ITEM, ...     (the person's "waiting on me" view holds exactly these)
+       | time person finds nothing waiting             (that view is empty)
        a write may end in "-> refused REASON" (the API's reason: NOT_ALLOWED, ...)
 
 rule   = [when input = value, ...] [from time] [until time]: answer
@@ -4834,6 +4839,198 @@ One stub, `lifecycle.Input.Given`, landed with the tests.
 **Kernel changes (counted):** the rule (`lifecycle.checkRequired`, the
 item service passing the patch's fields), the load checks, the reading's
 clause, the API's message. No schema, migration, proto or go.mod change.
+
+## Waiting on me, step 1, as built: the view, derived at read time (2026-11-25)
+
+Track 1, item 5 of `docs/roadmap.md`, the first of its five steps. Both
+bake-offs' test 3 ("one inbox") found that the kernel could not say what
+waits on a person: a 64-line script rebuilt it from the Types with one
+search per move. Now one filter answers it, for every Type with no
+per-Type code: `ItemFilter.waiting_on`, on `SearchItems` and `ListItems`.
+
+A queue is a view, not a container (the owner's decision,
+`docs/research/task-inboxes-taskana-polyflow.md`): a container is where an
+Item belongs, a queue is who must act next. The view is read from the
+Type: the moves out of each Item's current state, in the Item's own Type
+version.
+
+**The rule** (`internal/policy/waiting.go`: `WaitingMoves`, `NamedEntries`,
+`WaitsOn`, `WaitsOnRole`; pure, beside `MayTransition`):
+
+- **A move counts when its `allowed` names someone:** a role
+  (`role:<name>`), a person (`principal:user:…`, `principal:agent:…`) or a
+  field (`field:<id>`, the person or people the field holds).
+- **An empty `allowed` is nobody's queue.** "Anyone may" is not "someone
+  must": a Type that wants a queue names a role.
+- **`creator` never counts.** A move for the creator only (withdraw a
+  request, send a draft) is the requester's own, not work waiting on them.
+  Beside a role (`allowed: [creator, 'role:x']`) the Item waits on x's
+  holders, not on its requester.
+- **`nobody` and the kernel's own actors** (the timer, a hook) do not count.
+- **A state in category done or canceled never waits:** a reopen is not
+  work.
+- **`except` is applied to the person asking.** A finance member who asked
+  for a purchase does not find it in their own view; their colleagues do.
+- **Not evaluated: guards, `required` and `given` fields.** The view says
+  "may act, as far as who they are goes"; the move may still be refused
+  when asked. **An Item with an open hold is left out:** it waits on a
+  check, not on a person (one indexed lookup).
+- **Each Item follows its own version**, as its moves do (starting work,
+  step 2b): a purchase made on version 1 stays in the queue version 1
+  names when version 2 names another.
+
+`WaitsOn` narrows a move's list to the entries that name someone and asks
+`MayTransition`, so the rule for agents and the meaning of `except` are
+the move's own, written once. A property test over 5,000 generated Types,
+people and Items holds that whatever waits on someone is a move
+`MayTransition` lets them make.
+
+**The values of `waiting_on`:**
+
+- **`me`:** the caller. For an agent, what its session may act on: the
+  agent and the user it acts for both pass (a role must be the agent's
+  too; a field that names a person never names their agent), within the
+  session's scopes.
+- **`role:<name>`:** that role's queue. Any member of staff may ask for
+  it, and sees of it what they can already see. A queue is a role's:
+  `except` is not applied (the purchase gus asked for is in the finance
+  queue, and not in gus's own `me`). A role nobody holds, or that no Type
+  names, is an empty queue.
+- **Anything else is `INVALID_ARGUMENT` on `filter.waiting_on`,** another
+  person's inbox (`user:fay`) included. So is **a customer asking**: a
+  customer takes only the creator's moves, which do not count, until a
+  Type can say that a state waits on its requester (step 5).
+
+**How it is read.** Derived when it is asked; nothing is stored. The item
+service (`internal/itemservice/waiting.go`) turns the rule into one more
+SQL condition: for every registered Type version and state, each waiting
+move becomes the condition under which the caller may make it ("true" for
+a role they hold, read now, or their own ID; a test of the Item's field
+for `field:<id>`; `except` as a test of who created the Item or its
+container). States that share a condition are grouped into lists of
+(type, version, state). The condition joins the visibility test and the
+other filters **before the limit**, and every Item returned goes through
+`policy.Project`, exactly as Search and List did. So the view composes
+with types, states, categories, field and link filters, words,
+`order_by`, paging and `min_seq`, and a page token is bound to
+`waiting_on` like to the rest of its request. A test holds what the SQL
+returns to `policy.WaitsOn` and `policy.WaitsOnRole` over a world with
+every case.
+
+Because nothing is stored, nothing can fall behind: a role granted shows
+its queue at once and a role revoked hides it; a changed `field:` field
+moves the Item to the person it now names; a new Type version changes
+nothing for Items of earlier ones.
+
+**The contract.** One new field, `string waiting_on = 6` on `ItemFilter`.
+No new operation, error code, table or migration.
+
+**pli.** `--waiting-on me|role:NAME` on `item search` and `item list`, and
+`pli inbox [WORDS...] [--role NAME] [FILTERS] [PAGING]`, which is `item
+search --waiting-on me` (with `--role NAME`, `role:NAME`) and prints the
+same answer.
+
+**The reading.** The first thing said of what holds while an Item is in a
+state, before what the state freezes: "While it is in {s}, it waits on
+{who}." (part `waits`), citing each move that names someone; the people
+in the Type's order, each once, in the words a move's own sentence uses,
+joined with ", or". It does not repeat `except`: the move sentences below
+it do. A state whose moves name nobody, or in category done or canceled,
+has no such sentence. `states[].category` stays among the keys no
+sentence reads: it decides which views show the Item, as its reason
+already said. The three approved readings each gained one sentence:
+incident@3 and incident@4, "While it is in new, it waits on anyone with
+the role desk_agent."; vacation_request@3, "While it is in submitted, it
+waits on whoever `f_approver` names."
+
+**The story grammar grew by one read step**, which the sentence's witness
+needs (`internal/story`, test tooling: no binary links it):
+
+```
+time person finds waiting ITEM, ITEM, ...   the person's view holds exactly these Items
+time person finds nothing waiting           the person's view is empty
+```
+
+It reads the item service's public Search with `waiting_on = me`, as the
+person, every page. Like `sees`, it may not be refused, and `Check` holds
+its Items to the ones the story knows.
+
+**What the rule says of the Types in `types/`,** each written before it
+existed (none was changed):
+
+- **The trackers (story, task, bug, epic, sprint) name nobody,** so their
+  Items wait on nobody. "Assigned to me" stays a field filter.
+- **`incident@4` in `new` waits on `desk_agent`** only because its cancel
+  move names the role; the move that picks an incident up is open to
+  anyone. Right by luck, and now in an approved reading.
+- **`ticket@7` in `in_progress` shows for every approver,** though the
+  approval is for some tickets only: the guard that says which is not
+  evaluated.
+- **`leave_balance@1` in `open` waits on `hr_admin`:** the move that
+  closes a balance names the role. True, and not what an HR admin would
+  call work.
+
+The first, third and fourth are what a `waiting: true|false` key on a
+transition would let a Type say (step 5, Later).
+
+**What it costs** (`go run ./cmd/bench -waiting`; Postgres 17; 400,000
+Items in one namespace, 55,000 of them open and waiting; a page of 50,
+30 runs each):
+
+| Read | median ms | p90 ms |
+| --- | --- | --- |
+| A finance member, `me` (a role: 22,500 match) | 30.7 | 34.8 |
+| The finance queue, asked by someone outside it | 29.4 | 40.2 |
+| The CFO, `me` (2,500 match) | 36.2 | 50.7 |
+| A manager with 500 waiting, `me` (a field) | 32.4 | 57.1 |
+| A manager with nothing waiting | 27.9 | 33.4 |
+| A manager who is also in finance | 32.5 | 37.2 |
+| Someone nothing names | 40.6 | 47.8 |
+| A finance member, purchases only | 57.8 | 74.7 |
+| A finance member, ordered by amount | 42.5 | 49.8 |
+| For comparison: a plain Type and state filter | 1.4 | 1.7 |
+
+- **About 30 to 60 ms a page at this size,** twenty to forty times a plain
+  filtered page. The cost follows the number of open Items in the states
+  involved, not what is in the caller's view: someone with nothing
+  waiting pays the same.
+- **The condition names its Types and states twice.** The (type, version,
+  state) lists alone made Postgres read every Item (50 to 83 ms); two
+  `= any` tests that say nothing new let it walk
+  `items_namespace_type_state`.
+- **Step 3's question.** A throwaway prototype of rows stored per open
+  Item (Phase A, Postgres 16) read a page in 0.3 to 0.5 ms whatever the
+  size, for about 0.01 ms more on each move. Whether the pilot needs
+  that is the owner's decision on these numbers.
+- **The bench loads its Items with one INSERT,** not through the item
+  service: reads only are measured, and a Create each would take most of
+  an hour. It runs only against the Postgres container it starts itself
+  (`testdb.Start`); it takes no database address, by flag or by
+  environment.
+
+**The bake-offs.** The Temporal bake-off's `test_inbox.py`, unchanged,
+gives the same rows as before: the script's own four for fay, and "Does a
+claim hold?" still "allowed: the claim is only a field". No script row
+tests the view; `pli --as fay inbox` now answers in one call what
+`kernel-inbox.py` rebuilds. The claim is step 2.
+
+**Tests.** New: policy 5 (31 cases of who a move names, and the property
+test); item service 13 (the bake-offs' four of six first); API 3; pli 3;
+story 4; reading 2 and a witness. No existing test's code changed. One
+new fixture file, the witness Type
+(`internal/reading/testdata/types/w_queue.v1.yaml`). Assertion changes,
+approved by the owner at the tests gate: the three approved readings.
+
+**Kernel changes (counted):** the rule (`policy`), the filter (the item
+service and the API's one field), the reading's sentence, pli's command
+and flag. No schema, migration or go.mod change; the proto grew by one
+field.
+
+**What is left** (the owner's split): step 2, a claim that binds; step 3,
+who may act stored per open Item, if these numbers ask for it; step 4, a
+container as a filter, capped counts, "who am I" with roles, and the web
+Inbox on the view; step 5, a state that waits on its requester (and so a
+customer's view).
 
 ## Out of scope for the spike
 
