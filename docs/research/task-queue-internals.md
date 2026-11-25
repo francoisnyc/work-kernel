@@ -76,13 +76,24 @@ CEL. The proposal for item 5's Phase A:
    `policy.Project`): the inbox shows only Items the reader may see. KADAI
    does the same with READ before READTASKS.
 4. **Guards are not pre-evaluated.** A row means "may act, if the guard
-   passes"; the transition still checks everything. `except` is applied when
-   the rows are written (an excluded person gets none).
+   passes"; the transition still checks everything. `except` is applied
+   when the view is read, not when rows are written (corrected at item 5's
+   Phase A, 2026-11-25): a requester who holds the role is reached through
+   the role's row, so no row can be left out for them.
 5. **The claim binds, as KADAI's does, and goes further than Camunda's:**
-   only someone with a row may claim; once claimed, only the claimant may make
-   the Item's decisions until it is released, reassigned by an administrator,
-   or reset by escalation. Concurrent claims need no optimistic lock: the
-   Item row is already locked during every write.
+   only someone the move's rules let in may claim; once claimed, only the
+   claimant may make the Item's decisions until it is released, reassigned
+   by an administrator, or reset by escalation. The claim is checked by the
+   move's own rules under the Item's row lock, like every move, never
+   against the stored rows (corrected, 2026-11-25): rows only serve reads,
+   so a wrong row can show too much or too little in a list and never lets
+   someone act. Concurrent claims need no optimistic lock: the Item row is
+   already locked during every write.
 6. **A read model fed by the event reader** (Polyflow's way) waits for the
    inbox over other systems, where the rows come from intakes rather than
    from Types.
+
+**As built (2026-11-25, item 5, step 1).** The view came first, derived at
+read time with no rows: `docs/design.md`, "Waiting on me, step 1, as
+built", with what it costs. Storing the rows is step 3, decided on those
+numbers.

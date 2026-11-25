@@ -232,8 +232,31 @@ attack that found it as its test:
    Item is a move; an approval step is not.
    How others make it fast, and what that suggests (who may act stored per
    open Item in the same write, roles resolved at query time, guards not
-   pre-evaluated, the claim checked against those rows):
-   `docs/research/task-queue-internals.md`.
+   pre-evaluated): `docs/research/task-queue-internals.md`. The claim is
+   checked by the move's own rules, under the Item's lock, never against
+   stored rows: rows, if they come, only serve reads.
+   Split into five steps (the owner's, at its Phase A):
+   1. **The view, derived at read time. Built** (PR #89; `docs/design.md`,
+      "Waiting on me, step 1, as built"): `ItemFilter.waiting_on` (`me`, or
+      `role:<name>`) on `SearchItems` and `ListItems`, and `pli inbox`. An
+      Item waits on the people a move out of its state names (a role, a
+      person, a field); an empty `allowed`, the creator's own moves and
+      done or canceled states do not count; guards are not evaluated.
+      Nothing is stored, so roles and fields are followed at once, and the
+      view never shows an Item its reader cannot see. One new field in
+      kernel.v1; no table. At 400,000 Items with 55,000 open, a page costs
+      about 30 to 60 ms (a plain filter: 1.4 ms). The bake-offs' scripts,
+      unchanged, give the same rows: no script row tests the view.
+   2. **The claim that binds:** what the bake-offs' failing row needs (fay
+      approves the purchase gus claimed). A Type key; its own Phase A.
+   3. **Who may act, stored per open Item,** in the same write, if step 1's
+      numbers ask for it (a prototype read a page in under 1 ms): the same
+      view, fast, and oldest-waiting first.
+   4. **Queue extras and the screen:** a container as a filter, capped
+      counts, "who am I" with roles, the web Inbox on the view.
+   5. **Sent back to the requester:** a Type says a state waits on its
+      requester (a `waiting` key on a transition), which also gives a
+      customer a view.
 6. **Moving open Items to a new version, and retiring old versions**,
    deliberately and checked: a change that must reach requests in flight;
    includes starting work's step 2b (the latest version governs creates and
