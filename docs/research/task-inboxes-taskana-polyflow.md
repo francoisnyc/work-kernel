@@ -107,3 +107,85 @@ engine, the task attributes, and authorisation rules.
   untrusted text.
 - **Delegation** ("out of office") is not on the KADAI permissions page read;
   the approvals pilot lists it.
+
+## On Temporal specifically (added 2026-11-24)
+
+Temporal has no human task management of its own; its forum says so, and its
+answer is a documented pattern ("Reliable document approvals with
+human-in-the-loop workflows"), not a component. Open-source work nearby:
+
+- **OpenNSW `taskflow`** ([package](https://pkg.go.dev/github.com/OpenNSW/core/taskflow),
+  [repository](https://github.com/OpenNSW/core), Apache-2.0, no tagged
+  version). A task layer between a business workflow and its human steps,
+  in Go: each task is its own small Temporal workflow of sequential steps
+  run by plugins (user input, API call, payment, external review); the
+  parent's activity returns `ErrResultPending` and is completed when the
+  task ends. Built for one application.
+- **Ballerina workflows**: human tasks and a management API, running on
+  Temporal, for programs written in Ballerina.
+- **Zigflow** ([repository](https://github.com/mrsimonemms/zigflow)):
+  Temporal workflows declared in YAML (CNCF Serverless Workflow), listed in
+  Temporal's Code Exchange. Steps only: no work items, deciders, inbox or
+  agents. The nearest neighbour to "Types instead of code"; to watch, maybe
+  complementary.
+- **iWF**: a programming model interpreted on Temporal, for developers.
+
+**Borrowed from OpenNSW** (each placed where it will be used):
+
+1. **Completing a step with a signed link** (`CompleteTaskStepByToken`):
+   for the kernel, a single-use link naming one person, one Item and one
+   transition, with an expiry, the click still judged by the Type's rules.
+   The fallback for gated moves in "work done from a chat"
+   (`docs/roadmap.md`), and "approve from the email".
+2. **A move writes only its own fields** (a step's submission is scoped to
+   its own namespace, the server stamping the key): a transition declares
+   the fields it may set, nothing else. Raised for track 1's items 3 and 4.
+3. **One call with everything a screen needs** (`GetTaskRenderInfo`): the
+   Item, the moves this person may make now, the Type's presentation hints.
+   For the inbox (track 1, item 5) and cards in chat.
+4. **Waiting on outside work with asynchronous activity completion**
+   (`ErrResultPending`): how the hook protocol's `pending` outcome could
+   work.
+
+**The same gaps as the kernel's:** a claim is "UI guidance" there, not
+enforced (track 1, item 5 makes it bind); tasks are pinned to the version
+they started with, with no migration (track 1, item 6).
+
+## Established human-task designs (added 2026-11-24)
+
+Read for track 1, item 5 (team queues with a claim that binds): the
+WS-HumanTask standard (OASIS, 2007 to 2010; implemented by jBPM, Oracle,
+Informatica and others), Orkes Conductor's human tasks, and Camunda 8's user
+tasks. Not read: Temporal's own approvals pattern ("Reliable document
+approvals with human-in-the-loop workflows"); the fetch needed an approval
+nobody gave. To read before item 5's Phase A closes.
+
+**Worth borrowing:**
+
+1. **Roles per task** (WS-HumanTask): potential owners (receive it),
+   actual owner (does it), excluded owners (may not take it), business
+   administrators (stakeholders for a whole kind of task), notification
+   recipients. Excluded owners are the four-eyes rule; the kernel has it as
+   a transition's `except`. Business administrators are missing: someone
+   who sees every task of a kind and can reassign a stuck one or resolve a
+   missed deadline, without deciding it. "Nothing is skipped automatically"
+   needs that person.
+2. **Escalation reassigns and resets the claim** (jBPM): when an escalation
+   is reached, its people become the potential owners, and an actual owner
+   is reset to ready. A claim that binds needs a rule for when it lapses.
+3. **An escalation chain as data** (Orkes): assignment policies in order,
+   each with its own time limit (`slaMinutes`); unpicked in time, the task
+   moves to the next. `autoClaim` claims for the first assignee. Built on
+   the kernel's timers.
+4. **Due and follow-up dates, first-class and queryable** (Camunda): what an
+   inbox sorts and filters on.
+5. **Assignment changes judged like any move** (Camunda's user task
+   listeners can correct the assignee, due date or priority, and deny the
+   lifecycle transition): in the kernel, claim, release and reassign as
+   transitions, so checks and `allowed` apply.
+6. **Absences** (Oracle's vacation rules add alternates for absent users):
+   the approvals pilot's delegation and out of office.
+
+**A design signal:** Camunda 8 no longer uses candidate users and groups for
+who may see or work on a task; its authorization does. A queue should be
+defined by the kernel's permissions, not by a separate list.

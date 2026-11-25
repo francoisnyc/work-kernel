@@ -113,12 +113,21 @@ attack that found it as its test:
    27 of 27, its access request 17 of 18, the one left being a person's).
    They do not yet pass in full: a colleague can still change someone's
    draft (item 4).
-3. **Required means given by the mover**, where a Type asks for it.
+3. **Required means given by the mover**, where a Type asks for it. To weigh
+   in its Phase A, with item 4: a transition that declares the fields it may
+   set, and sets nothing else (OpenNSW scopes a step's submission this way).
 4. **"Only the requester" for drafts:** a draft's fields written only by
    whoever created it, until it is submitted. (Who last wrote a value, in
    full, is provenance: theme 2.)
 5. **Team queues with a claim that binds, and a "waiting on me" view** over
    every Type.
+   For its Phase A, from the established human-task designs
+   (`docs/research/task-inboxes-taskana-polyflow.md`): a queue defined by
+   the kernel's permissions, not a separate list; potential and excluded
+   owners (excluded is `except`, which exists); an administrator who can
+   reassign a stuck task but not decide it; claim, release and reassign as
+   transitions, so checks apply; an escalation chain with a time limit per
+   tier that resets the claim; due and follow-up dates.
 6. **Moving open Items to a new version, and retiring old versions**,
    deliberately and checked: a change that must reach requests in flight;
    includes starting work's step 2b (the latest version governs creates and
@@ -361,7 +370,10 @@ test:
     kernel, never by the model calling the same tool.
   - **First check before building:** whether the kernel can tell a call
     from the card (the person) from a call by the model. If it cannot,
-    gated moves go through a signed link or an out-of-band step instead.
+    gated moves go through a signed link or an out-of-band step instead:
+    single-use, naming one person, one Item and one transition, with an
+    expiry, the click still judged by the Type's rules (from OpenNSW,
+    `docs/research/task-inboxes-taskana-polyflow.md`).
   - **What the Type adds for chat:** each move becomes a tool whose input
     schema comes from the Type's JSON Schema (V2c), so a move's `required`
     fields are its form; a short "when to suggest this" line per move for
@@ -461,7 +473,8 @@ almost every theme at once. Two products, in this order:
 What it needs that is not built:
 
 - a "waiting on me" view across every Type, fast enough to be a daily inbox;
-- delegation and out of office, recorded as who acted for whom;
+- delegation and out of office, recorded as who acted for whom (vacation
+  rules that add alternates for an absent approver, as Oracle's do);
 - approval rules beyond one approver: n of m, in sequence, in parallel, and
   chains from the org chart (the HR `manager_of` hook is a start);
 - reminders and escalation on top of timers;
