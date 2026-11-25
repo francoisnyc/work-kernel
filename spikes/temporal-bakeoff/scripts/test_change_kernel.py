@@ -60,7 +60,11 @@ for s in steps[:3]:
 _, it = pli("fay", "item", "get", before["approved"])
 say(f"- Already approved: still `{it['item']['state']}`, readable as before; its version's rules are kept with it.")
 say(f"- A new purchase@2: {finish(new(2, 'manager_review'))}.")
-say(f"- A new purchase asked for on the OLD version by name (purchase@1), after the change: {finish(new(1, 'manager_review'))} "
-    "(the first bake-off's gap: a creator may pick any registered version).")
+# Since track 1, item 6, step 1 the kernel refuses this create; the row records the refusal (it used to run the purchase to its end).
+ok, res = pli("ana", "item", "create", "--type", "purchase@1", "--set", "f_amount=6000", "--set", "f_vendor=cloudhost",
+              "--set", "f_cost_centre=CC-100", "--set", "f_justification=Three servers", check=False)
+say("- A new purchase asked for on the OLD version by name (purchase@1), after the change: "
+    + ("created (the first bake-off's gap: a creator may pick any registered version)." if ok
+       else "refused: " + " ".join(str(res).split())[:200]))
 say("- There is no way to move an open Item to the new version: the change reaches no request in flight.")
 open(os.path.join(SPIKE, "results/change-kernel.md"), "w").write("\n".join(out) + "\n")

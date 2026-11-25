@@ -37,9 +37,16 @@ def record(side, attack, ok, detail, verdict=None):
 # ---------------------------------------------------------------- kernel
 
 
+# The purchase version k_purchase creates. agent-among-approvers runs on
+# kernel/types-v2, where purchase@2 is the latest: since track 1, item 6,
+# step 1 the kernel refuses a create of purchase@1 there, so that part
+# sets this to 2 (a 2,500 purchase takes the same path in both versions).
+PURCHASE_VERSION = 1
+
+
 def k_purchase(amount, to=None, justification="Monitors for the design team"):
     """ana creates and submits a purchase; bob/fay move it to `to`."""
-    _, c = pli("ana", "item", "create", "--type", "purchase@1", "--set", f"f_amount={amount}",
+    _, c = pli("ana", "item", "create", "--type", f"purchase@{PURCHASE_VERSION}", "--set", f"f_amount={amount}",
                "--set", "f_vendor=officeco", "--set", "f_cost_centre=CC-100", "--set", f"f_justification={justification}")
     i = short(c["item"]["name"])
     pli("ana", "item", "transition", i, "--to", "manager_review", "--wait", "5s")
@@ -398,6 +405,8 @@ def agent_given_the_approvers_rights():
         text = f.read().replace('principal: "agent:prep-bot", namespace: acme, roles: [preparer]', 'principal: "agent:prep-bot", namespace: acme, roles: [preparer, finance]')
     open(tokens, "w").write(text)
     subprocess.run([f"{SPIKE}/scripts/kernel-restart-itemservice.sh", f"{SPIKE}/kernel/types-v2", tokens], check=True, capture_output=True)
+    global PURCHASE_VERSION
+    PURCHASE_VERSION = 2
     p = k_purchase(2500, "finance_queue")
     own = k_session()
     side = "kernel-agent-in-finance"
