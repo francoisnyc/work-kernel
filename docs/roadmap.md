@@ -632,6 +632,15 @@ campaigns) brings it close:
   unlocked, or not used in guards.
 - **Temporal at volume** is a cost question (actions billed per Item event),
   not a capacity one (`docs/research/policy-permissions-and-spike-prep.md`).
+- **"Waiting on me" is derived at read time:** 30 to 60 ms a page at 400,000
+  Items with 55,000 open (`go run ./cmd/bench -waiting`), against 1.4 ms for
+  a plain filtered page, and the cost follows the open Items in the states
+  involved, not the size of the caller's own queue. Stored rows, written in
+  the same write, are track 1 item 5's step 3 (0.3 to 0.5 ms in the
+  prototype).
+- **A service's first Search loads every registered Type version**
+  (resolving a filter): about a second at 441 versions under the race
+  detector, paid once per process, growing with the catalogue.
 
 ### A pilot candidate: approvals
 
