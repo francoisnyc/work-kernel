@@ -12,6 +12,7 @@ import (
 
 	"github.com/francoisnyc/work-kernel/internal/contracts"
 	"github.com/francoisnyc/work-kernel/internal/lifecycle"
+	"github.com/francoisnyc/work-kernel/internal/policy"
 	"github.com/francoisnyc/work-kernel/internal/typedef"
 )
 
@@ -423,6 +424,7 @@ func (r *renderer) state(i int) {
 	}
 
 	// While it is there.
+	r.waits(s)
 	if len(s.Frozen) > 0 {
 		r.say([]Part{Frozen}, []string{at("states[%d].frozen", i)},
 			at("While it is in %s, nobody changes %s.", s.ID, joinOr(ticked(s.Frozen))))
@@ -1305,4 +1307,38 @@ func (r *Reading) Text() string {
 	}
 	blocks = append(blocks, "Not covered by this reading\n- "+strings.Join(r.NotCovered, "\n- "))
 	return strings.Join(blocks, "\n\n") + "\n"
+}
+
+// waits says who a state waits on ("waiting on me", track 1 item 5): the
+// people the moves out of it name, in the Type's order, each once, in the
+// words a move's own sentence uses. The rule is policy.WaitingMoves, the
+// one the item service's waiting_on filter reads, so a state whose moves
+// name nobody, or in category done or canceled, has no such sentence.
+func (r *renderer) waits(s typedef.State) {
+	var phrases, paths []string
+	for _, tr := range policy.WaitingMoves(r.t, s.ID) {
+		for ti, other := range r.t.Transitions {
+			if other.From == tr.From && other.To == tr.To {
+				paths = append(paths, at("transitions[%d]", ti))
+			}
+		}
+		for _, e := range policy.NamedEntries(tr) {
+			var phrase string
+			switch {
+			case strings.HasPrefix(e, typedef.AllowedRolePrefix):
+				phrase = "anyone with the role " + strings.TrimPrefix(e, typedef.AllowedRolePrefix)
+			case strings.HasPrefix(e, typedef.AllowedFieldPrefix):
+				phrase = "whoever `" + strings.TrimPrefix(e, typedef.AllowedFieldPrefix) + "` names"
+			default:
+				phrase = "`" + strings.TrimPrefix(e, typedef.AllowedPrincipalPrefix) + "`"
+			}
+			if !slices.Contains(phrases, phrase) {
+				phrases = append(phrases, phrase)
+			}
+		}
+	}
+	if len(phrases) == 0 {
+		return
+	}
+	r.say([]Part{Waits}, paths, at("While it is in %s, it waits on %s.", s.ID, strings.Join(phrases, ", or ")))
 }
