@@ -30,14 +30,14 @@ func TestCustomer_SearchAndListPlans_NeverScanEveryItem(t *testing.T) {
 	ctx := testCtx(t)
 	for _, q := range []string{
 		`insert into items (id, namespace_id, type_id, type_version, container_id, scope_id, state, fields, item_seq, content_seq,
-		                    created_at, created_by)
+		                    created_at, created_by, state_entered_at)
 		 select gen_random_uuid(), $1, 'incident', 2, $2, $3, 'new',
 		        jsonb_build_object('f_title', 'printer ' || n || ' vpn', 'f_priority', 'P3'), 1, 1,
-		        now() - (n || ' minutes')::interval, 'customer:c' || (n % 4000)
+		        now() - (n || ' minutes')::interval, 'customer:c' || (n % 4000), now() - (n || ' minutes')::interval
 		 from generate_series(1, 20000) n`,
 		`insert into items (id, namespace_id, type_id, type_version, container_id, scope_id, state, fields, item_seq, content_seq,
-		                    created_at, created_by)
-		 select gen_random_uuid(), $1, 'reply', 1, i.id, $3, '', jsonb_build_object('f_body', 'vpn again'), 1, 1, i.created_at, 'user:sam'
+		                    created_at, created_by, state_entered_at)
+		 select gen_random_uuid(), $1, 'reply', 1, i.id, $3, '', jsonb_build_object('f_body', 'vpn again'), 1, 1, i.created_at, 'user:sam', i.created_at
 		 from items i where i.namespace_id = $1 and i.container_id = $2 and i.type_id = 'incident' and random() < 0.25`,
 	} {
 		if _, err := pool.Exec(ctx, q, w.ns, w.desk, node); err != nil {
