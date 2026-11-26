@@ -198,9 +198,52 @@ In order of value for the cost:
   the one worth checking first, and a pair of Types (`access_request@1` with
   `approval@1`) is the first configuration if it comes.
 
+## Ventoux already does much of this, more cheaply
+
+The owner's other project, ventoux (case management on Temporal, in Python),
+built a behavioural check of its definitions in its validation layers
+(`src/ventoux/core/validate.py`, `src/ventoux/case/reach.py`,
+`src/ventoux/case/assignment_checks.py`; brief, D34). Its method differs from
+poly's, and suits the kernel better:
+
+- **Over-approximate, then claim only what holds on every path.** Every
+  condition is taken as possibly true and every outcome as possible. What is
+  still unreachable can never happen on any path, so it is an **error**;
+  what depends on data or on who holds a role is a **warning**, which lets a
+  definition through but is shown. An issue that says neither is an error
+  (fail closed). No domains to declare, no state explosion over data, and no
+  "clean" claimed beyond what was proven: a fix in ventoux restored exactly
+  that when a check over-claimed (`docs/layers/fix-check-proofs.md`).
+- **What it proves, as built:** every state reachable (`UNREACHABLE_STATE`),
+  the plan able to end from every reachable state (`NO_PATH_TO_FINAL`), steps
+  that wait on each other (`DEADLOCK`), what can never start, fire or close
+  (`NEVER_STARTS`, `NEVER_FIRES`, `NEVER_CLOSES`), milestones never reached;
+  every high-risk activity behind an approval on every path, with the
+  shortest unapproved path as the witness, and one approval never unlocking
+  two high-risk runs; who is asked: a rule that can pick nobody
+  (`MAY_ASSIGN_NOBODY`), or someone the approval excludes; where a deciding
+  value came from (`OPENER_DECIDES`, `WRITER_DECIDES`,
+  `UNTRUSTED_TRANSITION`).
+- **The case's reach is a fixpoint** over steps and milestones grown from
+  nothing until a round adds nothing, so steps that wait on each other never
+  get in.
+
+For the kernel this means `pli check` is a port of a method already built
+and tested, not research: the same two severities, the same "possibly true"
+reading of guards, reachability forwards (from the initial state) and
+backwards (from done and canceled), the shortest path as the witness. What
+the kernel adds is the actor: each arrow is a transition *and the principal
+kinds that may take it* (`allowed`, `except`, `writable_by`, a claim, the
+kernel's own timers and reactions), so "an agent can reach approved without
+a person" is a reachability question over arrows an agent may take. With
+guards taken as possibly true it is a warning; with no guard on the path it
+is an error. Port the method, not the code: ventoux is Python over its own
+plan format, the kernel is Go over Types.
+
 ## Where it would sit in the roadmap
 
-The checker is not a track 1 item. It is a candidate to strengthen track 2,
+Agreed by the owner (2026-11-26): the trial goes ahead as part of track 2's
+preparation (roadmap, "Track 2"). The checker is not a track 1 item. It strengthens track 2,
 the authoring test, and the decision point's question of whether rules as
 data are safer than code: a non-developer reading a witness in plain words is
 the strongest form of "checked before it runs". A first spike, the stuck

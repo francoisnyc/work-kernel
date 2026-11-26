@@ -350,6 +350,28 @@ mistake, which these Types do not refuse.
   approval, written by a fresh author with no context, on the kernel and on
   plain Temporal with the shared package. Measured as in the second
   bake-off: what composing costs here, and what copying costs there.
+- **Before the authoring test: `pli check`, what a Type can do** (a trial;
+  `docs/research/poly-ecosystem-design.md`). The load checks today are
+  structural; this reads a Type as a graph of states and of who may take
+  each transition, and reports, each with the shortest path as its witness,
+  printed as a story and in plain words:
+  - **stuck:** a reachable state, not done or canceled, out of which no
+    person, agent, timer or reaction can move (the bake-off's access
+    request for no system);
+  - **who can reach what:** a decision state an agent reaches without a
+    person's move, a requester approving their own request, a colleague
+    changing someone's draft (the attack scripts' rows, found by the
+    checker);
+  - **dead rules:** a state, transition, reaction or timer that can never
+    be reached or fire.
+
+  The method is ventoux's validation, already built (its brief, D34): every
+  guard taken as possibly true, so what is still impossible is an error and
+  what depends on data or on who holds a role is a warning; an issue that
+  says neither is an error. Ported, not copied. Done when it runs on every
+  Type in `types/` and on the bake-offs' Types, and its findings on the
+  bake-offs' Types match what their attack scripts found by hand. The
+  author in the authoring test reads its witnesses beside the reading.
 
 ### Track 3: the work path, in parallel
 
