@@ -1,12 +1,12 @@
 # The reviewer's attempts, both sides (plain Temporal after its fixes)
 
-Generated on 2026-11-24 12:40 UTC. 
+Generated on 2026-11-26 02:29 UTC. 
 
 | Side | Process | Attempt | Result | Evidence |
 |---|---|---|---|---|
 | plain | purchase | block the decision: the agent rewrites its preparation 2,050 times, then the decider approves | PASS (refused) | 20 rewrites accepted; the decider's approval then answered HTTP 204 {} |
 | plain | access | block the decision: the agent rewrites its preparation 2,050 times, then the decider approves | PASS (refused) | 20 rewrites accepted; the decider's approval then answered HTTP 204 {} |
-| plain | purchase | an approved purchase whose order cannot be placed leaves a trace | PASS (recorded) | state=order_failed order=None failure=the purchase system refused the order: activity error (type: PlaceOrder, scheduledEventID: 28, startedEventID: 29, identity: 11649@vm@): POST http://127.0.0.1:18082/invoices: HTTP 404 history=['submitte |
+| plain | purchase | an approved purchase whose order cannot be placed leaves a trace | PASS (recorded) | state=order_failed order=None failure=the purchase system refused the order: activity error (type: PlaceOrder, scheduledEventID: 28, startedEventID: 29, identity: 20786@vm@): POST http://127.0.0.1:18082/invoices: HTTP 404 history=['submitte |
 | plain | purchase | a colleague with no part in it reads ana's purchase | PASS (refused) | HTTP 404 |
 | plain | purchase | ... and its history | PASS (refused) | HTTP 404 |
 | plain | purchase | the agent reads it (it must, to prepare) | ALLOWED (its job) | HTTP 200 |
