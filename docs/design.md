@@ -2867,7 +2867,8 @@ outcome or refusal (code, reason, metadata) instead. One label is read
 from the Type: a transition whose `allowed` names only
 `principal:system:...` is greyed out. The inbox is every transition whose
 `allowed` names `field:X`: the Items in its from-state where X is the
-caller. A board is the Items linked to one Item by one link, ordered by a
+caller (replaced on 2026-11-26 by the kernel's waiting-on view: "The web
+Inbox on the view, as built"). A board is the Items linked to one Item by one link, ordered by a
 string field.
 
 **What the Types do not say** (and the UI does without): a field has no
@@ -2908,7 +2909,8 @@ the Types the container admits (`own` and `shared`), nothing at the top
 level, and no readers. Still read from the Types, never decided in the UI:
 the server refuses the rest. `#/items` alone is the top level, as `#/` is.
 A customer's view of a move keeps only the `field:X` entries whose field
-they see, so their Inbox never searches on a field hidden from them.
+they see, so their Inbox never searches on a field hidden from them
+(since 2026-11-26 a customer's Inbox makes no call at all).
 A page titles an Item by its Type's **first string field**, so desk@2
 declares `f_name` before `f_key`: a portal is shown by its name.
 
@@ -5712,7 +5714,7 @@ service, the API or pli. `internal/lifecycle` holds none of it.
 
 **Left as they are.** The web UI and the PoC apps still work out their
 inbox and its buttons themselves (`inboxQueries`, `inboxTransitions`):
-the web Inbox moves to these reads in PR 2. The bake-offs' scripts are
+the web Inbox moves to these reads in PR 2 (done: the next section). The bake-offs' scripts are
 their record and were not changed.
 
 **Tests.** New: item service 12, API 5, pli 5. Two existing assertions
@@ -5725,6 +5727,107 @@ sets the new time aside as it does the create time.
 two RPCs; `MayMove` and `Moves` in `policy`; the filter, the count, who
 am I and the moves in the item service's reads; pli's two commands and
 two flags. No migration, no new dependency, no lifecycle change.
+
+## The web Inbox on the view, as built (step 4, PR 2) (2026-11-26)
+
+Track 1, item 5 of `docs/roadmap.md`, step 4, the second of two PRs: the
+generic web UI's Inbox now asks the kernel what waits, instead of working
+it out from the Types. Web only: no kernel, proto, Type or schema change,
+no new dependency.
+
+**What it replaces.** The Inbox of "Web UI as built" ran one search per
+transition whose `allowed` names `field:X`, and offered a row's moves by
+the same rule. It never showed a role's queue, and its buttons were a
+guess. Its two functions (`inboxQueries`, `inboxTransitions`) are gone.
+
+**What the page asks, and nothing else:**
+
+- `WhoAmI`, once: the caller's roles, for the tabs.
+- `CountItems`, once per tab: the number on the tab, "50+" when the
+  answer is capped. Read again when the place changes and after a move.
+- `SearchItems` with `filter.waiting_on` (`me`, or `role:<name>`),
+  `order_by: waiting_since`, a page of 50; the place as `filter.in`; the
+  next page by its token; after a write of this tab, its `commit_seq` as
+  `min_seq`. A search names no Type, no state and no field.
+- `TransitionItem`, one per button pressed.
+
+**The tabs.** "Waiting on me" first, then one tab per role the caller
+holds that some Type names in a transition's `allowed`, in byte order.
+A role no Type names can have no queue and gets no tab. A role's tab is
+`waiting_on: role:<name>`: what waits on the team and nobody has claimed.
+
+**The rows.** Oldest waiting first by default, with a switch to newest
+(`waiting_since desc`). A row shows the title, the Type and state, who
+asked (the creator, or the user an agent created it for), how long it
+has waited (from `state_time`, the largest unit that fits: "waiting 3
+d"), a label, and its buttons. [More] reads the next page and adds it
+below. An optional place (an Item's name or ID in a text box) keeps what
+is below that container.
+
+**The buttons are exactly `Item.moves`,** in the server's order. Each is
+one `TransitionItem`, through the transition panel every Item page uses,
+so a move's required fields are asked for as elsewhere. Claiming and
+releasing are moves like any other: no side door. A row for which the
+server lists no move says "No move here is yours to make." After a move
+the answer stays on the page (the row may have left the tab), and the
+rows and every tab's number are read again.
+
+**Where the browser still reads the Types, and why none of it is
+who-may:**
+
+- which role names are written in some `allowed`, to choose the tabs: it
+  decides no row and no button, and a role with nothing behind it shows 0;
+- the transition of a listed move, to show its form and its rules as
+  text;
+- which fields are principal fields, for the label below.
+
+Nothing in the page reads `allowed`, `except` or a claim to offer or hide
+a move. A test offers a move the Type's `allowed` would not suggest
+because the server listed it, and hides one the Type would allow because
+the server did not.
+
+**The label, "why it is here":** only what the data says directly.
+
+- On a role's tab: "for your team (finance)", from the tab.
+- On "Waiting on me": the principal fields of the Item that hold the
+  caller, by ID: "f_approver is you", "f_claimed_by is you".
+- On "Waiting on me" when no field holds the caller: no label.
+- **Dropped:** "for your team" on "Waiting on me" (the browser would have
+  to work out which role and which move apply: policy), and "claimed by
+  you" as such (`GetType` does not show which field is the claim).
+  Either comes back when the kernel says the reason with the row.
+
+**Empty, loading, error.** "Nothing is waiting on you.", or "Nothing is
+waiting on finance." on a role's tab. While a read runs the last rows
+stay, greyed and marked busy; a slower, older answer never replaces a
+newer one. A refusal is shown as it came (`RefusalView`), and the page
+does not then claim the Inbox is empty.
+
+**A customer** gets "Nothing waits on you here yet." and the page makes
+no call: `waiting_on` refuses a customer until step 5. It is one branch
+to remove then, not a second page.
+
+**Oldest first, and page 2.** A page holds 50. Someone with more than 50
+waiting sees a new arrival only after [More], or by switching to newest
+first. It showed in the journeys: 51 approvals left in bob's Inbox put a
+new vacation request on his second page. The journeys now cancel what
+they leave waiting.
+
+**Not on the stack yet: a claim.** No Type in `types/` has a claimed
+state, so claiming and releasing from the screen are tested against a
+fake kernel (the row leaves the team's tab, appears in "Waiting on me"
+with the claimant's moves, and after the release is back at the end of
+the team's queue). A claiming Type on the stack is the next small change
+(`docs/roadmap.md`).
+
+**Tests.** New: 23 for the page's model, 12 for the page against a fake
+kernel, 4 journeys on the stack (a desk agent's queue: the tab, its
+number, both orders, a move from the row; the empty state; "50+" and
+[More]; a customer, with no call). **Retired, with the owner's
+approval:** the 7 tests (8 assertions) of the two removed functions, in
+`approval-inbox.test.ts`, `customers-inbox.test.ts` and `typeinfo.test.ts`.
+One fixture change in `TransitionPanel.test.tsx`. The two existing Inbox
+journeys pass unchanged.
 
 ## Out of scope for the spike
 
