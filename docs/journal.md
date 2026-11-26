@@ -6,6 +6,30 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
+- **Waiting since, step 3a's Later items** (design.md, "Waiting since, as built"):
+  - **The table (step 3b): who may act, stored per open Item.** Not built:
+    the numbers did not ask for it. Build it when more than about 200,000
+    Items are open and waiting in one namespace or the inbox page's p90
+    passes 200 ms; or a count is polled by many people on every screen;
+    or agents poll their queue in a loop. Its design is in step 3's Phase
+    A report and summed up in design.md: rows of (Item, the move, a role
+    as written or a person, the claimant, the move's `except`, the time);
+    one function called from the one place every write passes; a rebuild
+    command; the derived view kept as the truth. The read must be one
+    ordered branch per token, merged: one query over the tokens sorts
+    every match (8 to 55 ms measured).
+  - **`Item.state_time`** (the same instant, on the Item an API returns),
+    so that a screen can show "waiting 3 days": with step 4.
+  - **Since it first entered the queue.** Today a release puts an Item at
+    the back: it waits as of its release. A queue that keeps an Item's
+    first place across a claim and a release needs a second time, kept
+    by the Type or by the kernel.
+  - **Oldest first as the inbox's default.** The default order is still
+    newest created first; `pli inbox --oldest` and the web Inbox (step 4)
+    can ask for the other.
+  - **A count** ("50+") still reads the view: 3 ms where many wait, up to
+    40 ms at 550,000 open for someone with nothing waiting. The first
+    thing the table would speed up.
 - **Migrate one quiet Item, step 2's Later items** (design.md, "Migrate one quiet Item to the latest version, as built"):
   - **An Item that has finished an action cannot be migrated** while the
     latest version keeps that hook on a state it entered: an action's
@@ -4404,3 +4428,68 @@ with the development password.
 
 **Open:** the two write-ups (`docs/research/camunda-bakeoff.md`, `temporal-bakeoff.md`) and one roadmap line still
 quote the old counts; the sentences were listed for the owner, none rewritten.
+
+## 2026-11-26 — Track 1, item 5, step 3a: waiting since (Phases A to D)
+
+**Asked:** step 3, "who may act, stored per open Item". **Built instead, on the owner's decision after Phase A:** one
+column, `items.state_entered_at`, and `order_by: waiting_since` on the `waiting_on` view (oldest waiting first; `desc`
+newest). The table is step 3b, on a trigger (Later, and the roadmap).
+
+**Phase A measured before designing** (throwaway Postgres 17, raw SQL, the bench's data shape, a page of 50): the
+derived view 29 ms at 55,000 open Items and 280 ms at 550,000; oldest-first read from the events 82 ms and 1,180 ms;
+with a column 21 ms and 216 ms; stored rows 0.5 to 0.7 ms at either size, but only for the oldest-first page read as one
+ordered branch per token (one query over the tokens: 7.7 and 55 ms) and for counts (0.08 ms against 3 to 40 ms); rows
+used as a filter under any other order 63 to 640 ms, no better than derived. So: not yet, and the roadmap's "the same
+view, fast" was too wide.
+
+**Built:** migration 00014 (the column, backfilled from each Item's latest create or transition event, NOT NULL, no
+default). A create and every state change set it, in the statement that writes the state, with the write's one time
+(the transition's UPDATE; the UPDATE of a hold that moves the Item; the two INSERTs). `resolveOrder` takes
+`waiting_since` only with `Filter.WaitingOn`; ties by ID; the page token carries the time as RFC 3339 and a forged
+one is refused as a token. `pli inbox --oldest`. The proto's comment on `order_by`; `gen/` and `web/src/gen`
+regenerated (comments). design.md: "Waiting since, as built", Reads, `order_by`, the write rule, step 1's corrected
+sentence. Roadmap: step 3 split into 3a (built) and 3b with three triggers.
+
+**Kernel changes (counted):** the column and migration; four statements (two that write a state, two that create);
+the order in the reads; pli's flag; the proto comment. No new dependency; no lifecycle or policy change.
+
+**Decided (the owner, through the coordinator):** Phase A: the column now and no table; the schema change; the
+contract addition (`order_by: waiting_since`, only with `waiting_on`; `Item.state_time` left for step 4); waiting
+since the Item entered its current state, so a release goes to the back; the order 3a, 4, 5, then 3b on a trigger. At
+the tests gate: pli's names (`--order-by waiting_since`, `inbox --oldest`, the two together a usage error); ties in ID
+order both ways; a move from a state to the same state enters it again; the run-wide check kept. Phase C accepted by
+the coordinator's review.
+
+**Tests:** new: item service 12, API 1, pli 1. **Existing tests changed:** fixture-only, `customer_plan_test.go` (its
+two hand-written INSERTs name the column); set-up, `runTests` of the item service and workflow test packages (after
+the run, `testdb.StateEnteredAtDrift` reads every Item the tests made and fails the run if a time is not that of the
+Item's latest create or transition event). **Assertion changes:** none. The stub that landed with the tests: the
+migration, and creates filling the column (NOT NULL: without it nothing could be created).
+
+**Surprises:**
+- The rule "never UPDATE an Item row twice in one transaction" caught me as it caught the etag: my first throwaway set
+  the column after the event, and `TestReactMove_Children_ACrashPartway…` went red (Postgres re-checks the row's
+  foreign keys and waits on the container's lock). Now a source test holds the column to the statement that writes
+  the state.
+- Stored rows do not make "the view" fast: only their own order and counts. And a plain `token = any(…)` query over
+  them sorts every match.
+- The cheapest proof that no write path is missed was not a test per path but one query after the whole package has
+  run, over everything its tests did. It also ran green on the compose stack after the scenario (282 Items, none off).
+- A Search with neither words nor a filter is refused before its order is read; my test's first version asserted
+  otherwise and was corrected before the tests gate.
+
+**Numbers.** `go vet` clean; `go test ./...` green; `go test -race ./...` green, 28 packages; the new tests
+`-race -count=10` green; `buf lint` and `buf breaking` pass. Web: typecheck, 464 unit tests, build; apps/poc:
+typecheck, 408, build. Scenario on the compose stack: passed (run word runf666c827, 138 steps). Web Playwright 9;
+apps/poc journeys 4. **The write bench** (`cmd/bench`, twice on main and twice on this branch; a ticket's transition,
+p50): one writer, Type cache on, main 2.81 and 2.40 ms, branch 2.42 and 2.52 ms; cache off, main 4.10 and 3.88,
+branch 4.10 and 4.19; 16 writers, cache on, main 15.83 and 14.43, branch 15.66 and 14.10. The one more query a
+transition makes (the write's time, read before its UPDATE) is below what this bench can see: the runs differ more
+than the sides. **The bake-offs:** not run; no file under `spikes/` changed and no script asks for an order.
+
+**Local workarounds, outside the repository (nothing committed):** dockerd started by hand (a stale containerd pid file
+moved aside once); the stack from a compose override in the scratchpad; Playwright through scratchpad configs using
+the preinstalled Chromium; main checked out a second time in the scratchpad for the bench.
+
+**Open:** the Later items above. **Next session:** step 4 (a container as a filter, capped counts, "who am I" with
+roles, the web Inbox on the view, `Item.state_time`), then step 5; 3b only on a trigger.

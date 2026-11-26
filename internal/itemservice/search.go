@@ -50,6 +50,10 @@ type SearchRequest struct {
 // it when none is selected); else an InvalidError on order_by. Strings and
 // enum names compare byte by byte, never by locale. Items whose Type does
 // not declare the field sort as unset.
+// OrderWaitingSince is the one order that is no field: oldest waiting
+// first, by when the Item entered its state. Only with Filter.WaitingOn.
+const OrderWaitingSince = "waiting_since"
+
 type OrderBy struct {
 	Field string
 	Desc  bool
@@ -131,7 +135,7 @@ func (k *Service) searchQuery(ctx context.Context, req SearchRequest) (itemQuery
 	if err != nil {
 		return itemQuery{}, err
 	}
-	order, err := k.resolveOrder(ctx, req.Principal, req.Filter.TypeIDs, req.OrderBy)
+	order, err := k.resolveOrder(ctx, req.Principal, req.Filter, req.OrderBy)
 	if err != nil {
 		return itemQuery{}, err
 	}

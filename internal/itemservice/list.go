@@ -78,7 +78,7 @@ func (k *Service) listQuery(ctx context.Context, req ListRequest) (itemQuery, er
 	if err != nil {
 		return itemQuery{}, err
 	}
-	order, err := k.resolveOrder(ctx, req.Principal, req.Filter.TypeIDs, req.OrderBy)
+	order, err := k.resolveOrder(ctx, req.Principal, req.Filter, req.OrderBy)
 	if err != nil {
 		return itemQuery{}, err
 	}
