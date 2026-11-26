@@ -5813,12 +5813,41 @@ first. It showed in the journeys: 51 approvals left in bob's Inbox put a
 new vacation request on his second page. The journeys now cancel what
 they leave waiting.
 
-**Not on the stack yet: a claim.** No Type in `types/` has a claimed
-state, so claiming and releasing from the screen are tested against a
-fake kernel (the row leaves the team's tab, appears in "Waiting on me"
-with the claimant's moves, and after the release is back at the end of
-the team's queue). A claiming Type on the stack is the next small change
-(`docs/roadmap.md`).
+**A claim on the stack (the follow-up, 2026-11-26).** When this section
+was written no Type in `types/` had a claimed state, and claiming from
+the screen was tested against a fake kernel only. Since the follow-up it
+runs for real:
+
+- **The Type:** `equipment_request@1`, the first Type in `types/` with a
+  claim. Someone asks the desk for equipment; the request waits in
+  `queue` on `role:desk_agent`. A desk agent (not the person who asked)
+  moves it to `in_hand`, which is the claimed state (`claim: f_handler`):
+  the kernel names them in `f_handler`, and only they move it to
+  `fulfilled` or `declined`. The move back to `queue` is the release
+  (`release: true`, `clears: [f_handler]`). Whoever asked can withdraw it
+  while it is in the queue. Top level, no reaction, no timer.
+- **No new role and no dev-token change:** lea and sam already hold
+  `desk_agent`. On the stack an equipment request shows beside incidents
+  in their Inbox.
+- **A journey on the real kernel** (`web/e2e/inbox.spec.ts`): sam takes a
+  request from the `desk_agent` tab with the one button the server lists;
+  it leaves the team's tab and is in his "Waiting on me", labelled
+  "f_handler is you", with the claimant's three buttons; lea, a desk
+  agent too, finds it in neither tab, and on the request's own page her
+  decision is refused (`PERMISSION_DENIED NOT_ALLOWED`); sam releases it
+  and it is the team queue's newest arrival again. The fake-kernel page
+  test stays: it pins the page's calls.
+- **A scenario step** tells the same story through pli, with `pli inbox`
+  at each point.
+- **The release rule, as it stands** ("A claim that binds, as built"): a
+  release is judged by the move's `allowed` alone. So lea, who may not
+  decide sam's request, may release it: that is how a claim left behind
+  is taken over. The screen offers the release to the claimant only (a
+  claimed request is in no colleague's tab); a colleague releases from
+  the request's own page. "Only the claimant releases" would be a new
+  rule in the kernel (Later).
+- Three existing tests gained one entry each (the count of Types, 69, and
+  two exact lists). No kernel, proto or schema change.
 
 **Tests.** New: 23 for the page's model, 12 for the page against a fake
 kernel, 4 journeys on the stack (a desk agent's queue: the tab, its

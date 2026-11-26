@@ -7,10 +7,16 @@ One entry per session, newest at the bottom.
 Ideas noted during the spike, not built yet.
 
 - **The web Inbox, step 4 PR 2's Later items** (design.md, "The web Inbox on the view, as built"):
-  - **A claim on the stack (next, its own small change).** A Type in
-    `types/` with `claim` and a release move, and a role for a dev user,
-    so a real claim and release journey runs in the browser. About 20 Go
-    test files load `types/`: check the Go suite with it.
+  - **A claim on the stack.** Built on 2026-11-26 (`equipment_request@1`;
+    the entry below). Three tests held a list or a count of the Types;
+    nothing else moved.
+  - **Only the claimant releases.** Today a release is judged by
+    `allowed` alone, so a colleague in the role can release someone
+    else's claim (how a claim left behind is taken over). A Type that
+    wants the claimant alone to release needs a new key and a kernel
+    change.
+  - **A reason on `declined`,** and equipment requests placed in a desk
+    (a new desk version): left out to keep the first claiming Type small.
   - **A place picker.** The place filter is a text box that takes an
     Item's name or ID. A picker (search by words, or the containers the
     caller works in) would make it usable without copying an ID.
@@ -4651,3 +4657,46 @@ the page, published as a private page for the owner, not committed.
 
 **Open:** the Later items above. **Next session:** the claiming Type on the stack (a Type with `claim` and a release
 move, a role for a dev user, a real claim and release journey), then step 5; 3b only on a trigger.
+
+## 2026-11-26 — Track 1, item 5, step 4's follow-up: a claim on the stack (Phases A to D)
+
+**Built:** one data file, `types/equipment_request.v1.yaml`: the first Type in `types/` with a claimed state. A request
+waits in `queue` on `role:desk_agent`; a desk agent who is not the requester moves it to `in_hand` (`claim: f_handler`)
+and is then the only one who moves it to `fulfilled` or `declined`; the move back to `queue` is the release. lea and sam
+already hold the role, so the dev tokens did not change. A journey on the real kernel (sam claims from the team's tab,
+the row moves to his "Waiting on me", lea is refused the decision on the request's page, sam releases) and a scenario
+step with the same story through pli. design.md: a note under "The web Inbox on the view, as built". Roadmap: the
+follow-up built; what remains is step 5, then 3b on a trigger.
+
+**Changed (counted):** the Type file; one journey and two seed helpers; one scenario step (139 steps, was 138). No
+kernel, proto, schema or dev-token change.
+
+**Decided (the owner, through the coordinator):** a small new Type, not a new version of an existing one
+(`fulfilment_task` would need a second new version for the reaction that creates it; `incident`'s reactions move into
+the state that would be claimed, which the kernel refuses at load); reuse `desk_agent`; top level, no reason on
+`declined`; a scenario step; the colleague's refusal shown on the request's own page. Phase C and D in one go.
+
+**Tests:** new: 1 journey, 1 scenario step. **Existing tests changed, one commit, all assertions, one entry more
+each:** `TestPli_Types` (69 Types), `TestParseDir_ReadsTheRepositorysTypes`, `TestListTypes_EveryVersionInOrder`. The
+tests were committed and seen red before the Type file existed.
+
+**Surprises:**
+- I expected a colleague's release of someone else's claim to be refused, and wrote the scenario step that way. The
+  kernel allowed it, as step 2 decided: a release is `allowed`'s alone. The step now checks the two decisions are
+  refused and says why the release is not.
+- The team's queue is shared: this run's incidents wait on `desk_agent` too, with the same run word. The scenario's
+  `pli inbox` calls name the Type, and the journey uses a word of its own.
+- Docker had stopped before the first scratch run of the Go suite: 7 packages "failed" on "cannot connect". A red
+  suite says nothing until its first error line is read.
+- Adding a Type moved exactly the three tests a search had found, and the readings needed nothing: every key the Type
+  uses already had its sentence.
+
+**Numbers.** `go vet` clean; `go test ./...` green, 28 packages. Web: typecheck, 492 unit tests. On the compose stack:
+the scenario passed (139 steps); web Playwright 14 (13 existing, 1 new); apps/poc journeys 4. The bake-offs: not run;
+they load their own Types from `spikes/`.
+
+**Local workarounds, outside the repository (nothing committed):** dockerd started by hand; the stack from a compose
+override in the scratchpad; Playwright through scratchpad configs using the preinstalled Chromium.
+
+**Open:** the Later items above. **Next session:** step 5 (a state that waits on its requester, which also gives a
+customer a view); 3b only on a trigger.
