@@ -8,6 +8,35 @@ bake-off (`docs/research/camunda-bakeoff.md`, `spikes/camunda-bakeoff/`).
 
 Written for the owner's colleagues as well as the owner.
 
+**Since then (2026-11-26).** This write-up is kept as the record of
+24 November: its numbers and its conclusions are as written then. The
+kernel has changed since (`docs/roadmap.md`, track 1), and this bake-off
+was run again in full on 26 November (`spikes/temporal-bakeoff/results/`).
+The attack scripts are unchanged; the change test's script now records the
+refusal and migrates the requests in flight. On the kernel side now:
+
+- **Under attack:** purchase 27 of 27 attempts refused (was 26 of 29); the
+  access request as rewritten 17 of 18 (was 16 of 19; the one left is a
+  request for no system); the access request as its author wrote it, blind, 18
+  of 18 (was 15 of 19); the staff-role run 7 of 7 (was 6 of 7). The two holes
+  are closed in every Type by the kernel's default: no agent writes a
+  field its Type does not open to agents (track 1, item 2). A draft can be
+  its requester's alone (item 4).
+- **A change in flight:** the old version by name is refused (item 6,
+  step 1), and the three requests in flight were each migrated, after a
+  check, and went to the CFO (item 6, step 2). One at a time; all at once
+  is a later step.
+- **A claim binds** (item 5, step 2), and the kernel can say what waits on
+  a person (`waiting_on`, item 5, step 1). There is still no screen.
+- **The side door is closed.** An effect re-checks what caused it (item 1),
+  so a forged workflow start places no order.
+- **Still open:** a colleague with no part in a request reads it and its
+  history (these Types narrow nothing); an access request for no system;
+  Postgres is reachable with the development password.
+
+Where a sentence below is no longer true of the kernel, a note in italics
+says so. The conclusions have not been revisited here.
+
 **Words used.**
 - The **kernel** is this repository's own system, which itself runs on
   Temporal. In it a process is a **Type**: a YAML file of fields, states and
@@ -114,10 +143,10 @@ for how independent these builds really were.
 | Measure | Kernel | Plain Temporal |
 |---|---|---|
 | **1. A second process** | 95 lines of YAML in 2 files (50 without comments), plus a 10-line setup script. About 25 repeat the purchase Type. No tests. | 317 lines of Go in 2 files (252 without comments), 194 lines of tests, 3 of wiring. About 125 copied from the purchase. After the review, 18 more lines of code, the cap copied again. |
-| **2. A change in flight** ("over 5,000, the CFO too") | 11 lines of YAML added, 3 changed, checked and explained before it runs. **Reaches no request in flight.** A requester can still ask for the old version. | 9 lines added and 4 changed in the workflow, one version check, 21 lines of tests. **Reached all three requests in flight.** Without the version check it broke reading a request already approved; Temporal's replay check caught it. |
-| **3. What every process rebuilds** | Given to every Type: the API, history, who decides, frozen fields, search, retries, safe resubmission, a limit nobody can exhaust. **Missing: an inbox, a claim that binds.** Every member of staff reads every request (these Types narrow nothing). | Built once: sign-in, the inbox and a binding claim, the audit trail, outside calls, API plumbing (429 lines). Per process: its rules, routes, tests, and copies of five helpers. Missed at first and added after review: the update limit, retries that never give up, safe resubmission. Still missing: search, a record after 24 hours. |
-| **4. Consistency under attack** | Purchase 26 of 29 refused; access request 16 of 19 (the rewrite). The same two holes in every Type, **closed by 2 to 5 lines of YAML per Type** once known. The reviewer's four new attempts: all refused. | The author's list: purchase 16 of 16, access request 15 of 15, before any hardening. The reviewer's: **the agent blocked decisions in both processes**, and a failed order was silent. After 137 lines of fixes (tests included): all refused. |
-| Side doors (no credentials) | The Temporal development server places an unapproved order (the first bake-off's known hole, fix designed, not built). | The Temporal development server places an unapproved order too, and the audit trail names the manager as the one who approved. |
+| **2. A change in flight** ("over 5,000, the CFO too") | 11 lines of YAML added, 3 changed, checked and explained before it runs. **Reaches no request in flight.** A requester can still ask for the old version. *Since: the old version is refused, and requests in flight can be migrated.* | 9 lines added and 4 changed in the workflow, one version check, 21 lines of tests. **Reached all three requests in flight.** Without the version check it broke reading a request already approved; Temporal's replay check caught it. |
+| **3. What every process rebuilds** | Given to every Type: the API, history, who decides, frozen fields, search, retries, safe resubmission, a limit nobody can exhaust. **Missing: an inbox, a claim that binds.** *(Since built, without a screen.)* Every member of staff reads every request (these Types narrow nothing). | Built once: sign-in, the inbox and a binding claim, the audit trail, outside calls, API plumbing (429 lines). Per process: its rules, routes, tests, and copies of five helpers. Missed at first and added after review: the update limit, retries that never give up, safe resubmission. Still missing: search, a record after 24 hours. |
+| **4. Consistency under attack** | Purchase 26 of 29 refused; access request 16 of 19 (the rewrite). *Since: 27 of 27 and 17 of 18.* The same two holes in every Type, **closed by 2 to 5 lines of YAML per Type** once known. The reviewer's four new attempts: all refused. | The author's list: purchase 16 of 16, access request 15 of 15, before any hardening. The reviewer's: **the agent blocked decisions in both processes**, and a failed order was silent. After 137 lines of fixes (tests included): all refused. |
+| Side doors (no credentials) | The Temporal development server places an unapproved order (the first bake-off's known hole, fix designed, not built). *Since closed.* | The Temporal development server places an unapproved order too, and the audit trail names the manager as the one who approved. |
 | Footprint | About 180 MB idle, 5 parts, up in about 7 s | About 125 MB idle, 3 parts, up in about 6 s |
 
 ## Measure 1: the marginal cost of a process
@@ -280,8 +309,8 @@ skip a step, change what is decided, or stop a decision. Evidence:
 
 | Process | Kernel | Plain Temporal |
 |---|---|---|
-| Purchase | 26 of 29 refused; 2 succeeded; 1 allowed by the requester's own grant | 16 of 16 refused |
-| Access request, as first written | Rewrite: 16 of 19; 2 succeeded; 1 allowed. The author's Type: 15 of 19 | 15 of 15 refused |
+| Purchase | 26 of 29 refused; 2 succeeded; 1 allowed by the requester's own grant. *Since: 27 of 27 refused* | 16 of 16 refused |
+| Access request, as first written | Rewrite: 16 of 19; 2 succeeded; 1 allowed. The author's Type: 15 of 19. *Since: 17 of 18, and 18 of 18* | 15 of 15 refused |
 
 How to read these counts. The kernel's purchase list is the first
 bake-off's and includes three attempts on access requests. Of the plain
@@ -396,15 +425,20 @@ justifications and reasons it stores in clear) matters more there.
    account of a process.
 
 **On the kernel** (from the first bake-off, with this run's evidence):
-1. An effect does not re-check committed state (the side door).
+1. An effect does not re-check committed state (the side door). *Since
+   closed (track 1, item 1).*
 2. Fields are writable by the agent unless a Type says otherwise; the safe
    setting exists (a role only people hold) but no author used it. No
-   "only the requester edits a draft".
+   "only the requester edits a draft". *Since: closed to agents by default
+   (item 2); a draft can be its requester's alone (item 4).*
 3. No inbox, no claim that binds; every member of staff reads every
-   request unless a Type narrows it.
+   request unless a Type narrows it. *Since: a "waiting on me" view and a
+   claim that binds (item 5, steps 1 and 2). The last part still holds.*
 4. A change reaches nothing in flight; an old version stays askable.
+   *Since closed, one request at a time (item 6, steps 1 and 2).*
 5. A Type cannot share with another Type, and cannot say where its Items
-   may be created or who may ask.
+   may be created or who may ask. *Since: a Type says where its Items are
+   created and by whom (`start`).*
 6. Neither `validate` nor `explain` caught a request that can never be
    decided (an owner asking for their own system).
 
@@ -417,7 +451,8 @@ justifications and reasons it stores in clear) matters more there.
 3. **The precondition was not met:** the kernel's first hole ("an effect
    re-checks committed state") was not fixed on `main`. As instructed, the
    run went ahead, and the kernel's forged-workflow start is reported as a
-   known open hole, kept out of the comparison.
+   known open hole, kept out of the comparison. *Since closed (track 1,
+   item 1).*
 4. No `ANTHROPIC_API_KEY`: no live model, and the first bake-off's injection
    run was not repeated (the compromised-agent script needs no model).
 5. The plain side's agent is an outside program with an API token. Inside
