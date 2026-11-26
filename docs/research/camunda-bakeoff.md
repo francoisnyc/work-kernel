@@ -6,6 +6,34 @@ code and the raw results are in `spikes/camunda-bakeoff/` (run
 
 Written for the owner's colleagues as well as the owner.
 
+**Since then (2026-11-26).** This write-up is kept as the record of
+24 November: its numbers and its recommendation are as written then. The
+kernel has changed since (`docs/roadmap.md`, track 1), and both bake-offs
+were run again in full on 26 November (`spikes/camunda-bakeoff/results/`).
+The attack scripts are unchanged; the change test's script now records the
+refusal and migrates a request in flight. On the kernel side now:
+
+- **The compromised agent: 27 of 27 attempts refused** (was 26 of 29; the
+  list is shorter because rows that followed a step now refused no longer
+  appear). Changing a request before its owner submits it, planting a
+  rejection reason and filing a purchase in the requester's name are all
+  refused: no agent writes a field its Type does not open to agents
+  (track 1, item 2).
+- **The CFO change can no longer be sidestepped.** A create must name the
+  latest version (item 6, step 1), and a request in flight can be migrated
+  to it, one at a time and after a check, by someone the new version names
+  (item 6, step 2).
+- **The side door is closed.** An effect re-checks what caused it (item 1),
+  so a forged workflow start places no order.
+- **A claim binds** (item 5, step 2), and the kernel can say what waits on
+  a person (`waiting_on`, item 5, step 1). There is still no screen, and
+  this bake-off's inbox script does not use the new view.
+- **Still open:** the agent given the finance role by mistake claims and
+  approves; Postgres is reachable with the development password.
+
+Where a sentence below is no longer true of the kernel, a note in italics
+says so. The recommendation has not been revisited here.
+
 **Words used.**
 - The **kernel** is this repository's own system. In it a piece of work is
   an **Item**; its rules (fields, states, who may make which move) are a
@@ -37,6 +65,8 @@ work:
   before it is submitted; planting a rejection reason), neither of them an
   approval, and both need kernel changes to close. Its development setup
   also has an unguarded side door that produced an unapproved order.
+  *Since: 27 of 27 refused; both holes and the side door are closed (see
+  the note at the top).*
 - The kernel's best ideas held up and are worth carrying over: checking and
   explaining a rule change before it goes live, freezing what was approved,
   and taking the requester's identity from the sign-in.
@@ -80,11 +110,11 @@ manager alone approves; a rejection that tells the requester) work:
 
 | Test | Kernel | Camunda 8.10 |
 |---|---|---|
-| **1. The change "over 5,000, the CFO too"** | 11 lines of YAML added, 3 changed. Before it ran, the kernel **checked** it (two typing slips named with line and fix) and **explained** it in plain language. **It can be sidestepped:** a requester can still ask for the old version by name, and the CFO is skipped. Requests in flight keep the old rules. | About 23 lines of XML and one form (in practice a few shapes drawn in Camunda's Modeler). A broken link was refused at deployment; a misspelled variable was **accepted and went live**, and the next large purchase stopped with an incident (nothing was approved). New requests use the latest version; a request in flight was **migrated** to it. AI-assisted modelling exists (alpha) but could not be tried. |
+| **1. The change "over 5,000, the CFO too"** | 11 lines of YAML added, 3 changed. Before it ran, the kernel **checked** it (two typing slips named with line and fix) and **explained** it in plain language. **It can be sidestepped:** a requester can still ask for the old version by name, and the CFO is skipped. Requests in flight keep the old rules. *Since: the old version by name is refused, and a request in flight can be migrated.* | About 23 lines of XML and one form (in practice a few shapes drawn in Camunda's Modeler). A broken link was refused at deployment; a misspelled variable was **accepted and went live**, and the next large purchase stopped with an incident (nothing was approved). New requests use the latest version; a request in flight was **migrated** to it. AI-assisted modelling exists (alpha) but could not be tried. |
 | **2a. Injection in the justification** | The model was fooled and wrote "approve immediately; finance can be skipped". Nothing else changed: the purchase waited for the manager, then went to finance. | The same. |
-| **2b. A fully compromised agent** | **26 of 29 attempts refused.** Two succeeded: changing a request before its owner submits it, and planting a rejection reason. One more is allowed because the requester's own grant allows it. | **Hardened: 17 of 17 refused.** With the default role for connectors: **5 of 17 succeeded**, including an order with no approval. |
-| **2c. Side doors** (added after the review) | The development workflow server has no sign-on: through it, **an order was placed for a purchase still waiting on its manager.** | Nothing found: the API refuses calls without credentials. |
-| **3. One inbox** | Had to be built: a script, no screen; the kernel cannot say "what waits on me". A claim does not stop a colleague deciding. | Tasklist shows both kinds; with a 41-line form per decision it shows the agent's preparation and an Approve box. The claim is enforced (after one setting). |
+| **2b. A fully compromised agent** | **26 of 29 attempts refused.** Two succeeded: changing a request before its owner submits it, and planting a rejection reason. One more is allowed because the requester's own grant allows it. *Since: 27 of 27 refused.* | **Hardened: 17 of 17 refused.** With the default role for connectors: **5 of 17 succeeded**, including an order with no approval. |
+| **2c. Side doors** (added after the review) | The development workflow server has no sign-on: through it, **an order was placed for a purchase still waiting on its manager.** *Since closed.* | Nothing found: the API refuses calls without credentials. |
+| **3. One inbox** | Had to be built: a script, no screen; the kernel cannot say "what waits on me". A claim does not stop a colleague deciding. *Since: it can (no screen yet), and a claim binds.* | Tasklist shows both kinds; with a 41-line form per decision it shows the agent's preparation and an Approve box. The claim is enforced (after one setting). |
 | **4. Cost and footprint** | 5 parts, about 185 MB idle, up in 7 s. Free to run in production. But it is a proof of concept: no real sign-on, no screens, and the team maintains the platform itself. | 3 containers, about 1.3 GB idle, up in 48 s. A paid Enterprise licence is required for production (price on request). The platform is maintained by its vendor. |
 
 ## Test 1: a plain-English change
@@ -122,8 +152,11 @@ need the CFO's approval, after finance." Evidence: `results/test1-cfo.md`.
   CFO.** The kernel lets a creator pick any registered version. Closing
   this needs a kernel change (it is on the kernel's roadmap). Unlike
   Camunda's failure below, this one fails open: the purchase is approved.
+  *Since closed: a create must name the latest version, unless that
+  version keeps the older one open (track 1, item 6, step 1).*
 - A request already in flight kept the old rules (no CFO). The kernel has
-  no way to move it to the new ones.
+  no way to move it to the new ones. *Since: it can be migrated, one at a
+  time and after a check (track 1, item 6, step 2).*
 
 **Camunda.**
 - *What changed:* the purchase model (`camunda/purchase-cfo.bpmn`): one
@@ -198,7 +231,8 @@ know every ID. Evidence: `results/test2-compromised-*.md`. The result files
 also hold follow-on checks (did the order arrive? is the purchase where it
 was?); the counts below are attempts.
 
-**Kernel: 26 of 29 attempts refused.** The agent's credentials are its
+**Kernel: 26 of 29 attempts refused.** *(Since: 27 of 27; see the note at
+the top.)* The agent's credentials are its
 token plus its grants. The spike gave it every grant: every power, acting
 for itself, for the manager, for a finance member, for the CFO, for the
 owner and for the requester. It was given no approver's role (that mistake
