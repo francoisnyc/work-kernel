@@ -5402,7 +5402,10 @@ locked, `type_version` set, `item_seq` up by one, one event `migrated`
 with `{from_version, to_version}` (numbers only), and an outbox row when
 either version has listeners. The **etag does not change**: a migrate
 writes no content. **Nothing runs:** no enter reaction, no hook, no timer
-for the state the Item is already in. The idempotency key is over the
+for the state the Item is already in. (Still so after step 3a, and now
+also later: what the new version adds on the state the Item is in is
+never owed for that entry; the timer changes in step 3b. See "Each state entry judged by its own version, as built (item 6, step 3a)".)
+The idempotency key is over the
 Item and the version named; a retry answers with the first result.
 
 **The refusal.** `FAILED_PRECONDITION` / `NOT_MIGRATABLE` (new), with
@@ -5434,12 +5437,17 @@ does **not** block: their records name no version. Both are pinned
 changing how history written before a migrate is read (step 3). It must
 not be done by loosening the quiet check alone: the workflow's loader
 would then read the old action as pending under the new version and run
-it again.
+it again. (Lifted in step 3a: each state entry is now read under the
+version it was made under, by the quiet check and the loader alike, so a
+finished action stays finished. See "Each state entry judged by its own version, as built (item 6, step 3a)".)
 
 **Other limits of this step.** No Item whose state has a timer (step 3).
 No migrate to a version that adds a hook or an enter reaction on a state
 the Item already entered: it would be owed for that old entry. One Item
-at a time (step 4). No mapping of states or fields (step 5).
+at a time (step 4). No mapping of states or fields (step 5). (Partly
+lifted in step 3a: a hook, enrich hook or reaction the new version adds
+on a state already entered is not owed for that entry, so it no longer
+refuses the migrate; timers in step 3b. See "Each state entry judged by its own version, as built (item 6, step 3a)".)
 
 **The reading.** A version with the block gains a section, *Who migrates
 Items to it*: "While this is the latest version of w_bill, anyone with
@@ -5940,6 +5948,74 @@ comes in PR 2.
 `WaitsOnRequester` and one case in `WaitsOn`; one SQL group and the
 customer branch in the view; one reading sentence; one contract field.
 No migration, no new dependency.
+
+## Each state entry judged by its own version, as built (item 6, step 3a) (2026-11-26)
+
+Track 1, item 6, step 3 is in two parts; this is the first. Step 2
+refused an Item that had finished an action while the latest version
+still declared that hook, because history was read under the version the
+Item would go to. Now history written before a migrate is read as what it
+was.
+
+**The rule.** Each state entry is judged by the version the Item was on
+when the entry was made. An action, an enrich hook, a reaction or an
+undo is owed for an entry only if that entry's own version declares it,
+and it is finished by that version's records. So:
+
+- an action finished before a migrate stays finished;
+- what the new version adds on a state the Item already entered (an
+  action, an enrich hook, an enter reaction) is not owed for that entry;
+  the next entry, made under the new version, owes it;
+- an undo is that of the version the hold was asked under: one the new
+  version renames is not owed again;
+- a reaction caused by an Item created inside is judged by the version
+  the container was on when that Item was created (that create is not
+  one of the container's own events, so it is placed by time).
+
+**How.** `lifecycle.VersionAt(migrations, current, seq)` is pure: before
+the first migrate, its `from`; from a `migrated` event on, its `to`,
+until the next. `entryVersions` (`internal/itemservice/entries.go`) reads
+an Item's `migrated` events once and answers "which version was the Item
+on at this event" (and at an instant, for an Item created inside). It is
+the one place versions are learned from, and four readers use it:
+`pendingActions`, `pendingReactions`, `pendingUndos` and `owedEnrich`.
+
+**The loader and the quiet check agree.** `StateEntry`, which the
+workflow's `LoadItem` reads, and `notQuiet`, the migrate's quiet check,
+both go through those four readers. `StateEntry` gains `PendingEnrich`,
+the enrich hooks owed for the current entry by the entry's own version,
+and `LoadItem` runs those, no longer computing them from the current
+version (the one change in `internal/workflow`, an activity; no workflow
+code, nothing that changes replay). The quiet check judges pending work
+once, under the Item's own history, where step 2 asked both versions.
+So a migrate that goes through leaves the loader nothing owed for an
+older entry, and nothing runs twice. The tests check that after every
+migrate that goes through.
+
+**Unchanged.** `ConfirmCause` and `lifecycle.BoundTo`: work unfinished
+under its own version still refuses the migrate, so every action pending
+after a migrate is for an entry made under the new version and names it.
+"An Item changes version only by a migrate, which is refused while an
+action is unfinished, so no action meets two versions" still holds. No
+contract, schema or payload change.
+
+**Lifted:** a finished action (step 2's limit); a hook, enrich hook or
+reaction the new version adds on a state already entered; an undo the
+new version renames. **Still refused:** a state with a timer under either
+version (`HAS_TIMER`, step 3b); work unfinished under its own version
+(`ACTION_UNFINISHED`, `REACTION_UNFINISHED`); an open hold; events not
+yet delivered. Still seventeen check codes.
+
+**Step 2's tests that changed** (approved): in `TestMigrate_Quiet`, an
+action only the new version declares on the state the Item is in now
+migrates; `TestMigrate_Quiet_AnActionTheNewVersionAddsOnAStateAlreadyLeft`
+answers `closed` alone; in `TestMigrate_Quiet_AReactionUnfinished`, one
+declared by the new version only now migrates; the pin of step 2's limit
+flipped (`..._GoesThrough`: migrates, the action ran once).
+
+**The bake-offs**, both run in full: every verdict as before; the one
+already approved now reads `NOT_MIGRATABLE … checks: CLOSED` (was
+`CLOSED,ACTION_UNFINISHED`). No script changed.
 
 ## Out of scope for the spike
 

@@ -107,13 +107,26 @@ Ideas noted during the spike, not built yet.
   - **A count** ("50+") still reads the view: 3 ms where many wait, up to
     40 ms at 550,000 open for someone with nothing waiting. The first
     thing the table would speed up.
+- **Each state entry judged by its own version, step 3a's Later items** (design.md, "Each state entry judged by its own version, as built"):
+  - **Acting timers stay refused** (`HAS_TIMER`, also after step 3b): a
+    reminder run started just before a migrate could not record itself
+    after it (the version check), so it could be sent twice. Lifting it
+    needs a way to see a run in flight.
+  - **An Item created inside is placed by time:** its create is not one of
+    the container's events, so the container's version at that instant is
+    used. A create and a migrate committed in the same instant would be
+    read in commit-time order, which the tests do not exercise.
+  - **Each reader of pending work reads the migrates itself** (four small
+    queries for an Item never migrated, as before one): passing one
+    reading through would save them, once it matters.
 - **Migrate one quiet Item, step 2's Later items** (design.md, "Migrate one quiet Item to the latest version, as built"):
   - **An Item that has finished an action cannot be migrated** while the
     latest version keeps that hook on a state it entered: an action's
     record carries its version (`hook:<type>@v<n>:<id>`). It fails closed.
     The lift is in how history before a migrate is read (step 3), never in
     the quiet check alone, which would run the action again. Reactions and
-    undos are not affected: their records name no version.
+    undos are not affected: their records name no version. (Lifted in
+    step 3a.)
   - **A link change that only loosens** (more targets, `max: one` lifted)
     could be let through. Today any difference is `link_changed`.
   - **`archive` is listed as a write operation** (CLAUDE.md, design.md
@@ -4767,3 +4780,43 @@ preinstalled Chromium.
 
 **Open:** the Later items above. **Next session:** step 5's PR 2 (`incident@6`, the screen's customer rows, a journey,
 a scenario step, `pli type get`), after item 6 step 3 merges; 3b only on a trigger.
+
+## 2026-11-26 — Track 1, item 6, step 3a: each state entry judged by its own version (Phase D)
+
+**Built:** history written before a migrate is read as what it was. Each state entry is judged by the version the
+Item was on when the entry was made, read from its `migrated` events (`lifecycle.VersionAt`, pure). One reader,
+`entryVersions`, is used by `pendingActions`, `pendingReactions`, `pendingUndos` and `owedEnrich`; the workflow's
+loader (`StateEntry`, now with `PendingEnrich`, read by `LoadItem`) and the migrate's quiet check both go through
+them, so they agree. Lifted: step 2's limit on an Item that has finished an action, and the refusal of a version that
+adds a hook, enrich hook or reaction on a state already entered; an undo a new version renames is not owed again.
+`ConfirmCause`, `lifecycle.BoundTo`, the contract and the schema are unchanged. design.md: "Each state entry judged by
+its own version, as built", and a note after three passages of step 2's section. Roadmap: step 3 split, 3a built.
+
+**Decided (the owner, through the coordinator):** Phase A, "Ok": the rule; the refusal for what a new version adds on
+a state already entered lifted; for 3b, a timer counts from the state entry, timers at an instant re-read, acting
+timers still refused; step 2's three passages get notes, not rewrites; two PRs, 3a then 3b. Phase B, "Ok": the
+tests, the undo case as a renamed undo, and `StateEntry.PendingEnrich` read by `LoadItem` (the one file in
+`internal/workflow`). Phase C, accepted, with one more test for an Item created inside.
+
+**Tests:** new: lifecycle 1 (13 cases); item service 7 (an action, enrich hook and reaction the new version adds,
+on the state the Item is in and on one left; an action unfinished under its own version still refuses; an Item
+migrated twice; a renamed undo; an Item created inside a migrated container). Each migrate that goes through checks
+the loader then owes nothing. **Step 2's tests changed (assertions, approved):** four, as listed in design.md.
+
+**Surprises:**
+- The enrich hooks the loader runs were computed in the workflow package from the current version, not by the item
+  service; the rule needed one field and a one-line change to the loader activity.
+- "An undo the new version adds" cannot be written: a held reaction must declare its undo to load. A renamed undo
+  shows the same flaw.
+- A move reaction writes two events on its target (the move and `reaction_applied`); my first count of the
+  containers' test assumed one.
+- My first browser run built the web bundles without `VITE_DEV_USERS=1`, so every journey timed out at sign-in.
+
+**Numbers.** `go vet` clean; `go test ./...` and `go test -race ./...` green, 28 packages; the new and changed tests
+`-race -count=10` green. Scenario on the stack: passed. Web: 492 unit tests, 14 browser journeys; apps/poc: 408 unit
+tests, 4 journeys. Both bake-offs in full: verdicts as recorded; the already-approved purchase now reads `CLOSED`
+alone. Fresh results kept out.
+
+**Open:** the Later items above. **Next session:** step 3b, Items with timers (Phase B: the workflow's reload behind
+a `workflow.GetVersion` change ID, `StartsWorkflow` for a migrated event, `HAS_TIMER` narrowed to acting timers, the
+end-to-end and replay tests, the scenario step).
