@@ -313,8 +313,8 @@ attack that found it as its test:
       transition, corrected at its Phase A: the view knows the state, not
       the move that entered it), which also gives a customer a view.
       Split in two PRs (the owner's decision):
-      - **PR 1, the kernel. Built** (`docs/design.md`, "Sent back to the
-        requester, as built"): the key and its load checks;
+      - **PR 1, the kernel. Built** (PR #102; `docs/design.md`, "Sent
+        back to the requester, as built"): the key and its load checks;
         `policy.WaitsOnRequester` and one case in `WaitsOn`; the view
         for staff and customers (a customer's `waiting_on: me`; `role:`
         still refused); `State.waits_on_requester` in `GetType`; the

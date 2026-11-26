@@ -4721,7 +4721,7 @@ customer a view); 3b only on a trigger.
 
 ## 2026-11-26 — Track 1, item 5, step 5, PR 1: sent back to the requester, the kernel (Phases A to D)
 
-**Built:** a state's `waits_on: requester`: an Item in that state waits on its requester (`created_on_behalf_of`,
+**Built (PR #102):** a state's `waits_on: requester`: an Item in that state waits on its requester (`created_on_behalf_of`,
 else `created_by`) besides whoever its moves name. Load checks (`INVALID_VALUE` for another value; `CONFLICT` on a
 done or canceled state, a claimed state, the initial state). `policy.WaitsOnRequester`, the one statement of which
 states wait on their requester, and one case in `policy.WaitsOn`; one group in the view's SQL. A customer, or an agent
