@@ -419,3 +419,69 @@ func TestMigrate_Entries_AnUndoDoneUnderItsVersion(t *testing.T) {
 		t.Errorf("the jar's level = %s, want %s: nothing given back twice", got, before)
 	}
 }
+
+// --- an Item created inside ---
+
+func boxSrc(version int, reaction, rest string) string {
+	return "\nid: bx_{s}\nversion: " + fmt.Sprint(version) + `
+initial_state: open
+states:
+  - {id: open,    category: todo}
+  - {id: working, category: active}
+transitions:
+  - {from: open,    to: working}
+  - {from: working, to: open}
+reactions:
+  - {id: ` + reaction + `, kind: move, on: created_inside, of: [bn_{s}], by: creator, to: working, from: [open]}
+` + rest
+}
+
+const boxNoteSrc = "\nid: bn_{s}\nversion: 1\nfields:\n  - {id: f_title, type: string}\n"
+
+// A reaction caused by an Item created inside a container is not one of
+// the container's own events: it is judged by the version the container
+// was on when the Item was created. Before the migrate, v1's wake, which
+// ran: finished stays finished, nothing owed under v2. After it, v2's
+// rouse is owed for the new Item, once.
+func TestMigrate_Entries_AnItemCreatedInside(t *testing.T) {
+	w := newMigWorld(t)
+	typ := w.id("bx")
+	w.reg(t, boxNoteSrc)
+	w.reg(t, boxSrc(1, "wake", ""))
+	box := w.container(t, w.lea, typ, nil)
+	note := func() uuid.UUID {
+		t.Helper()
+		res, err := w.create(t, w.lea, w.id("bn"), 1, &box, map[string]any{"f_title": "n " + word()})
+		return mustCreate(t, "a note inside the box", res, err)
+	}
+
+	first := note()
+	out, err := w.k.Internal().ReactMove(testCtx(t), inside(box, first, "wake"))
+	if err != nil || out.Outcome != itemservice.ReactionApplied {
+		t.Fatalf("wake = %+v, %v; want applied", out, err)
+	}
+	if err := w.move(t, w.lea, box, "open"); err != nil {
+		t.Fatalf("lea puts the box back to open: %v", err)
+	}
+	if se := w.entry(t, box); len(se.PendingReactions) != 0 {
+		t.Fatalf("under v1, after wake ran: pending reactions = %+v, want none", se.PendingReactions)
+	}
+
+	w.reg(t, boxSrc(2, "rouse", migAllowed))
+	w.migrateClean(t, box, typ, 2) // the first note is judged by v1: nothing owed
+
+	second := note()
+	se := w.entry(t, box)
+	if len(se.PendingReactions) != 1 || se.PendingReactions[0].Reaction != "rouse" || se.PendingReactions[0].CauseItem != second {
+		t.Errorf("after a note created under v2: pending reactions = %+v, want rouse for %s alone", se.PendingReactions, second)
+	}
+	var n int
+	if err := pool.QueryRow(testCtx(t),
+		`select count(*) from item_events where item_id = $1 and actor = $2 and op = 'transition'`,
+		box, "reaction:"+typ+":wake").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("moves wake made on the box = %d, want 1", n)
+	}
+}
