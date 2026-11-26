@@ -334,7 +334,7 @@ err_has "pli agent start"
 step "INVALID_REQUEST: a value that is not an int"
 refuse ana "INVALID_ARGUMENT INVALID_REQUEST" item update "$t1" --set f_priority=high
 
-step "a create names the latest version: build_step@1 is closed since build_step@2; ticket@1 stays open, because ticket@8 keeps it"
+step "a create names the latest version: build_step@1 is closed since build_step@2; ticket@1 stays open, because ticket@9 keeps it"
 refuse ana "INVALID_ARGUMENT INVALID_REQUEST" item create --type build_step@1 --set "f_title=old $w"
 err_has "type"
 err_has "closed to new Items: create its latest version"
@@ -1920,6 +1920,47 @@ refuse ana "NOT_FOUND NOT_FOUND" item get "$theirs"
 refuse triage-bot "NOT_FOUND NOT_FOUND" agent start --for user:ana --scopes "$theirs" --powers read
 
 # ---------------------------------------------------------------------------
+# Migrate one Item to the latest version of its Type (track 1, item 6, step 2).
+# ---------------------------------------------------------------------------
+
+# Track 1, item 6, step 2: one quiet Item goes to the latest version of its
+# Type. ticket@9 says who may: role:ticket_admin, which sam holds. The
+# ticket is open: no timer on its state, nothing unfinished, its events
+# delivered (the dry run is asked until the relay has caught up).
+step "migrate: sam dry-runs, then migrates ana's open ticket@5 to ticket@9; bob may not; a ticket whose state has a timer is refused"
+mg=$(new_ticket ana --set f_assignee=user:ana)
+ok ana item transition "$mg" --to open >/dev/null
+refuse bob "PERMISSION_DENIED NOT_ALLOWED" item migrate "$mg" --to ticket@9
+refuse bob "PERMISSION_DENIED NOT_ALLOWED" item migrate "$mg" --to ticket@9 --dry-run
+fits() { [ "$(ok sam item migrate "$1" --to ticket@9 --dry-run | j '.problems // [] | length')" = "0" ]; }
+wait_until 10 "the dry run finds no problem" fits "$mg"
+dry=$(ok sam item migrate "$mg" --to ticket@9 --dry-run)
+expect "the dry run's problems" "$(printf '%s' "$dry" | j '.problems // [] | length')" "0"
+expect "the dry run wrote nothing: still ticket@5" "$(ok ana item get "$mg" | j .item.type)" "namespaces/acme/types/ticket/versions/5"
+# The target is the latest version, and no other.
+refuse sam "FAILED_PRECONDITION NOT_MIGRATABLE" item migrate "$mg" --to ticket@8
+expect "checks" "$(meta checks)" "TARGET_NOT_LATEST"
+etag_before=$(ok ana item get "$mg" | j .item.etag)
+expect "the migrate answers with the Item on ticket@9" \
+	"$(ok sam item migrate "$mg" --to ticket@9 | j .item.type)" "namespaces/acme/types/ticket/versions/9"
+got=$(ok ana item get "$mg")
+expect "the ticket reads ticket@9" "$(printf '%s' "$got" | j .item.type)" "namespaces/acme/types/ticket/versions/9"
+expect "its state is unchanged" "$(printf '%s' "$got" | j .item.state)" "open"
+expect "its etag is unchanged" "$(printf '%s' "$got" | j .item.etag)" "$etag_before"
+expect "its history ends with the migrate, which names the version it left" \
+	"$(ok ana item history "$mg" | j '.events[-1] | "\(.kind) \(.actor) \(.previous_type) \(.type)"')" \
+	"ITEM_EVENT_KIND_MIGRATED user:sam namespaces/acme/types/ticket/versions/5 namespaces/acme/types/ticket/versions/9"
+# It moves on under ticket@9.
+expect "the migrated ticket starts work" "$(ok ana item transition "$mg" --to in_progress | j .item.state)" "in_progress"
+# In progress has a timer: such an Item is not migrated in this step.
+mg2=$(new_ticket ana --set f_assignee=user:ana)
+ok ana item transition "$mg2" --to open >/dev/null
+ok ana item transition "$mg2" --to in_progress >/dev/null
+refuse sam "FAILED_PRECONDITION NOT_MIGRATABLE" item migrate "$mg2" --to ticket@9
+case ",$(meta checks)," in *,HAS_TIMER,*) ;; *) fail "checks: got '$(meta checks)', want HAS_TIMER among them" ;; esac
+expect "the refused ticket stays on ticket@5" "$(ok ana item get "$mg2" | j .item.type)" "namespaces/acme/types/ticket/versions/5"
+
+# ---------------------------------------------------------------------------
 # Ventoux V2b: draft Types checked against every registered version, with
 # nothing registered (pli type validate, ValidateTypes).
 # ---------------------------------------------------------------------------
@@ -2011,7 +2052,7 @@ for reason in UNAUTHENTICATED SESSION_INVALID INVALID_REQUEST NOT_FOUND NOT_ALLO
 	IDEMPOTENCY_KEY_REUSED NOT_CAUGHT_UP AUDIENCE_CHANGED \
 	LINK_CARDINALITY ALREADY_LINKED NOT_LINKED LINK_TARGET_TYPE \
 	FIELD_NOT_WRITABLE FIELD_FROZEN INVARIANT_FAILED LINK_NOT_WRITABLE TOO_MANY_VALUES APPROVAL_UNAVAILABLE \
-	PLACEMENT_NOT_WRITABLE NOT_UNIQUE; do
+	PLACEMENT_NOT_WRITABLE NOT_UNIQUE NOT_MIGRATABLE; do
 	case $seen in *" $reason "*) ;; *) fail "no step triggered $reason" ;; esac
 done
 cat <<'EOF'
