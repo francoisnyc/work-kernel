@@ -1,0 +1,22 @@
+# Witness fixture: sent back to the requester (track 1 item 5, step 5).
+# The help team asks the requester a question; while the answer is
+# awaited, the request waits on whoever asked for it, and on nobody else:
+# only the requester sends it back to the team.
+id: w_back
+version: 1
+initial_state: open
+
+fields:
+  - {id: f_title, type: string}
+
+states:
+  - {id: open,     category: waiting}
+  - {id: asked,    category: waiting, waits_on: requester}
+  - {id: answered, category: done}
+
+transitions:
+  - {from: open,  to: asked,    allowed: ['role:w_help']}
+  - {from: open,  to: answered, allowed: ['role:w_help']}
+  - {from: asked, to: open,     allowed: [creator]}
+
+customer_fields: [f_title]

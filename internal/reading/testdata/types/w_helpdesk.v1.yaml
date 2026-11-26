@@ -1,0 +1,5 @@
+# Witness fixture: a container with no lifecycle, where customers open
+# w_back requests (own).
+id: w_helpdesk
+version: 1
+own: [w_back]
