@@ -299,8 +299,9 @@ attack that found it as its test:
         lists, each one `TransitionItem`. The browser decides nothing
         about who may act. The web's own inbox queries and list of moves
         are retired. Web only; no new dependency.
-      - **The follow-up, a claim on the stack. Built** (`docs/design.md`,
-        "The web Inbox on the view, as built", its last note):
+      - **The follow-up, a claim on the stack. Built** (PR #101;
+        `docs/design.md`, "The web Inbox on the view, as built", its
+        last note):
         `equipment_request@1`, the first Type in `types/` with a claimed
         state and a release move. Its queue is the desk agents', a role
         two dev users already hold, so the dev tokens did not change. A

@@ -4660,8 +4660,8 @@ move, a role for a dev user, a real claim and release journey), then step 5; 3b 
 
 ## 2026-11-26 — Track 1, item 5, step 4's follow-up: a claim on the stack (Phases A to D)
 
-**Built:** one data file, `types/equipment_request.v1.yaml`: the first Type in `types/` with a claimed state. A request
-waits in `queue` on `role:desk_agent`; a desk agent who is not the requester moves it to `in_hand` (`claim: f_handler`)
+**Built (PR #101):** one data file, `types/equipment_request.v1.yaml`: the first Type in `types/` with a claimed state. A
+request waits in `queue` on `role:desk_agent`; a desk agent who is not the requester moves it to `in_hand` (`claim: f_handler`)
 and is then the only one who moves it to `fulfilled` or `declined`; the move back to `queue` is the release. lea and sam
 already hold the role, so the dev tokens did not change. A journey on the real kernel (sam claims from the team's tab,
 the row moves to his "Waiting on me", lea is refused the decision on the request's page, sam releases) and a scenario
