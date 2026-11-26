@@ -69,7 +69,7 @@ func TestMigrateItem(t *testing.T) {
 	})); err != nil {
 		t.Fatalf("ana narrows an Item to herself: %v", err)
 	}
-	registerAPIType(t, apimigSrc("2", "migrate:\n  allowed: ['role:apimig_admin']\n"))
+	registerAPIType(t, apimigSrc("2", "migrate:\n  allowed: ['role:apimig_admin']\nstart: {older_versions: all}\n"))
 	migrate := func(who string, req *kernelv1.MigrateItemRequest) (*kernelv1.MigrateItemResponse, error) {
 		res, err := as(who).MigrateItem(ctx, connect.NewRequest(req))
 		if err != nil {
