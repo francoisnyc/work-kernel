@@ -40,6 +40,7 @@ func Read(t *typedef.Type, cat *contracts.Catalog) *Reading {
 	r := &renderer{t: t, cat: cat, ctx: newCtx(t)}
 	r.inShort()
 	r.whoStarts()
+	r.whoMigrates()
 	r.whoWrites()
 	r.links()
 	if !noLifecycle(t) {
@@ -204,6 +205,34 @@ func (r *renderer) whoStarts() {
 					t.ID, withArticle(t.ID), joinOr(names)))
 		}
 	}
+}
+
+// --- Who migrates Items to it ---
+
+// whoMigrates reads the migrate block: who may migrate an open Item of an
+// older version to this one, while it is the latest. A Type without the
+// block says nothing: nobody may, the kernel's rule for every Type.
+func (r *renderer) whoMigrates() {
+	t := r.t
+	if t.Migrate == nil {
+		return
+	}
+	r.section("Who migrates Items to it")
+	parts := []Part{MigrateWho}
+	var phrases []string
+	for _, e := range t.Migrate.Allowed {
+		if role, ok := strings.CutPrefix(e, typedef.AllowedRolePrefix); ok {
+			phrases, parts = append(phrases, "anyone with the role "+role), append(parts, WhoRole)
+		} else {
+			phrases, parts = append(phrases, "`"+strings.TrimPrefix(e, typedef.AllowedPrincipalPrefix)+"`"), append(parts, WhoPrincipal)
+		}
+	}
+	who := strings.Join(phrases, ", or ")
+	if len(phrases) > 1 {
+		who += ","
+	}
+	r.say(parts, []string{"migrate"},
+		at("While this is the latest version of %s, %s may migrate an open %s of an older version to it, once it fits.", t.ID, who, t.ID))
 }
 
 // --- Who writes what ---

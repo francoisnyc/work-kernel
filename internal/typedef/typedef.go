@@ -343,7 +343,7 @@ type Type struct {
 	Start *Start `yaml:"start" json:"start,omitempty"`
 	// Migrate (track 1, item 6, step 2): who may migrate an open Item of
 	// an older version to this one, while it is the latest. nil: nobody.
-	// A stub: parsed and stored; nothing checks or reads it yet.
+	// The latest version's block decides (see migrate.go).
 	Migrate *Migrate `yaml:"migrate" json:"migrate,omitempty"`
 }
 
@@ -553,6 +553,7 @@ func (t *Type) check() error {
 	t.checkJira24b(r)
 	// Where Items of this Type may be created, and by whom.
 	t.checkStart(r)
+	t.checkMigrate(r)
 	// Clears name fields, and may not sit on a held transition.
 	t.checkClears(r)
 	// Computed effects: the same, and each expression compiles to a value

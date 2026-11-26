@@ -54,6 +54,8 @@ func (r Renderer) Event(ty *typedef.Type, ev itemservice.Event, own []string) Li
 		if ev.LinkType != "" && ev.LinkTarget != nil {
 			text += fmt.Sprintf("; linked %s to %s", ev.LinkType, r.ref(ev.LinkTarget))
 		}
+	case lifecycle.OpMigrated:
+		text = fmt.Sprintf("%s migrated it %s@%d -> %s@%d", who, ev.TypeID, ev.PreviousVersion, ev.TypeID, ev.TypeVersion)
 	case lifecycle.OpTransitionRequested:
 		text = with(fmt.Sprintf("%s asked %s -> %s", who, ev.From, ev.RequestedTo))
 	case lifecycle.OpTransitionDenied:

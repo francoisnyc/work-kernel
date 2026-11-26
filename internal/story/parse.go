@@ -588,7 +588,7 @@ func parseStep(day1 time.Time, line string, timed bool) (Step, error) {
 		}
 		i += 2
 	}
-	verb, err := word(i+1, "what "+st.Actor+" does: creates, updates, moves, links, unlinks, places, narrows, sees, cannot see or finds")
+	verb, err := word(i+1, "what "+st.Actor+" does: creates, updates, moves, migrates, links, unlinks, places, narrows, sees, cannot see or finds")
 	if err != nil {
 		return st, err
 	}
