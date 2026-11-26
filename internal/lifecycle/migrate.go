@@ -279,3 +279,20 @@ func pathMisfits(t *typedef.Type, f MigrationFacts) []Misfit {
 	}
 	return out
 }
+
+// Migration is one migrate in an Item's history: the item_seq of its
+// migrated event, and the versions it went from and to.
+type Migration struct {
+	Seq      int64
+	From, To int
+}
+
+// VersionAt returns the version of its Type the Item was on when its event
+// at item_seq seq was written (track 1, item 6, step 3). ms are the Item's
+// migrates in item_seq order; current is its version now. Each state entry
+// is judged by the version it was made under.
+//
+// (Not built yet: it answers current.)
+func VersionAt(ms []Migration, current int, seq int64) int {
+	return current
+}

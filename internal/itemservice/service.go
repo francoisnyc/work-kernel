@@ -545,6 +545,10 @@ type StateEntry struct {
 	// cause is the entering event. OpenHold is the Item's open hold, if any.
 	HooksRun []string
 	OpenHold *HoldEntry
+	// PendingEnrich are the enrich hooks owed for the current entry that
+	// have not written yet, judged by the version the Item was on when it
+	// entered the state (track 1, item 6, step 3a). (Not built yet: nil.)
+	PendingEnrich []string
 	// PendingActions are the action hooks not yet completed, for any entry
 	// of their state, not just the current one: an action is never dropped
 	// because the Item moved on (or the worker died).
