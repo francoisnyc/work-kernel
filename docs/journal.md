@@ -6,6 +6,27 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
+- **Migrate one quiet Item, step 2's Later items** (design.md, "Migrate one quiet Item to the latest version, as built"):
+  - **An Item that has finished an action cannot be migrated** while the
+    latest version keeps that hook on a state it entered: an action's
+    record carries its version (`hook:<type>@v<n>:<id>`). It fails closed.
+    The lift is in how history before a migrate is read (step 3), never in
+    the quiet check alone, which would run the action again. Reactions and
+    undos are not affected: their records name no version.
+  - **A link change that only loosens** (more targets, `max: one` lifted)
+    could be let through. Today any difference is `link_changed`.
+  - **`archive` is listed as a write operation** (CLAUDE.md, design.md
+    "Item") **and is not built.** Left as it is; the owner's to settle.
+  - **`GetType` does not show `migrate`** (nor `start.older_versions`): a
+    client cannot ask who may migrate, only read the YAML or the reading.
+  - **An enrich hook that never ran** (its action down, no fallback) keeps
+    an Item in that state from ever being quiet.
+  - **The dry run needs the relay to have caught up:** just after a write
+    it answers `events_undelivered`. A client retries; the scenario waits.
+  - **A version that adds a hook or an enter reaction on a state already
+    entered** refuses every Item that passed there. Step 3 or 5.
+  - **The committed bake-off results are older than main** (24 November):
+    a fresh recorded run of both is still the owner's decision.
 - **A create names the latest version, step 1's Later items** (design.md, "A create names the latest version, as built"):
   - **A reason of its own for a closed version** (`VERSION_CLOSED`, with
     the latest version in metadata), so a client can retry on the latest.
@@ -4295,3 +4316,72 @@ preinstalled Chromium.
 Phase A: who may migrate, the fit checks, quiet Items only, the names; and the wording of CLAUDE.md's list of write
 operations and design.md's "an Item never changes version", which a migrate makes untrue. **Next session:** item 6,
 step 2 (move one quiet Item), or item 5's steps 3 to 5, as the owner chooses.
+
+## 2026-11-26 — Track 1, item 6, step 2: migrate one quiet Item to the latest version (Phase D)
+
+**Built:** `MigrateItem`: one open, quiet Item goes to the latest version of its Type, checked against it, in one
+transaction (Item row, a `migrated` event with the two version numbers, an outbox row when either version listens).
+The etag does not change and nothing runs. A dry run (`validate_only`) does the same checks in a transaction that is
+rolled back and lists every problem. The latest version says who may (`migrate.allowed`; absent, nobody; people
+only). The refusal is `NOT_MIGRATABLE` with seventeen check codes. A reading section, a story verb, `pli item
+migrate`. `ticket@9` (ticket@8 plus the key) and a scenario step. design.md: "Migrate one quiet Item to the latest
+version, as built". Roadmap: step 2 built; step 3 gains Items that have finished an action; bake-off hole 4 updated.
+
+**Kernel changes (counted, eight):** the contract and handler; `lifecycle.Fits`; `policy.MayMigrate`;
+`Service.Migrate` and the history's reading of the event; the Type key, its checks and the schema; the reading; the
+story verb; pli. Two small refactors in the item service: the pending-work readers take a querier (to run inside
+the transaction), and `uniqueClash` came out of `checkUnique`. No migration, no new dependency; the contract only
+grew.
+
+**Decided (the owner, through the coordinator):** Phase A, "Yes" to the defaults: the contract addition; the names
+(`MigrateItem`, `migrated`, `migrate.allowed`, "migrate" not "move"); `type` required and the latest; who may is
+the latest version's word, people only, a claimed Item keeps its claimant; the path check from history with no
+guard run again; quiet under both versions including undelivered events; links strict; no reaction, hook or timer
+runs; the etag unchanged; the wording of CLAUDE.md, design.md and the roadmap, word for word. Phase B, "Ok", with
+the customer's answer pinned (not visible: not found; visible: forbidden). Phase C, "Ok" to four points: the etag
+table's row for `migrated`; the API test's fixture fix; a real migrate in the scenario through `ticket@9`; **the
+action limit stays for this step, fails closed, and is pinned**, its lift belonging to step 3.
+
+**Tests:** new: lifecycle 10, item service 18 (the bake-off row first; two pin the limit and its opposite for
+reactions), typedef 4 and a schema corpus file, API 1, pli 1, reading 3 and a witness (`w_bill@1..2`), workflow 1
+end to end. **Existing tests changed, assertions:** the contract's RPC list; `MigrateResult` among the results
+that carry no Item data; the reading's cite test (`migrate`); the etag table (`migrated`: never; fourteen kinds);
+and for `ticket@9`: pli's Type count (67 to 68) and its migrate target (ticket@8 to ticket@9), the two Type lists
+(API, ParseDir), "no Type in types/ has the migrate key" (now: ticket@9 alone), and step 1's "which versions keep
+older ones open" (ticket@9 carries ticket@8's block and is the latest ticket). **Fixture only:** `ticket.v9` in the
+three `newest_types_test.go` lists; `apimig@2` keeps older versions open so the API test can run twice in one
+database.
+
+**The bake-offs, both run in full, both sides up.** Script changes, approved: `test1-cfo.py` keeps two purchases in
+flight and an administrator migrates one; `test_change_kernel.py` migrates the three in flight; the spike's
+`purchase@2` gained `migrate` for a role of its own, and the dev token that role. New rows: each migrated purchase,
+after a dry run with 0 problems, is sent by finance to the CFO ("the change reaches a request already in flight");
+the one already approved is refused, `NOT_MIGRATABLE … CLOSED,ACTION_UNFINISHED`; "the change reached 3 of the 3
+requests in flight". Counts as before: the first bake-off's kernel list 32 of 32, requester 3 of 3,
+agent-among-approvers 1 of 3 (by design); the second's purchase 27 of 27, access 17 of 18, blind-written access 18
+of 18, staff-role 7 of 7. The fresh result files were kept out of the repository.
+
+**Surprises:**
+- **The limit on actions.** The bake-off's refused row said `ACTION_UNFINISHED` for a purchase whose order had long
+  been placed. An action's record carries the version, so a finished action reads as unfinished under the new
+  version. Nothing in Phase A named it. It fails closed, so it stayed, pinned.
+- Reactions and undos looked the same and are not: their records name no version. Found by tracing, then by running
+  it; pinned the other way.
+- A Phase B test passed once and failed on its second run in one database: it created version 1 after its own
+  version 2 was registered. Step 1's rule again; `-count=10` found it.
+- The etag table demands a decision for every event kind, so a new kind fails that test until it is listed.
+- `ticket@9` moved six assertions, two of them step 1's and this step's own "nothing in types/ has the key".
+- The role went to sam, not lea: a PoC test pins lea's exact roles.
+- The scenario step first sat above the helper it needed (`wait_until`).
+- The committed bake-off results (24 November) differ from any run on main in the attack tables; rows changed by
+  Types edited since. Not this branch's doing.
+
+**Numbers.** `go vet` clean; `go test ./...` green, 28 packages; `go test -race ./...` green (at Phase C's head);
+the new tests `-race -count=10` green. Scenario on the stack: passed, with the new step. Web: 464 unit tests,
+Playwright 9; apps/poc: 408 unit tests, journeys 4.
+
+**Local workarounds, outside the repository (nothing committed):** as before: dockerd started by hand, the stack
+from a scratchpad override with host-built binaries, Playwright through temporary configs.
+
+**Open:** the Later items above. **Next session:** item 6, step 3 (Items with timers, and reading history written
+before a migrate, which lifts the action limit), or step 4 (every open Item of a version), as the owner chooses.

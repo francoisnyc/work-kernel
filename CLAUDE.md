@@ -51,7 +51,7 @@ worker); the **item service** is the one program that reads and writes Items.
 
 
 - Every write goes through the item service's operations (create, update,
-  transition, link, archive). Nothing writes Item state from the side.
+  transition, link, migrate, archive). Nothing writes Item state from the side.
 - A write is one Postgres transaction: Item row + event + outbox row. The Item
   row is locked during the write, so `item_seq` has no gaps.
 - Every write takes an idempotency key and returns `commit_seq`.

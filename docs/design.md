@@ -68,7 +68,7 @@ Seven parts:
 | Policy | read/write rules via scopes and grants (below) |
 | History | append-only events: every accepted operation |
 
-Five write operations: **create, update, transition, link, archive**. Each is
+Six write operations: **create, update, transition, link, migrate, archive**. Each is
 validated (schema, lifecycle, policy), then either accepted and recorded, or
 rejected with a reason.
 
@@ -134,7 +134,8 @@ A Type is versioned YAML data that **names code but never contains it**.
   "Jira part 2, step 1 as built"). A state has `timer` or `at`, never both.
 - Approvals: a business state, decided by an ordinary transition; the kernel
   has no approval concept (see "Approval as a business state").
-- Items stay on the Type version they were created with. Versioning rule:
+- An Item stays on the Type version it was created with, until someone who
+  may migrates it to the latest one. Versioning rule:
   **pin the lifecycle, evolve the schema, float the policy.**
 
 Guards are CEL expressions (`cel-go`), compiled when a Type loads. Every field
@@ -4331,7 +4332,9 @@ forged, by a forged start or by forged workflow code on the task queue.
 (`internal/itemservice/cause.go`), before it reads the hook's inputs or
 calls the connector. From committed state only, it confirms:
 
-- the Type and version named are the Item's (an Item never changes version);
+- the Type and version named are the Item's (an Item changes version only by
+  a migrate, which is refused while an action is unfinished, so no action
+  meets two versions);
 - the hook is an action hook of that Type (by the contract rules, "action"
   and `sideEffects: some` are the same set);
 - the event named is an event of this Item, and the one the hook is bound
@@ -5292,6 +5295,162 @@ which the scenario shows.
 **Kernel changes (three):** the key, its load checks and `Start.Creatable`
 (`typedef`, the JSON Schema); the check in `Create`; the reading's
 sentence. No schema migration, proto or go.mod change.
+
+## Migrate one quiet Item to the latest version, as built (2026-11-26)
+
+Track 1, item 6, step 2 of five. Step 1 closed the old version to new
+Items; the requests already in flight kept its rules. This step lets
+someone who may take one open Item, checked, to the latest version of its
+Type.
+
+**The operation.** `MigrateItem` (kernel.v1; `Service.Migrate` in
+`internal/itemservice/migrate.go`; `pli item migrate ITEM --to TYPE@N
+[--dry-run]`). The request names the Item, the Type version to go to, and
+an idempotency key. With `validate_only` it is a **dry run**: the same
+checks, in a transaction that is rolled back, no key needed; the answer
+lists every problem and writes nothing. The word is "migrate" everywhere:
+"move" stays a state change or a change of container.
+
+**Who may.** The **latest** version says, as it does for creates and
+placement:
+
+```yaml
+migrate:
+  allowed: ['role:ticket_admin']   # role:<name> or principal:user:<id>
+```
+
+Absent, nobody may: it fails closed. People only: no agent, no one acting
+for another, no customer (`policy.MayMigrate`). The Item must be visible
+to the caller; one that is not answers `NOT_FOUND`, as for any write. A
+claimed Item may be migrated and keeps its claimant. Load checks
+(`typedef.checkMigrate`): a block without `allowed` (`REQUIRED`), an empty
+list or an entry that is not a role or a user (`INVALID_VALUE`), an entry
+twice (`DUPLICATE`).
+
+**The target.** `type` is required and must be the Item's own Type, at
+its latest registered version as read in the write's transaction, and
+newer than the Item's. Anything else is refused with `target_not_latest`
+alone, before the fit is looked at.
+
+**The order of a migrate's answers.** What is `NOT_FOUND`; a `type` that
+names another Type (`INVALID_REQUEST` on `type`); who may (`NOT_ALLOWED`);
+the target; then every other check, all reported together.
+
+**Quiet, under both versions.** Nothing may be in the middle of
+happening, judged with the version the Item is on and with the latest
+(`notQuiet`, which reads the database inside the transaction):
+
+- `closed`: its state is done or canceled;
+- `held`: an open hold;
+- `action_unfinished`: an action not finished for a state the Item
+  entered, or an enrich hook of its current state that has not written;
+- `reaction_unfinished`: a reaction or an undo not finished;
+- `has_timer`: its state has a timer of any sort (step 3);
+- `events_undelivered`: an event of the Item is still in the outbox (the
+  relay judges an event by the Item's version when it delivers it).
+
+**The fit** (`lifecycle.Fits`, one pure function, the only place the fit
+is judged), in the order reported:
+
+- `state_missing`: the latest version has no such state;
+- `field_missing`, `field_changed`: a field that holds a value is gone, or
+  has another type or shape, or holds more values than now allowed;
+- `invariant_failed`: an invariant of the latest version does not hold;
+- `not_unique`: a sibling holds the same value of a field the latest
+  version makes unique (this one needs the database);
+- `link_changed`: a link the Item has is not declared the same way.
+  Strict: a change that only loosens is refused too;
+- `container_not_admitted`: the latest version's `start.in` does not admit
+  where the Item is;
+- `claim_empty`: its state has a claim in the latest version and nobody
+  holds it;
+- `path_not_declared`, `path_missing_fields`: see below.
+
+**The path check, and what it does not do.** The Item's history must be a
+history the latest version could have had: its first state is the initial
+state, each move it made is a move the latest version declares, and the
+fields the latest version requires for the last move are set now. It does
+**not** run the guards of past moves again (the values of then are gone),
+nor judge who made them. So an Item past a point where the new version
+adds a guard is migrated, and meets the new rules from its next move on:
+a 6,000 purchase in finance review goes to the CFO after the migrate.
+
+**The write.** One transaction through the write path: the Item row
+locked, `type_version` set, `item_seq` up by one, one event `migrated`
+with `{from_version, to_version}` (numbers only), and an outbox row when
+either version has listeners. The **etag does not change**: a migrate
+writes no content. **Nothing runs:** no enter reaction, no hook, no timer
+for the state the Item is already in. The idempotency key is over the
+Item and the version named; a retry answers with the first result.
+
+**The refusal.** `FAILED_PRECONDITION` / `NOT_MIGRATABLE` (new), with
+`checks` in the metadata: the codes, upper case, comma-separated, in the
+order above. A dry run returns the same as `problems`, each with the
+state, fields, link or invariant it is about. Seventeen codes:
+`TARGET_NOT_LATEST`, `CLOSED`, `HELD`, `ACTION_UNFINISHED`,
+`REACTION_UNFINISHED`, `HAS_TIMER`, `EVENTS_UNDELIVERED`, `STATE_MISSING`,
+`FIELD_MISSING`, `FIELD_CHANGED`, `INVARIANT_FAILED`, `NOT_UNIQUE`,
+`LINK_CHANGED`, `CONTAINER_NOT_ADMITTED`, `CLAIM_EMPTY`,
+`PATH_NOT_DECLARED`, `PATH_MISSING_FIELDS`.
+
+**Readers.** The Item reads as the new version at once (get, list,
+search). Its history ends with `MIGRATED`; that event carries the new
+version as `type` and the one left as `previous_type`. Earlier events keep
+the version they were written under. The relay and the workflow read the
+version from the Item row, so the next move, reaction and timer are the
+new version's (`internal/workflow/migrate_e2e_test.go`).
+
+**The limit: an Item that has finished an action.** An Item that has
+finished an action cannot be migrated while the latest version still
+declares that hook on a state the Item entered. The record of a finished
+action carries the version it ran under (`hook:<type>@v<n>:<id>`), and a
+version reads only its own records, so under the latest version the
+action looks unfinished. It fails closed: the migrate is refused with
+`ACTION_UNFINISHED`, and nothing runs twice. A finished reaction or undo
+does **not** block: their records name no version. Both are pinned
+(`internal/itemservice/migrate_ran_test.go`). Lifting the limit means
+changing how history written before a migrate is read (step 3). It must
+not be done by loosening the quiet check alone: the workflow's loader
+would then read the old action as pending under the new version and run
+it again.
+
+**Other limits of this step.** No Item whose state has a timer (step 3).
+No migrate to a version that adds a hook or an enter reaction on a state
+the Item already entered: it would be owed for that old entry. One Item
+at a time (step 4). No mapping of states or fields (step 5).
+
+**The reading.** A version with the block gains a section, *Who migrates
+Items to it*: "While this is the latest version of w_bill, anyone with
+the role w_bill_admin, or `user:root`, may migrate an open w_bill of an
+older version to it, once it fits." (part `migrate_who`, citing `migrate.allowed`; witness
+`w_bill@1..2`). A version without the block says nothing. A story has the
+verb `migrates ITEM to TYPE@VERSION`, and its timeline the line "who
+migrated it T@1 -> T@2".
+
+**What follows the latest version** (step 1's table, with one row added):
+
+| | Judged by |
+|---|---|
+| where an Item is created, and by whom (`start`) | the latest version |
+| which versions may be created (`start.older_versions`) | the latest version |
+| **who may migrate an Item to it** (`migrate.allowed`) | the latest version |
+| who moves, narrows or un-narrows it (`placement_writable_by`) | the latest version |
+| its states and moves, guards, reactions, timers, invariants | the Item's own version, which a migrate changes |
+| who may make a move; who may write a field; what a customer sees | the Item's own version |
+
+**The Types in `types/`.** `ticket@9` is `ticket@8` plus `migrate:
+{allowed: ['role:ticket_admin']}` and nothing else; no registered version
+was edited. sam holds the role in the dev tokens, and the scenario
+migrates an open `ticket@5` to it. In the bake-offs, the spike's
+`purchase@2` gained the key for a role of its own.
+
+**Kernel changes (eight):** the contract (`MigrateItem`, its messages,
+event kind `MIGRATED`, `ItemEvent.previous_type`, the reason) and its
+handler; `lifecycle.Fits`; `policy.MayMigrate`; `Service.Migrate` and the
+history's reading of the event; the Type key, its load checks and the JSON
+Schema; the reading's section; the story's verb; `pli item migrate`. The
+contract only grew (`buf breaking` passes). No schema migration, no new
+dependency.
 
 ## Out of scope for the spike
 
