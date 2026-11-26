@@ -32,6 +32,7 @@ type Kernel interface {
 	Get(context.Context, item.Principal, uuid.UUID) (item.Item, error)
 	Update(context.Context, itemservice.UpdateRequest) (itemservice.WriteResult, error)
 	Transition(context.Context, itemservice.TransitionRequest) (itemservice.TransitionResult, error)
+	Migrate(context.Context, itemservice.MigrateRequest) (itemservice.MigrateResult, error)
 	Search(context.Context, itemservice.SearchRequest) (itemservice.SearchResult, error)
 	List(context.Context, itemservice.ListRequest) (itemservice.ListResult, error)
 	ListEvents(context.Context, itemservice.ListEventsRequest) (itemservice.ListEventsResult, error)

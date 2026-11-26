@@ -236,6 +236,7 @@ var eventKinds = map[string]kernelv1.ItemEventKind{
 	"hook_ran":             kernelv1.ItemEventKind_ITEM_EVENT_KIND_HOOK_RAN,
 	"reaction_applied":     kernelv1.ItemEventKind_ITEM_EVENT_KIND_REACTION_APPLIED,
 	"reaction_skipped":     kernelv1.ItemEventKind_ITEM_EVENT_KIND_REACTION_SKIPPED,
+	"migrated":             kernelv1.ItemEventKind_ITEM_EVENT_KIND_MIGRATED,
 }
 
 func (s *server) ListItemEvents(ctx context.Context, req *connect.Request[kernelv1.ListItemEventsRequest]) (*connect.Response[kernelv1.ListItemEventsResponse], error) {
@@ -282,6 +283,9 @@ func eventOut(ns, item string, ty *typedef.Type, e itemservice.Event) (*kernelv1
 	}
 	if e.TypeID != "" {
 		out.Type = typeName(ns, e.TypeID, e.TypeVersion)
+	}
+	if e.PreviousVersion != 0 {
+		out.PreviousType = typeName(ns, e.TypeID, e.PreviousVersion)
 	}
 	if e.HoldID != nil {
 		out.Hold = holdName(item, *e.HoldID)
