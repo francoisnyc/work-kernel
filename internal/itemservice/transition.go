@@ -383,10 +383,20 @@ func (k *Service) transition(ctx context.Context, req TransitionRequest, kc *ker
 			return WriteResult{}, err
 		}
 		itemSeq := it.ItemSeq + 1
+		// The Item enters its state at the write's one time, the time its
+		// event carries (stampWrite; appendEvent reads the same stamp).
+		// state_entered_at goes in this statement, with the state: a
+		// second UPDATE of the row would make Postgres re-check its
+		// foreign keys and wait on the container's row lock.
+		enteredAt, err := stampWrite(ctx, tx)
+		if err != nil {
+			return WriteResult{}, err
+		}
 		_, err = tx.Exec(ctx,
-			`update items set state = $2, fields = $3, item_seq = $4, content_seq = content_seq + $5, updated_at = now()
+			`update items set state = $2, fields = $3, item_seq = $4, content_seq = content_seq + $5, updated_at = now(),
+			                  state_entered_at = $6
 			 where id = $1`,
-			req.ItemID, next.State, merged, itemSeq, bump.n)
+			req.ItemID, next.State, merged, itemSeq, bump.n, enteredAt)
 		if err != nil {
 			return WriteResult{}, fmt.Errorf("update item: %w", err)
 		}

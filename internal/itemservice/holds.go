@@ -373,10 +373,23 @@ func (in *Internal) ResolveHold(ctx context.Context, req ResolveHoldRequest) (Wr
 		if err != nil {
 			return WriteResult{}, err
 		}
+		// Only a hold that moves the Item (op transition) enters a state:
+		// state_entered_at takes the write's one time then, in the
+		// statement that writes the state (see transition). A nil pointer
+		// is SQL NULL, and coalesce keeps the column as it is.
+		var enteredAt *time.Time
+		if op == "transition" {
+			at, err := stampWrite(ctx, tx)
+			if err != nil {
+				return WriteResult{}, err
+			}
+			enteredAt = &at
+		}
 		if _, err := tx.Exec(ctx,
-			`update items set state = $2, fields = $3, item_seq = $4, content_seq = content_seq + $5, updated_at = now()
+			`update items set state = $2, fields = $3, item_seq = $4, content_seq = content_seq + $5, updated_at = now(),
+			                  state_entered_at = coalesce($6, state_entered_at)
 			 where id = $1`,
-			req.ItemID, state, merged, itemSeq, bump.n); err != nil {
+			req.ItemID, state, merged, itemSeq, bump.n, enteredAt); err != nil {
 			return WriteResult{}, fmt.Errorf("update item: %w", err)
 		}
 		res, err := appendEvent(ctx, tx, ty, req.ItemID, itemSeq, recorded, req.Attribution, bump, payload, set)
