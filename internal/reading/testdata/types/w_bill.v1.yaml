@@ -1,0 +1,6 @@
+# A bill, version 1: an older version, whose Items an administrator may
+# migrate to version 2.
+id: w_bill
+version: 1
+fields:
+  - {id: f_title, type: string}

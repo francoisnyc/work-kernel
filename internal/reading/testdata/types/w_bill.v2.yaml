@@ -1,0 +1,11 @@
+# A bill, version 2, the latest: holders of the role w_bill_admin, and
+# root, may migrate an open bill of version 1 to it. Version 1 stays open
+# to new Items, so that the witness has bills to migrate.
+id: w_bill
+version: 2
+fields:
+  - {id: f_title, type: string}
+start:
+  older_versions: all
+migrate:
+  allowed: ['role:w_bill_admin', 'principal:user:root']
