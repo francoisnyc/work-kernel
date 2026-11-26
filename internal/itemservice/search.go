@@ -104,6 +104,11 @@ func (k *Service) Search(ctx context.Context, req SearchRequest) (SearchResult, 
 	if err := recordReads(ctx, k.pool, req.Principal, read); err != nil {
 		return SearchResult{}, err
 	}
+	if req.Filter.WaitingOn != "" {
+		if err := k.fillMoves(ctx, req.Principal, items); err != nil {
+			return SearchResult{}, err
+		}
+	}
 	return SearchResult{Items: items, NextPageToken: next}, nil
 }
 

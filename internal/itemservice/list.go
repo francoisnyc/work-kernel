@@ -58,6 +58,11 @@ func (k *Service) List(ctx context.Context, req ListRequest) (ListResult, error)
 	if err := recordReads(ctx, k.pool, req.Principal, read); err != nil {
 		return ListResult{}, err
 	}
+	if req.Filter.WaitingOn != "" {
+		if err := k.fillMoves(ctx, req.Principal, items); err != nil {
+			return ListResult{}, err
+		}
+	}
 	return ListResult{Items: items, NextPageToken: next}, nil
 }
 
@@ -73,6 +78,9 @@ func (k *Service) listQuery(ctx context.Context, req ListRequest) (itemQuery, er
 	limit, err := pageSize(req.Limit)
 	if err != nil {
 		return itemQuery{}, err
+	}
+	if req.Filter.In != nil {
+		return itemQuery{}, &InvalidError{Path: "filter.in", Reason: "a listing has its container: use it, or SearchItems with filter.in"}
 	}
 	filter, err := k.resolveFilter(ctx, req.Principal, req.Filter)
 	if err != nil {
