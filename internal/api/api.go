@@ -35,8 +35,6 @@ type Kernel interface {
 	Migrate(context.Context, itemservice.MigrateRequest) (itemservice.MigrateResult, error)
 	Search(context.Context, itemservice.SearchRequest) (itemservice.SearchResult, error)
 	List(context.Context, itemservice.ListRequest) (itemservice.ListResult, error)
-	Count(context.Context, itemservice.CountRequest) (itemservice.CountResult, error)
-	WhoAmI(context.Context, item.Principal) (itemservice.Me, error)
 	ListEvents(context.Context, itemservice.ListEventsRequest) (itemservice.ListEventsResult, error)
 	StartAgentSession(context.Context, itemservice.StartAgentSessionRequest) (string, error)
 	AgentSession(context.Context, item.Principal) (itemservice.AgentSession, error)

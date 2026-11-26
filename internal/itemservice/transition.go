@@ -446,7 +446,9 @@ func authorize(ctx context.Context, tx pgx.Tx, p item.Principal, ty *typedef.Typ
 	if !policy.MayTransition(tr, who, it) {
 		return fmt.Errorf("%w: %s may not move this Item from %q to %q", ErrForbidden, p.Actor, from, to)
 	}
-	if st, _ := ty.State(from); !policy.MayLeaveClaimed(st, tr, who, it) {
+	// MayMove is the whole answer (what an Item's Moves lists); the two
+	// tests are told apart only for the message.
+	if st, _ := ty.State(from); !policy.MayMove(st, tr, who, it) {
 		return fmt.Errorf("%w: %s may not move this Item from %q to %q: someone else has claimed it", ErrForbidden, p.Actor, from, to)
 	}
 	return nil

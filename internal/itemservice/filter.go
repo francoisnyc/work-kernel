@@ -35,10 +35,6 @@ type Filter struct {
 	// is an *InvalidError at filter.waiting_on.
 	// omitempty keeps the page tokens of requests without it as they were.
 	WaitingOn string `json:",omitempty"`
-	// In keeps the Items below this container, at any depth (track 1 item
-	// 5, step 4). Search and Count only; List has its own container.
-	// Declared so the tests compile; nothing reads it yet.
-	In *uuid.UUID `json:",omitempty"`
 }
 
 // FieldFilter is a condition on one field: Eq, or a range of one or two
