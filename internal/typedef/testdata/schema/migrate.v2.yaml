@@ -1,0 +1,7 @@
+# Corpus for the schema tests (Ventoux V2c): the migrate block (track 1,
+# item 6, step 2). It loads on its own (stages a and b).
+id: corpus_migrate
+version: 2
+
+migrate:
+  allowed: ['role:corpus_admin', 'principal:user:ana']
