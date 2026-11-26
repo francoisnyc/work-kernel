@@ -290,9 +290,18 @@ type Migration struct {
 // VersionAt returns the version of its Type the Item was on when its event
 // at item_seq seq was written (track 1, item 6, step 3). ms are the Item's
 // migrates in item_seq order; current is its version now. Each state entry
-// is judged by the version it was made under.
-//
-// (Not built yet: it answers current.)
+// is judged by the version it was made under. The migrated event itself
+// is of the version it went to.
 func VersionAt(ms []Migration, current int, seq int64) int {
-	return current
+	if len(ms) == 0 {
+		return current
+	}
+	v := ms[0].From
+	for _, m := range ms {
+		if m.Seq > seq {
+			break
+		}
+		v = m.To
+	}
+	return v
 }
