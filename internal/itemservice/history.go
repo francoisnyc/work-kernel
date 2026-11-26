@@ -53,13 +53,15 @@ type Event struct {
 	Hop                                                            int
 
 	TypeID      string // create
-	TypeVersion int    // create
-	From        string // the state left (transition) or held in
-	To          string // the state entered (transition; create: the first state)
-	RequestedTo string // a held transition's requested state
-	HoldID      *uuid.UUID
-	Hook        string // hook_failed
-	Reason      string // a code: transition_denied, transition_failed, hook_failed
+	TypeVersion int    // create; migrated: the version the Item is on from here
+	// PreviousVersion is the version a migrated event left.
+	PreviousVersion int
+	From            string // the state left (transition) or held in
+	To              string // the state entered (transition; create: the first state)
+	RequestedTo     string // a held transition's requested state
+	HoldID          *uuid.UUID
+	Hook            string // hook_failed
+	Reason          string // a code: transition_denied, transition_failed, hook_failed
 
 	// Values are the fields this event set, with their values; a cleared
 	// field is present with a nil value. A field whose value was erased
@@ -206,6 +208,9 @@ func (k *Service) ListEvents(ctx context.Context, req ListEventsRequest) (ListEv
 		if e.CausationID, err = refs.causation(ctx, req.ItemID, e.CausationID); err != nil {
 			return ListEventsResult{}, err
 		}
+		if e.Op == lifecycle.OpMigrated {
+			e.TypeID = it.TypeID
+		}
 		if customer {
 			e = customerEvent(e, ty)
 		}
@@ -248,6 +253,9 @@ type eventPayload struct {
 	Reaction       string     `json:"reaction"`
 	Timer          string     `json:"timer"` // hook_ran, hook_failed: an acting timer's run
 	Run            int        `json:"run"`
+	// migrated: the two versions, and nothing else.
+	FromVersion int `json:"from_version"`
+	ToVersion   int `json:"to_version"`
 }
 
 // withPayload fills the event from its stored payload and values.
@@ -264,6 +272,11 @@ func (e Event) withPayload(ctx context.Context, payload, values, deltas []byte, 
 	}
 
 	e.TypeID, e.TypeVersion = pl.TypeID, pl.TypeVersion
+	if e.Op == lifecycle.OpMigrated {
+		// The payload holds the two versions only; ListEvents adds the
+		// Item's Type, which a migrate never changes.
+		e.TypeVersion, e.PreviousVersion = pl.ToVersion, pl.FromVersion
+	}
 	e.From, e.To, e.RequestedTo = pl.From, pl.To, pl.RequestedTo
 	if e.Op == "create" {
 		e.To = pl.State

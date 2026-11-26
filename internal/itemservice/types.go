@@ -55,6 +55,15 @@ type querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
+// rowsQuerier is a querier that also reads several rows: the pool, or a
+// transaction. What is pending on an Item (actions, undos, reactions) is
+// read through it, by the workflow's loader from the pool and by a migrate
+// from its own transaction, under the Item's lock.
+type rowsQuerier interface {
+	querier
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
 // loadType returns a registered Type, from the cache when it is enabled.
 func (k *Service) loadType(ctx context.Context, q querier, id string, version int) (*typedef.Type, error) {
 	read := func() (*typedef.Type, error) { return readType(ctx, q, id, version) }
