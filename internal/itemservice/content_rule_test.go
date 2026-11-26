@@ -130,6 +130,9 @@ var contentRows = []contentRow{
 	{"reaction_applied", "incident.v1.yaml", lifecycle.OpReactionApplied, map[string]any{"reaction": "incident:sla_start_resolution", "target": "t"}, false},
 	{"reaction_failed", "incident.v1.yaml", lifecycle.OpReactionFailed, map[string]any{"reaction": "incident:x", "reason": "guard_failed"}, false},
 	{"reaction_skipped", "incident.v1.yaml", lifecycle.OpReactionSkipped, map[string]any{"reaction": "incident:x", "reason": "condition_false"}, false},
+	// A migrate changes the Type version and nothing a caller could
+	// overwrite (track 1, item 6, step 2; the owner's decision).
+	{"migrated", "incident.v1.yaml", lifecycle.OpMigrated, map[string]any{"from_version": 1, "to_version": 2}, false},
 }
 
 func TestChangesContent_EveryEventKind(t *testing.T) {
@@ -152,7 +155,7 @@ func TestChangesContent_EveryEventKind(t *testing.T) {
 	}
 }
 
-// The thirteen event kinds the kernel writes today. A new kind has no
+// The fourteen event kinds the kernel writes today. A new kind has no
 // decision until someone adds one: the rule answers with an error (the
 // write fails), it never guesses.
 var allOps = []string{
@@ -161,6 +164,7 @@ var allOps = []string{
 	lifecycle.OpHookFailed, lifecycle.OpHookRan,
 	lifecycle.OpReactionApplied, lifecycle.OpReactionFailed, lifecycle.OpReactionSkipped,
 	lifecycle.OpLinkAdded, lifecycle.OpLinkRemoved,
+	lifecycle.OpMigrated,
 }
 
 func TestChangesContent_AnUndecidedKindIsAnError(t *testing.T) {
