@@ -291,8 +291,8 @@ attack that found it as its test:
         `waiting_on` answer and judged by the same `policy.MayMove` a
         transition passes. `pli whoami`, `item count`, `inbox --count`,
         `--in ITEM`. No table, no migration.
-      - **PR 2, the screen. Built** (`docs/design.md`, "The web Inbox on
-        the view, as built"): the web Inbox asks the kernel. A tab for
+      - **PR 2, the screen. Built** (PR #100; `docs/design.md`, "The web
+        Inbox on the view, as built"): the web Inbox asks the kernel. A tab for
         "Waiting on me" and one per role held, each with a capped count;
         oldest waiting first, with a switch; a place filter; [More]. A
         row's buttons are exactly the moves the server lists, each one

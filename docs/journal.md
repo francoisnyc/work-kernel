@@ -4607,7 +4607,7 @@ retire `inboxQueries` and `inboxTransitions` and list each of their tests), then
 
 ## 2026-11-26 — Track 1, item 5, step 4, PR 2: the web Inbox on the view (Phases B to D)
 
-**Built:** the generic web UI's Inbox asks the kernel. `WhoAmI` once for the tabs ("Waiting on me", then each role the
+**Built (PR #100):** the generic web UI's Inbox asks the kernel. `WhoAmI` once for the tabs ("Waiting on me", then each role the
 caller holds that a Type names); `CountItems` per tab ("50+" when capped); `SearchItems` with `waiting_on`, oldest
 waiting first, a page of 50, an order switch, a place filter (`filter.in`), [More] by token. A row shows who asked, how
 long it has waited and a label, and its buttons are exactly `Item.moves`, each one `TransitionItem`; after a move the
