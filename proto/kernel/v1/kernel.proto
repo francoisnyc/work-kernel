@@ -1062,6 +1062,11 @@ message State {
   // the timer; an unset field arms nothing. A state has timer or at, never
   // both.
   AtTimer at = 6;
+  // Set when an Item in this state waits on its requester (the person who
+  // asked for it: created_on_behalf_of, else creator), besides whoever its
+  // moves name: the Type's `waits_on: requester`. Such an Item is in its
+  // requester's "waiting on me" view, a customer's included.
+  bool waits_on_requester = 7;
 }
 
 // A state's timer after a duration.

@@ -30,6 +30,11 @@ import (
 // field for a field:<id> entry; `except` as a test of who created the
 // Item). States that share a condition are grouped, so the SQL is a few
 // lists of (type, version, state) rather than one clause per state.
+//
+// A state that waits on its requester (policy.WaitsOnRequester, step 5)
+// adds one group under the requester's condition: the caller's own
+// requests there. It is all a customer's "me" holds: their moves never
+// count, and the customer rule and policy.Project apply as to any read.
 
 // noOpenHold leaves out an Item whose move is being checked: it waits on
 // the check, not on a person. One lookup in item_holds_one_open.
@@ -41,14 +46,16 @@ const noOpenHold = `not exists (select 1 from item_holds h where h.item_id = m.i
 func (k *Service) waitingConds(ctx context.Context, p item.Principal, all []*typedef.Type, on string,
 	args pgx.NamedArgs) ([]string, error) {
 	invalid := func(reason string) error { return &InvalidError{Path: "filter.waiting_on", Reason: reason} }
-	// A customer takes only the moves that name the creator, and those do
-	// not count until a Type can say that a state waits on its requester.
-	if policy.CustomerOf(p) != "" {
-		return nil, invalid("a customer has no waiting_on view")
-	}
 	role, isRole := strings.CutPrefix(on, typedef.AllowedRolePrefix)
 	if on != "me" && (!isRole || !roleName.MatchString(role)) {
 		return nil, invalid("want me, or role:<name> for a role's queue")
+	}
+	// A customer holds no role, and takes only the moves that name the
+	// creator, which never count: what waits on them is what was sent back
+	// to them (a state's waits_on: requester), inside the customer rule.
+	customer := policy.CustomerOf(p) != ""
+	if customer && isRole {
+		return nil, invalid("a customer has no role's queue; ask for me")
 	}
 
 	who := policy.Who{Actor: p.Actor, OnBehalfOf: p.OnBehalfOf}
@@ -71,8 +78,26 @@ func (k *Service) waitingConds(ctx context.Context, p item.Principal, all []*typ
 	// groups: the states that share one condition, in the order found.
 	var groups []*waitGroup
 	byCond := map[string]*waitGroup{}
+	group := func(cond string, t *typedef.Type, state string) {
+		g := byCond[cond]
+		if g == nil {
+			g = &waitGroup{cond: cond, seen: map[string]bool{}}
+			byCond[cond] = g
+			groups = append(groups, g)
+		}
+		g.add(t, state)
+	}
+	// policy.IsRequester: the Item's effective creator is the caller's
+	// effective user (the user an agent acts for, else the actor).
+	const requester = `coalesce(m.created_on_behalf_of, m.created_by) = coalesce(nullif(@w_behalf, ''), @w_actor)`
 	for _, t := range all {
 		for _, st := range t.States {
+			if !isRole && policy.WaitsOnRequester(t, st.ID) {
+				group(requester, t, st.ID)
+			}
+			if customer {
+				continue // a customer's moves never make anything wait on them
+			}
 			for _, tr := range policy.WaitingMoves(t, st.ID) {
 				// A claimed Item is its claimant's, not the queue's.
 				cond, ok := "true", st.Claim == "" && slices.Contains(tr.Allowed, typedef.AllowedRolePrefix+role)
@@ -82,13 +107,7 @@ func (k *Service) waitingConds(ctx context.Context, p item.Principal, all []*typ
 				if !ok {
 					continue
 				}
-				g := byCond[cond]
-				if g == nil {
-					g = &waitGroup{cond: cond, seen: map[string]bool{}}
-					byCond[cond] = g
-					groups = append(groups, g)
-				}
-				g.add(t, st.ID)
+				group(cond, t, st.ID)
 			}
 		}
 	}

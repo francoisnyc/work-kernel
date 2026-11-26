@@ -305,11 +305,12 @@ func TestCountItems(t *testing.T) {
 			t.Errorf("CountItems with %s: %v; SearchItems: %v; want the same refusal", what, countErr, searchErr)
 		}
 	}
-	// A customer has no waiting_on view, counted or not.
+	// A customer has no role's queue, counted or not. Her own view (step
+	// 5) is counted in waiting_sent_back_test.go.
 	_, err = asCustomer("kim", "").CountItems(ctx, connect.NewRequest(&kernelv1.CountItemsRequest{
-		Parent: "namespaces/acme", Filter: &kernelv1.ItemFilter{WaitingOn: "me"},
+		Parent: "namespaces/acme", Filter: &kernelv1.ItemFilter{WaitingOn: "role:apiwq_team"},
 	}))
-	invalid(t, "a customer's CountItems waiting on me", err, "filter.waiting_on")
+	invalid(t, "a customer's CountItems waiting on role:apiwq_team", err, "filter.waiting_on")
 	// And counts her own requests like anyone their searches.
 	desk := portal(t)
 	kimsIncident(t, desk)

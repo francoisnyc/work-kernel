@@ -13,6 +13,7 @@ var KeyParts = map[string][]Part{
 	"states[].frozen":          {Frozen},
 	"states[].requester_only":  {RequesterOnly},
 	"states[].claim":           {Claim, WaitsClaimant},
+	"states[].waits_on":        {Waits, WaitsRequester},
 	"states[].timer.after":     {Timer, TimerWaits},
 	"states[].timer.to":        {Timer},
 	"states[].at.field":        {AtTimer},

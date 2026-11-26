@@ -1,0 +1,21 @@
+# Corpus for the schema tests (Ventoux V2c): a state that waits on its
+# requester (track 1 item 5, step 5). A reviewer sends the request back;
+# then it waits on whoever asked for it. It loads on its own (stages a and b).
+id: corpus_waits_on
+version: 1
+initial_state: draft
+
+fields:
+  - {id: f_note, type: string}
+
+states:
+  - {id: draft,  category: todo}
+  - {id: review, category: waiting}
+  - {id: back,   category: waiting, waits_on: requester}
+  - {id: done,   category: done}
+
+transitions:
+  - {from: draft,  to: review, allowed: [creator]}
+  - {from: review, to: back,   allowed: ['role:reviewer']}
+  - {from: review, to: done,   allowed: ['role:reviewer']}
+  - {from: back,   to: review, allowed: [creator]}

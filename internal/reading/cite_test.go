@@ -35,6 +35,9 @@ func elements(ty *typedef.Type) []string {
 		if s.Claim != "" {
 			add("states[%d].claim", i)
 		}
+		if s.WaitsOn != "" {
+			add("states[%d].waits_on", i)
+		}
 		if s.Timer != nil {
 			add("states[%d].timer", i)
 		}

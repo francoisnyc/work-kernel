@@ -182,12 +182,19 @@ func TestWaitingSince_OnlyWithWaitingOn(t *testing.T) {
 	if err != nil || len(res.Items) != 0 {
 		t.Errorf("olaf, whom nothing names, oldest waiting first: %d Items, error %v; want an empty view", len(res.Items), err)
 	}
-	// A customer has no waiting_on view, with or without the order.
+	// A customer has a view of what was sent back to her (step 5), with
+	// the order: here nothing was; and no role's queue, with or without it.
 	kim := item.Principal{Actor: "customer:kim", Namespace: w.ns}
-	_, err = w.k.Search(testCtx(t), itemservice.SearchRequest{
+	res, err = w.k.Search(testCtx(t), itemservice.SearchRequest{
 		Principal: kim, Filter: itemservice.Filter{WaitingOn: "me"}, OrderBy: oldestWaiting,
 	})
-	assertWaitingOnInvalid(t, "a customer asks for her view, oldest waiting first", err)
+	if err != nil || len(res.Items) != 0 {
+		t.Errorf("a customer asks for her view, oldest waiting first: %d Items, error %v; want an empty view", len(res.Items), err)
+	}
+	_, err = w.k.Search(testCtx(t), itemservice.SearchRequest{
+		Principal: kim, Filter: itemservice.Filter{WaitingOn: "role:wq_finance"}, OrderBy: oldestWaiting,
+	})
+	assertWaitingOnInvalid(t, "a customer asks for a role's queue, oldest waiting first", err)
 }
 
 // A release goes to the back of the queue: the Item waits on the team as
