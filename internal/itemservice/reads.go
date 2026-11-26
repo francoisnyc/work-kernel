@@ -117,22 +117,35 @@ type sqlOrder struct {
 	expr    string
 	cast    string // "::numeric", or "::text" (compared under COLLATE "C")
 	numeric bool
+	instant bool // waiting_since: the value is a timestamp
 	desc    bool
 	vis     pgx.NamedArgs // a customer's per-row rule's arguments (rowListing); nil for staff
 }
 
-// resolveOrder checks an OrderBy against the Types in play: the selected
+// resolveOrder checks an OrderBy. waiting_since (OrderWaitingSince) is no
+// field: it sorts the waiting_on view by items.state_entered_at, and is
+// malformed without Filter.WaitingOn. Anything else is a field, checked
+// against the Types in play: the selected
 // Types, or every registered Type when none is selected. The field must be
 // declared by at least one of them, with one type across all that declare
 // it, and that type must have an order: string, int, date, datetime or enum. A
 // malformed order is an *InvalidError on order_by.
-func (k *Service) resolveOrder(ctx context.Context, p item.Principal, typeIDs []string, o *OrderBy) (*sqlOrder, error) {
+func (k *Service) resolveOrder(ctx context.Context, p item.Principal, f Filter, o *OrderBy) (*sqlOrder, error) {
 	if o == nil {
 		return nil, nil
 	}
+	typeIDs := f.TypeIDs
 	bad := func(reason string) error { return &InvalidError{Path: "order_by", Reason: reason} }
 	if o.Field == "" {
 		return nil, bad("order_by needs a field")
+	}
+	// waiting_since is no field: it is how long the Item has been in its
+	// state, and only the waiting_on view has it.
+	if o.Field == OrderWaitingSince {
+		if f.WaitingOn == "" {
+			return nil, bad("waiting_since orders the waiting_on view: give filter.waiting_on with it")
+		}
+		return &sqlOrder{desc: o.Desc, expr: "m.state_entered_at", cast: "::timestamptz", instant: true}, nil
 	}
 	all, err := k.typesFor(ctx, p)
 	if err != nil {
@@ -176,6 +189,11 @@ func (o *sqlOrder) after(t *pageToken, args pgx.NamedArgs) (string, error) {
 	if t.Value == nil {
 		// The last page ended among the Items without a value.
 		return "(" + o.expr + " is null and m.id > @after_id)", nil
+	}
+	if o.instant {
+		if _, err := time.Parse(time.RFC3339Nano, *t.Value); err != nil {
+			return "", &InvalidError{Path: "page_token", Reason: "not a page token of this request"}
+		}
 	}
 	if o.numeric {
 		// The token is unsigned: a value that is no number must be refused
@@ -316,6 +334,10 @@ func (k *Service) pageSQL(ctx context.Context, q itemQuery) (string, pgx.NamedAr
 		}
 		orderBy = q.order.expr + " " + direction + " nulls last, m.id asc"
 		sortValue = "(" + q.order.expr + ")::text"
+		if q.order.instant {
+			// RFC 3339 in UTC, whatever the session's time zone.
+			sortValue = `to_char(` + q.order.expr + ` at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`
+		}
 	}
 	switch {
 	case q.after == nil:
