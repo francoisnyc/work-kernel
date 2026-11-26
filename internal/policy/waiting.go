@@ -98,6 +98,15 @@ func WaitsOn(ty *typedef.Type, state string, who Who, it ItemFacts) bool {
 	return false
 }
 
+// WaitsOnRequester reports whether an Item of ty, in state, waits on its
+// requester: the state says `waits_on: requester`. Never in a state of
+// category done or canceled (load refuses the key there).
+//
+// STUB: declared so the tests compile; it says no.
+func WaitsOnRequester(ty *typedef.Type, state string) bool {
+	return false
+}
+
 // WaitsOnRole reports whether an Item of ty, in state, is in the queue of
 // the role (a bare name: finance): one of its waiting moves names it.
 // `except` is not asked: it is judged for a person, in WaitsOn.
