@@ -157,12 +157,16 @@ func TestWaitingOn_Refusals(t *testing.T) {
 		invalid(t, "ListItems waiting on "+on, err, "filter.waiting_on")
 	}
 
-	// A customer has no such view yet, for herself or for a role.
-	for _, on := range []string{"me", "role:apiwq_team"} {
-		_, err := asCustomer("kim", "").SearchItems(ctx, connect.NewRequest(&kernelv1.SearchItemsRequest{
-			Parent: "namespaces/acme", Filter: &kernelv1.ItemFilter{WaitingOn: on},
-		}))
-		invalid(t, "a customer's SearchItems waiting on "+on, err, "filter.waiting_on")
+	// A customer has no role's queue. Her own view (step 5) is no refusal:
+	// waiting_sent_back_test.go tests what is in it.
+	_, err := asCustomer("kim", "").SearchItems(ctx, connect.NewRequest(&kernelv1.SearchItemsRequest{
+		Parent: "namespaces/acme", Filter: &kernelv1.ItemFilter{WaitingOn: "role:apiwq_team"},
+	}))
+	invalid(t, "a customer's SearchItems waiting on role:apiwq_team", err, "filter.waiting_on")
+	if _, err := asCustomer("kim", "").SearchItems(ctx, connect.NewRequest(&kernelv1.SearchItemsRequest{
+		Parent: "namespaces/acme", Filter: &kernelv1.ItemFilter{WaitingOn: "me"},
+	})); err != nil {
+		t.Errorf("a customer's SearchItems waiting on me: %v, want her view", err)
 	}
 
 	// A page token is bound to waiting_on, like to the rest of its request.
