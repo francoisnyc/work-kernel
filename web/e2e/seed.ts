@@ -187,3 +187,71 @@ export async function seedIncident(baseURL: string, run: string): Promise<Desk> 
   await sam.linkItems({ name: incident.name, requestId: randomUUID(), linkType: "caused_by", target: bug.name });
   return { desk, incident, firstResponse, resolution, bug };
 }
+
+// --- Track 1 item 5, step 4, PR 2: the Inbox on the waiting-on view ---
+
+export type DeskQueue = { desk: Item; incidents: Item[] };
+
+// lea's desk (desk@2, calendar and policy linked) with ana's new
+// incidents in it (incident@3), created one after the other: the first
+// waits the longest. A new incident waits on the desk agents (its move to
+// canceled names role:desk_agent, from incident@2 on); sam and lea hold
+// that role.
+export async function seedDeskQueue(baseURL: string, run: string, titles: string[]): Promise<DeskQueue> {
+  const lea = api(baseURL, "lea");
+  const ana = api(baseURL, "ana");
+  const week = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"].map((d) => `${d} 00:00-24:00`);
+  const calendar = await createItem(lea, type("calendar", 1), { f_name: `Always ${run} q`, f_week: week, f_zone: "UTC" });
+  const targets: JsonObject = { f_name: `Standard ${run} q` };
+  ["p1", "p2", "p3", "p4"].forEach((p, i) => {
+    targets[`f_first_response_s_${p}`] = String(3600 * (i + 1));
+    targets[`f_resolution_s_${p}`] = String(4 * 3600 * (i + 1));
+  });
+  const policy = await createItem(lea, type("sla_policy", 1), targets);
+  const desk = await createItem(lea, type("desk", 2), { f_key: `Q${run}`, f_name: `Queue desk ${run}` });
+  await lea.linkItems({ name: desk.name, requestId: randomUUID(), linkType: "calendar", target: calendar.name });
+  await lea.linkItems({ name: desk.name, requestId: randomUUID(), linkType: "sla_policy", target: policy.name });
+  const incidents: Item[] = [];
+  for (const title of titles) {
+    incidents.push(await createItem(ana, type("incident", 3), { f_title: title, f_priority: "P3" }, { container: desk.name }));
+  }
+  return { desk, incidents };
+}
+
+// An empty place of ana's: a ticket with nothing in it.
+export async function seedEmptyPlace(baseURL: string, run: string): Promise<Item> {
+  return createItem(api(baseURL, "ana"), type("ticket", 9), { f_title: `Empty box ${run}` });
+}
+
+export type ApprovalQueue = { box: Item; tickets: Item[] };
+
+// A box of ana's with `count` tickets in progress inside it, which wait
+// on the approvers (bob): the move to approved names role:approver. They
+// reach in_progress one after the other, so `first` waits the longest.
+export async function seedApprovalQueue(baseURL: string, run: string, count: number): Promise<ApprovalQueue> {
+  const ana = api(baseURL, "ana");
+  const box = await createItem(ana, type("ticket", 9), { f_title: `Approvals box ${run}` });
+  const made = await Promise.all(
+    Array.from({ length: count }, (_, i) =>
+      createItem(ana, type("ticket", 9), { f_title: `Approve ${run} #${i + 1}`, f_assignee: "user:ana" }, { container: box.name }),
+    ),
+  );
+  const move = async (it: Item, toState: string) => {
+    const res = await ana.transitionItem({ name: it.name, requestId: randomUUID(), toState, wait: create(DurationSchema, { seconds: 5n }) });
+    if (res.outcome !== TransitionOutcome.APPLIED) throw new Error(`seed: ${it.name} to ${toState}: ${TransitionOutcome[res.outcome]} ${res.reason}`);
+  };
+  await Promise.all(made.map((it) => move(it, "open")));
+  for (const it of made) await move(it, "in_progress");
+  return { box, tickets: made };
+}
+
+// Takes what a journey left waiting out of everyone's Inbox: ana, who
+// made them, cancels each. The stack is shared with the other journeys
+// (bob's Inbox shows the oldest 50 first), so a journey leaves nothing
+// waiting behind. A failure here is not the journey's: it is ignored.
+export async function cancelAll(baseURL: string, items: Item[]): Promise<void> {
+  const ana = api(baseURL, "ana");
+  await Promise.allSettled(
+    items.map((it) => ana.transitionItem({ name: it.name, requestId: randomUUID(), toState: "canceled", wait: create(DurationSchema, { seconds: 5n }) })),
+  );
+}
