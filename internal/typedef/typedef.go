@@ -200,6 +200,10 @@ type State struct {
 	// what `allowed` asks; a move marked release gives the claim up.
 	// Packages policy and itemservice judge it.
 	Claim string `yaml:"claim" json:"claim,omitempty"`
+	// WaitsOn says whom an Item in this state waits on besides what its
+	// moves name (track 1 item 5, step 5): "requester", its requester (the
+	// effective creator). Empty for none. Package policy judges it.
+	WaitsOn string `yaml:"waits_on" json:"waits_on,omitempty"`
 	// Acting are the state's acting timers (Step 2, part 3): each runs an
 	// action hook after a delay, without a transition, optionally again at
 	// an interval, at most Max times per entry into the state.
@@ -564,6 +568,7 @@ func (t *Type) check() error {
 	t.checkGiven(r)
 	// A claimed state, and the moves that claim and release.
 	t.checkClaim(r)
+	t.checkWaitsOn(r)
 
 	// A field only the kernel writes needs a writer: a hook that writes it,
 	// or another Type's reaction this Type accepts for it.

@@ -20,8 +20,9 @@
 //     applied before the limit, and every Item goes through policy.Project;
 //   - an agent's view is what its session may act on: the agent and its
 //     user both pass, within the session's scopes;
-//   - a customer's waiting_on is refused (until a Type can say a state
-//     waits on its requester).
+//   - a customer has no role's queue; her "me" holds only what was sent
+//     back to her (a state's waits_on: requester, step 5: sent_back_test.go),
+//     so in this world, whose Types have no such state, it is empty.
 //
 // The first test is the bake-offs' test 3 ("one inbox":
 // docs/research/camunda-bakeoff.md): six requests of two Types, four of
@@ -613,18 +614,28 @@ func TestWaiting_AnOpenHoldHides(t *testing.T) {
 	assertWaiting(t, "gus, once the hold has closed", w.waiting(t, w.gus, "me", none), these("asked", asked))
 }
 
-// A customer's waiting_on is refused: a customer takes only the moves
-// that name the creator, and those do not count until a Type can say that
-// a state waits on its requester. So is an agent's acting for one.
+// A customer takes only the moves that name the creator, and those never
+// count: what waits on her is what a state sends back to its requester
+// (step 5, sent_back_test.go). Since step 5 her "me" is no longer refused;
+// in this world, whose Types never wait on the requester, it is empty. A
+// role's queue stays refused: a customer holds no role.
 func TestWaiting_ACustomerIsRefused(t *testing.T) {
 	w := newWaitWorld(t)
 	w.purchase(t, 2500, "finance_queue", nil, purchaseOpts{})
 	kim := customer("kim-"+uuid.NewString()[:8], w.ns)
-	for _, on := range []string{"me", "role:wq_finance"} {
-		_, err := w.k.Search(testCtx(t), itemservice.SearchRequest{Principal: kim, Filter: itemservice.Filter{WaitingOn: on}})
-		assertWaitingOnInvalid(t, "a customer's Search waiting on "+on, err)
-		_, err = w.k.List(testCtx(t), itemservice.ListRequest{Principal: kim, Filter: itemservice.Filter{WaitingOn: on}})
-		assertWaitingOnInvalid(t, "a customer's List waiting on "+on, err)
+	f := itemservice.Filter{WaitingOn: "role:wq_finance"}
+	_, err := w.k.Search(testCtx(t), itemservice.SearchRequest{Principal: kim, Filter: f})
+	assertWaitingOnInvalid(t, "a customer's Search waiting on role:wq_finance", err)
+	_, err = w.k.List(testCtx(t), itemservice.ListRequest{Principal: kim, Filter: f})
+	assertWaitingOnInvalid(t, "a customer's List waiting on role:wq_finance", err)
+	me := itemservice.Filter{WaitingOn: "me"}
+	res, err := w.k.Search(testCtx(t), itemservice.SearchRequest{Principal: kim, Filter: me})
+	if err != nil || len(res.Items) != 0 {
+		t.Errorf("a customer's Search waiting on me: %d Items, error %v; want an empty view", len(res.Items), err)
+	}
+	listed, err := w.k.List(testCtx(t), itemservice.ListRequest{Principal: kim, Filter: me})
+	if err != nil || len(listed.Items) != 0 {
+		t.Errorf("a customer's List waiting on me: %d Items, error %v; want an empty view", len(listed.Items), err)
 	}
 }
 

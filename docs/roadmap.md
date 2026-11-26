@@ -309,8 +309,21 @@ attack that found it as its test:
         and the scenario tells the same story through pli. One data file;
         no kernel change.
    5. **Sent back to the requester:** a Type says a state waits on its
-      requester (a `waiting` key on a transition), which also gives a
-      customer a view.
+      requester (`waits_on: requester` on a state; first planned on a
+      transition, corrected at its Phase A: the view knows the state, not
+      the move that entered it), which also gives a customer a view.
+      Split in two PRs (the owner's decision):
+      - **PR 1, the kernel. Built** (PR #102; `docs/design.md`, "Sent
+        back to the requester, as built"): the key and its load checks;
+        `policy.WaitsOnRequester` and one case in `WaitsOn`; the view
+        for staff and customers (a customer's `waiting_on: me`; `role:`
+        still refused); `State.waits_on_requester` in `GetType`; the
+        reading sentence. Test Types only.
+      - **PR 2, next:** `incident@6`, whose `waiting_for_customer`
+        waits on the requester, so a customer has an Inbox on the
+        stack; the screen's customer rows and the label "sent back to
+        you"; a journey and a scenario step. After item 6 step 3 has
+        merged (`incident@6` touches a workflow test file).
 6. **Moving open Items to a new version, and retiring old versions**,
    deliberately and checked: a change that must reach requests in flight;
    builds on starting work's steps 2 and 2b, already built (the latest

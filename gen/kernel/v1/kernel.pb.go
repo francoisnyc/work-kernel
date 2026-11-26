@@ -5046,9 +5046,14 @@ type State struct {
 	// is moved to `to`, by principal system:timer. Changing the field moves
 	// the timer; an unset field arms nothing. A state has timer or at, never
 	// both.
-	At            *AtTimer `protobuf:"bytes,6,opt,name=at,proto3" json:"at,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	At *AtTimer `protobuf:"bytes,6,opt,name=at,proto3" json:"at,omitempty"`
+	// Set when an Item in this state waits on its requester (the person who
+	// asked for it: created_on_behalf_of, else creator), besides whoever its
+	// moves name: the Type's `waits_on: requester`. Such an Item is in its
+	// requester's "waiting on me" view, a customer's included.
+	WaitsOnRequester bool `protobuf:"varint,7,opt,name=waits_on_requester,json=waitsOnRequester,proto3" json:"waits_on_requester,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *State) Reset() {
@@ -5121,6 +5126,13 @@ func (x *State) GetAt() *AtTimer {
 		return x.At
 	}
 	return nil
+}
+
+func (x *State) GetWaitsOnRequester() bool {
+	if x != nil {
+		return x.WaitsOnRequester
+	}
+	return false
 }
 
 // A state's timer after a duration.
@@ -7424,14 +7436,15 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\x11writable_by_roles\x18\x05 \x03(\tR\x0fwritableByRoles\x12\x1a\n" +
 	"\bmultiple\x18\x06 \x01(\bR\bmultiple\x12\x10\n" +
 	"\x03max\x18\a \x01(\x05R\x03max\x122\n" +
-	"\x15unique_among_siblings\x18\b \x03(\tR\x13uniqueAmongSiblings\"\xe6\x01\n" +
+	"\x15unique_among_siblings\x18\b \x03(\tR\x13uniqueAmongSiblings\"\x94\x02\n" +
 	"\x05State\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x124\n" +
 	"\bcategory\x18\x02 \x01(\x0e2\x18.kernel.v1.StateCategoryR\bcategory\x12\x16\n" +
 	"\x06frozen\x18\x03 \x03(\tR\x06frozen\x12.\n" +
 	"\x06acting\x18\x04 \x03(\v2\x16.kernel.v1.ActingTimerR\x06acting\x12+\n" +
 	"\x05timer\x18\x05 \x01(\v2\x15.kernel.v1.StateTimerR\x05timer\x12\"\n" +
-	"\x02at\x18\x06 \x01(\v2\x12.kernel.v1.AtTimerR\x02at\"=\n" +
+	"\x02at\x18\x06 \x01(\v2\x12.kernel.v1.AtTimerR\x02at\x12,\n" +
+	"\x12waits_on_requester\x18\a \x01(\bR\x10waitsOnRequester\"=\n" +
 	"\n" +
 	"StateTimer\x12\x14\n" +
 	"\x05after\x18\x01 \x01(\tR\x05after\x12\x19\n" +

@@ -51,29 +51,30 @@ const (
 	Rollup         Part = "rollup"           // When it is read, {id} counts its {over} by {count_by}.
 
 	// A state: what entering it does, what happens while it is there.
-	Waits         Part = "waits"          // While it is in {s}, it waits on {who}.
-	WaitsClaimant Part = "waits.claimant" // While it is in {s}, it waits on whoever claimed it.
-	Claim         Part = "claim"          // Whoever moves it into {s} claims it: {f} names them, and only they move it on from there, unless a move releases the claim.
-	Frozen        Part = "frozen"         // While it is in {s}, nobody changes {fields}.
-	RequesterOnly Part = "requester_only" // While it is in {s}, only the requester changes {fields}.
-	Timer         Part = "timer"          // {d} after it enters {s}, if it is still there, the timer moves it to {to}.
-	TimerWaits    Part = "timer.waits"    // ; if a hold is open then, the timer waits for it to close and looks again
-	AtTimer       Part = "at_timer"       // When the instant in {f} passes while it is in {s}, the timer moves it to {to}.
-	Acting        Part = "acting"         // {d} after it enters {s}, {hook} calls {action} with {inputs}, at most {n} times while it stays there.
-	ActingEvery   Part = "acting.every"   // , then every {e}
-	ActingAt      Part = "acting_at"      // When the instant in {f} passes while it is in {s}, {id} ... and {hook} calls {action} with {inputs}.
-	ActingAtWhen  Part = "acting_at.when" // , if {when}
-	ActingAtSets  Part = "acting_at.sets" // sets {f} to {value}
-	Enrich        Part = "enrich"         // On entering {s}, {hook} calls {action} with {inputs} and writes its answer into {fields}.
-	EnrichFallbk  Part = "enrich.fallback"
-	Action        Part = "action" // On entering {s}, {hook} calls {action} with {inputs}, once per entry, even if it has moved on.
-	ActionWrites  Part = "action.writes"
-	Resolve       Part = "resolve" // On entering {s}, the kernel links {link} to the requester's {state} {target} ...
-	Final         Part = "final"   // Nothing leaves {s}.
-	ReactionFrom  Part = "reaction.from"
-	ReactionWhen  Part = "reaction.when"
-	ReactionSkip  Part = "reaction.skip"
-	ReactionHook  Part = "reaction_hook" // When {reaction} has applied, {hook} calls {action} with {inputs}.
+	Waits          Part = "waits"           // While it is in {s}, it waits on {who}.
+	WaitsClaimant  Part = "waits.claimant"  // While it is in {s}, it waits on whoever claimed it.
+	WaitsRequester Part = "waits.requester" // While it is in {s}, it waits on whoever asked for it.
+	Claim          Part = "claim"           // Whoever moves it into {s} claims it: {f} names them, and only they move it on from there, unless a move releases the claim.
+	Frozen         Part = "frozen"          // While it is in {s}, nobody changes {fields}.
+	RequesterOnly  Part = "requester_only"  // While it is in {s}, only the requester changes {fields}.
+	Timer          Part = "timer"           // {d} after it enters {s}, if it is still there, the timer moves it to {to}.
+	TimerWaits     Part = "timer.waits"     // ; if a hold is open then, the timer waits for it to close and looks again
+	AtTimer        Part = "at_timer"        // When the instant in {f} passes while it is in {s}, the timer moves it to {to}.
+	Acting         Part = "acting"          // {d} after it enters {s}, {hook} calls {action} with {inputs}, at most {n} times while it stays there.
+	ActingEvery    Part = "acting.every"    // , then every {e}
+	ActingAt       Part = "acting_at"       // When the instant in {f} passes while it is in {s}, {id} ... and {hook} calls {action} with {inputs}.
+	ActingAtWhen   Part = "acting_at.when"  // , if {when}
+	ActingAtSets   Part = "acting_at.sets"  // sets {f} to {value}
+	Enrich         Part = "enrich"          // On entering {s}, {hook} calls {action} with {inputs} and writes its answer into {fields}.
+	EnrichFallbk   Part = "enrich.fallback"
+	Action         Part = "action" // On entering {s}, {hook} calls {action} with {inputs}, once per entry, even if it has moved on.
+	ActionWrites   Part = "action.writes"
+	Resolve        Part = "resolve" // On entering {s}, the kernel links {link} to the requester's {state} {target} ...
+	Final          Part = "final"   // Nothing leaves {s}.
+	ReactionFrom   Part = "reaction.from"
+	ReactionWhen   Part = "reaction.when"
+	ReactionSkip   Part = "reaction.skip"
+	ReactionHook   Part = "reaction_hook" // When {reaction} has applied, {hook} calls {action} with {inputs}.
 
 	// A move, and who may make it.
 	Move         Part = "move" // {Who} moves it from {a} to {b}[clauses].
@@ -159,7 +160,7 @@ func Parts() []Part {
 		Starts, Closed, NoLifecycle, Invariant,
 		FieldKernel, FieldRoles, FieldUnique, FieldAgentsOnly, FieldAgents, FieldAgentsRoles, FieldAgentsCustomers,
 		Link, LinkOne, LinkInverseOne, LinkKernel, LinkRoles, Incoming, Rollup,
-		Claim, Waits, WaitsClaimant, Frozen, RequesterOnly, Timer, TimerWaits, AtTimer, Acting, ActingEvery, ActingAt, ActingAtWhen, ActingAtSets,
+		Claim, Waits, WaitsClaimant, WaitsRequester, Frozen, RequesterOnly, Timer, TimerWaits, AtTimer, Acting, ActingEvery, ActingAt, ActingAtWhen, ActingAtSets,
 		Enrich, EnrichFallbk, Action, ActionWrites, Resolve, Final, ReactionFrom, ReactionWhen, ReactionSkip, ReactionHook,
 		Move, MoveRequired, MoveGiven, MoveGuard, MoveEscape, MoveRelease, MoveClears, MoveSets,
 		WhoStaff, WhoCreator, WhoRole, WhoField, WhoPrincipal, WhoTimer, WhoHook, WhoNobody, ExceptCreator, ExceptContainerCreatr,

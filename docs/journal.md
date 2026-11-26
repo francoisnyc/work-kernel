@@ -6,6 +6,24 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
+- **Sent back to the requester, step 5 PR 1's Later items** (design.md, "Sent back to the requester, as built"):
+  - **vacation_request's "returned" state.** Sending a request back to
+    draft cannot use the key: the draft is the initial state, and a fresh
+    draft must not wait on its maker. A Type that wants it adds a state
+    of its own (`returned`, with `waits_on: requester`).
+  - **Other `waits_on` values.** Only `requester` exists. A manager, a
+    field's person or the container's creator would be new values with
+    their own rule in `policy`.
+  - **Only the move that sent it back.** A key on the transition (exact:
+    a fresh Item in the state would not wait) needs a column saying which
+    move entered the state. Not taken: the key on the state covers the
+    cases seen so far.
+  - **A requester with no move.** An incident's customer answers by
+    replying, not by a move, so her row has no button. PR 2's screen
+    links it ("Open it to answer"); a Type could also declare what
+    answers it.
+  - **A customer's agent and the screen.** An agent acting for a
+    customer has the same view as the customer; no client shows it yet.
 - **The web Inbox, step 4 PR 2's Later items** (design.md, "The web Inbox on the view, as built"):
   - **A claim on the stack.** Built on 2026-11-26 (`equipment_request@1`;
     the entry below). Three tests held a list or a count of the Types;
@@ -4700,3 +4718,52 @@ override in the scratchpad; Playwright through scratchpad configs using the prei
 
 **Open:** the Later items above. **Next session:** step 5 (a state that waits on its requester, which also gives a
 customer a view); 3b only on a trigger.
+
+## 2026-11-26 — Track 1, item 5, step 5, PR 1: sent back to the requester, the kernel (Phases A to D)
+
+**Built (PR #102):** a state's `waits_on: requester`: an Item in that state waits on its requester (`created_on_behalf_of`,
+else `created_by`) besides whoever its moves name. Load checks (`INVALID_VALUE` for another value; `CONFLICT` on a
+done or canceled state, a claimed state, the initial state). `policy.WaitsOnRequester`, the one statement of which
+states wait on their requester, and one case in `policy.WaitsOn`; one group in the view's SQL. A customer, or an agent
+acting for one, may now ask `waiting_on: me` and gets their own requests that wait on them, through the customer rule
+and `policy.Project`; `role:` stays refused. `State.waits_on_requester` (7) in `GetType`. The reading's sentence and
+its witness. design.md: "Sent back to the requester, as built" and two "since step 5" notes. Roadmap: step 5 corrected
+to "on a state", split in two PRs, PR 1 built.
+
+**Kernel changes (counted):** the key and its checks in typedef; `WaitsOnRequester` and one case in `WaitsOn`; one SQL
+group and the customer branch in the view; one reading sentence; one contract field. No migration, no new dependency.
+Nothing in the workflow package, the migrate or `types/` (item 6 step 3 ran in parallel there).
+
+**Decided (the owner, through the coordinator):** Phase A: the key on a state, not a transition, and the roadmap line
+corrected; the three load checks; customers' `me` allowed and `role:` refused; the contract field; `incident@6` as
+the Type on the stack and vacation_request left alone; two PRs, the second after item 6 step 3 merges; a row with no
+moves links "Open it to answer" (PR 2). Tests gate: the 16 new tests, the five changed refusal tests, the stricter
+citation helper; the `pli type get` test moved to PR 2. Phase C accepted by the coordinator's review.
+
+**Tests:** new: typedef 4, policy 4, item service 5, API 2, a reading witness. **Existing tests changed, each in its
+own commit:** assertion changes, the five tests that pinned "a customer is refused `waiting_on`"
+(`TestWaiting_ACustomerIsRefused`, `TestCount_RefusedAsTheSearchIs`, `TestWaitingSince_OnlyWithWaitingOn`,
+`TestWaitingOn_Refusals`, `TestCountItems`): `role:` still refused, `me` answers. Helper: the citation test's
+`elements()` lists `waits_on` (stricter). No test changed after the tests gate.
+
+**Surprises:**
+- The roadmap's "key on a transition" did not survive the first look at the stack's real case: an incident waiting for
+  its customer has no move for her. She replies, and a reaction moves it back.
+- My first witness story was wrong, not the kernel: the request's move back to the team also named the team's role,
+  so the state waited on the team too, exactly as the rule says. The witness now gives that move to the requester alone.
+- A customer may not set a staff field at create, and an agent acting for a customer needs a session with a customer's
+  fixed powers: two set-up mistakes in my first item service tests, both caught before the gate.
+- My commit messages first ended with a literal "$T": a shell variable inside a quoted heredoc. The nine commits were
+  rewritten before the push.
+
+**Numbers.** `go vet` clean; `go test ./...` and `go test -race ./...` green, 28 packages; the new and changed tests
+`-race -count=10` green; `buf lint` and `buf breaking` pass. Web: typecheck, 492 unit tests; apps/poc: typecheck, 408.
+On the compose stack: the scenario passed (139 steps); web Playwright 14; apps/poc journeys 4. **The bake-offs:** not
+run; no file under `spikes/` changed and their Types have no state that waits on the requester.
+
+**Local workarounds, outside the repository (nothing committed):** dockerd started by hand, again after each worker
+restart; the stack from a compose override in the scratchpad; Playwright through scratchpad configs using the
+preinstalled Chromium.
+
+**Open:** the Later items above. **Next session:** step 5's PR 2 (`incident@6`, the screen's customer rows, a journey,
+a scenario step, `pli type get`), after item 6 step 3 merges; 3b only on a trigger.

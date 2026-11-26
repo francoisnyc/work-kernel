@@ -456,7 +456,7 @@ func TestCount_RefusedAsTheSearchIs(t *testing.T) {
 		{"neither words nor a filter", w.fay, "", itemservice.Filter{}},
 		{"an unknown Type", w.fay, "", itemservice.Filter{TypeIDs: []string{"no_such_type"}}},
 		{"waiting on someone else", w.fay, "", itemservice.Filter{WaitingOn: "user:gus"}},
-		{"a customer's waiting_on", kim, "", itemservice.Filter{WaitingOn: "me"}},
+		{"a customer's role queue", kim, "", itemservice.Filter{WaitingOn: "role:in_team"}},
 		{"below a container fay cannot see", w.fay, "", itemservice.Filter{In: &w.vault}},
 		{"the kernel's own actor", item.Principal{Actor: "system:timer", Namespace: w.ns}, "all", itemservice.Filter{}},
 		{"an agent with no session", item.Principal{Actor: "agent:nobody", Namespace: w.ns}, "all", itemservice.Filter{}},
