@@ -292,13 +292,13 @@ attack that found it as its test:
         transition passes. `pli whoami`, `item count`, `inbox --count`,
         `--in ITEM`. No table, no migration.
       - **PR 2, the screen. Built** (PR #100; `docs/design.md`, "The web
-        Inbox on the view, as built"): the web Inbox asks the kernel. A tab for
-        "Waiting on me" and one per role held, each with a capped count;
-        oldest waiting first, with a switch; a place filter; [More]. A
-        row's buttons are exactly the moves the server lists, each one
-        `TransitionItem`. The browser decides nothing about who may act.
-        The web's own inbox queries and list of moves are retired. Web
-        only; no new dependency.
+        Inbox on the view, as built"): the web Inbox asks the kernel. A
+        tab for "Waiting on me" and one per role held, each with a
+        capped count; oldest waiting first, with a switch; a place
+        filter; [More]. A row's buttons are exactly the moves the server
+        lists, each one `TransitionItem`. The browser decides nothing
+        about who may act. The web's own inbox queries and list of moves
+        are retired. Web only; no new dependency.
       - **Next, a small change of its own: a claim on the stack.** One
         Type in `types/` with a claimed state (`claim`) and a release
         move, and a matching role for a dev user, so that a real claim
