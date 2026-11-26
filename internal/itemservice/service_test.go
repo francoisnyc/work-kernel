@@ -412,6 +412,9 @@ func TestGet_ReturnsCreatedItem(t *testing.T) {
 			got.CreatedOnBehalfOf, alice.Actor)
 	}
 	got.CreatedAt, got.CreatedBy = time.Time{}, ""
+	// Since track 1 item 5, step 4 an Item also carries when it entered its
+	// state (TestStateTime_* check it); here it is only set aside.
+	got.StateEnteredAt = time.Time{}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Get = %+v\nwant  %+v", got, want)
 	}

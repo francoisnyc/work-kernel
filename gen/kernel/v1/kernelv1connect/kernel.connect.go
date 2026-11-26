@@ -74,6 +74,8 @@ const (
 	ItemServiceSearchItemsProcedure = "/kernel.v1.ItemService/SearchItems"
 	// ItemServiceListItemsProcedure is the fully-qualified name of the ItemService's ListItems RPC.
 	ItemServiceListItemsProcedure = "/kernel.v1.ItemService/ListItems"
+	// ItemServiceCountItemsProcedure is the fully-qualified name of the ItemService's CountItems RPC.
+	ItemServiceCountItemsProcedure = "/kernel.v1.ItemService/CountItems"
 	// ItemServiceListItemEventsProcedure is the fully-qualified name of the ItemService's
 	// ListItemEvents RPC.
 	ItemServiceListItemEventsProcedure = "/kernel.v1.ItemService/ListItemEvents"
@@ -88,6 +90,8 @@ const (
 	ItemServiceListActionsProcedure = "/kernel.v1.ItemService/ListActions"
 	// ItemServiceExplainTypeProcedure is the fully-qualified name of the ItemService's ExplainType RPC.
 	ItemServiceExplainTypeProcedure = "/kernel.v1.ItemService/ExplainType"
+	// ItemServiceWhoAmIProcedure is the fully-qualified name of the ItemService's WhoAmI RPC.
+	ItemServiceWhoAmIProcedure = "/kernel.v1.ItemService/WhoAmI"
 	// ItemServiceStartAgentSessionProcedure is the fully-qualified name of the ItemService's
 	// StartAgentSession RPC.
 	ItemServiceStartAgentSessionProcedure = "/kernel.v1.ItemService/StartAgentSession"
@@ -124,6 +128,10 @@ type ItemServiceClient interface {
 	// A container's direct children (or the top-level Items), with the same
 	// filters as SearchItems.
 	ListItems(context.Context, *connect.Request[v1.ListItemsRequest]) (*connect.Response[v1.ListItemsResponse], error)
+	// How many Items a SearchItems with the same words and filter would
+	// return to the caller, counted through the same query and capped at 50:
+	// never an Item the caller cannot see, never an exact total past the cap.
+	CountItems(context.Context, *connect.Request[v1.CountItemsRequest]) (*connect.Response[v1.CountItemsResponse], error)
 	// An Item's history, oldest first, as the caller may see it.
 	ListItemEvents(context.Context, *connect.Request[v1.ListItemEventsRequest]) (*connect.Response[v1.ListItemEventsResponse], error)
 	// One Type version. Types are read-only: they load from files at start.
@@ -153,6 +161,10 @@ type ItemServiceClient interface {
 	// Called with an agent's token: mint a session in capability mode, with
 	// the scopes it may touch and the powers it may use. Later calls carry its
 	// ID in the Pli-Agent-Session header.
+	// Who the caller is: their principal, their namespace and the roles they
+	// hold there; for an agent, the user it acts for and its session. About
+	// the caller only, and no Item data.
+	WhoAmI(context.Context, *connect.Request[v1.WhoAmIRequest]) (*connect.Response[v1.WhoAmIResponse], error)
 	StartAgentSession(context.Context, *connect.Request[v1.StartAgentSessionRequest]) (*connect.Response[v1.StartAgentSessionResponse], error)
 	// Called with a user's token: approve one wider scope for an agent session
 	// acting for that user (the answer to NEEDS_APPROVAL).
@@ -218,6 +230,12 @@ func NewItemServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(itemServiceMethods.ByName("ListItems")),
 			connect.WithClientOptions(opts...),
 		),
+		countItems: connect.NewClient[v1.CountItemsRequest, v1.CountItemsResponse](
+			httpClient,
+			baseURL+ItemServiceCountItemsProcedure,
+			connect.WithSchema(itemServiceMethods.ByName("CountItems")),
+			connect.WithClientOptions(opts...),
+		),
 		listItemEvents: connect.NewClient[v1.ListItemEventsRequest, v1.ListItemEventsResponse](
 			httpClient,
 			baseURL+ItemServiceListItemEventsProcedure,
@@ -252,6 +270,12 @@ func NewItemServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			httpClient,
 			baseURL+ItemServiceExplainTypeProcedure,
 			connect.WithSchema(itemServiceMethods.ByName("ExplainType")),
+			connect.WithClientOptions(opts...),
+		),
+		whoAmI: connect.NewClient[v1.WhoAmIRequest, v1.WhoAmIResponse](
+			httpClient,
+			baseURL+ItemServiceWhoAmIProcedure,
+			connect.WithSchema(itemServiceMethods.ByName("WhoAmI")),
 			connect.WithClientOptions(opts...),
 		),
 		startAgentSession: connect.NewClient[v1.StartAgentSessionRequest, v1.StartAgentSessionResponse](
@@ -290,12 +314,14 @@ type itemServiceClient struct {
 	migrateItem       *connect.Client[v1.MigrateItemRequest, v1.MigrateItemResponse]
 	searchItems       *connect.Client[v1.SearchItemsRequest, v1.SearchItemsResponse]
 	listItems         *connect.Client[v1.ListItemsRequest, v1.ListItemsResponse]
+	countItems        *connect.Client[v1.CountItemsRequest, v1.CountItemsResponse]
 	listItemEvents    *connect.Client[v1.ListItemEventsRequest, v1.ListItemEventsResponse]
 	getType           *connect.Client[v1.GetTypeRequest, v1.GetTypeResponse]
 	listTypes         *connect.Client[v1.ListTypesRequest, v1.ListTypesResponse]
 	validateTypes     *connect.Client[v1.ValidateTypesRequest, v1.ValidateTypesResponse]
 	listActions       *connect.Client[v1.ListActionsRequest, v1.ListActionsResponse]
 	explainType       *connect.Client[v1.ExplainTypeRequest, v1.ExplainTypeResponse]
+	whoAmI            *connect.Client[v1.WhoAmIRequest, v1.WhoAmIResponse]
 	startAgentSession *connect.Client[v1.StartAgentSessionRequest, v1.StartAgentSessionResponse]
 	approveWiden      *connect.Client[v1.ApproveWidenRequest, v1.ApproveWidenResponse]
 	linkItems         *connect.Client[v1.LinkItemsRequest, v1.LinkItemsResponse]
@@ -337,6 +363,11 @@ func (c *itemServiceClient) ListItems(ctx context.Context, req *connect.Request[
 	return c.listItems.CallUnary(ctx, req)
 }
 
+// CountItems calls kernel.v1.ItemService.CountItems.
+func (c *itemServiceClient) CountItems(ctx context.Context, req *connect.Request[v1.CountItemsRequest]) (*connect.Response[v1.CountItemsResponse], error) {
+	return c.countItems.CallUnary(ctx, req)
+}
+
 // ListItemEvents calls kernel.v1.ItemService.ListItemEvents.
 func (c *itemServiceClient) ListItemEvents(ctx context.Context, req *connect.Request[v1.ListItemEventsRequest]) (*connect.Response[v1.ListItemEventsResponse], error) {
 	return c.listItemEvents.CallUnary(ctx, req)
@@ -365,6 +396,11 @@ func (c *itemServiceClient) ListActions(ctx context.Context, req *connect.Reques
 // ExplainType calls kernel.v1.ItemService.ExplainType.
 func (c *itemServiceClient) ExplainType(ctx context.Context, req *connect.Request[v1.ExplainTypeRequest]) (*connect.Response[v1.ExplainTypeResponse], error) {
 	return c.explainType.CallUnary(ctx, req)
+}
+
+// WhoAmI calls kernel.v1.ItemService.WhoAmI.
+func (c *itemServiceClient) WhoAmI(ctx context.Context, req *connect.Request[v1.WhoAmIRequest]) (*connect.Response[v1.WhoAmIResponse], error) {
+	return c.whoAmI.CallUnary(ctx, req)
 }
 
 // StartAgentSession calls kernel.v1.ItemService.StartAgentSession.
@@ -411,6 +447,10 @@ type ItemServiceHandler interface {
 	// A container's direct children (or the top-level Items), with the same
 	// filters as SearchItems.
 	ListItems(context.Context, *connect.Request[v1.ListItemsRequest]) (*connect.Response[v1.ListItemsResponse], error)
+	// How many Items a SearchItems with the same words and filter would
+	// return to the caller, counted through the same query and capped at 50:
+	// never an Item the caller cannot see, never an exact total past the cap.
+	CountItems(context.Context, *connect.Request[v1.CountItemsRequest]) (*connect.Response[v1.CountItemsResponse], error)
 	// An Item's history, oldest first, as the caller may see it.
 	ListItemEvents(context.Context, *connect.Request[v1.ListItemEventsRequest]) (*connect.Response[v1.ListItemEventsResponse], error)
 	// One Type version. Types are read-only: they load from files at start.
@@ -440,6 +480,10 @@ type ItemServiceHandler interface {
 	// Called with an agent's token: mint a session in capability mode, with
 	// the scopes it may touch and the powers it may use. Later calls carry its
 	// ID in the Pli-Agent-Session header.
+	// Who the caller is: their principal, their namespace and the roles they
+	// hold there; for an agent, the user it acts for and its session. About
+	// the caller only, and no Item data.
+	WhoAmI(context.Context, *connect.Request[v1.WhoAmIRequest]) (*connect.Response[v1.WhoAmIResponse], error)
 	StartAgentSession(context.Context, *connect.Request[v1.StartAgentSessionRequest]) (*connect.Response[v1.StartAgentSessionResponse], error)
 	// Called with a user's token: approve one wider scope for an agent session
 	// acting for that user (the answer to NEEDS_APPROVAL).
@@ -501,6 +545,12 @@ func NewItemServiceHandler(svc ItemServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(itemServiceMethods.ByName("ListItems")),
 		connect.WithHandlerOptions(opts...),
 	)
+	itemServiceCountItemsHandler := connect.NewUnaryHandler(
+		ItemServiceCountItemsProcedure,
+		svc.CountItems,
+		connect.WithSchema(itemServiceMethods.ByName("CountItems")),
+		connect.WithHandlerOptions(opts...),
+	)
 	itemServiceListItemEventsHandler := connect.NewUnaryHandler(
 		ItemServiceListItemEventsProcedure,
 		svc.ListItemEvents,
@@ -535,6 +585,12 @@ func NewItemServiceHandler(svc ItemServiceHandler, opts ...connect.HandlerOption
 		ItemServiceExplainTypeProcedure,
 		svc.ExplainType,
 		connect.WithSchema(itemServiceMethods.ByName("ExplainType")),
+		connect.WithHandlerOptions(opts...),
+	)
+	itemServiceWhoAmIHandler := connect.NewUnaryHandler(
+		ItemServiceWhoAmIProcedure,
+		svc.WhoAmI,
+		connect.WithSchema(itemServiceMethods.ByName("WhoAmI")),
 		connect.WithHandlerOptions(opts...),
 	)
 	itemServiceStartAgentSessionHandler := connect.NewUnaryHandler(
@@ -577,6 +633,8 @@ func NewItemServiceHandler(svc ItemServiceHandler, opts ...connect.HandlerOption
 			itemServiceSearchItemsHandler.ServeHTTP(w, r)
 		case ItemServiceListItemsProcedure:
 			itemServiceListItemsHandler.ServeHTTP(w, r)
+		case ItemServiceCountItemsProcedure:
+			itemServiceCountItemsHandler.ServeHTTP(w, r)
 		case ItemServiceListItemEventsProcedure:
 			itemServiceListItemEventsHandler.ServeHTTP(w, r)
 		case ItemServiceGetTypeProcedure:
@@ -589,6 +647,8 @@ func NewItemServiceHandler(svc ItemServiceHandler, opts ...connect.HandlerOption
 			itemServiceListActionsHandler.ServeHTTP(w, r)
 		case ItemServiceExplainTypeProcedure:
 			itemServiceExplainTypeHandler.ServeHTTP(w, r)
+		case ItemServiceWhoAmIProcedure:
+			itemServiceWhoAmIHandler.ServeHTTP(w, r)
 		case ItemServiceStartAgentSessionProcedure:
 			itemServiceStartAgentSessionHandler.ServeHTTP(w, r)
 		case ItemServiceApproveWidenProcedure:
@@ -634,6 +694,10 @@ func (UnimplementedItemServiceHandler) ListItems(context.Context, *connect.Reque
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kernel.v1.ItemService.ListItems is not implemented"))
 }
 
+func (UnimplementedItemServiceHandler) CountItems(context.Context, *connect.Request[v1.CountItemsRequest]) (*connect.Response[v1.CountItemsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kernel.v1.ItemService.CountItems is not implemented"))
+}
+
 func (UnimplementedItemServiceHandler) ListItemEvents(context.Context, *connect.Request[v1.ListItemEventsRequest]) (*connect.Response[v1.ListItemEventsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kernel.v1.ItemService.ListItemEvents is not implemented"))
 }
@@ -656,6 +720,10 @@ func (UnimplementedItemServiceHandler) ListActions(context.Context, *connect.Req
 
 func (UnimplementedItemServiceHandler) ExplainType(context.Context, *connect.Request[v1.ExplainTypeRequest]) (*connect.Response[v1.ExplainTypeResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kernel.v1.ItemService.ExplainType is not implemented"))
+}
+
+func (UnimplementedItemServiceHandler) WhoAmI(context.Context, *connect.Request[v1.WhoAmIRequest]) (*connect.Response[v1.WhoAmIResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kernel.v1.ItemService.WhoAmI is not implemented"))
 }
 
 func (UnimplementedItemServiceHandler) StartAgentSession(context.Context, *connect.Request[v1.StartAgentSessionRequest]) (*connect.Response[v1.StartAgentSessionResponse], error) {

@@ -132,3 +132,27 @@ func MayLeaveClaimed(st typedef.State, tr typedef.Transition, who Who, it ItemFa
 	claimant, _ := it.Fields[st.Claim].(string)
 	return claimant != "" && claimant == cmp.Or(who.OnBehalfOf, who.Actor)
 }
+
+// MayMove answers "may this principal make this move, for who they are?":
+// the transition's `allowed` and `except` (MayTransition) and the claim of
+// the state it leaves (MayLeaveClaimed). It is the one answer the item
+// service's authorize and an Item's Moves both read. Guards, required and
+// given fields are not its business.
+func MayMove(st typedef.State, tr typedef.Transition, who Who, it ItemFacts) bool {
+	return MayTransition(tr, who, it) && MayLeaveClaimed(st, tr, who, it)
+}
+
+// Moves lists the to-states of the transitions out of state that who may
+// make (MayMove), in the Type's order: never nil, empty when there are
+// none. An agent session's powers and scopes are not its business: the
+// item service checks those on the write.
+func Moves(ty *typedef.Type, state string, who Who, it ItemFacts) []string {
+	st, _ := ty.State(state)
+	moves := []string{}
+	for _, tr := range ty.Transitions {
+		if tr.From == state && MayMove(st, tr, who, it) {
+			moves = append(moves, tr.To)
+		}
+	}
+	return moves
+}

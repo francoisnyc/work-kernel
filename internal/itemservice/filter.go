@@ -35,6 +35,9 @@ type Filter struct {
 	// is an *InvalidError at filter.waiting_on.
 	// omitempty keeps the page tokens of requests without it as they were.
 	WaitingOn string `json:",omitempty"`
+	// In keeps the Items below this container, at any depth (track 1 item
+	// 5, step 4). Search and Count only; List has its own container.
+	In *uuid.UUID `json:",omitempty"`
 }
 
 // FieldFilter is a condition on one field: Eq, or a range of one or two
@@ -57,7 +60,7 @@ type FieldFilter struct {
 // empty reports whether the filter says nothing.
 func (f Filter) empty() bool {
 	return len(f.TypeIDs) == 0 && len(f.States) == 0 && len(f.Categories) == 0 && len(f.Fields) == 0 &&
-		len(f.Links) == 0 && f.WaitingOn == ""
+		len(f.Links) == 0 && f.WaitingOn == "" && f.In == nil
 }
 
 // sqlFilter is a Filter checked against the registered Types and turned into
@@ -88,6 +91,20 @@ func (k *Service) resolveFilter(ctx context.Context, p item.Principal, f Filter)
 		return vs
 	}
 
+	if f.In != nil {
+		// Read like List reads its container: visible, in the session's
+		// scopes, in the namespace; else ErrNotFound.
+		if _, err := k.Get(ctx, p, *f.In); err != nil {
+			return out, err
+		}
+		out.args["f_in"] = *f.In
+		out.conds = append(out.conds, `m.id in (
+			with recursive below (id) as (
+			    select id from items where container_id = @f_in
+			    union all
+			    select i.id from items i join below b on i.container_id = b.id
+			) select id from below)`)
+	}
 	for _, id := range f.TypeIDs {
 		if len(versions(id)) == 0 {
 			return out, &InvalidError{Path: "filter.types", Reason: "unknown Type"}

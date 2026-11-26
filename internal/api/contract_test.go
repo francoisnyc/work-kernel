@@ -56,6 +56,10 @@ func TestContract_OnlyPublicOperations(t *testing.T) {
 	want = slices.Insert(want, slices.Index(want, "ListActions")+1, "ExplainType")
 	// Track 1, item 6, step 2, after TransitionItem.
 	want = slices.Insert(want, slices.Index(want, "TransitionItem")+1, "MigrateItem")
+	// Track 1, item 5, step 4: CountItems after ListItems, WhoAmI after
+	// ExplainType. Two reads; neither is the internal door.
+	want = slices.Insert(want, slices.Index(want, "ListItems")+1, "CountItems")
+	want = slices.Insert(want, slices.Index(want, "ExplainType")+1, "WhoAmI")
 	if !slices.Equal(got, want) {
 		t.Errorf("ItemService methods = %v, want %v", got, want)
 	}

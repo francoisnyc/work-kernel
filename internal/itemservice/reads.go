@@ -238,7 +238,7 @@ func (k *Service) page(ctx context.Context, q itemQuery) ([]hit, string, error) 
 		var h hit
 		err := row.Scan(&h.it.ID, &h.it.TypeID, &h.it.TypeVersion, &h.it.ContainerID, &h.it.ScopeID,
 			&h.it.State, &h.it.Fields, &h.it.ItemSeq, &h.it.ContentSeq, &h.it.CreatedAt, &h.it.CreatedBy, &h.it.CreatedOnBehalfOf,
-			&h.policyScope, &h.sortValue)
+			&h.it.StateEnteredAt, &h.policyScope, &h.sortValue)
 		return h, err
 	})
 	if err != nil {
@@ -359,7 +359,7 @@ func (k *Service) pageSQL(ctx context.Context, q itemQuery) (string, pgx.NamedAr
 	}
 	return with +
 		`select m.id, m.type_id, m.type_version, m.container_id, m.scope_id, m.state, m.fields, m.item_seq, m.content_seq,
-		        m.created_at, m.created_by, coalesce(m.created_on_behalf_of, ''), s.policy_scope_id,
+		        m.created_at, m.created_by, coalesce(m.created_on_behalf_of, ''), m.state_entered_at, s.policy_scope_id,
 		        ` + sortValue + `
 		 from ` + from + ` join scopes s on s.id = m.scope_id
 		 where ` + strings.Join(conds, "\n and ") + `
