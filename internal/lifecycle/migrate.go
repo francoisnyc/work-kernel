@@ -17,23 +17,23 @@ type MigrationCheck string
 
 // The checks, in the order they are reported.
 const (
-	TargetNotLatest     MigrationCheck = "target_not_latest"      // the version named is not the latest, or not newer than the Item's
-	MigrateClosed       MigrationCheck = "closed"                 // the Item's state is done or canceled
-	MigrateHeld         MigrationCheck = "held"                   // an open hold
-	ActionUnfinished    MigrationCheck = "action_unfinished"      // an action or enrich hook has not finished, under either version
-	ReactionUnfinished  MigrationCheck = "reaction_unfinished"    // a reaction or an undo has not finished, under either version
-	HasTimer            MigrationCheck = "has_timer"              // the state has a timer, under either version
-	EventsUndelivered   MigrationCheck = "events_undelivered"     // events of the Item are still in the outbox
-	StateMissing        MigrationCheck = "state_missing"          // the new version has no such state
-	FieldMissing        MigrationCheck = "field_missing"          // a field holding a value is not in the new version
-	FieldChanged        MigrationCheck = "field_changed"          // a field holding a value has another type, shape or options
-	MigrateInvariant    MigrationCheck = "invariant_failed"       // an invariant of the new version does not hold
-	MigrateNotUnique    MigrationCheck = "not_unique"             // a sibling holds the same value of a unique field
-	LinkChanged         MigrationCheck = "link_changed"           // a link the Item has is not declared the same way
+	TargetNotLatest      MigrationCheck = "target_not_latest"      // the version named is not the latest, or not newer than the Item's
+	MigrateClosed        MigrationCheck = "closed"                 // the Item's state is done or canceled
+	MigrateHeld          MigrationCheck = "held"                   // an open hold
+	ActionUnfinished     MigrationCheck = "action_unfinished"      // an action or enrich hook has not finished, under either version
+	ReactionUnfinished   MigrationCheck = "reaction_unfinished"    // a reaction or an undo has not finished, under either version
+	HasTimer             MigrationCheck = "has_timer"              // the state has a timer, under either version
+	EventsUndelivered    MigrationCheck = "events_undelivered"     // events of the Item are still in the outbox
+	StateMissing         MigrationCheck = "state_missing"          // the new version has no such state
+	FieldMissing         MigrationCheck = "field_missing"          // a field holding a value is not in the new version
+	FieldChanged         MigrationCheck = "field_changed"          // a field holding a value has another type, shape or options
+	MigrateInvariant     MigrationCheck = "invariant_failed"       // an invariant of the new version does not hold
+	MigrateNotUnique     MigrationCheck = "not_unique"             // a sibling holds the same value of a unique field
+	LinkChanged          MigrationCheck = "link_changed"           // a link the Item has is not declared the same way
 	ContainerNotAdmitted MigrationCheck = "container_not_admitted" // the new version's start.in does not admit where the Item is
-	ClaimEmpty          MigrationCheck = "claim_empty"            // the state has a claim in the new version and nobody holds it
-	PathNotDeclared     MigrationCheck = "path_not_declared"      // a move the Item made is not a move of the new version
-	PathMissingFields   MigrationCheck = "path_missing_fields"    // the last move's required fields are not set
+	ClaimEmpty           MigrationCheck = "claim_empty"            // the state has a claim in the new version and nobody holds it
+	PathNotDeclared      MigrationCheck = "path_not_declared"      // a move the Item made is not a move of the new version
+	PathMissingFields    MigrationCheck = "path_missing_fields"    // the last move's required fields are not set
 )
 
 // Misfit is one reason an Item does not fit the new version. It names
