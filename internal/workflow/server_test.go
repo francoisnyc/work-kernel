@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -92,7 +93,19 @@ func runTests(m *testing.M) int {
 		return 1
 	}
 
-	return m.Run()
+	code := m.Run()
+	// Track 1 item 5, step 3a: after every test has run, with a real
+	// worker (timers, reactions, holds), no Item has a state_entered_at
+	// that is not the time of the event that put it in its state.
+	if drift, err := testdb.StateEnteredAtDrift(ctx, pool); err != nil {
+		log.Printf("state_entered_at: reading every Item: %v", err)
+		return 1
+	} else if len(drift) > 0 {
+		log.Printf("FAIL: state_entered_at is not the time of the Item's latest create or transition event, for (at most 20 shown):\n  %s",
+			strings.Join(drift, "\n  "))
+		return 1
+	}
+	return code
 }
 
 // --- the probe workflow ---
