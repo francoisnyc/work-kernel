@@ -118,7 +118,8 @@ const usage = `usage: pli [--server URL] [--tokens FILE] --as NAME [--session ID
   item migrate ITEM --to TYPE@VERSION [--dry-run] [--request-id ID]
   item search [WORDS...] [--min-seq N] [FILTERS] [PAGING]
   item list [ITEM] [FILTERS] [PAGING]           (no ITEM: the top level)
-  inbox [WORDS...] [--role NAME] [FILTERS] [PAGING]   (what waits on you, or on a role: item search --waiting-on)
+  inbox [WORDS...] [--role NAME] [FILTERS] [PAGING] [--oldest]
+                                  (what waits on you, or on a role: item search --waiting-on; --oldest: oldest waiting first)
   item history ITEM [PAGING]
   item link SRC LINK_TYPE TARGET [--etag E] [--request-id ID]     (LINK_TYPE: the declared name)
   item unlink SRC LINK_TYPE TARGET [--etag E] [--request-id ID]
@@ -138,6 +139,7 @@ FILTERS: [--type TYPE]... [--state S]... [--category C]... [--where F=V|F>V|F>=V
          [--linked out:NAME=ITEM | in:NAME=ITEM]...   (on a principal field, --where F=me is the caller)
          [--waiting-on me|role:NAME]                 (the open Items that wait on you, or on a role)
          [--order-by 'FIELD [asc|desc]']             (default: newest first)
+         [--order-by waiting_since]                  (with --waiting-on: oldest waiting first; 'waiting_since desc': newest)
 PAGING:  [--page-size N] [--page-token T]`
 
 // usageError is a wrong command line: exit 2, nothing sent.
@@ -684,8 +686,10 @@ func (c *cli) search(ctx context.Context, name string, args []string) error {
 	minSeq := fs.Int64("min-seq", 0, "answer only once the write with this commit_seq is visible")
 	fl, pg := filterFlags(fs), pagingFlags(fs)
 	var role string
+	var oldest bool
 	if name == "inbox" {
 		fs.StringVar(&role, "role", "", "a role's queue (finance) instead of what waits on you")
+		fs.BoolVar(&oldest, "oldest", false, "oldest waiting first (--order-by waiting_since)")
 	}
 	pos, err := parse(fs, args)
 	if err != nil {
@@ -694,6 +698,12 @@ func (c *cli) search(ctx context.Context, name string, args []string) error {
 	if name == "inbox" {
 		if fl.waitingOn != "" {
 			return usagef("inbox is --waiting-on me, and with --role NAME that role's queue: give --role or use item search --waiting-on, not both")
+		}
+		if oldest && fl.orderBy != "" {
+			return usagef("--oldest is --order-by waiting_since: give one of --oldest and --order-by, not both")
+		}
+		if oldest {
+			fl.orderBy = "waiting_since"
 		}
 		fl.waitingOn = "me"
 		if role != "" {
