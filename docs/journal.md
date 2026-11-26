@@ -6,6 +6,33 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
+- **Inbox reads, step 4 PR 1's Later items** (design.md, "Inbox reads, as built"):
+  - **An agent session's powers in `moves`.** `moves` is judged by the
+    Type's rules for the agent and its user; a session without the
+    transition power still sees the moves, and the write refuses. Apply
+    the session's powers to the list if a screen for agents needs it: a
+    small change with its own test.
+  - **Open moves are listed.** A move with no `allowed` and no `except`
+    is anyone's, so it is in `moves`. The screen (PR 2) decides whether
+    to show them all as buttons or only the moves that name someone.
+  - **`GetType` showing `claim` and `release`.** `moves` answers "what may
+    I do" on a `waiting_on` page; a detail page (`GetItem`) still offers
+    moves from `allowed` alone. Either `GetType` shows the two keys, or
+    `GetItem` fills `moves`.
+  - **The PoC apps' inbox onto the view.** `apps/poc` still works out its
+    inbox and its buttons itself; left as it is.
+  - **`kernel-inbox.py` is answered by the view.** With `waiting_on`,
+    `state_time`, `CountItems` and `moves`, the view now answers the
+    bake-off's inbox question whole: the script could be one call. It is
+    the bake-off's record, so it was left.
+  - **`filter.in` at size.** One recursive query over `container_id`;
+    not measured on a deep or wide tree.
+  - **`min_seq` on `CountItems`.** Left out: a count right after a write
+    is as fresh as the database, as a search is today.
+  - **`moves` on `GetItem` and on a write's answer.** Empty there today.
+  - **Roles change between `WhoAmI` and the next read.** A screen that
+    builds its tabs from `WhoAmI` shows a role's tab until it asks again;
+    the reads themselves always use the roles of the moment.
 - **Waiting since, step 3a's Later items** (design.md, "Waiting since, as built"):
   - **The table (step 3b): who may act, stored per open Item.** Not built:
     the numbers did not ask for it. Build it when more than about 200,000
@@ -19,7 +46,7 @@ Ideas noted during the spike, not built yet.
     ordered branch per token, merged: one query over the tokens sorts
     every match (8 to 55 ms measured).
   - **`Item.state_time`** (the same instant, on the Item an API returns),
-    so that a screen can show "waiting 3 days": with step 4.
+    so that a screen can show "waiting 3 days": built in step 4, PR 1.
   - **Since it first entered the queue.** Today a release puts an Item at
     the back: it waits as of its release. A queue that keeps an Item's
     first place across a claim and a release needs a second time, kept
@@ -4493,3 +4520,61 @@ the preinstalled Chromium; main checked out a second time in the scratchpad for 
 
 **Open:** the Later items above. **Next session:** step 4 (a container as a filter, capped counts, "who am I" with
 roles, the web Inbox on the view, `Item.state_time`), then step 5; 3b only on a trigger.
+
+## 2026-11-26 — Track 1, item 5, step 4, PR 1: the inbox reads (Phases A to D)
+
+**Asked:** step 4, "queue extras and the screen". **Split in two PRs at Phase A (the owner's decision):** the reads
+first, the web Inbox second. This entry is PR 1.
+
+**Built:** `Item.state_time` (15) on every Item the API returns. `ItemFilter.in` (7): everything below one container,
+on `SearchItems` and `CountItems`; the container is read as the caller first, so hidden is missing. `rpc CountItems`:
+the search, read once with a page of 51 and counted from what `policy.Project` returns; 50 and `capped` past the cap.
+`rpc WhoAmI`: principal, namespace, roles; an agent's user, that user's roles, its session. `Item.moves` (16): the
+moves the caller may make, filled on a `waiting_on` answer. pli: `whoami`, `item count`, `inbox --count`, `--in ITEM`.
+design.md: "Inbox reads, as built", one sentence beside the `policy.Project` rule, one beside "no exact totals".
+Roadmap: step 4 split into PR 1 (built) and PR 2 (next).
+
+**Kernel changes (counted):** two fields on `Item`, one on `ItemFilter`, two RPCs; `policy.MayMove` and
+`policy.Moves`; the filter, the count, who am I and the moves in the item service's reads; pli's two commands and two
+flags. No migration, no new dependency, no lifecycle change.
+
+**Where who-may lives.** `policy.MayMove` is `MayTransition` and `MayLeaveClaimed` together. `authorize`, which every
+transition passes, decides with it; `policy.Moves` is the only loop over a Type's transitions that asks it, and the
+item service fills `Item.Moves` from that. The API and pli pass the list on.
+
+**Decided (the owner, through the coordinator):** Phase A: two PRs; the contract additions; the moves come from the
+server, not from a client reading `GetType`; the `policy.Project` rule is about Item data, so `WhoAmI` is exempt and
+CLAUDE.md is not changed; the web's own inbox queries and list of moves retire in PR 2; the PoC apps and
+`kernel-inbox.py` stay. At the tests gate: `moves` as proposed (name, number, which reads fill it, what empty means,
+what is not judged); an agent with no session gets `INVALID_ARGUMENT` from `WhoAmI` as on every read; `pli item count`
+always prints both fields; no `min_seq` on `CountItemsRequest`. Phase C accepted by the coordinator's review.
+
+**Tests:** new: item service 12, API 5, pli 5. **Existing tests changed, each in its own commit:** assertion,
+`TestContract_OnlyPublicOperations` (its exact list gains the two RPCs); assertion, `TestEveryExportedReadCallsProject`
+(its exemptions gain `WhoAmI`; `Count` has none); fixture only, `TestGet_ReturnsCreatedItem` (sets the new time aside
+as it does the create time). No test changed after the tests gate.
+
+**Surprises:**
+- `Count` needed no exemption. I had expected a count to be "not Item data"; built as the search counted after
+  `Project`, the guard test passes it as it stands, and went red on the stub that did not.
+- A stub that answers an error makes a test that reads the response's fields panic, and a panic stops the whole
+  package: the other failing tests never ran. The API tests now read a failed call's message as an empty one.
+- I wrote a new test file over an existing one of the same name (`moves_test.go`). Restored from git at once, nothing
+  lost; I now check a name is free before writing a file.
+- `usageError` was already a type in pli: Go has one namespace per package for types and functions, tests included.
+- On the dev stack an approver's `moves` on a ticket in progress has five entries: four are moves anyone may make.
+  The definition says so; the screen will have to choose what to show (Later).
+
+**Numbers.** `go vet` clean; `go test ./...` green, 28 packages; `go test -race ./...` green, no race; the new tests
+`-race -count=10` green; `buf lint` and `buf breaking` pass. Web: typecheck, 464 unit tests, build; apps/poc:
+typecheck, 408, build. Scenario on the compose stack: passed (run word run3f3383cd, 138 steps). Web Playwright 9;
+apps/poc journeys 4. On the stack, `pli whoami`, `inbox --count`, `item count` and `inbox --oldest` answered for bob,
+sam, lea and hana with roles, counts, `state_time` and `moves`. **The bake-offs:** not run; no file under `spikes/`
+changed, no Type, no migration; the item service and pli they run changed by additions only.
+
+**Local workarounds, outside the repository (nothing committed):** dockerd started by hand; the stack from a compose
+override in the scratchpad; Playwright through scratchpad configs using the preinstalled Chromium.
+
+**Open:** the Later items above. **Next session:** step 4's PR 2, the web Inbox on these reads (tabs for "waiting on
+me" and each role held, capped counts, oldest first, a place filter, claim and release by `TransitionItem` only;
+retire `inboxQueries` and `inboxTransitions` and list each of their tests), then step 5; 3b only on a trigger.

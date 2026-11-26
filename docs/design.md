@@ -500,6 +500,9 @@ client → item service (Go, stateless)
   `policy.Project`; a test parses the package and fails if a new read does not.
   `StateEntry` and `Type` are the only exemptions: they feed the workflow, not a
   principal. Any count, facet or total is computed after `Project`, never before.
+  The rule is about Item data: `WhoAmI` carries none (the caller's own
+  principal, roles and session) and is the one read answered to a principal
+  that does not pass through `Project` (the owner's reading, 2026-11-26).
 - **History on the way out.** Event payloads keep opaque container IDs
   (`container_id`, `container_from`, `container_to`) for audit and replay.
   Anything that later exposes history or Watch to a principal passes each such
@@ -939,7 +942,9 @@ and its scope: the insert already holds those key locks.)
 ### Reads
 
 - Paging everywhere: `page_size` (default 50, max 500), `page_token`,
-  `next_page_token`. Opaque tokens, no offsets, no exact totals.
+  `next_page_token`. Opaque tokens, no offsets, no exact totals. A capped
+  count keeps this: `CountItems` is exact up to 50 and says "more" past it
+  ("Inbox reads, as built").
 - Paging is keyset on `(created_at desc, id desc)` (history: `item_seq`),
   or under `order_by` on (the field's value, id) with the Items without a
   value last (under `waiting_since`, on (`state_entered_at`, id)), never
@@ -5610,6 +5615,116 @@ name the column). No assertion changed.
 statements that write a state, and the two that create an Item; the
 order in the item service's reads; pli's flag. The proto's comment. No
 new dependency.
+
+## Inbox reads, as built (step 4, PR 1) (2026-11-26)
+
+Track 1, item 5 of `docs/roadmap.md`, step 4, the first of two PRs: what
+an inbox screen must read, built in the kernel so that no client works it
+out for itself. The screen is PR 2. The contract grew by two fields on
+`Item`, one on `ItemFilter` and two RPCs; no table, no migration.
+
+**`Item.state_time`** (field 15). When the Item entered the state it is
+in: `items.state_entered_at` (step 3a), the instant `order_by:
+waiting_since` sorts by. It is on every Item the API returns, a write's
+answer included, and goes out through `policy.Project` with the rest of
+the Item. A customer sees it on their own Items. A screen can now say
+"waiting 3 days".
+
+**`ItemFilter.in`** (field 7). One container's name: the answer holds the
+Items below it, at any depth, never the container itself. It combines
+with words and with every other filter (`waiting_on` too).
+
+- `SearchItems` and `CountItems` only. `ListItems` has its `parent` and
+  refuses the filter: `INVALID_ARGUMENT` at `filter.in`.
+- The container is first read as the caller. One the caller cannot see,
+  one that does not exist, one outside an agent's session scopes and one
+  in another namespace give the same `NOT_FOUND`, byte for byte.
+- Seeing a container does not show what is below it: each Item below is
+  still read by its own visibility. A narrowed sub-container's contents
+  stay hidden from the people it leaves out.
+- It is one recursive query over `container_id`. Not measured at size:
+  Later.
+
+**`CountItems`.** The words and the filter of `SearchItems`, answered with
+`{count, capped}`. The cap is fixed at 50: past it the answer is 50 with
+`capped: true`, which a screen shows as "50+".
+
+- It is the search itself, with the same checks, refused where the search
+  is and with the same answer. It reads one page of 51 and **counts what
+  `policy.Project` returns**, so a count never tells of an Item a page
+  would hide. An agent's reads are recorded as for a search.
+- No page, no order, no `min_seq`.
+- It keeps "no exact totals" (Reads): a count is exact only up to 50.
+
+**`WhoAmI`.** Who the caller is, from the token and never from the
+request: `principal`, `namespace`, `roles` (the caller's roles in that
+namespace, read now, sorted). For an agent also `on_behalf_of`, that
+user's roles, and its `session` (the `AgentSession` message: scopes and
+powers). It never returns the token, anyone else's roles, a name or an
+email, or grants the agent has not used.
+
+- An agent without a session is refused as on every read
+  (`INVALID_ARGUMENT`); with a session that does not exist or is not its
+  own, `UNAUTHENTICATED` / `SESSION_INVALID`.
+- **It is the one read that does not pass through `policy.Project`:** it
+  carries no Item data (see "One door, enforced").
+
+**`Item.moves`** (field 16). The moves the caller may make now: the
+`to_state` of each transition out of the Item's state that the caller may
+make, in the Type's order.
+
+- Filled only in an answer to `SearchItems` or `ListItems` whose filter
+  has `waiting_on`. There, empty means "none for you" (a role's queue read
+  by someone outside the role). Everywhere else (`GetItem`, a read without
+  `waiting_on`, a write's answer) it is empty and says nothing.
+- **Judged by:** the move's `allowed` and `except`, the state's `claim`
+  and a `release`, and the agent rule (an agent gets what both it and the
+  user it acts for may make).
+- **Not judged:** guards, required and given fields, who may write the
+  claim field (`writable_by`), and an agent session's powers and scopes.
+  So a listed move can still be refused when asked; a move that is not
+  listed is always refused for who the caller is.
+- A move with no `allowed` and no `except` is anyone's who can see the
+  Item, and is listed. On a ticket in progress an approver sees `open`,
+  `waiting`, `approved`, `canceled`, `resolved`.
+- A test holds the list to the writes: for 11 callers (staff, an agent, a
+  claimant, an outsider), in 3 states and both views, the listed moves
+  are exactly those `TransitionItem` does not refuse for who the caller is.
+
+**One who-may answer, in `policy`.** `policy.MayMove(state, transition,
+who, facts)` is `MayTransition` (allowed, except, the agent rule) and
+`MayLeaveClaimed` (claim, release) together. The item service's
+`authorize`, which every transition passes, decides with `MayMove`;
+`policy.Moves` lists the transitions `MayMove` lets through, and the item
+service fills `Item.Moves` from it. No copy of the rule in the item
+service, the API or pli. `internal/lifecycle` holds none of it.
+
+**pli.**
+
+- `pli whoami`.
+- `--in ITEM` on `item search`, `item count` and `inbox` (a bare ID is in
+  the caller's namespace).
+- `pli item count [WORDS...] [FILTERS]`, and `pli inbox --count` (with
+  `--role NAME` for a role's queue). Both fields are always printed,
+  `{"count": 0, "capped": false}`, so a script reads `.count` without a
+  default. A count with an order or a page is a usage error: nothing is
+  sent.
+
+**Left as they are.** The web UI and the PoC apps still work out their
+inbox and its buttons themselves (`inboxQueries`, `inboxTransitions`):
+the web Inbox moves to these reads in PR 2. The bake-offs' scripts are
+their record and were not changed.
+
+**Tests.** New: item service 12, API 5, pli 5. Two existing assertions
+changed: the contract test's exact list of RPCs gained `CountItems` and
+`WhoAmI`, and the guard test that holds every read to `Project` gained
+its exemption for `WhoAmI`. One fixture: `TestGet_ReturnsCreatedItem`
+sets the new time aside as it does the create time.
+
+**Kernel changes (counted):** two fields on `Item`, one on `ItemFilter`,
+two RPCs; `MayMove` and `Moves` in `policy`; the filter, the count, who
+am I and the moves in the item service's reads; pli's two commands and
+two flags. No migration, no new dependency, no lifecycle change.
 
 ## Out of scope for the spike
 

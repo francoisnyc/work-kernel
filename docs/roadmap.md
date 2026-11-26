@@ -278,9 +278,23 @@ attack that found it as its test:
            namespace, or a measured p90 over 200 ms on the inbox page;
         2. a count polled by many people on every screen (a badge);
         3. agents polling their queue in a loop.
-      The order of what remains: step 4, step 5, then 3b on a trigger.
-   4. **Queue extras and the screen:** a container as a filter, capped
-      counts, "who am I" with roles, the web Inbox on the view.
+      The order of what remains: step 4's PR 2, step 5, then 3b on a
+      trigger.
+   4. **Queue extras and the screen.** Split in two PRs at its Phase A
+      (the owner's decision):
+      - **PR 1, the reads. Built** (`docs/design.md`, "Inbox reads, as
+        built"): `Item.state_time`; `ItemFilter.in`, everything below one
+        container; `CountItems`, a search counted through `policy.Project`
+        and capped at 50; `WhoAmI`, the caller's principal and roles, and
+        an agent's user and session; `Item.moves`, the moves the caller
+        may make, filled on a `waiting_on` answer and judged by the same
+        `policy.MayMove` a transition passes. `pli whoami`, `item count`,
+        `inbox --count`, `--in ITEM`. No table, no migration.
+      - **PR 2, the screen. Next:** the web Inbox on these reads: a tab
+        for "waiting on me" and one per role held, capped counts, oldest
+        first, a place filter, claim and release by `TransitionItem`
+        only. It retires the web's own inbox queries and its own list of
+        moves. No new web dependency.
    5. **Sent back to the requester:** a Type says a state waits on its
       requester (a `waiting` key on a transition), which also gives a
       customer a view.
