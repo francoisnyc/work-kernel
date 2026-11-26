@@ -4920,7 +4920,8 @@ people and Items holds that whatever waits on someone is a move
 - **Anything else is `INVALID_ARGUMENT` on `filter.waiting_on`,** another
   person's inbox (`user:fay`) included. So is **a customer asking**: a
   customer takes only the creator's moves, which do not count, until a
-  Type can say that a state waits on its requester (step 5).
+  Type can say that a state waits on its requester (step 5). (Since step
+  5: `me` answers; `role:` still refused.)
 
 **How it is read.** Derived when it is asked; nothing is stored. The item
 service (`internal/itemservice/waiting.go`) turns the rule into one more
@@ -5805,7 +5806,8 @@ does not then claim the Inbox is empty.
 
 **A customer** gets "Nothing waits on you here yet." and the page makes
 no call: `waiting_on` refuses a customer until step 5. It is one branch
-to remove then, not a second page.
+to remove then, not a second page. (Since step 5, PR 1: `me` answers;
+`role:` still refused. The page's branch goes in PR 2.)
 
 **Oldest first, and page 2.** A page holds 50. Someone with more than 50
 waiting sees a new arrival only after [More], or by switching to newest
@@ -5857,6 +5859,87 @@ approval:** the 7 tests (8 assertions) of the two removed functions, in
 `approval-inbox.test.ts`, `customers-inbox.test.ts` and `typeinfo.test.ts`.
 One fixture change in `TransitionPanel.test.tsx`. The two existing Inbox
 journeys pass unchanged.
+
+## Sent back to the requester, as built (step 5, PR 1) (2026-11-26)
+
+Track 1, item 5 of `docs/roadmap.md`, step 5, the first of two PRs: a
+Type can say that a state waits on whoever asked for the Item. That is
+the case "sent back to the requester" (a question for them, a correction
+to make), and it gives a customer a "waiting on me" view. PR 1 is the
+kernel, tested on test Types; PR 2 brings `incident@6` and the screen.
+
+**The key, on a state.** `waits_on: requester` on a state: an Item in
+that state waits on its requester, besides whoever its moves name.
+
+- **On a state, not a transition** (the owner's decision at Phase A; the
+  roadmap had "a `waiting` key on a transition"). The view is derived
+  when it is read, from the Item's state; a key on the move that sends
+  an Item back would need a column remembering which move entered the
+  state, a schema change. And the stack's real case has no move for the
+  requester at all: an incident waiting for its customer comes back when
+  the customer replies, by a reaction.
+- **The requester** is the one the kernel already calls so everywhere
+  (`policy.IsRequester`): `created_on_behalf_of`, else `created_by`. So
+  ana for her own request, kim for her incident, ana when an agent
+  created it for her.
+- **It adds no move.** The requester's moves are what the Type gives the
+  creator (`allowed: [creator]`), or none; `moves` lists them as before.
+  It does not replace the moves' rule: a state may wait on its requester
+  and on a role at once, and then both see it.
+- **Load checks:** the one value is `requester` (`INVALID_VALUE`
+  otherwise); not on a done or canceled state, which never wait; not on a
+  claimed state, where the Item waits on its claimant only; not on the
+  initial state, where every new Item would wait on whoever just made it
+  (`CONFLICT` each). The key is in `schema/type.schema.json`.
+
+**The rule, in `policy`.** `policy.WaitsOnRequester(type, state)` says
+which states wait on their requester; it is the one statement of it.
+`policy.WaitsOn` gains one case before the moves: such a state, and the
+person (the user an agent acts for, else the actor) is the Item's
+requester. `WaitsOnRole` is unchanged: a role's queue holds what the
+role's moves name.
+
+**The view.** The item service's SQL (`internal/itemservice/waiting.go`)
+adds one group: the states `WaitsOnRequester` names, under the
+requester's condition. A test holds the SQL to `policy.WaitsOn`, Item by
+Item.
+
+**Customers.** Since this step a customer, or an agent acting for one,
+may ask `waiting_on: me`:
+
+- they get their own requests whose state waits on the requester, and
+  nothing else: a customer's moves never count, and they hold no role;
+- each row is what any read gives them: the customer rule decides which
+  Items they see, and `policy.Project` which fields (their customer
+  fields only);
+- `role:<name>` stays refused for them (`INVALID_ARGUMENT` on
+  `filter.waiting_on`);
+- `CountItems`, `order_by: waiting_since`, `filter.in` and paging work as
+  for staff, by the same code.
+
+**The contract.** One field, `State.waits_on_requester` (7), which
+`GetType` fills, so that a client can say "sent back to you" from what
+the Type declares. The refusal of a customer's `me` is gone; no error was
+added. No schema change.
+
+**The reading.** "While it is in {s}, it waits on whoever asked for it."
+(part `waits.requester`), with a witness: kim, a customer, finds her
+request in her view once the team has asked her, and nobody else does;
+ana's own request, sent back, waits on ana.
+
+**Tests.** New: 4 in typedef, 4 in policy, 5 in the item service, 2 over
+the API, and one witness. Five existing tests that pinned "a customer is
+refused `waiting_on`" now pin that a customer's `role:` is refused and
+her `me` answers (the owner's approval at Phase A): two in the step 1
+tests, one each in 3a's and step 4's, one in the API's `CountItems`. The
+citation test's list of a Type's elements gained the key, so every
+`waits_on` must be read. No Type in `types/` uses it yet: `incident@6`
+comes in PR 2.
+
+**Kernel changes (counted):** the key and its checks in typedef;
+`WaitsOnRequester` and one case in `WaitsOn`; one SQL group and the
+customer branch in the view; one reading sentence; one contract field.
+No migration, no new dependency.
 
 ## Out of scope for the spike
 
