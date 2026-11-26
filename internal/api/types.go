@@ -62,7 +62,8 @@ func typeOut(ns string, t *typedef.Type) *kernelv1.Type {
 		})
 	}
 	for _, s := range t.States {
-		st := &kernelv1.State{Id: s.ID, Category: categories[s.Category], Frozen: s.Frozen}
+		st := &kernelv1.State{Id: s.ID, Category: categories[s.Category], Frozen: s.Frozen,
+			WaitsOnRequester: s.WaitsOn == typedef.WaitsOnRequester}
 		// Types are not secret: a client sees what a state will do by itself.
 		if s.Timer != nil {
 			st.Timer = &kernelv1.StateTimer{After: s.Timer.After, ToState: s.Timer.To}

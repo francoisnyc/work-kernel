@@ -479,6 +479,10 @@ func (r *renderer) state(i int) {
 				s.ID, s.Claim))
 	}
 	r.waits(i, s)
+	if s.WaitsOn == typedef.WaitsOnRequester {
+		r.say([]Part{Waits, WaitsRequester}, []string{at("states[%d].waits_on", i)},
+			at("While it is in %s, it waits on whoever asked for it.", s.ID))
+	}
 	if len(s.Frozen) > 0 {
 		r.say([]Part{Frozen}, []string{at("states[%d].frozen", i)},
 			at("While it is in %s, nobody changes %s.", s.ID, joinOr(ticked(s.Frozen))))

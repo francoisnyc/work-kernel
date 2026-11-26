@@ -28,7 +28,10 @@ import (
 //   - a state in category done or canceled never waits: a reopen is not
 //     work;
 //   - guards, required and given fields are not looked at: the move may
-//     still be refused when it is asked for.
+//     still be refused when it is asked for;
+//   - a state with `waits_on: requester` waits on the Item's requester
+//     too, whatever its moves name (track 1 item 5, step 5): an Item sent
+//     back to whoever asked for it, a customer included.
 
 // The two state categories that never wait (typedef's fixed list).
 const (
@@ -87,6 +90,9 @@ func WaitsOn(ty *typedef.Type, state string, who Who, it ItemFacts) bool {
 		return false
 	}
 	st, _ := ty.State(state)
+	if WaitsOnRequester(ty, state) && IsRequester(who.Actor, who.OnBehalfOf, it.CreatedBy, it.CreatedOnBehalfOf) {
+		return true
+	}
 	for _, tr := range WaitingMoves(ty, state) {
 		// tr is a copy (range copies each element), so narrowing its list
 		// to the named entries changes nothing in the Type.
@@ -101,10 +107,11 @@ func WaitsOn(ty *typedef.Type, state string, who Who, it ItemFacts) bool {
 // WaitsOnRequester reports whether an Item of ty, in state, waits on its
 // requester: the state says `waits_on: requester`. Never in a state of
 // category done or canceled (load refuses the key there).
-//
-// STUB: declared so the tests compile; it says no.
+// The item service's view groups exactly these states under the
+// requester's condition (IsRequester, in SQL).
 func WaitsOnRequester(ty *typedef.Type, state string) bool {
-	return false
+	st, ok := ty.State(state)
+	return ok && st.WaitsOn == typedef.WaitsOnRequester && st.Category != categoryDone && st.Category != categoryCanceled
 }
 
 // WaitsOnRole reports whether an Item of ty, in state, is in the queue of
