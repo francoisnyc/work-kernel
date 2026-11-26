@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"github.com/google/uuid"
 	"strconv"
 	"strings"
 
@@ -20,7 +21,7 @@ type filter struct{ itemservice.Filter }
 
 func (f filter) empty() bool {
 	return len(f.TypeIDs) == 0 && len(f.States) == 0 && len(f.Categories) == 0 && len(f.Fields) == 0 &&
-		len(f.Links) == 0 && f.WaitingOn == ""
+		len(f.Links) == 0 && f.WaitingOn == "" && f.In == nil
 }
 
 // parseTypeID reads a Type's name without a version: namespaces/{ns}/types/{type}.
@@ -55,6 +56,13 @@ func (s *server) filterIn(ctx context.Context, p item.Principal, f *kernelv1.Ite
 	// "Waiting on me": the kernel reads the value (me, role:<name>) and
 	// refuses anything else, at filter.waiting_on.
 	out.WaitingOn = f.WaitingOn
+	// A container to search below: a name in the caller's namespace; the
+	// kernel says whether the caller can see it.
+	in, cerr := optionalItem(p, f.In, "filter.in")
+	if cerr != nil {
+		return out, cerr
+	}
+	out.In = in
 	for _, c := range f.Categories {
 		name, ok := categoryNames[c]
 		if !ok {
@@ -335,4 +343,52 @@ func eventOut(ns, item string, ty *typedef.Type, e itemservice.Event) (*kernelv1
 	out.LinkType, out.LinkTarget, out.LinkReplaced = e.LinkType, ref(e.LinkTarget), ref(e.LinkReplaced)
 	out.ReactionTarget = ref(e.ReactionTarget)
 	return out, nil
+}
+
+// CountItems is SearchItems' words and filter, answered with a capped
+// count (track 1 item 5, step 4): the kernel counts through the same query.
+func (s *server) CountItems(ctx context.Context, req *connect.Request[kernelv1.CountItemsRequest]) (*connect.Response[kernelv1.CountItemsResponse], error) {
+	p, m := caller(ctx), req.Msg
+	if cerr := parentNamespace(p, m.Parent); cerr != nil {
+		return nil, cerr
+	}
+	filter, cerr := s.filterIn(ctx, p, m.Filter)
+	if cerr != nil {
+		return nil, cerr
+	}
+	if strings.TrimSpace(m.Query) == "" && filter.empty() {
+		return nil, badField("query", "required: words, a filter or both")
+	}
+	res, err := s.k.Count(ctx, itemservice.CountRequest{Principal: p, Query: m.Query, Filter: filter.Filter})
+	if err != nil {
+		return nil, errorIn(err, p.Namespace, "")
+	}
+	return connect.NewResponse(&kernelv1.CountItemsResponse{Count: int32(res.Count), Capped: res.Capped}), nil
+}
+
+// WhoAmI answers who the caller is: the token says who, never the request.
+func (s *server) WhoAmI(ctx context.Context, _ *connect.Request[kernelv1.WhoAmIRequest]) (*connect.Response[kernelv1.WhoAmIResponse], error) {
+	p := caller(ctx)
+	me, err := s.k.WhoAmI(ctx, p)
+	if err != nil {
+		return nil, errorIn(err, p.Namespace, "")
+	}
+	out := &kernelv1.WhoAmIResponse{
+		Principal: me.Principal, Namespace: namespaceName(me.Namespace), Roles: me.Roles,
+		OnBehalfOf: me.OnBehalfOf, OnBehalfOfRoles: me.OnBehalfOfRoles,
+	}
+	if ses := me.Session; ses != nil {
+		scopes := make([]string, len(ses.Scopes))
+		for i, id := range ses.Scopes {
+			scopes[i] = namespaceName(me.Namespace)
+			if id != uuid.Nil {
+				scopes[i] = itemName(me.Namespace, id)
+			}
+		}
+		out.Session = &kernelv1.AgentSession{
+			Name: namespaceName(me.Namespace) + "/agentSessions/" + ses.ID, Id: ses.ID,
+			Agent: ses.Agent, ActingFor: ses.OnBehalfOf, Scopes: scopes, Powers: ses.Powers,
+		}
+	}
+	return connect.NewResponse(out), nil
 }

@@ -84,6 +84,10 @@ func (s *server) view(ctx context.Context, p item.Principal, it item.Item) (*ker
 	if !it.CreatedAt.IsZero() {
 		out.CreateTime = timestamppb.New(it.CreatedAt)
 	}
+	if !it.StateEnteredAt.IsZero() {
+		out.StateTime = timestamppb.New(it.StateEnteredAt)
+	}
+	out.Moves = it.Moves
 	// The category is the Type version's, for the state the Item is in.
 	if st, ok := ty.State(it.State); ok {
 		out.Category = categories[st.Category]

@@ -154,8 +154,9 @@ message Item {
   // of the Item's state that the caller may make for who they are, in the
   // Type's order. Judged by the move's own rules: `allowed`, `except`, the
   // state's claim and a release; for an agent, the agent and the user it
-  // acts for. Guards, required and given fields are not evaluated, so a
-  // listed move may still be refused when asked. Filled only in an answer
+  // acts for. Guards, required and given fields, who may write the claim
+  // field (writable_by) and an agent session's powers are not evaluated, so
+  // a listed move may still be refused when asked. Filled only in an answer
   // to SearchItems or ListItems whose filter has waiting_on; empty there
   // means the caller may make none (a role's queue asked by a
   // non-member). Everywhere else it is empty and says nothing.
