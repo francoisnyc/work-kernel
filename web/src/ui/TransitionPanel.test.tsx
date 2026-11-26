@@ -6,7 +6,6 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import { StateCategory, TransitionItemResponseSchema, TransitionOutcome } from "../gen/kernel/v1/kernel_pb";
-import { inboxTransitions } from "../model/typeinfo";
 import {
   aSubmittedVacation,
   aTicket,
@@ -82,7 +81,7 @@ describe("what is offered", () => {
       <TransitionPanel
         type={vacation}
         item={aSubmittedVacation}
-        only={inboxTransitions(vacation, aSubmittedVacation)}
+        only={vacation.transitions.filter((t) => t.fromState === "submitted" && ["approved", "rejected"].includes(t.toState))}
         onTransition={applied()}
       />,
     );

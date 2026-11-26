@@ -7,8 +7,6 @@ import {
   item,
   itemName,
   leaveBalance,
-  sprint,
-  story,
   ticket,
   ticket4,
   vacation,
@@ -16,8 +14,6 @@ import {
 import {
   displayTitle,
   fieldAccess,
-  inboxQueries,
-  inboxTransitions,
   incomingLinkTypes,
   latestVersions,
   parseTypeName,
@@ -101,26 +97,6 @@ describe("transitionsFrom", () => {
     for (const v of [...transitionsFrom(ticket, "in_progress"), ...transitionsFrom(leaveBalance, "open")]) {
       expect(v.systemOnly, v.transition.toState).toBe(false);
     }
-  });
-});
-
-describe("the inbox", () => {
-  test("one query per Type, state and field that an `allowed: field:X` names, across versions", () => {
-    // vacation_request v1 and v3 both name field:f_approver from submitted,
-    // for two target states: still one query.
-    expect(inboxQueries(allTypes)).toEqual([
-      { type: `${NS}/types/vacation_request`, state: "submitted", field: "f_approver" },
-    ]);
-  });
-
-  test("no Type names a field: no query", () => {
-    expect(inboxQueries([ticket, story, sprint])).toEqual([]);
-  });
-
-  test("a row offers the field-allowed transitions of the Item's own version", () => {
-    expect(inboxTransitions(vacation, aSubmittedVacation).map((t) => t.toState)).toEqual(["approved", "rejected"]);
-    const draft = item({ name: itemName(12), type: vacation.name, state: "draft" });
-    expect(inboxTransitions(vacation, draft)).toEqual([]);
   });
 });
 
