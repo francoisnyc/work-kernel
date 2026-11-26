@@ -317,6 +317,44 @@ var outcomes = map[itemservice.Outcome]kernelv1.TransitionOutcome{
 	itemservice.OutcomeError:   kernelv1.TransitionOutcome_TRANSITION_OUTCOME_ERROR,
 }
 
+// MigrateItem moves an open Item to the latest version of its Type (track
+// 1, item 6, step 2), or with validate_only says what keeps it from that.
+func (s *server) MigrateItem(ctx context.Context, req *connect.Request[kernelv1.MigrateItemRequest]) (*connect.Response[kernelv1.MigrateItemResponse], error) {
+	p, m := caller(ctx), req.Msg
+	id, cerr := inNamespace(p, m.Name, "name")
+	if cerr != nil {
+		return nil, cerr
+	}
+	if m.Type == "" {
+		return nil, badField("type", "required")
+	}
+	ns, typeID, version, ok := parseTypeName(m.Type)
+	if !ok || ns != p.Namespace {
+		return nil, badField("type", "want namespaces/{ns}/types/{type}/versions/{n}")
+	}
+	if m.RequestId == "" && !m.ValidateOnly {
+		return nil, badField("request_id", "required")
+	}
+	res, err := s.k.Migrate(ctx, itemservice.MigrateRequest{
+		IdempotencyKey: m.RequestId, Principal: p, ItemID: id, TypeID: typeID, TypeVersion: version, ValidateOnly: m.ValidateOnly,
+	})
+	if err != nil {
+		return nil, errorFor(err, m.Name)
+	}
+	it, err := s.current(ctx, p, id)
+	if err != nil {
+		return nil, err
+	}
+	out := &kernelv1.MigrateItemResponse{Item: it, ItemSeq: res.ItemSeq, CommitSeq: res.CommitSeq}
+	for _, pr := range res.Problems {
+		out.Problems = append(out.Problems, &kernelv1.MigrationProblem{
+			Check: strings.ToUpper(string(pr.Check)), State: pr.State, ToState: pr.ToState,
+			Fields: pr.Fields, LinkType: pr.LinkType, Invariant: pr.Invariant,
+		})
+	}
+	return connect.NewResponse(out), nil
+}
+
 func (s *server) TransitionItem(ctx context.Context, req *connect.Request[kernelv1.TransitionItemRequest]) (*connect.Response[kernelv1.TransitionItemResponse], error) {
 	p, m := caller(ctx), req.Msg
 	id, cerr := inNamespace(p, m.Name, "name")

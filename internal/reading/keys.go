@@ -104,6 +104,7 @@ var KeyParts = map[string][]Part{
 	"start.allowed": {StartWho, WhoStaff, WhoRole, WhoPrincipal, StartWhoField, StartWhoContainerCreator, StartWhoNobody,
 		StartWhoCustomers, StartLatest},
 	"start.older_versions": {StartOlder, StartOlderAll},
+	"migrate.allowed":      {MigrateWho, WhoRole, WhoPrincipal},
 }
 
 // LeftOut are the keys no sentence reads, each with the reason.

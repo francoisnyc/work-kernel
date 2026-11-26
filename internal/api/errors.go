@@ -58,6 +58,7 @@ var messages = map[string]string{
 	"LINK_NOT_WRITABLE":   "the caller may not set links of this type",
 	"LINK_UNRESOLVED":     "entering the state sets a link, and no single target was found",
 	"NOT_UNIQUE":          "another Item in the same container already holds that value",
+	"NOT_MIGRATABLE":      "the Item cannot be migrated to the latest version of its Type",
 }
 
 // ReasonMessage returns the one fixed message of an ErrorInfo reason, and
@@ -160,13 +161,14 @@ func errorWith(err error, item, readersPath, ns string) *connect.Error {
 	// first; a bad session is also invalid, so SESSION_INVALID comes before
 	// INVALID_REQUEST.
 	var (
-		held        *itemservice.HeldError
-		invalid     *itemservice.InvalidError
-		rejected    *itemservice.RejectedError
-		approval    *itemservice.NeedsApprovalError
-		fieldNW     *itemservice.FieldNotWritableError
-		linkNW      *itemservice.LinkNotWritableError
-		placementNW *itemservice.PlacementNotWritableError
+		held          *itemservice.HeldError
+		invalid       *itemservice.InvalidError
+		rejected      *itemservice.RejectedError
+		notMigratable *itemservice.NotMigratableError
+		approval      *itemservice.NeedsApprovalError
+		fieldNW       *itemservice.FieldNotWritableError
+		linkNW        *itemservice.LinkNotWritableError
+		placementNW   *itemservice.PlacementNotWritableError
 	)
 	switch {
 	case errors.As(err, &held):
@@ -219,6 +221,13 @@ func errorWith(err error, item, readersPath, ns string) *connect.Error {
 		return apiError(connect.CodePermissionDenied, "NOT_ALLOWED", nil)
 	// A rule's refusal answers with its code. One without a code is a bug
 	// in the kernel, not the caller's problem: INTERNAL, like anything else.
+	case errors.As(err, &notMigratable):
+		// Every check that failed, in order; the dry run gives the details.
+		codes := make([]string, len(notMigratable.Problems))
+		for i, m := range notMigratable.Problems {
+			codes[i] = strings.ToUpper(string(m.Check))
+		}
+		return apiError(connect.CodeFailedPrecondition, "NOT_MIGRATABLE", map[string]string{"checks": strings.Join(codes, ",")})
 	case errors.As(err, &rejected) && rejected.Code != "":
 		return apiError(connect.CodeFailedPrecondition, strings.ToUpper(rejected.Code), rejected.Metadata)
 	case errors.Is(err, itemservice.ErrIdempotencyKeyReuse):

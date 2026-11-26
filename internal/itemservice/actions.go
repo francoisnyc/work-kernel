@@ -133,7 +133,7 @@ type PendingAction struct {
 // event names the hook as originating_hook and the entry as causation_id:
 // its write-back, or hook_failed. It reads the Item's whole history, which
 // is fine for the spike (see docs/journal.md, Later).
-func (k *Service) pendingActions(ctx context.Context, id uuid.UUID, ty *typedef.Type) ([]PendingAction, error) {
+func (k *Service) pendingActions(ctx context.Context, q rowsQuerier, id uuid.UUID, ty *typedef.Type) ([]PendingAction, error) {
 	hasActions := false
 	for _, h := range ty.Hooks {
 		hasActions = hasActions || h.Kind == typedef.HookAction
@@ -143,7 +143,7 @@ func (k *Service) pendingActions(ctx context.Context, id uuid.UUID, ty *typedef.
 	}
 
 	// Every event that entered a state, oldest first.
-	rows, err := k.pool.Query(ctx,
+	rows, err := q.Query(ctx,
 		`select item_seq, coalesce(case op when 'create' then payload->>'state' else payload->>'to' end, ''),
 		        coalesce(correlation_id, ''), hop
 		 from item_events
@@ -167,7 +167,7 @@ func (k *Service) pendingActions(ctx context.Context, id uuid.UUID, ty *typedef.
 	}
 
 	// What the hooks have already done: (originating_hook, causation_id).
-	rows, err = k.pool.Query(ctx,
+	rows, err = q.Query(ctx,
 		`select originating_hook, causation_id from item_events
 		 where item_id = $1 and originating_hook like 'hook:%' and causation_id is not null`, id)
 	if err != nil {
@@ -188,7 +188,7 @@ func (k *Service) pendingActions(ctx context.Context, id uuid.UUID, ty *typedef.
 
 	// Every applied undo that runs hooks (on: reaction), oldest first: each
 	// is an entry of those hooks, as entering a state is of an action's.
-	rows, err = k.pool.Query(ctx,
+	rows, err = q.Query(ctx,
 		`select item_seq, coalesce(payload->>'reaction', ''), coalesce(correlation_id, ''), hop
 		 from item_events
 		 where item_id = $1 and op = $2

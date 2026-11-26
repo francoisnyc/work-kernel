@@ -55,8 +55,16 @@ t0 = time.time()
 subprocess.run([f"{FIRST}/scripts/kernel-restart-itemservice.sh", f"{FIRST}/kernel/types-v2"], check=True, capture_output=True)
 say(f"- The change put live: the item service restarted with purchase@2 registered beside purchase@1 ({time.time() - t0:.1f} s; "
     "11 lines of YAML added, 3 changed: spikes/camunda-bakeoff/results/test1-kernel-purchase-v1-v2.diff).")
+# Since track 1, item 6, step 2 an administrator can migrate a request in flight to the new version, once the kernel has checked that it fits.
+moved = 0
 for s in steps[:3]:
-    say(f"- In flight at {s}: {finish(before[s])} (it keeps purchase@1, the version it was created on).")
+    _, dry = pli("ivy", "item", "migrate", before[s], "--to", "purchase@2", "--dry-run")
+    ok, res = pli("ivy", "item", "migrate", before[s], "--to", "purchase@2", check=False)
+    if ok:
+        moved += 1
+        say(f"- In flight at {s}: an administrator migrated it to purchase@2 (the dry run found {len(dry.get('problems', []))} problems); {finish(before[s])}.")
+    else:
+        say(f"- In flight at {s}: the migrate was refused ({' '.join(str(res).split())[:160]}); {finish(before[s])} (it keeps purchase@1).")
 _, it = pli("fay", "item", "get", before["approved"])
 say(f"- Already approved: still `{it['item']['state']}`, readable as before; its version's rules are kept with it.")
 say(f"- A new purchase@2: {finish(new(2, 'manager_review'))}.")
@@ -66,5 +74,7 @@ ok, res = pli("ana", "item", "create", "--type", "purchase@1", "--set", "f_amoun
 say("- A new purchase asked for on the OLD version by name (purchase@1), after the change: "
     + ("created (the first bake-off's gap: a creator may pick any registered version)." if ok
        else "refused: " + " ".join(str(res).split())[:200]))
-say("- There is no way to move an open Item to the new version: the change reaches no request in flight.")
+ok, res = pli("ivy", "item", "migrate", before["approved"], "--to", "purchase@2", check=False)
+say("- The one already approved: " + ("migrated" if ok else "not migrated (" + " ".join(str(res).split())[:160] + ")") + ".")
+say(f"- The change reached {moved} of the 3 requests in flight, each by one checked migrate; a fan of them at once is a later step.")
 open(os.path.join(SPIKE, "results/change-kernel.md"), "w").write("\n".join(out) + "\n")

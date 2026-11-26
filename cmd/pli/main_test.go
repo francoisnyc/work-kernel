@@ -308,8 +308,8 @@ func TestPli_Types(t *testing.T) {
 	for _, ty := range list["types"].([]any) {
 		names = append(names, ty.(map[string]any)["name"].(string))
 	}
-	if !slices.Contains(names, "namespaces/acme/types/ticket/versions/3") || len(names) != 67 {
-		t.Errorf("type list = %v, want the 67 Types of types/", names)
+	if !slices.Contains(names, "namespaces/acme/types/ticket/versions/3") || len(names) != 68 {
+		t.Errorf("type list = %v, want the 68 Types of types/", names)
 	}
 	ty := ok(t, "bob", "type", "get", "ticket@3")["type"].(map[string]any)
 	if ty["initial_state"] != "triage" {
@@ -341,5 +341,22 @@ func TestPli_UsageErrors(t *testing.T) {
 				t.Errorf("exit %d, stderr %q; want exit 2 mentioning %q", code, stderr.String(), c.want)
 			}
 		})
+	}
+}
+
+// pli item migrate ITEM --to TYPE@VERSION [--dry-run] calls MigrateItem
+// (track 1, item 6, step 2). ticket@9 lets the role ticket_admin migrate
+// to it, and bob does not hold it, so the call is refused, for a dry run too: what is pinned here is that
+// the command exists, sends the Type version, and prints the refusal.
+func TestPli_ItemMigrate(t *testing.T) {
+	item := ok(t, "ana", "item", "create", "--type", "ticket@1", "--set", "f_title=to migrate")["item"].(map[string]any)["name"].(string)
+	fails(t, "bob", "PERMISSION_DENIED NOT_ALLOWED", "item", "migrate", item, "--to", "ticket@9")
+	fails(t, "bob", "PERMISSION_DENIED NOT_ALLOWED", "item", "migrate", item, "--to", "ticket@9", "--dry-run")
+	// --to is required, and names a Type version.
+	for _, args := range [][]string{{"item", "migrate", item}, {"item", "migrate", item, "--to", "ticket"}} {
+		r := pli(t, "bob", args...)
+		if r.code != 2 || !strings.Contains(r.stderr, "--to") {
+			t.Errorf("pli %v: exit %d, stderr %q; want a usage error (exit 2) that names --to", args, r.code, r.stderr)
+		}
 	}
 }

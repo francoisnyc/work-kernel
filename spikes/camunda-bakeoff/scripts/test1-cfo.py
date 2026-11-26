@@ -45,8 +45,8 @@ def k_through_finance(i):
 
 # ------------------------------------------------------------- kernel
 say("\n## Kernel\n")
-before = k_new(1)
-say(f"- In flight before the change: purchase@1 {before}, 6,000, waiting on the manager.")
+before, before2 = k_new(1), k_new(1)
+say(f"- In flight before the change: two purchase@1 ({before}, {before2}), 6,000 each, waiting on the manager.")
 # Before it runs: the kernel checks the draft (with two typing slips, then
 # as written) and explains it in plain language. Nothing is registered yet.
 PLI = [f"{SPIKE}/scripts/pli.sh", "--as", "fay"]
@@ -83,7 +83,16 @@ time.sleep(2)
 _, res = pli("cora", "item", "get", new)
 say(f"- cora (cfo) approves: state `{res['item']['state']}`, order `{res['item']['fields'].get('f_order_id')}`")
 state, how = k_through_finance(before)
-say(f"- The in-flight purchase@1 {before}: {how} (it keeps the rules it was created under)")
+say(f"- The in-flight purchase@1 {before}: {how} (it keeps the rules it was created under, unless migrated)")
+# Since track 1, item 6, step 2 an administrator can migrate a purchase in flight to the new version, once the kernel has checked that it fits.
+_, dry = pli("ivy", "item", "migrate", before2, "--to", "purchase@2", "--dry-run")
+ok, res = pli("ivy", "item", "migrate", before2, "--to", "purchase@2", check=False)
+if ok:
+    state, how = k_through_finance(before2)
+    say(f"- The other in-flight purchase {before2}, migrated by an administrator to purchase@2 (the dry run found {len(dry.get('problems', []))} problems; "
+        f"it is now {res['item']['type'].split('/types/')[1].replace('/versions/', '@')}): {how}: the change reaches a request already in flight.")
+else:
+    say(f"- The other in-flight purchase {before2}: the migrate was refused: " + " ".join(str(res).split())[:200])
 # Since track 1, item 6, step 1 the kernel refuses this create; the row records the refusal (it used to run the purchase to its end).
 ok, res = pli("ana", "item", "create", "--type", "purchase@1", "--set", "f_amount=6000", "--set", "f_vendor=cloudhost",
               "--set", "f_cost_centre=CC-100", "--set", "f_justification=Three servers for the data team", check=False)

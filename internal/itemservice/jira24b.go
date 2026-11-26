@@ -251,25 +251,38 @@ type childState struct {
 // such writes in one container are judged one after the other.
 func checkUnique(ctx context.Context, tx pgx.Tx, ty *typedef.Type, id uuid.UUID, container *uuid.UUID,
 	state string, fields map[string]any) error {
+	f, clash, err := uniqueClash(ctx, tx, ty, id, container, state, fields)
+	if err != nil {
+		return err
+	}
+	if clash {
+		return rejected(CodeNotUnique, "another %s in this container holds the same %s", ty.ID, f)
+	}
+	return nil
+}
+
+// uniqueClash is checkUnique's finding: the unique field of ty whose value
+// a sibling already holds, if any. A migrate asks it of the version the
+// Item would move to.
+func uniqueClash(ctx context.Context, tx pgx.Tx, ty *typedef.Type, id uuid.UUID, container *uuid.UUID,
+	state string, fields map[string]any) (string, bool, error) {
 	if container == nil || len(ty.UniqueFields()) == 0 {
-		return nil
+		return "", false, nil
 	}
 	rows, err := tx.Query(ctx, `select state, fields from items where container_id = $1 and type_id = $2 and id <> $3`,
 		*container, ty.ID, id)
 	if err != nil {
-		return fmt.Errorf("read siblings: %w", err)
+		return "", false, fmt.Errorf("read siblings: %w", err)
 	}
 	siblings, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (lifecycle.Sibling, error) {
 		var s lifecycle.Sibling
 		return s, r.Scan(&s.State, &s.Fields)
 	})
 	if err != nil {
-		return fmt.Errorf("read siblings: %w", err)
+		return "", false, fmt.Errorf("read siblings: %w", err)
 	}
-	if f, clash := lifecycle.SiblingClash(ty, state, fields, siblings); clash {
-		return rejected(CodeNotUnique, "another %s in this container holds the same %s", ty.ID, f)
-	}
-	return nil
+	f, clash := lifecycle.SiblingClash(ty, state, fields, siblings)
+	return f, clash, nil
 }
 
 // lockUniqueContainer takes step 1 of the lock order for an update of an

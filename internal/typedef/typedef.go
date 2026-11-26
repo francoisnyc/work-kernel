@@ -341,6 +341,16 @@ type Type struct {
 	// Start (starting work, step 2; see start.go): where Items of the
 	// Type may be created, and by whom. nil when the Type has no block.
 	Start *Start `yaml:"start" json:"start,omitempty"`
+	// Migrate (track 1, item 6, step 2): who may migrate an open Item of
+	// an older version to this one, while it is the latest. nil: nobody.
+	// The latest version's block decides (see migrate.go).
+	Migrate *Migrate `yaml:"migrate" json:"migrate,omitempty"`
+}
+
+// Migrate is a Type's migrate block. Allowed lists who may migrate Items
+// to this version: role:<name> and principal:user:<id>.
+type Migrate struct {
+	Allowed []string `yaml:"allowed" json:"allowed,omitempty"`
 }
 
 // Jira 2.4b keywords. AllowedNobody (kernel change 12) is the `allowed`
@@ -543,6 +553,7 @@ func (t *Type) check() error {
 	t.checkJira24b(r)
 	// Where Items of this Type may be created, and by whom.
 	t.checkStart(r)
+	t.checkMigrate(r)
 	// Clears name fields, and may not sit on a held transition.
 	t.checkClears(r)
 	// Computed effects: the same, and each expression compiles to a value

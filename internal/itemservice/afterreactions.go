@@ -782,7 +782,7 @@ func (k *Service) containerReacts(ctx context.Context, q policy.Querier, contain
 // inside) with no outcome record. For any entry, not just the current one:
 // a reaction is never dropped because the Item moved on, or the worker
 // died. Oldest trigger first, then the Type's order.
-func (k *Service) pendingReactions(ctx context.Context, id uuid.UUID, ty *typedef.Type) ([]PendingReaction, error) {
+func (k *Service) pendingReactions(ctx context.Context, q rowsQuerier, id uuid.UUID, ty *typedef.Type) ([]PendingReaction, error) {
 	var enters, insides bool
 	var of []string
 	for _, r := range ty.Reactions {
@@ -799,7 +799,7 @@ func (k *Service) pendingReactions(ctx context.Context, id uuid.UUID, ty *typede
 		return nil, nil
 	}
 	// The outcome records there are: "<reaction key>|<cause>".
-	rows, err := k.pool.Query(ctx,
+	rows, err := q.Query(ctx,
 		// (A record that says more follow does not finish its reaction:
 		// one child of several was dealt with.)
 		`select payload ->> 'reaction' || '|' || causation_id from item_events
@@ -828,7 +828,7 @@ func (k *Service) pendingReactions(ctx context.Context, id uuid.UUID, ty *typede
 	}
 	var causes []cause
 	if enters {
-		rows, err := k.pool.Query(ctx,
+		rows, err := q.Query(ctx,
 			// A create enters the initial state: from nothing.
 			`select created_at, item_seq, coalesce(payload ->> 'from', ''),
 			        coalesce(payload ->> 'to', payload ->> 'state', ''), coalesce(correlation_id, ''), hop
@@ -848,7 +848,7 @@ func (k *Service) pendingReactions(ctx context.Context, id uuid.UUID, ty *typede
 	if insides {
 		// Items created inside this one (not moved in later): their create
 		// event names this Item as the container.
-		rows, err := k.pool.Query(ctx,
+		rows, err := q.Query(ctx,
 			`select e.created_at, c.id, c.type_id, coalesce(e.correlation_id, ''), e.hop
 			 from items c join item_events e on e.item_id = c.id and e.item_seq = 1
 			 where c.container_id = $1 and c.type_id = any($2) and e.payload ->> 'container_id' = $1::text

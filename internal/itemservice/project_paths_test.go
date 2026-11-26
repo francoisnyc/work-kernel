@@ -44,8 +44,11 @@ var projectExempt = map[string]string{
 // noItemData are the result types that carry no Item data. A
 // TransitionResult is a WriteResult plus an outcome, a hold ID and a reason;
 // the reason is a code, never a field value, so it holds no Item data either
-// (Step 6, part 2).
-var noItemData = []string{"WriteResult", "TransitionResult", "error"}
+// (Step 6, part 2). A MigrateResult is a WriteResult plus the problems that
+// keep an Item from being migrated: codes and what the Type declares (state,
+// field and link type IDs, an invariant's ID), never a field value and
+// never another Item (track 1, item 6, step 2; a test holds that).
+var noItemData = []string{"WriteResult", "TransitionResult", "MigrateResult", "error"}
 
 func TestEveryExportedReadCallsProject(t *testing.T) {
 	fset := token.NewFileSet()

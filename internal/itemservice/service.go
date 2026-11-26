@@ -634,7 +634,7 @@ func (k *Service) StateEntry(ctx context.Context, id uuid.UUID) (StateEntry, err
 	if err != nil {
 		return StateEntry{}, err
 	}
-	if se.PendingActions, err = k.pendingActions(ctx, id, ty); err != nil {
+	if se.PendingActions, err = k.pendingActions(ctx, k.pool, id, ty); err != nil {
 		return StateEntry{}, err
 	}
 	// The hold whose allowed resolution entered the state, if any: an
@@ -650,13 +650,13 @@ func (k *Service) StateEntry(ctx context.Context, id uuid.UUID) (StateEntry, err
 			return StateEntry{}, fmt.Errorf("read the entering hold: %w", err)
 		}
 	}
-	if se.PendingUndos, err = k.pendingUndos(ctx, id, ty); err != nil {
+	if se.PendingUndos, err = k.pendingUndos(ctx, k.pool, id, ty); err != nil {
 		return StateEntry{}, err
 	}
 	if se.ActingRuns, err = k.actingRuns(ctx, id, se.EnteredSeq); err != nil {
 		return StateEntry{}, err
 	}
-	if se.PendingReactions, err = k.pendingReactions(ctx, id, ty); err != nil {
+	if se.PendingReactions, err = k.pendingReactions(ctx, k.pool, id, ty); err != nil {
 		return StateEntry{}, err
 	}
 	return se, nil

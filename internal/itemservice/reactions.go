@@ -591,7 +591,7 @@ type PendingUndo struct {
 // by a held reaction: a deduction committed, its undo due (the hold closed
 // non-allow, or its state left by the undo's trigger), and the undo's key
 // not yet used. A workflow run that starts after a crash resumes them.
-func (k *Service) pendingUndos(ctx context.Context, id uuid.UUID, ty *typedef.Type) ([]PendingUndo, error) {
+func (k *Service) pendingUndos(ctx context.Context, q rowsQuerier, id uuid.UUID, ty *typedef.Type) ([]PendingUndo, error) {
 	var held []string
 	for _, r := range ty.Reactions {
 		if r.Kind == typedef.ReactionHeld {
@@ -602,10 +602,10 @@ func (k *Service) pendingUndos(ctx context.Context, id uuid.UUID, ty *typedef.Ty
 		return nil, nil
 	}
 	var ns string
-	if err := k.pool.QueryRow(ctx, `select namespace_id from items where id = $1`, id).Scan(&ns); err != nil {
+	if err := q.QueryRow(ctx, `select namespace_id from items where id = $1`, id).Scan(&ns); err != nil {
 		return nil, fmt.Errorf("read namespace: %w", err)
 	}
-	rows, err := k.pool.Query(ctx,
+	rows, err := q.Query(ctx,
 		`select id, hook, from_state, to_state, status, requested_seq, coalesce(resolved_seq, 0)
 		 from item_holds where item_id = $1 and hook = any($2) and status <> 'open' order by requested_seq`, id, held)
 	if err != nil {
@@ -652,7 +652,7 @@ func (k *Service) pendingUndos(ctx context.Context, id uuid.UUID, ty *typedef.Ty
 			keys = append(keys, resv.key+":"+undo.ID+":applied")
 		}
 		var found int
-		if err := k.pool.QueryRow(ctx,
+		if err := q.QueryRow(ctx,
 			`select count(*) from idempotency where namespace_id = $1 and actor = $2 and key = any($3)`,
 			ns, item.KindReaction+":"+ty.ID+":"+undo.ID, keys).Scan(&found); err != nil {
 			return nil, fmt.Errorf("read the undo's key: %w", err)
@@ -661,7 +661,7 @@ func (k *Service) pendingUndos(ctx context.Context, id uuid.UUID, ty *typedef.Ty
 			continue
 		}
 		p := PendingUndo{Reaction: undo.ID, HoldID: h.id, CauseSeq: cause}
-		if err := k.pool.QueryRow(ctx,
+		if err := q.QueryRow(ctx,
 			`select coalesce(correlation_id, ''), hop from item_events where item_id = $1 and item_seq = $2`,
 			id, cause).Scan(&p.CorrelationID, &p.Hop); err != nil {
 			return nil, fmt.Errorf("read the undo's cause: %w", err)

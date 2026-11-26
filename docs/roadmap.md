@@ -269,8 +269,8 @@ attack that found it as its test:
       customer a view.
 6. **Moving open Items to a new version, and retiring old versions**,
    deliberately and checked: a change that must reach requests in flight;
-   includes starting work's step 2b (the latest version governs creates and
-   placement).
+   builds on starting work's steps 2 and 2b, already built (the latest
+   version decides where an Item starts and who places it).
    Before Items move, each is checked against the new version's rules from
    its state and history (as Cognitive Fab's polyflow vets a new version
    against runs in flight: `docs/research/agent-governance-cognitive-fab-polyflow.md`).
@@ -288,12 +288,28 @@ attack that found it as its test:
       were changed, with the owner's agreement. No proto or database
       change. **Still open:** the three purchases in flight are still
       approved without the CFO, and no open Item can be moved.
-   2. **Move one quiet Item** to the latest version, checked against it
-      (its state, fields, invariants, links, container, claim and path),
-      with a dry run: a new operation in kernel.v1 and a Type key for who
-      may. Refused for an Item with a hold, an unfinished action or a
-      timer.
-   3. **Items with timers:** the workflow reloads under the new version.
+   2. **Migrate one quiet Item. Built** (`docs/design.md`, "Migrate one
+      quiet Item to the latest version, as built"): `MigrateItem` takes one
+      open Item to the latest version of its Type, checked against it (its
+      state, fields, invariants, links, container, claim and path), with a
+      dry run that lists every problem. The latest version says who may
+      (`migrate.allowed`; absent, nobody; people only). One transaction,
+      one `migrated` event; the etag does not change and nothing runs.
+      Refused (`NOT_MIGRATABLE`, seventeen check codes) for an Item that
+      is closed, held, has anything unfinished, has a timer on its state,
+      or has events not yet delivered. `ticket@9` carries the key and the
+      scenario migrates a ticket. Both bake-offs, run in full: an
+      administrator migrates the purchases in flight (after a dry run with
+      no problems) and finance's approval then sends each to the CFO; the
+      one already approved is refused. A contract addition; no database
+      change. **Still open:** an Item whose state has a timer; **an Item
+      that has finished an action** while the latest version keeps that
+      hook (an action's record carries its version; it fails closed);
+      a version that adds a hook or reaction on a state already entered;
+      one Item at a time; links that only loosen are refused.
+   3. **Items with timers, and Items that have finished an action:** the
+      workflow reloads under the new version, and history written before
+      a migrate is read as what it was.
    4. **Bulk and status:** every open Item of a version, with a dry-run
       list; which versions are open, and how many open Items each holds,
       in `ListTypes`.
@@ -660,9 +676,12 @@ test:
 4. **Done for creates: a requester creating on an older version skipped a
    newer rule.** The CFO approval was skipped this way. Since track 1, item
    6, step 1 a create names the latest version unless that version keeps
-   the older one open (`start.older_versions`). **Still open:** a request
-   already in flight keeps the rules of the version it was created on, and
-   nothing moves it (track 1, item 6, steps 2 to 4).
+   the older one open (`start.older_versions`). **Done one at a time for
+   requests in flight:** since track 1, item 6, step 2 someone the latest
+   version names can migrate a request in flight to it, after a dry run;
+   in both bake-offs the migrated purchases then go to the CFO. **Still
+   open:** every request of a version at once (step 4), and requests whose
+   state has a timer or that have finished an action (step 3).
 5. **Known, and planned elsewhere:** a claim is only a field, so a colleague
    can still decide (team queues with an enforced claim, under "Pilots serve
    generality"). Since built: track 1, item 5, step 2 (a state's `claim`).

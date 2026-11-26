@@ -7,6 +7,7 @@
 //	  item update ITEM [--set ID=VALUE]... [--add ID=VALUE]... [--remove ID=VALUE]... [--readers P,P | --inherit]
 //	                   [--move-to ITEM | --move-to-top] [--confirm-widen] [--etag E] [--request-id ID]
 //	  item transition ITEM --to STATE [--set ID=VALUE]... [--add ID=VALUE]... [--remove ID=VALUE]... [--wait D] [--etag E] [--request-id ID]
+//	  item migrate ITEM --to TYPE@VERSION [--dry-run] [--request-id ID]
 //	  item search [WORDS...] [--min-seq N] [FILTERS] [PAGING]
 //	  item list [ITEM] [FILTERS] [PAGING]           (no ITEM: the top level)
 //	  item history ITEM [PAGING]
@@ -114,6 +115,7 @@ const usage = `usage: pli [--server URL] [--tokens FILE] --as NAME [--session ID
   item update ITEM [--set ID=VALUE]... [--readers P,P | --inherit]
                    [--move-to ITEM | --move-to-top] [--confirm-widen] [--etag E] [--request-id ID]
   item transition ITEM --to STATE [--set ID=VALUE]... [--add ID=VALUE]... [--remove ID=VALUE]... [--wait D] [--etag E] [--request-id ID]
+  item migrate ITEM --to TYPE@VERSION [--dry-run] [--request-id ID]
   item search [WORDS...] [--min-seq N] [FILTERS] [PAGING]
   item list [ITEM] [FILTERS] [PAGING]           (no ITEM: the top level)
   inbox [WORDS...] [--role NAME] [FILTERS] [PAGING]   (what waits on you, or on a role: item search --waiting-on)
@@ -210,6 +212,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		"item get":        c.itemGet,
 		"item update":     c.itemUpdate,
 		"item transition": c.itemTransition,
+		"item migrate":    c.itemMigrate,
 		"item search":     c.itemSearch,
 		"item list":       c.itemList,
 		"item history":    c.itemHistory,
@@ -626,6 +629,40 @@ func (c *cli) itemTransition(ctx context.Context, args []string) error {
 		Name: c.itemRef(ref), RequestId: *requestID, Etag: *etag, ToState: *to, Fields: fields,
 		Wait: durationpb.New(*wait),
 	}))
+	if err != nil {
+		return err
+	}
+	return c.print(res.Msg)
+}
+
+// itemMigrate moves an open Item to the latest version of its Type, which
+// --to must name (track 1, item 6, step 2). With --dry-run nothing is
+// written: the answer lists what keeps the Item from being migrated.
+func (c *cli) itemMigrate(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("item migrate", flag.ContinueOnError)
+	to := fs.String("to", "", "the Type version to migrate to: TYPE@VERSION, the latest version of the Item's Type")
+	dryRun := fs.Bool("dry-run", false, "check only: write nothing, list every problem")
+	requestID := fs.String("request-id", newRequestID(), "idempotency key")
+	pos, err := parse(fs, args)
+	if err != nil {
+		return err
+	}
+	ref, err := one(pos, "ITEM")
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(*to, "@") && !strings.Contains(*to, "/versions/") {
+		return usagef("--to is required and names a Type version, such as purchase@2")
+	}
+	typeName, err := c.typeRef(*to)
+	if err != nil {
+		return err
+	}
+	req := &kernelv1.MigrateItemRequest{Name: c.itemRef(ref), Type: typeName, ValidateOnly: *dryRun}
+	if !*dryRun {
+		req.RequestId = *requestID
+	}
+	res, err := c.c.MigrateItem(ctx, connect.NewRequest(req))
 	if err != nil {
 		return err
 	}

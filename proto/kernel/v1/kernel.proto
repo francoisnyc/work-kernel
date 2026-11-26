@@ -43,6 +43,14 @@ service ItemService {
   rpc UpdateItem(UpdateItemRequest) returns (UpdateItemResponse);
   // Move the Item to another state, optionally with a field patch and a wait.
   rpc TransitionItem(TransitionItemRequest) returns (TransitionItemResponse);
+  // Move an open Item from the Type version it is on to the latest one
+  // (track 1, item 6, step 2), once it is checked against that version:
+  // its state, fields, invariants, links, container, claim and the path it
+  // took. Only those the latest version's migrate.allowed names may; an
+  // Item with an open hold, an unfinished action or reaction, a timer or
+  // undelivered events is refused. With validate_only nothing is written
+  // and every problem is listed.
+  rpc MigrateItem(MigrateItemRequest) returns (MigrateItemResponse);
   // Items whose string fields contain all the words and that match the
   // filter, among those the caller can see. Words, a filter or both.
   rpc SearchItems(SearchItemsRequest) returns (SearchItemsResponse);
@@ -291,6 +299,59 @@ message TransitionItemResponse {
   string hold = 6;
 }
 
+message MigrateItemRequest {
+  // namespaces/{ns}/items/{item}
+  string name = 1;
+  // Required: the Type version the caller expects the Item to land on,
+  // namespaces/{ns}/types/{type}/versions/{n}. It must be the latest
+  // registered version of the Item's Type when the call commits; if a newer
+  // one was registered since the caller looked, the Item does not fit
+  // (problem TARGET_NOT_LATEST) and nothing is written.
+  string type = 2;
+  // Required unless validate_only; see CreateItemRequest.request_id.
+  string request_id = 3;
+  // Check only: nothing is written, no request_id is used, and the answer
+  // lists every problem (none: the Item fits).
+  bool validate_only = 4;
+}
+
+message MigrateItemResponse {
+  // The Item as the caller sees it: after the migrate, or as it is for
+  // validate_only.
+  Item item = 1;
+  // Zero for validate_only.
+  int64 item_seq = 2;
+  int64 commit_seq = 3;
+  // validate_only: everything that keeps the Item from being migrated.
+  // Empty when it fits. A migrate that does not fit is not answered here:
+  // it is FAILED_PRECONDITION / NOT_MIGRATABLE, with the checks in metadata.
+  repeated MigrationProblem problems = 4;
+}
+
+// One reason an Item cannot be migrated to the latest version of its Type.
+// It names what the Type declares (states, fields, link types), never a
+// value or another Item.
+message MigrationProblem {
+  // A code in UPPER_SNAKE: TARGET_NOT_LATEST, CLOSED, HELD,
+  // ACTION_UNFINISHED, REACTION_UNFINISHED, HAS_TIMER, EVENTS_UNDELIVERED,
+  // STATE_MISSING, FIELD_MISSING, FIELD_CHANGED, INVARIANT_FAILED,
+  // NOT_UNIQUE, LINK_CHANGED, CONTAINER_NOT_ADMITTED, CLAIM_EMPTY,
+  // PATH_NOT_DECLARED, PATH_MISSING_FIELDS. Clients ignore codes they do
+  // not know.
+  string check = 1;
+  // The state the problem is about; for PATH_NOT_DECLARED the state the
+  // undeclared move left.
+  string state = 2;
+  // For PATH_NOT_DECLARED: the state the undeclared move entered.
+  string to_state = 3;
+  // Field IDs, sorted.
+  repeated string fields = 4;
+  // The link type's declared name.
+  string link_type = 5;
+  // INVARIANT_FAILED: the invariant's ID.
+  string invariant = 6;
+}
+
 enum TransitionOutcome {
   TRANSITION_OUTCOME_UNSPECIFIED = 0;
   // The Item moved.
@@ -515,6 +576,9 @@ message ItemEvent {
   // it created, its container, the Item one link away); restricted when
   // the caller cannot see it. Unset when the record names no Item.
   ItemRef reaction_target = 35;
+  // MIGRATED: the Type version the Item left,
+  // namespaces/{ns}/types/{type}/versions/{n} (type holds the new one).
+  string previous_type = 36;
 }
 
 enum ItemEventKind {
@@ -546,6 +610,10 @@ enum ItemEventKind {
   // reaction names it, reason says why (condition_false, not_by,
   // not_in_from, no_target). No field or state change.
   ITEM_EVENT_KIND_REACTION_SKIPPED = 13;
+  // The Item was migrated to the latest version of its Type: type names
+  // the version it is on from here, previous_type the one it left. No
+  // field or state change.
+  ITEM_EVENT_KIND_MIGRATED = 14;
 }
 
 message StartAgentSessionRequest {

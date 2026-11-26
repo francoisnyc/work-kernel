@@ -75,6 +75,7 @@
 //	time person creates ITEM as TYPE@V [in ITEM] [with values]
 //	time person updates ITEM with values             (field = null clears it)
 //	time person moves ITEM to STATE [with values]
+//	time person migrates ITEM to TYPE@VERSION        the Item goes to that version, which must be its Type's latest
 //	time person links ITEM LINK ITEM
 //	time person unlinks ITEM LINK ITEM
 //	time person places ITEM in ITEM                  moves it into a container (Update with a move)
@@ -142,6 +143,7 @@
 //
 //	create               who created it in STATE[ inside ITEM][: values]
 //	transition           who moved it FROM -> TO[: values][; linked LINK to ITEM]
+//	migrated             who migrated it TYPE@VERSION -> TYPE@VERSION
 //	transition_requested who asked FROM -> TO[: values]
 //	transition_denied    who denied FROM -> TO: REASON
 //	transition_failed    who failed FROM -> TO: REASON

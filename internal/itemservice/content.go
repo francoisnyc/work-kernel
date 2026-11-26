@@ -50,6 +50,9 @@ var contentDecisions = map[string]contentDecision{
 	lifecycle.OpReactionApplied:  never,
 	lifecycle.OpReactionFailed:   never,
 	lifecycle.OpReactionSkipped:  never,
+	// A migrate changes the Item's Type version and nothing a caller could
+	// overwrite: no field, no reader, no container, no state.
+	lifecycle.OpMigrated: never,
 }
 
 // changesContent reports whether the event (op, payload), written on an

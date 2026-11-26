@@ -68,6 +68,8 @@ const (
 	// ItemServiceTransitionItemProcedure is the fully-qualified name of the ItemService's
 	// TransitionItem RPC.
 	ItemServiceTransitionItemProcedure = "/kernel.v1.ItemService/TransitionItem"
+	// ItemServiceMigrateItemProcedure is the fully-qualified name of the ItemService's MigrateItem RPC.
+	ItemServiceMigrateItemProcedure = "/kernel.v1.ItemService/MigrateItem"
 	// ItemServiceSearchItemsProcedure is the fully-qualified name of the ItemService's SearchItems RPC.
 	ItemServiceSearchItemsProcedure = "/kernel.v1.ItemService/SearchItems"
 	// ItemServiceListItemsProcedure is the fully-qualified name of the ItemService's ListItems RPC.
@@ -108,6 +110,14 @@ type ItemServiceClient interface {
 	UpdateItem(context.Context, *connect.Request[v1.UpdateItemRequest]) (*connect.Response[v1.UpdateItemResponse], error)
 	// Move the Item to another state, optionally with a field patch and a wait.
 	TransitionItem(context.Context, *connect.Request[v1.TransitionItemRequest]) (*connect.Response[v1.TransitionItemResponse], error)
+	// Move an open Item from the Type version it is on to the latest one
+	// (track 1, item 6, step 2), once it is checked against that version:
+	// its state, fields, invariants, links, container, claim and the path it
+	// took. Only those the latest version's migrate.allowed names may; an
+	// Item with an open hold, an unfinished action or reaction, a timer or
+	// undelivered events is refused. With validate_only nothing is written
+	// and every problem is listed.
+	MigrateItem(context.Context, *connect.Request[v1.MigrateItemRequest]) (*connect.Response[v1.MigrateItemResponse], error)
 	// Items whose string fields contain all the words and that match the
 	// filter, among those the caller can see. Words, a filter or both.
 	SearchItems(context.Context, *connect.Request[v1.SearchItemsRequest]) (*connect.Response[v1.SearchItemsResponse], error)
@@ -188,6 +198,12 @@ func NewItemServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			httpClient,
 			baseURL+ItemServiceTransitionItemProcedure,
 			connect.WithSchema(itemServiceMethods.ByName("TransitionItem")),
+			connect.WithClientOptions(opts...),
+		),
+		migrateItem: connect.NewClient[v1.MigrateItemRequest, v1.MigrateItemResponse](
+			httpClient,
+			baseURL+ItemServiceMigrateItemProcedure,
+			connect.WithSchema(itemServiceMethods.ByName("MigrateItem")),
 			connect.WithClientOptions(opts...),
 		),
 		searchItems: connect.NewClient[v1.SearchItemsRequest, v1.SearchItemsResponse](
@@ -271,6 +287,7 @@ type itemServiceClient struct {
 	getItem           *connect.Client[v1.GetItemRequest, v1.GetItemResponse]
 	updateItem        *connect.Client[v1.UpdateItemRequest, v1.UpdateItemResponse]
 	transitionItem    *connect.Client[v1.TransitionItemRequest, v1.TransitionItemResponse]
+	migrateItem       *connect.Client[v1.MigrateItemRequest, v1.MigrateItemResponse]
 	searchItems       *connect.Client[v1.SearchItemsRequest, v1.SearchItemsResponse]
 	listItems         *connect.Client[v1.ListItemsRequest, v1.ListItemsResponse]
 	listItemEvents    *connect.Client[v1.ListItemEventsRequest, v1.ListItemEventsResponse]
@@ -303,6 +320,11 @@ func (c *itemServiceClient) UpdateItem(ctx context.Context, req *connect.Request
 // TransitionItem calls kernel.v1.ItemService.TransitionItem.
 func (c *itemServiceClient) TransitionItem(ctx context.Context, req *connect.Request[v1.TransitionItemRequest]) (*connect.Response[v1.TransitionItemResponse], error) {
 	return c.transitionItem.CallUnary(ctx, req)
+}
+
+// MigrateItem calls kernel.v1.ItemService.MigrateItem.
+func (c *itemServiceClient) MigrateItem(ctx context.Context, req *connect.Request[v1.MigrateItemRequest]) (*connect.Response[v1.MigrateItemResponse], error) {
+	return c.migrateItem.CallUnary(ctx, req)
 }
 
 // SearchItems calls kernel.v1.ItemService.SearchItems.
@@ -375,6 +397,14 @@ type ItemServiceHandler interface {
 	UpdateItem(context.Context, *connect.Request[v1.UpdateItemRequest]) (*connect.Response[v1.UpdateItemResponse], error)
 	// Move the Item to another state, optionally with a field patch and a wait.
 	TransitionItem(context.Context, *connect.Request[v1.TransitionItemRequest]) (*connect.Response[v1.TransitionItemResponse], error)
+	// Move an open Item from the Type version it is on to the latest one
+	// (track 1, item 6, step 2), once it is checked against that version:
+	// its state, fields, invariants, links, container, claim and the path it
+	// took. Only those the latest version's migrate.allowed names may; an
+	// Item with an open hold, an unfinished action or reaction, a timer or
+	// undelivered events is refused. With validate_only nothing is written
+	// and every problem is listed.
+	MigrateItem(context.Context, *connect.Request[v1.MigrateItemRequest]) (*connect.Response[v1.MigrateItemResponse], error)
 	// Items whose string fields contain all the words and that match the
 	// filter, among those the caller can see. Words, a filter or both.
 	SearchItems(context.Context, *connect.Request[v1.SearchItemsRequest]) (*connect.Response[v1.SearchItemsResponse], error)
@@ -451,6 +481,12 @@ func NewItemServiceHandler(svc ItemServiceHandler, opts ...connect.HandlerOption
 		ItemServiceTransitionItemProcedure,
 		svc.TransitionItem,
 		connect.WithSchema(itemServiceMethods.ByName("TransitionItem")),
+		connect.WithHandlerOptions(opts...),
+	)
+	itemServiceMigrateItemHandler := connect.NewUnaryHandler(
+		ItemServiceMigrateItemProcedure,
+		svc.MigrateItem,
+		connect.WithSchema(itemServiceMethods.ByName("MigrateItem")),
 		connect.WithHandlerOptions(opts...),
 	)
 	itemServiceSearchItemsHandler := connect.NewUnaryHandler(
@@ -535,6 +571,8 @@ func NewItemServiceHandler(svc ItemServiceHandler, opts ...connect.HandlerOption
 			itemServiceUpdateItemHandler.ServeHTTP(w, r)
 		case ItemServiceTransitionItemProcedure:
 			itemServiceTransitionItemHandler.ServeHTTP(w, r)
+		case ItemServiceMigrateItemProcedure:
+			itemServiceMigrateItemHandler.ServeHTTP(w, r)
 		case ItemServiceSearchItemsProcedure:
 			itemServiceSearchItemsHandler.ServeHTTP(w, r)
 		case ItemServiceListItemsProcedure:
@@ -582,6 +620,10 @@ func (UnimplementedItemServiceHandler) UpdateItem(context.Context, *connect.Requ
 
 func (UnimplementedItemServiceHandler) TransitionItem(context.Context, *connect.Request[v1.TransitionItemRequest]) (*connect.Response[v1.TransitionItemResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kernel.v1.ItemService.TransitionItem is not implemented"))
+}
+
+func (UnimplementedItemServiceHandler) MigrateItem(context.Context, *connect.Request[v1.MigrateItemRequest]) (*connect.Response[v1.MigrateItemResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kernel.v1.ItemService.MigrateItem is not implemented"))
 }
 
 func (UnimplementedItemServiceHandler) SearchItems(context.Context, *connect.Request[v1.SearchItemsRequest]) (*connect.Response[v1.SearchItemsResponse], error) {
