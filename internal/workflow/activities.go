@@ -106,15 +106,13 @@ func (a *Activities) LoadItem(ctx context.Context, itemID string) (Snapshot, err
 			undos[r.ID] = u.ID
 		}
 	}
-	// The current entry's enrich hooks that have not written yet. A hook
-	// that ran and wrote nothing (no fallback) runs again; its key makes any
-	// second write a no-op.
-	var pending []string
-	for _, h := range enrich[se.State] {
-		if !slices.Contains(se.HooksRun, h.ID) {
-			pending = append(pending, h.ID)
-		}
-	}
+	// The current entry's enrich hooks that have not written yet, as the
+	// item service reads them: by the version the Item was on when it
+	// entered the state (track 1, item 6, step 3a), so a hook a later
+	// version adds is not run for an entry made before a migrate. A hook
+	// that ran and wrote nothing (no fallback) runs again; its key makes
+	// any second write a no-op.
+	pending := se.PendingEnrich
 	snap := Snapshot{
 		TypeID: se.TypeID, TypeVersion: se.TypeVersion, Timers: timers,
 		State: se.State, LastAppliedSeq: se.ItemSeq,
