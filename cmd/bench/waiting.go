@@ -88,7 +88,7 @@ transitions:
 // 73 have purchases in review, 500 each: m70 and m170 do, m5 has none.
 const loadWaiting = `
 insert into items (id, namespace_id, type_id, type_version, scope_id, state, fields, item_seq, content_seq,
-                   created_at, created_by, updated_at)
+                   created_at, created_by, updated_at, state_entered_at)
 select gen_random_uuid(), 'default',
        case when g <= 250000 then 'bw_purchase' else 'bw_story' end,
        case when g <= 250000 then 1 + (g % 2) else 1 end,
@@ -103,7 +103,7 @@ select gen_random_uuid(), 'default',
        case when g <= 250000 then jsonb_build_object('f_amount', g % 9000, 'f_vendor', 'vendor-' || (g % 300),
                                                      'f_manager', 'user:m' || (g % 500))
             else jsonb_build_object('f_title', 'story ' || g) end,
-       1, 1, now() - (g || ' seconds')::interval, 'user:u' || (g % 5000), now()
+       1, 1, now() - (g || ' seconds')::interval, 'user:u' || (g % 5000), now(), now() - (g || ' seconds')::interval
 from generate_series(1, 400000) g`
 
 func waitingMode(ctx context.Context) error {

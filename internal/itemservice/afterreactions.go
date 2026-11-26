@@ -629,8 +629,8 @@ func (in *Internal) ReactCreate(ctx context.Context, req ReactionRunRequest) (Re
 			const itemSeq = 1
 			_, err = tx.Exec(ctx,
 				`insert into items (id, namespace_id, type_id, type_version, container_id, scope_id, state, fields, item_seq,
-				                    content_seq, created_at, created_by, created_on_behalf_of)
-				 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $12, $10, $11, null)`,
+				                    content_seq, created_at, created_by, created_on_behalf_of, state_entered_at)
+				 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $12, $10, $11, null, $10)`,
 				id, tg.ns, created.ID, created.Version, container, scopeID, created.InitialState, fields, itemSeq,
 				at, tg.principal().Actor, bump.n)
 			if err != nil {

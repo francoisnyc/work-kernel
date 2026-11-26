@@ -364,8 +364,8 @@ func (k *Service) Create(ctx context.Context, req CreateRequest) (WriteResult, e
 		const itemSeq = 1
 		_, err = tx.Exec(ctx,
 			`insert into items (id, namespace_id, type_id, type_version, container_id, scope_id, state, fields, item_seq,
-			                    content_seq, created_at, created_by, created_on_behalf_of)
-			 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $13, $12, $10, nullif($11, ''))`,
+			                    content_seq, created_at, created_by, created_on_behalf_of, state_entered_at)
+			 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $13, $12, $10, nullif($11, ''), $12)`,
 			id, ns, ty.ID, ty.Version, req.ContainerID, scopeID, ty.InitialState, fields, itemSeq,
 			owner.Actor, owner.OnBehalfOf, at, bump.n)
 		if err != nil {
