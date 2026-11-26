@@ -343,3 +343,20 @@ func TestPli_UsageErrors(t *testing.T) {
 		})
 	}
 }
+
+// pli item migrate ITEM --to TYPE@VERSION [--dry-run] calls MigrateItem
+// (track 1, item 6, step 2). ticket@8 names nobody who may migrate to it,
+// so the call is refused, for a dry run too: what is pinned here is that
+// the command exists, sends the Type version, and prints the refusal.
+func TestPli_ItemMigrate(t *testing.T) {
+	item := ok(t, "ana", "item", "create", "--type", "ticket@1", "--set", "f_title=to migrate")["item"].(map[string]any)["name"].(string)
+	fails(t, "bob", "PERMISSION_DENIED NOT_ALLOWED", "item", "migrate", item, "--to", "ticket@8")
+	fails(t, "bob", "PERMISSION_DENIED NOT_ALLOWED", "item", "migrate", item, "--to", "ticket@8", "--dry-run")
+	// --to is required, and names a Type version.
+	for _, args := range [][]string{{"item", "migrate", item}, {"item", "migrate", item, "--to", "ticket"}} {
+		r := pli(t, "bob", args...)
+		if r.code != 2 || !strings.Contains(r.stderr, "--to") {
+			t.Errorf("pli %v: exit %d, stderr %q; want a usage error (exit 2) that names --to", args, r.code, r.stderr)
+		}
+	}
+}
