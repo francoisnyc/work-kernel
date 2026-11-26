@@ -33,7 +33,7 @@ export function customerMayTake(t: Transition): boolean {
 
 // customerView: a Type as a customer meets it: only the fields and link
 // names it lists for them, and only the moves they may take, whose
-// field:X entries keep only the fields they see (so the Inbox never asks
+// field:X entries keep only the fields they see (so no page shows a rule
 // about a field hidden from them).
 export function customerView(t: Type): Type {
   const shown = new Set(t.customerFields);

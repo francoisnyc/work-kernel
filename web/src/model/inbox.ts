@@ -6,16 +6,16 @@
 // here reads `allowed`, `except` or a claim to decide what a person may
 // do. The one thing read from the Types is which role names appear in
 // some `allowed`, to choose which of the caller's roles get a tab.
-//
-// STUB: declared so the tests compile; not built yet.
-import type { MessageInitShape } from "@bufbuild/protobuf";
-import type { Timestamp } from "@bufbuild/protobuf/wkt";
-import type {
-  CountItemsRequestSchema,
-  Item,
-  SearchItemsRequestSchema,
-  Transition,
-  Type,
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
+import { timestampDate, type Timestamp } from "@bufbuild/protobuf/wkt";
+import {
+  FieldType,
+  TransitionSchema,
+  type CountItemsRequestSchema,
+  type Item,
+  type SearchItemsRequestSchema,
+  type Transition,
+  type Type,
 } from "../gen/kernel/v1/kernel_pb";
 
 // One tab: "Waiting on me", or a role's queue.
@@ -30,34 +30,93 @@ export const INBOX_PAGE = 50;
 // name; "" for anywhere).
 export type InboxView = { parent: string; tab: InboxTab; order: InboxOrder; place: string };
 
-export function inboxTabs(_roles: readonly string[], _types: Type[]): InboxTab[] {
-  return [];
+const ME: InboxTab = { key: "me", label: "Waiting on me", waitingOn: "me" };
+
+// "Waiting on me", then one tab per role the caller holds (WhoAmI) that
+// some Type names in a transition's `allowed`, in byte order. A role no
+// Type names can have no queue, so it gets no tab. This reads which names
+// are written in the Types; it decides nothing about who may act.
+export function inboxTabs(roles: readonly string[], types: Type[]): InboxTab[] {
+  const named = new Set<string>();
+  for (const type of types) {
+    for (const t of type.transitions) {
+      for (const a of t.allowed) if (a.startsWith("role:")) named.add(a.slice("role:".length));
+    }
+  }
+  const held = [...new Set(roles)].filter((r) => named.has(r)).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return [ME, ...held.map((r) => ({ key: `role:${r}`, label: r, waitingOn: `role:${r}`, role: r }))];
 }
 
-export function inboxSearch(_v: InboxView, _page: { pageToken?: string; minSeq?: bigint } = {}): MessageInitShape<typeof SearchItemsRequestSchema> {
-  return {};
+function filterOf(v: Pick<InboxView, "tab" | "place">) {
+  return v.place === "" ? { waitingOn: v.tab.waitingOn } : { waitingOn: v.tab.waitingOn, in: v.place };
 }
 
-export function inboxCount(_v: Omit<InboxView, "order">): MessageInitShape<typeof CountItemsRequestSchema> {
-  return {};
+// The search a view sends: the tab's waiting_on, the order, a page of 50,
+// the place if one is chosen. It names no Type, state or field.
+export function inboxSearch(v: InboxView, page: { pageToken?: string; minSeq?: bigint } = {}): MessageInitShape<typeof SearchItemsRequestSchema> {
+  return {
+    parent: v.parent,
+    pageSize: INBOX_PAGE,
+    orderBy: v.order === "oldest" ? "waiting_since" : "waiting_since desc",
+    filter: filterOf(v),
+    ...(page.pageToken ? { pageToken: page.pageToken } : {}),
+    ...(page.minSeq ? { minSeq: page.minSeq } : {}),
+  };
 }
 
-export function countLabel(_c: { count: number; capped: boolean } | undefined): string {
-  return "";
+// The count behind a tab's number: the same filter, no page, no order.
+export function inboxCount(v: Omit<InboxView, "order">): MessageInitShape<typeof CountItemsRequestSchema> {
+  return { parent: v.parent, filter: filterOf(v) };
 }
 
-export function rowMoves(_type: Type | undefined, _item: Item): Transition[] {
-  return [];
+// "12", or "50+" when the kernel says there are more; "" before the answer.
+export function countLabel(c: { count: number; capped: boolean } | undefined): string {
+  if (!c) return "";
+  return c.capped ? `${c.count}+` : String(c.count);
 }
 
-export function whyYours(_tab: InboxTab, _type: Type | undefined, _item: Item, _principal: string): string {
-  return "";
+// A row's buttons: exactly the moves the server listed for the caller
+// (Item.moves), in its order. The Type is read only to show a move's form
+// and rules; a move this copy of the Type does not have is still offered.
+export function rowMoves(type: Type | undefined, item: Item): Transition[] {
+  return item.moves.map(
+    (to) =>
+      type?.transitions.find((t) => t.fromState === item.state && t.toState === to) ??
+      create(TransitionSchema, { fromState: item.state, toState: to }),
+  );
 }
 
-export function askedBy(_item: Item): string {
-  return "";
+// Why a row is in this tab, as far as the data says it directly:
+//   - on a role's tab, the tab: "for your team (finance)";
+//   - on Waiting on me, the principal fields that hold the caller, by ID:
+//     "f_approver is you"; nothing when no field does (the kernel put the
+//     Item in the view; the browser does not re-derive why).
+export function whyYours(tab: InboxTab, type: Type | undefined, item: Item, principal: string): string {
+  if (tab.role !== undefined) return `for your team (${tab.role})`;
+  const ids = (type?.fields ?? [])
+    .filter((f) => f.type === FieldType.PRINCIPAL && item.fields?.[f.id] === principal)
+    .map((f) => f.id);
+  return ids.length === 0 ? "" : `${ids.join(", ")} is you`;
 }
 
-export function waitingFor(_stateTime: Timestamp | undefined, _now: Date): string {
-  return "";
+// Who asked: the creator, or the user an agent created the Item for.
+export function askedBy(item: Item): string {
+  return item.creatorOnBehalfOf !== "" ? item.creatorOnBehalfOf : item.creator;
+}
+
+const units: [number, string][] = [
+  [86_400, "d"],
+  [3_600, "h"],
+  [60, "min"],
+  [1, "s"],
+];
+
+// "waiting 3 d": since the Item entered its state (Item.state_time), the
+// largest unit that fits, rounded down. Clock time, not working time.
+export function waitingFor(stateTime: Timestamp | undefined, now: Date): string {
+  if (!stateTime) return "";
+  const seconds = Math.floor((now.getTime() - timestampDate(stateTime).getTime()) / 1000);
+  if (seconds < 1) return "just arrived";
+  const [size, unit] = units.find(([s]) => seconds >= s)!;
+  return `waiting ${Math.floor(seconds / size)} ${unit}`;
 }

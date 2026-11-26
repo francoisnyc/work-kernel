@@ -237,3 +237,31 @@ dt {
   text-decoration: underline;
   cursor: pointer;
 }
+
+/* The Inbox: tabs with their counts, the controls, rows being re-read. */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.tabs [role="tab"][aria-selected="true"] {
+  font-weight: 600;
+  border-bottom: 2px solid currentColor;
+}
+.tabs .count {
+  opacity: 0.75;
+}
+.inbox-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+ul.items.loading {
+  opacity: 0.5;
+}
+ul.items > li > p.meta {
+  margin: 0.15rem 0 0.4rem;
+}
