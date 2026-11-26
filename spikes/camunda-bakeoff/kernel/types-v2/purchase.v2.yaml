@@ -96,6 +96,12 @@ hooks:
   - {id: place_order,     on: enter, state: approved, kind: action, action: erp.create_invoice, reads: [f_vendor, f_amount], writes: [f_order_id]}
   - {id: notify_rejected, on: enter, state: rejected, kind: action, action: email.notify, reads: [creator]}
 
+# Who may migrate a purchase in flight on version 1 to this version, once
+# the kernel has checked that it fits: the purchase administrator, a role
+# of its own, so that whoever migrates is not one of those who approve.
+migrate:
+  allowed: ['role:purchase_admin']
+
 # Nobody moves or narrows a purchase: hidden from its approvers, it would
 # wait for ever (found by reading `pli type explain`, rule "Who sees it").
 placement_writable_by: [kernel]

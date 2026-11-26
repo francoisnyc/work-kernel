@@ -9,7 +9,7 @@ tokens:
   - {name: gus,  token: dev-gus-not-a-secret,  principal: "user:gus",  namespace: acme, roles: [finance]}
   - {name: cora, token: dev-cora-not-a-secret, principal: "user:cora", namespace: acme, roles: [cfo]}
   - {name: olaf, token: dev-olaf-not-a-secret, principal: "user:olaf", namespace: acme}
-  - {name: ivy,  token: dev-ivy-not-a-secret,  principal: "user:ivy",  namespace: acme, roles: [it_admin]}
+  - {name: ivy,  token: dev-ivy-not-a-secret,  principal: "user:ivy",  namespace: acme, roles: [it_admin, purchase_admin]}
   - {name: prep-bot, token: dev-prep-bot-not-a-secret, principal: "agent:prep-bot", namespace: acme, roles: [preparer]}
 grants:
   # The agent acts for itself. The grant is deliberately generous (every
