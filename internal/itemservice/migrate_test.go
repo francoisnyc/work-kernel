@@ -229,9 +229,18 @@ func TestMigrate_WhoMay(t *testing.T) {
 	if err := try(withSession(t, w.k, bot)); !errors.Is(err, itemservice.ErrForbidden) {
 		t.Errorf("an agent with the role, acting for adm: %v, want ErrForbidden", err)
 	}
-	// Never a customer: one who sees nothing of it gets not found.
-	if err := try(w.kim); !errors.Is(err, itemservice.ErrNotFound) && !errors.Is(err, itemservice.ErrForbidden) {
-		t.Errorf("a customer: %v, want ErrNotFound or ErrForbidden", err)
+	// Never a customer. A purchase she cannot see does not exist for her;
+	// her own request, which she sees, she may not migrate.
+	assertNotFound(t, "a customer migrates a purchase she cannot see", try(w.kim))
+	w.reg(t, strings.Replace(stRoomSrc, "own: [ask_{s}]", "own: [pur_{s}]", 1))
+	room := w.container(t, w.lea, w.id("room"), nil)
+	mine, err := w.create(t, w.kim, w.id("pur"), 1, &room, map[string]any{"f_note": "kim's own"})
+	own := mustCreate(t, "kim's own purchase in the room", mine, err)
+	if _, err := w.k.Get(testCtx(t), w.kim, own); err != nil {
+		t.Fatalf("kim reads her own purchase: %v", err)
+	}
+	if _, err := w.migrate(t, w.kim, own, w.id("pur"), 2); !errors.Is(err, itemservice.ErrForbidden) {
+		t.Errorf("a customer migrates her own purchase, which she sees: %v, want ErrForbidden", err)
 	}
 
 	// An Item the caller cannot see does not exist for them, role or not.
