@@ -30,7 +30,7 @@ const (
 	MigrateInvariant    MigrationCheck = "invariant_failed"       // an invariant of the new version does not hold
 	MigrateNotUnique    MigrationCheck = "not_unique"             // a sibling holds the same value of a unique field
 	LinkChanged         MigrationCheck = "link_changed"           // a link the Item has is not declared the same way
-	ContainerNotAdmited MigrationCheck = "container_not_admitted" // the new version's start.in does not admit where the Item is
+	ContainerNotAdmitted MigrationCheck = "container_not_admitted" // the new version's start.in does not admit where the Item is
 	ClaimEmpty          MigrationCheck = "claim_empty"            // the state has a claim in the new version and nobody holds it
 	PathNotDeclared     MigrationCheck = "path_not_declared"      // a move the Item made is not a move of the new version
 	PathMissingFields   MigrationCheck = "path_missing_fields"    // the last move's required fields are not set

@@ -317,7 +317,7 @@ func TestFits_Container(t *testing.T) {
 				}
 				return
 			}
-			wantMisfit(t, ms, lifecycle.ContainerNotAdmited)
+			wantMisfit(t, ms, lifecycle.ContainerNotAdmitted)
 		})
 	}
 }
@@ -411,7 +411,7 @@ func TestFits_EveryMisfit_InOrder(t *testing.T) {
 		"invariants:\n  - {id: kind_given, rule: 'f_kind != null'}\nstart:\n  in: [desk]\n")
 	ms := lifecycle.Fits(v1, v2, inReview(map[string]any{"f_note": "x", "f_amount": 5}))
 	want := []lifecycle.MigrationCheck{lifecycle.FieldMissing, lifecycle.FieldChanged, lifecycle.MigrateInvariant,
-		lifecycle.ContainerNotAdmited, lifecycle.ClaimEmpty, lifecycle.PathNotDeclared}
+		lifecycle.ContainerNotAdmitted, lifecycle.ClaimEmpty, lifecycle.PathNotDeclared}
 	if got := checksOf(ms); !slices.Equal(got, want) {
 		t.Errorf("misfits = %v\nwant     %v", got, want)
 	}

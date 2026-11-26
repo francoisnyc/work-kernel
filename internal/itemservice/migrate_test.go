@@ -745,7 +745,7 @@ func TestMigrate_TheFitCheckIsGivenTheItemsFacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the dry run: %v", err)
 	}
-	want := []lifecycle.MigrationCheck{lifecycle.MigrateNotUnique, lifecycle.LinkChanged, lifecycle.ContainerNotAdmited, lifecycle.PathNotDeclared}
+	want := []lifecycle.MigrationCheck{lifecycle.MigrateNotUnique, lifecycle.LinkChanged, lifecycle.ContainerNotAdmitted, lifecycle.PathNotDeclared}
 	if got := checks(res.Problems); !slices.Equal(got, want) {
 		t.Fatalf("the dry run's problems = %v, want %v", got, want)
 	}
