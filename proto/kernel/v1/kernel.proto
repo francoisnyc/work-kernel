@@ -57,6 +57,10 @@ service ItemService {
   // A container's direct children (or the top-level Items), with the same
   // filters as SearchItems.
   rpc ListItems(ListItemsRequest) returns (ListItemsResponse);
+  // How many Items a SearchItems with the same words and filter would
+  // return to the caller, counted through the same query and capped at 50:
+  // never an Item the caller cannot see, never an exact total past the cap.
+  rpc CountItems(CountItemsRequest) returns (CountItemsResponse);
   // An Item's history, oldest first, as the caller may see it.
   rpc ListItemEvents(ListItemEventsRequest) returns (ListItemEventsResponse);
   // One Type version. Types are read-only: they load from files at start.
@@ -86,6 +90,10 @@ service ItemService {
   // Called with an agent's token: mint a session in capability mode, with
   // the scopes it may touch and the powers it may use. Later calls carry its
   // ID in the Pli-Agent-Session header.
+  // Who the caller is: their principal, their namespace and the roles they
+  // hold there; for an agent, the user it acts for and its session. About
+  // the caller only, and no Item data.
+  rpc WhoAmI(WhoAmIRequest) returns (WhoAmIResponse);
   rpc StartAgentSession(StartAgentSessionRequest) returns (StartAgentSessionResponse);
   // Called with a user's token: approve one wider scope for an agent session
   // acting for that user (the answer to NEEDS_APPROVAL).
@@ -139,6 +147,19 @@ message Item {
   // keyed by rollup ID (Type.rollups). Filled by GetItem only. A rollup
   // counts only the linked Items the caller can see.
   map<string, RollupValue> rollups = 14;
+  // When the Item entered the state it is in: its create, or its latest
+  // transition. What order_by waiting_since sorts by.
+  google.protobuf.Timestamp state_time = 15;
+  // The moves the caller may make now: the to_state of each transition out
+  // of the Item's state that the caller may make for who they are, in the
+  // Type's order. Judged by the move's own rules: `allowed`, `except`, the
+  // state's claim and a release; for an agent, the agent and the user it
+  // acts for. Guards, required and given fields are not evaluated, so a
+  // listed move may still be refused when asked. Filled only in an answer
+  // to SearchItems or ListItems whose filter has waiting_on; empty there
+  // means the caller may make none (a role's queue asked by a
+  // non-member). Everywhere else it is empty and says nothing.
+  repeated string moves = 16;
 }
 
 // One rollup of an Item: how many linked Items the caller can see, by state
@@ -433,6 +454,12 @@ message ItemFilter {
   // asking, is INVALID_ARGUMENT on filter.waiting_on. Part of what a page
   // token is bound to.
   string waiting_on = 6;
+  // Keeps the Items below this container, at any depth (the container
+  // itself is not among them): an Item's name. On SearchItems and
+  // CountItems; INVALID_ARGUMENT on ListItems, whose parent already says
+  // where. A container the caller cannot see, or that does not exist, is
+  // NOT_FOUND. Part of what a page token is bound to.
+  string in = 7;
 }
 
 // Items with a link of this name to or from item, as the result Items see
@@ -472,6 +499,37 @@ message FieldFilter {
   // opposite of empty. Alone: not with empty, eq or a bound. An Item whose
   // Type does not declare the field has no value.
   bool not_empty = 8;
+}
+
+message CountItemsRequest {
+  // namespaces/{ns}
+  string parent = 1;
+  // As on SearchItemsRequest: words, a filter or both are required.
+  string query = 2;
+  ItemFilter filter = 3;
+}
+
+message CountItemsResponse {
+  // How many Items match and the caller can see, at most 50.
+  int32 count = 1;
+  // More than 50 match: show "50+".
+  bool capped = 2;
+}
+
+message WhoAmIRequest {}
+
+message WhoAmIResponse {
+  // The caller: user:fay, agent:prep-bot, customer:kim.
+  string principal = 1;
+  // namespaces/{ns}
+  string namespace = 2;
+  // The roles the caller holds in the namespace, sorted. Role names only.
+  repeated string roles = 3;
+  // An agent acting for a user: that user, and the roles they hold, sorted.
+  string on_behalf_of = 4;
+  repeated string on_behalf_of_roles = 5;
+  // An agent's session: its scopes and powers. Absent for anyone else.
+  AgentSession session = 6;
 }
 
 message ListItemsRequest {

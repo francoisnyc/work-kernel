@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 
@@ -335,4 +336,14 @@ func eventOut(ns, item string, ty *typedef.Type, e itemservice.Event) (*kernelv1
 	out.LinkType, out.LinkTarget, out.LinkReplaced = e.LinkType, ref(e.LinkTarget), ref(e.LinkReplaced)
 	out.ReactionTarget = ref(e.ReactionTarget)
 	return out, nil
+}
+
+// CountItems and WhoAmI (track 1 item 5, step 4) are in the contract and
+// not built yet: both answer UNIMPLEMENTED.
+func (s *server) CountItems(ctx context.Context, req *connect.Request[kernelv1.CountItemsRequest]) (*connect.Response[kernelv1.CountItemsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("CountItems is not built yet"))
+}
+
+func (s *server) WhoAmI(ctx context.Context, _ *connect.Request[kernelv1.WhoAmIRequest]) (*connect.Response[kernelv1.WhoAmIResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("WhoAmI is not built yet"))
 }

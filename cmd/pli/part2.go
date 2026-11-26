@@ -24,7 +24,7 @@ import (
 // filterOpts are the FILTERS flags, shared by item search and item list.
 type filterOpts struct {
 	types, states, categories, wheres, links, empties, notEmpties listFlag
-	orderBy, waitingOn                                            string
+	orderBy, waitingOn, in                                        string
 }
 
 func filterFlags(fs *flag.FlagSet) *filterOpts {
@@ -37,6 +37,7 @@ func filterFlags(fs *flag.FlagSet) *filterOpts {
 	fs.Var(&f.notEmpties, "not-empty", "a field ID: Items where the field has a value; repeatable")
 	fs.Var(&f.links, "linked", "out:NAME=ITEM (Items that link to ITEM) or in:NAME=ITEM (Items ITEM links to, by the inverse name); repeatable")
 	fs.StringVar(&f.waitingOn, "waiting-on", "", "me or role:NAME: the open Items that wait on you, or on a role")
+	fs.StringVar(&f.in, "in", "", "a container ITEM: only the Items below it, at any depth (parsed; not built yet)")
 	fs.StringVar(&f.orderBy, "order-by", "", "sort by a field: 'FIELD', 'FIELD asc' or 'FIELD desc' (default: newest first)")
 	return f
 }

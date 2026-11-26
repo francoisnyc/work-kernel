@@ -175,6 +175,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if inbox {
 		rest = append([]string{"inbox", ""}, rest[1:]...)
 	}
+	whoami := len(rest) >= 1 && rest[0] == "whoami"
+	if whoami {
+		rest = append([]string{"whoami", ""}, rest[1:]...)
+	}
 	if len(rest) < 2 {
 		fmt.Fprintln(stderr, usage)
 		return exitUsage
@@ -216,6 +220,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		"item transition": c.itemTransition,
 		"item migrate":    c.itemMigrate,
 		"item search":     c.itemSearch,
+		"item count":      c.itemCount,
 		"item list":       c.itemList,
 		"item history":    c.itemHistory,
 		"item link":       c.itemLink,
@@ -233,6 +238,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	cmdArgs := rest[2:]
 	if inbox {
 		name, cmd, ok, cmdArgs = "inbox", c.inbox, true, rest[2:]
+	}
+	if whoami {
+		name, cmd, ok, cmdArgs = "whoami", c.whoami, true, rest[2:]
 	}
 	if rest[0] == "rank" {
 		// rank's second word is an Item (or "rebalance"), not a verb.
@@ -680,6 +688,29 @@ func (c *cli) itemSearch(ctx context.Context, args []string) error {
 	return c.search(ctx, "item search", args)
 }
 
+// itemCount is item search's words and filters, answered with a capped
+// count (CountItems): {"count": 12, "capped": false}.
+func (c *cli) itemCount(ctx context.Context, args []string) error {
+	return c.search(ctx, "item count", args)
+}
+
+// whoami prints who the caller is (WhoAmI): principal, namespace, roles,
+// and for an agent its user and session.
+func (c *cli) whoami(ctx context.Context, args []string) error {
+	pos, err := parse(flag.NewFlagSet("whoami", flag.ContinueOnError), args)
+	if err != nil {
+		return err
+	}
+	if len(pos) != 0 {
+		return usagef("unexpected arguments %v", pos)
+	}
+	return errNotBuilt
+}
+
+// errNotBuilt: whoami, item count, inbox --count and --in are parsed and
+// not built yet (track 1 item 5, step 4).
+var errNotBuilt = errors.New("not built yet")
+
 // search is item search and inbox: name says which.
 func (c *cli) search(ctx context.Context, name string, args []string) error {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
@@ -687,9 +718,11 @@ func (c *cli) search(ctx context.Context, name string, args []string) error {
 	fl, pg := filterFlags(fs), pagingFlags(fs)
 	var role string
 	var oldest bool
+	count := name == "item count"
 	if name == "inbox" {
 		fs.StringVar(&role, "role", "", "a role's queue (finance) instead of what waits on you")
 		fs.BoolVar(&oldest, "oldest", false, "oldest waiting first (--order-by waiting_since)")
+		fs.BoolVar(&count, "count", false, "how many wait, capped at 50, instead of the Items")
 	}
 	pos, err := parse(fs, args)
 	if err != nil {
@@ -717,6 +750,9 @@ func (c *cli) search(ctx context.Context, name string, args []string) error {
 	size, err := pg.size()
 	if err != nil {
 		return err
+	}
+	if count {
+		return errNotBuilt
 	}
 	res, err := c.c.SearchItems(ctx, connect.NewRequest(&kernelv1.SearchItemsRequest{
 		Parent: "namespaces/" + c.ns, Query: strings.Join(pos, " "), MinSeq: *minSeq,

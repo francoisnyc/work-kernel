@@ -70,6 +70,14 @@ type Item struct {
 	// Item is read, keyed by rollup ID. Only Get fills them; they count
 	// only what the reader can see.
 	Rollups map[string]Rollup
+	// StateEnteredAt is when the Item entered the state it is in: its
+	// create, or its latest transition (items.state_entered_at).
+	StateEnteredAt time.Time
+	// Moves are the to-states of the transitions out of the Item's state
+	// that the reader may make for who they are (allowed, except, claim,
+	// release, the agent rule; not guards or required fields), in the
+	// Type's order. Only Search and List with Filter.WaitingOn fill it.
+	Moves []string
 }
 
 // Rollup is one computed value: how many linked Items the reader can see,
