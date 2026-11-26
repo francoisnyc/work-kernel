@@ -4524,7 +4524,7 @@ roles, the web Inbox on the view, `Item.state_time`), then step 5; 3b only on a 
 ## 2026-11-26 — Track 1, item 5, step 4, PR 1: the inbox reads (Phases A to D)
 
 **Asked:** step 4, "queue extras and the screen". **Split in two PRs at Phase A (the owner's decision):** the reads
-first, the web Inbox second. This entry is PR 1.
+first, the web Inbox second. This entry is PR 1 (PR #99).
 
 **Built:** `Item.state_time` (15) on every Item the API returns. `ItemFilter.in` (7): everything below one container,
 on `SearchItems` and `CountItems`; the container is read as the caller first, so hidden is missing. `rpc CountItems`:

@@ -282,8 +282,8 @@ attack that found it as its test:
       trigger.
    4. **Queue extras and the screen.** Split in two PRs at its Phase A
       (the owner's decision):
-      - **PR 1, the reads. Built** (`docs/design.md`, "Inbox reads, as
-        built"): `Item.state_time`; `ItemFilter.in`, everything below one
+      - **PR 1, the reads. Built** (PR #99; `docs/design.md`, "Inbox
+        reads, as built"): `Item.state_time`; `ItemFilter.in`, everything below one
         container; `CountItems`, a search counted through `policy.Project`
         and capped at 50; `WhoAmI`, the caller's principal and roles, and
         an agent's user and session; `Item.moves`, the moves the caller
