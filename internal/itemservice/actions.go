@@ -133,10 +133,24 @@ type PendingAction struct {
 // event names the hook as originating_hook and the entry as causation_id:
 // its write-back, or hook_failed. It reads the Item's whole history, which
 // is fine for the spike (see docs/journal.md, Later).
+//
+// ty is the version the Item is on now. Each entry is judged by the version
+// it was made under (entryVersions): that version's action hooks, and its
+// records (hook:<type>@v<n>:<id>).
 func (k *Service) pendingActions(ctx context.Context, q rowsQuerier, id uuid.UUID, ty *typedef.Type) ([]PendingAction, error) {
+	ev, err := k.readEntryVersions(ctx, q, id, ty)
+	if err != nil {
+		return nil, err
+	}
+	versions, err := ev.all(ctx)
+	if err != nil {
+		return nil, err
+	}
 	hasActions := false
-	for _, h := range ty.Hooks {
-		hasActions = hasActions || h.Kind == typedef.HookAction
+	for _, v := range versions {
+		for _, h := range v.Hooks {
+			hasActions = hasActions || h.Kind == typedef.HookAction
+		}
 	}
 	if !hasActions {
 		return nil, nil
@@ -205,9 +219,9 @@ func (k *Service) pendingActions(ctx context.Context, q rowsQuerier, id uuid.UUI
 	}
 
 	var out []PendingAction
-	pending := func(h typedef.Hook, e entry) {
+	pending := func(eTy *typedef.Type, h typedef.Hook, e entry) {
 		key := done{
-			origin: fmt.Sprintf("hook:%s@v%d:%s", ty.ID, ty.Version, h.ID),
+			origin: fmt.Sprintf("hook:%s@v%d:%s", eTy.ID, eTy.Version, h.ID),
 			cause:  fmt.Sprintf("%s:%d", id, e.seq),
 		}
 		if !completed[key] {
@@ -215,15 +229,23 @@ func (k *Service) pendingActions(ctx context.Context, q rowsQuerier, id uuid.UUI
 		}
 	}
 	for _, e := range entries {
-		for _, h := range lifecycle.ActionHooks(ty, e.state) {
-			pending(h, e)
+		eTy, err := ev.at(ctx, e.seq)
+		if err != nil {
+			return nil, err
+		}
+		for _, h := range lifecycle.ActionHooks(eTy, e.state) {
+			pending(eTy, h, e)
 		}
 	}
 	for _, e := range applied {
+		eTy, err := ev.at(ctx, e.seq)
+		if err != nil {
+			return nil, err
+		}
 		// The payload names the reaction as <type>:<reaction>.
 		_, reaction, _ := strings.Cut(e.state, ":")
-		for _, h := range lifecycle.ReactionHooks(ty, reaction) {
-			pending(h, e)
+		for _, h := range lifecycle.ReactionHooks(eTy, reaction) {
+			pending(eTy, h, e)
 		}
 	}
 	return out, nil

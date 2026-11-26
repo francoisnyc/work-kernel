@@ -782,19 +782,35 @@ func (k *Service) containerReacts(ctx context.Context, q policy.Querier, contain
 // inside) with no outcome record. For any entry, not just the current one:
 // a reaction is never dropped because the Item moved on, or the worker
 // died. Oldest trigger first, then the Type's order.
+//
+// ty is the version the Item is on now. Each trigger is judged by the
+// version the Item was on at it (entryVersions); the outcome records name
+// the reaction without a version.
 func (k *Service) pendingReactions(ctx context.Context, q rowsQuerier, id uuid.UUID, ty *typedef.Type) ([]PendingReaction, error) {
+	ev, err := k.readEntryVersions(ctx, q, id, ty)
+	if err != nil {
+		return nil, err
+	}
+	versions, err := ev.all(ctx)
+	if err != nil {
+		return nil, err
+	}
 	var enters, insides bool
 	var of []string
-	for _, r := range ty.Reactions {
-		if r.Kind != typedef.ReactionMove && r.Kind != typedef.ReactionCreate && r.Kind != typedef.ReactionSet {
-			continue
-		}
-		if r.On == typedef.OnCreatedInside {
-			insides, of = true, append(of, r.Of...)
-		} else {
-			enters = true
+	for _, v := range versions {
+		for _, r := range v.Reactions {
+			if r.Kind != typedef.ReactionMove && r.Kind != typedef.ReactionCreate && r.Kind != typedef.ReactionSet {
+				continue
+			}
+			if r.On == typedef.OnCreatedInside {
+				insides, of = true, append(of, r.Of...)
+			} else {
+				enters = true
+			}
 		}
 	}
+	slices.Sort(of)
+	of = slices.Compact(of)
 	if !enters && !insides {
 		return nil, nil
 	}
@@ -871,9 +887,18 @@ func (k *Service) pendingReactions(ctx context.Context, q rowsQuerier, id uuid.U
 
 	var pending []PendingReaction
 	for _, c := range causes {
-		rs := lifecycle.EnterReactions(ty, c.from, c.to)
+		var cTy *typedef.Type
 		if c.childType != "" {
-			rs = lifecycle.InsideReactions(ty, c.childType)
+			cTy, err = ev.atTime(ctx, c.at) // the child's create is not the Item's event
+		} else {
+			cTy, err = ev.at(ctx, c.seq)
+		}
+		if err != nil {
+			return nil, err
+		}
+		rs := lifecycle.EnterReactions(cTy, c.from, c.to)
+		if c.childType != "" {
+			rs = lifecycle.InsideReactions(cTy, c.childType)
 		}
 		for _, r := range rs {
 			if !done(r, c.item, c.seq) {

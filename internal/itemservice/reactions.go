@@ -591,11 +591,25 @@ type PendingUndo struct {
 // by a held reaction: a deduction committed, its undo due (the hold closed
 // non-allow, or its state left by the undo's trigger), and the undo's key
 // not yet used. A workflow run that starts after a crash resumes them.
+//
+// ty is the version the Item is on now. Each hold is judged by the version
+// the Item was on when it was asked for (entryVersions): that version's
+// held reaction and its undo.
 func (k *Service) pendingUndos(ctx context.Context, q rowsQuerier, id uuid.UUID, ty *typedef.Type) ([]PendingUndo, error) {
+	ev, err := k.readEntryVersions(ctx, q, id, ty)
+	if err != nil {
+		return nil, err
+	}
+	versions, err := ev.all(ctx)
+	if err != nil {
+		return nil, err
+	}
 	var held []string
-	for _, r := range ty.Reactions {
-		if r.Kind == typedef.ReactionHeld {
-			held = append(held, r.ID)
+	for _, v := range versions {
+		for _, r := range v.Reactions {
+			if r.Kind == typedef.ReactionHeld && !slices.Contains(held, r.ID) {
+				held = append(held, r.ID)
+			}
 		}
 	}
 	if len(held) == 0 {
@@ -625,7 +639,11 @@ func (k *Service) pendingUndos(ctx context.Context, q rowsQuerier, id uuid.UUID,
 	}
 	var out []PendingUndo
 	for _, h := range holds {
-		undo, ok := lifecycle.UndoOf(ty, h.decider)
+		hTy, err := ev.at(ctx, h.requestedSeq)
+		if err != nil {
+			return nil, err
+		}
+		undo, ok := lifecycle.UndoOf(hTy, h.decider)
 		if !ok {
 			continue
 		}
@@ -648,7 +666,7 @@ func (k *Service) pendingUndos(ctx context.Context, q rowsQuerier, id uuid.UUID,
 		// between the two leaves the undo pending, and the new run's Undo
 		// (a no-op under its key) records it.
 		keys := []string{resv.key + ":" + undo.ID}
-		if len(lifecycle.ReactionHooks(ty, undo.ID)) > 0 {
+		if len(lifecycle.ReactionHooks(hTy, undo.ID)) > 0 {
 			keys = append(keys, resv.key+":"+undo.ID+":applied")
 		}
 		var found int
