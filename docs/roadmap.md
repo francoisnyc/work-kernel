@@ -261,7 +261,7 @@ attack that found it as its test:
       behind. No proto or database change. No Type in `types/` uses it yet.
    3. **Oldest waiting first; who may act stored only when needed.** Split
       in two at its Phase A, on measurements (the owner's decision):
-      - **3a. Waiting since. Built** (PR #97; `docs/design.md`, "Waiting
+      - **3a. Waiting since. Built** (PR #98; `docs/design.md`, "Waiting
         since, as built"): one column, `items.state_entered_at`, set by
         the write that creates an Item or changes its state, and
         `order_by: waiting_since` on the `waiting_on` view: oldest waiting
