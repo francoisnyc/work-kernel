@@ -259,9 +259,26 @@ attack that found it as its test:
       in place. Both bake-offs, scripts unchanged, now answer "does a claim
       hold?" with refused, and a colleague still takes over a claim left
       behind. No proto or database change. No Type in `types/` uses it yet.
-   3. **Who may act, stored per open Item,** in the same write, if step 1's
-      numbers ask for it (a prototype read a page in under 1 ms): the same
-      view, fast, and oldest-waiting first.
+   3. **Oldest waiting first; who may act stored only when needed.** Split
+      in two at its Phase A, on measurements (the owner's decision):
+      - **3a. Waiting since. Built** (PR #97; `docs/design.md`, "Waiting
+        since, as built"): one column, `items.state_entered_at`, set by
+        the write that creates an Item or changes its state, and
+        `order_by: waiting_since` on the `waiting_on` view: oldest waiting
+        first, `desc` for newest. Only with `waiting_on`; the default
+        order is unchanged. A release goes to the back of the queue.
+        `pli inbox --oldest`. One migration; the proto's comment only. No
+        table: the view stays derived, at the same cost as step 1.
+      - **3b. Who may act, stored per open Item,** in the same write.
+        Not built. Stored rows are fast only for the oldest-waiting-first
+        page and for counts (under 1 ms whatever the size, when read as
+        one ordered branch per token); for any other order they are no
+        faster than the derived view. Build it when one of these is met:
+        1. more than about 200,000 Items open and waiting in one
+           namespace, or a measured p90 over 200 ms on the inbox page;
+        2. a count polled by many people on every screen (a badge);
+        3. agents polling their queue in a loop.
+      The order of what remains: step 4, step 5, then 3b on a trigger.
    4. **Queue extras and the screen:** a container as a filter, capped
       counts, "who am I" with roles, the web Inbox on the view.
    5. **Sent back to the requester:** a Type says a state waits on its
@@ -838,9 +855,11 @@ campaigns) brings it close:
 - **"Waiting on me" is derived at read time:** 30 to 60 ms a page at 400,000
   Items with 55,000 open (`go run ./cmd/bench -waiting`), against 1.4 ms for
   a plain filtered page, and the cost follows the open Items in the states
-  involved, not the size of the caller's own queue. Stored rows, written in
-  the same write, are track 1 item 5's step 3 (0.3 to 0.5 ms in the
-  prototype).
+  involved, not the size of the caller's own queue: ten times the Items,
+  ten times the time (0.2 to 0.3 s at 550,000 open). Stored rows, written
+  in the same write, are track 1 item 5's step 3b, built on a trigger
+  named there: under 1 ms for the oldest-waiting-first page and for
+  counts, no gain for other orders.
 - **A service's first Search loads every registered Type version**
   (resolving a filter): about a second at 441 versions under the race
   detector, paid once per process, growing with the catalogue.

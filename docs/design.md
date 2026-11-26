@@ -916,7 +916,9 @@ waits for any transaction that holds the container's row lock, where one
 UPDATE would not, and a reaction that writes a parent and its children can
 deadlock. Found when `content_seq` was first bumped by a second statement
 (a test that locks a container while a reaction moves its children
-stopped passing). Reproduction, in plain Postgres:
+stopped passing; the same test caught it again when `state_entered_at`
+was first set that way, "Waiting since, as built"). Reproduction, in plain
+Postgres:
 
 ```sql
 create table items (id int primary key, container_id int references items, n int default 0, c int default 0);
@@ -940,7 +942,8 @@ and its scope: the insert already holds those key locks.)
   `next_page_token`. Opaque tokens, no offsets, no exact totals.
 - Paging is keyset on `(created_at desc, id desc)` (history: `item_seq`),
   or under `order_by` on (the field's value, id) with the Items without a
-  value last, never an offset. A page token is bound to its request (filters, words,
+  value last (under `waiting_since`, on (`state_entered_at`, id)), never
+  an offset. A page token is bound to its request (filters, words,
   container), its caller and its namespace: used with anything else it is
   `INVALID_ARGUMENT` (decided in Step 0, part 2).
 - A filter with one value (one Type, one state) is `=` in SQL, which walks
@@ -957,6 +960,9 @@ and its scope: the insert already holds those key locks.)
   the caller, or on a role; one more condition, with the others. See
   "Waiting on me, step 1, as built". A claimed Item waits on its claimant
   only ("A claim that binds, as built").
+- `order_by: waiting_since`, only with `waiting_on`: the view oldest
+  waiting first (` desc`: newest), by when each Item entered its state
+  (`items.state_entered_at`), ties by ID. See "Waiting since, as built".
 - `min_seq` on search for read-your-writes; `UNAVAILABLE` / `NOT_CAUGHT_UP`
   after 2 s. `GetItem` always reads the latest state.
 - Every read goes through `Project`. `Watch` comes later, after the sequencer.
@@ -1783,6 +1789,8 @@ and principal are refused. The page token carries the sort value as text
 (none for an Item without one) and the ID, and the order is part of the
 request a token is bound to. Items whose Type does not declare the field
 are not dropped: they sort as Items without a value.
+One name is not a field: `waiting_since`, on the `waiting_on` view only
+(track 1 item 5, step 3a: "Waiting since, as built").
 
 **Fields across Types.** A field filter or `order_by` is resolved across
 the selected Types, or across every registered Type that declares the
@@ -5006,7 +5014,11 @@ Items in one namespace, 55,000 of them open and waiting; a page of 50,
   `items_namespace_type_state`.
 - **Step 3's question.** A throwaway prototype of rows stored per open
   Item (Phase A, Postgres 16) read a page in 0.3 to 0.5 ms whatever the
-  size, for about 0.01 ms more on each move. Whether the pilot needs
+  size, for about 0.01 ms more on each move. Corrected at step 3's Phase
+  A (2026-11-26): that held only for the oldest-waiting-first page, read
+  as one ordered branch per token and merged; one query over the caller's
+  tokens took 8 to 55 ms, and for any other order the rows were no faster
+  than this view ("Waiting since, as built"). Whether the pilot needs
   that is the owner's decision on these numbers.
 - **The bench loads its Items with one INSERT,** not through the item
   service: an exception to "every write goes through the item service",
@@ -5037,7 +5049,9 @@ field.
 
 **What is left** (the owner's split): step 2, a claim that binds (since
 built: "A claim that binds, as built"); step 3,
-who may act stored per open Item, if these numbers ask for it; step 4, a
+who may act stored per open Item, if these numbers ask for it (since
+split: 3a, oldest waiting first, is built, "Waiting since, as built"; 3b,
+the table, waits for a trigger); step 4, a
 container as a filter, capped counts, "who am I" with roles, and the web
 Inbox on the view; step 5, a state that waits on its requester (and so a
 customer's view).
@@ -5451,6 +5465,151 @@ history's reading of the event; the Type key, its load checks and the JSON
 Schema; the reading's section; the story's verb; `pli item migrate`. The
 contract only grew (`buf breaking` passes). No schema migration, no new
 dependency.
+
+## Waiting since, as built (2026-11-26)
+
+Track 1, item 5 of `docs/roadmap.md`, step 3a. Step 3 was "who may act,
+stored per open Item". Its Phase A measured first, and the numbers did not
+ask for the table yet (below). The owner took the smaller step: **one
+column that says when an Item entered its state, and "oldest waiting
+first" as an order on the view that exists.** The table is step 3b, built
+when a trigger is met.
+
+**The column.** `items.state_entered_at timestamptz not null`, no default
+(migration 00014). It is the time of the event that put the Item in the
+state it is in: its create, or its latest transition. That is the event
+`StateEntry` already reads for timers; the column is the same instant, to
+the microsecond, on the Item's own row.
+
+**What sets it:**
+
+- a create (a person's, and a reaction's);
+- every state change, whoever makes it: a person, the timer, a reaction, a
+  hold whose check allows it, a claim, a release;
+- a move from a state to the same state: it is a transition event, and it
+  enters the state again (the owner's decision at the tests gate).
+
+**What does not:** a field update, the claim field written without a
+move, a hold that opens, a hold that is denied or fails, a link, a move of
+container, narrowing, a migrate, a hook's or a reaction's record.
+
+**How it is written.** In the statement that writes the state, with the
+write's one time (`stampWrite`, the time the event carries): the
+transition's UPDATE, the UPDATE of a hold that resolves and moves the
+Item, and the two INSERTs that create an Item. Never by a second UPDATE
+of the row (see "Rule for every write path" above): the first throwaway
+did that, and the test that locks a container while a reaction moves its
+children stopped passing. So it is in the same transaction as the Item
+row, its event and its outbox row. Two things hold this for every future
+write path:
+
+- a test reads the module's source: every statement that creates an Item
+  or writes its state writes the column, and no other statement does
+  (`TestStateEnteredAt_TheStatementThatWritesTheStateWritesIt`);
+- after the item service's and the workflow's test packages have run, one
+  query reads every Item their tests made, by whatever operation, and
+  fails the run if a `state_entered_at` is not the time of the Item's
+  latest create or transition event (`testdb.StateEnteredAtDrift`).
+
+**What it costs on a write.** A transition now reads the write's time
+once before its UPDATE, as a create already did: one short query more per
+state change. `cmd/bench`, run twice on main and twice on this branch
+(a transition of a ticket, one writer, Type cache on, p50): main 2.81 and
+2.40 ms, this branch 2.42 and 2.52 ms; with 16 writers, main 15.83 and
+14.43 ms, this branch 15.66 and 14.10 ms. The runs differ from one
+another by more than the two sides do: no cost that this bench can see.
+
+**The backfill.** The migration gives each existing Item the time of its
+latest create or transition event, whatever was written after it; an Item
+with no such event takes its create time. Then the column takes no null.
+No default, so that a write path that forgets it fails instead of writing
+"now".
+
+**The order.** `order_by: waiting_since` on `SearchItems` and
+`ListItems`: the `waiting_on` view, oldest waiting first; with ` desc`,
+newest. It is a reserved name, not a field (field IDs start with `f_`).
+
+- **Only together with `waiting_on`** (`me`, or `role:<name>`). Without
+  it the request is `INVALID_ARGUMENT` on `order_by`.
+- **The default order is unchanged:** newest created first.
+- **Ties:** Items that entered their state at the same instant come in
+  Item ID order, ascending in both directions, as `order_by` a field
+  breaks its ties. Each Item once, whatever the page size.
+- **The page token** carries the time as RFC 3339 in UTC, and the ID. It
+  is bound to the order like to the rest of its request. A token is
+  unsigned: one whose value is no time is refused as a token
+  (`INVALID_ARGUMENT` on `page_token`), never sent to the database.
+- **It is step 1's view in another order:** the same condition, joined
+  with the visibility test before the limit, every Item through
+  `policy.Project`. An Item its reader cannot see takes no room on a page.
+- **No index.** The view reads its candidates through
+  `items_namespace_type_state`, as before, and sorts them.
+
+**Waiting since when.** Since the Item entered its current state.
+
+- **A release goes to the back of the queue:** the Item waits on the team
+  as of its release.
+- A claimed Item is in its claimant's view as of the claim.
+- A reassignment by a field (the manager a field names is changed) and a
+  migrate keep the time: the Item is as old as it is.
+- "Since it first entered the queue, across a claim and a release" is
+  Later.
+
+**The contract.** No new field or message: `order_by` was a string. Its
+comment names `waiting_since`. `Item.state_time`, which would let a
+screen show "waiting 3 days", comes with step 4.
+
+**pli.** `--order-by waiting_since` (and `'waiting_since desc'`) on `item
+search` and `item list`, with `--waiting-on`; `pli inbox --oldest` is its
+short form. `--oldest` together with `--order-by` is a usage error;
+`item search` does not take `--oldest`.
+
+**Why not the table yet: Phase A's measurements** (a throwaway Postgres
+17, raw SQL without the visibility join, a page of 50 for a finance
+member; the data shape of `cmd/bench -waiting`):
+
+| Read | 400,000 Items, 55,000 open | 4,000,000 Items, 550,000 open |
+| --- | --- | --- |
+| Derived, newest first (step 1) | 29 ms | 280 ms |
+| Derived, oldest waiting first, time read from the events | 82 ms | 1,180 ms |
+| Derived, oldest waiting first, the column (this step) | 21 ms | 216 ms |
+| Stored rows, oldest waiting first, one ordered branch per token | 0.7 ms | 0.5 ms |
+| Stored rows, oldest waiting first, one query over the tokens | 7.7 ms | 55 ms |
+| Stored rows used only as a filter, newest created first | 66 ms | 640 ms |
+| Stored rows used only as a filter, ordered by a field | 63 ms | 603 ms |
+| Capped count ("50+"), derived | 3 ms | 40 ms |
+| Capped count, stored rows | 0.08 ms | 0.07 ms |
+
+- **30 to 60 ms a page at 55,000 open Items is not a problem for a daily
+  inbox.** 55,000 Items open and waiting is already a large company's
+  approvals.
+- **The derived view grows with the open Items in the states involved:**
+  ten times the Items, ten times the time. Stored rows do not grow.
+- **Stored rows are fast only in their own order (oldest waiting first)
+  and for counts.** For any other order they are no faster than the
+  derived view, and in this measurement slower.
+- **And only when the read is written as one ordered branch per token,
+  merged.** A single query over the caller's tokens sorts every match.
+
+**What is left for step 3b** (the table, when a trigger in the roadmap is
+met): rows of (Item, the move, a role as written or a person, the
+claimant, the move's `except`, the time), written in the same write from
+the one place every write passes; roles resolved when the view is asked;
+`except`, holds and visibility at read; a rebuild command, and the
+derived view as the truth the rows are compared with. A wrong row could
+only show too much or too little in a list: a move is always judged by
+its own rules, under the Item's lock.
+
+**Tests.** New: item service 12 (when the column is set and when not, the
+source test, the backfill; the order, its refusal, the release, ties,
+tokens, visibility), API 1, pli 1, and the run-wide check in two test
+set-ups. One existing test's fixture changed (its hand-written INSERTs
+name the column). No assertion changed.
+
+**Kernel changes (counted):** the column and its migration; the two
+statements that write a state, and the two that create an Item; the
+order in the item service's reads; pli's flag. The proto's comment. No
+new dependency.
 
 ## Out of scope for the spike
 
