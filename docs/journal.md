@@ -4385,3 +4385,22 @@ from a scratchpad override with host-built binaries, Playwright through temporar
 
 **Open:** the Later items above. **Next session:** item 6, step 3 (Items with timers, and reading history written
 before a migrate, which lifts the action limit), or step 4 (every open Item of a version), as the owner chooses.
+
+## 2026-11-26 — Both bake-offs recorded again on main
+
+**Done:** a fresh run of both bake-offs in full on main `51a38fe` (after track 1's items 2 to 6 step 2), both sides
+up, scripts and Types untouched; the `results/` files of both spikes committed as the scripts wrote them. The record
+before this was of 24 November. No code, script, Type or other doc changed.
+
+**What the record now shows, kernel side.** Camunda bake-off: the compromised agent 32 of 32 refused (was 31 of 36
+with two holes), as requester 3 of 3. Temporal bake-off: purchase 32 rows all pass (27 attempts), access 19 of 20
+(17 of 18 attempts), blind-written access 20 of 20, staff-role 7 of 7. The change test: the old version by name is
+refused, and the purchases in flight are migrated and go to the CFO. A claim holds. The forged Temporal start no
+longer places an order.
+
+**Still failing on the kernel side, all known:** a colleague reads another's purchase and its history (these Types
+narrow nothing); an access request for no system; the agent given the finance role claims and approves; Postgres
+with the development password.
+
+**Open:** the two write-ups (`docs/research/camunda-bakeoff.md`, `temporal-bakeoff.md`) and one roadmap line still
+quote the old counts; the sentences were listed for the owner, none rewritten.

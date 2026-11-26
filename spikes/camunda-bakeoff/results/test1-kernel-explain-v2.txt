@@ -25,54 +25,63 @@ In short
 1. A purchase starts in draft.
 2. It moves only as listed below; any other move is refused.
 
+Who migrates Items to it
+3. While this is the latest version of purchase, anyone with the role purchase_admin may migrate an open purchase of an older version to it, once it fits.
+
 Who writes what
-3. Only the kernel writes `f_manager`: `manager_check`.
-4. Only holders of finance write `f_claimed_by`.
-5. Only holders of preparer write `f_summary`.
-6. Only holders of preparer write `f_policy`.
-7. Only holders of preparer write `f_flags`.
-8. Only the kernel writes `f_order_id`: `place_order`.
+4. Only the kernel writes `f_manager`: `manager_check`.
+5. Only holders of finance write `f_claimed_by`.
+6. Only holders of preparer write `f_summary`.
+7. Only holders of preparer write `f_policy`.
+8. Only holders of preparer write `f_flags`.
+9. Only the kernel writes `f_order_id`: `place_order`.
+10. No agent writes its fields, except one that names a role the agent holds.
 
 draft (to do)
-9. The requester moves it from draft to manager_review, once `f_amount`, `f_vendor`, `f_cost_centre` and `f_justification` are set, only if `f_amount` is more than 0.
-10. Asking for this move opens a hold instead: `manager_check` calls `hr.manager_of@1` with onBehalfOf = who it was created for, createdBy = who created it; if it allows, or corrects `f_manager`, the move happens; it may deny it (unknown_employee, no_eligible_approver); with no answer within 15 minutes the move fails.
-11. While that hold is open, nothing moves it.
+11. The requester moves it from draft to manager_review, once `f_amount`, `f_vendor`, `f_cost_centre` and `f_justification` are set, only if `f_amount` is more than 0.
+12. Asking for this move opens a hold instead: `manager_check` calls `hr.manager_of@1` with onBehalfOf = who it was created for, createdBy = who created it; if it allows, or corrects `f_manager`, the move happens; it may deny it (unknown_employee, no_eligible_approver); with no answer within 15 minutes the move fails.
+13. While that hold is open, nothing moves it.
 
 manager_review (waiting)
-12. While it is in manager_review, nobody changes `f_amount`, `f_vendor`, `f_cost_centre`, `f_justification` or `f_manager`.
-13. Whoever `f_manager` names, but never anyone who took part in creating it, moves it from manager_review to approved, only if `f_amount` is less than 1000.
-14. Whoever `f_manager` names, but never anyone who took part in creating it, moves it from manager_review to finance_queue, only if `f_amount` is at least 1000.
-15. Whoever `f_manager` names, but never anyone who took part in creating it, moves it from manager_review to rejected, once `f_reason` is set.
+14. While it is in manager_review, it waits on whoever `f_manager` names.
+15. While it is in manager_review, nobody changes `f_amount`, `f_vendor`, `f_cost_centre`, `f_justification` or `f_manager`.
+16. Whoever `f_manager` names, but never anyone who took part in creating it, moves it from manager_review to approved, only if `f_amount` is less than 1000.
+17. Whoever `f_manager` names, but never anyone who took part in creating it, moves it from manager_review to finance_queue, only if `f_amount` is at least 1000.
+18. Whoever `f_manager` names, but never anyone who took part in creating it, moves it from manager_review to rejected, once the mover gives `f_reason` in the move itself.
 
 finance_queue (waiting)
-16. While it is in finance_queue, nobody changes `f_amount`, `f_vendor`, `f_cost_centre`, `f_justification`, `f_manager`, `f_summary`, `f_policy` or `f_flags`.
-17. Anyone with the role finance, but never anyone who took part in creating it, moves it from finance_queue to finance_review, once `f_claimed_by` is set.
+19. While it is in finance_queue, it waits on anyone with the role finance.
+20. While it is in finance_queue, nobody changes `f_amount`, `f_vendor`, `f_cost_centre`, `f_justification`, `f_manager`, `f_summary`, `f_policy` or `f_flags`.
+21. Anyone with the role finance, but never anyone who took part in creating it, moves it from finance_queue to finance_review, once `f_claimed_by` is set.
 
 finance_review (active)
-18. While it is in finance_review, nobody changes `f_amount`, `f_vendor`, `f_cost_centre`, `f_justification`, `f_manager`, `f_summary`, `f_policy` or `f_flags`.
-19. Anyone with the role finance moves it from finance_review to finance_queue; the move clears `f_claimed_by`.
-20. Anyone with the role finance, but never anyone who took part in creating it, moves it from finance_review to approved, only if `f_amount` is at most 5000.
-21. Anyone with the role finance, but never anyone who took part in creating it, moves it from finance_review to cfo_review, only if `f_amount` is more than 5000.
-22. Anyone with the role finance, but never anyone who took part in creating it, moves it from finance_review to rejected, once `f_reason` is set.
+22. Whoever moves it into finance_review claims it: `f_claimed_by` names them, and only they move it on from there, unless a move releases the claim.
+23. While it is in finance_review, it waits on whoever claimed it.
+24. While it is in finance_review, nobody changes `f_amount`, `f_vendor`, `f_cost_centre`, `f_justification`, `f_manager`, `f_summary`, `f_policy` or `f_flags`.
+25. Anyone with the role finance moves it from finance_review to finance_queue, which releases the claim; the move clears `f_claimed_by`.
+26. Anyone with the role finance, but never anyone who took part in creating it, moves it from finance_review to approved, only if `f_amount` is at most 5000.
+27. Anyone with the role finance, but never anyone who took part in creating it, moves it from finance_review to cfo_review, only if `f_amount` is more than 5000.
+28. Anyone with the role finance, but never anyone who took part in creating it, moves it from finance_review to rejected, once the mover gives `f_reason` in the move itself.
 
 cfo_review (waiting)
-23. While it is in cfo_review, nobody changes `f_amount`, `f_vendor`, `f_cost_centre`, `f_justification`, `f_manager`, `f_claimed_by`, `f_summary`, `f_policy` or `f_flags`.
-24. Anyone with the role cfo, but never anyone who took part in creating it, moves it from cfo_review to approved.
-25. Anyone with the role cfo, but never anyone who took part in creating it, moves it from cfo_review to rejected, once `f_reason` is set.
+29. While it is in cfo_review, it waits on anyone with the role cfo.
+30. While it is in cfo_review, nobody changes `f_amount`, `f_vendor`, `f_cost_centre`, `f_justification`, `f_manager`, `f_claimed_by`, `f_summary`, `f_policy` or `f_flags`.
+31. Anyone with the role cfo, but never anyone who took part in creating it, moves it from cfo_review to approved.
+32. Anyone with the role cfo, but never anyone who took part in creating it, moves it from cfo_review to rejected, once the mover gives `f_reason` in the move itself.
 
 approved (done)
-26. On entering approved, `place_order` calls `erp.create_invoice@1` with customerId = `f_vendor`, amount = `f_amount` and writes what it made into `f_order_id`, once per entry, even if it has moved on.
-27. While it is in approved, nobody changes `f_amount`, `f_vendor`, `f_cost_centre`, `f_justification`, `f_manager`, `f_claimed_by`, `f_summary`, `f_policy`, `f_flags` or `f_reason`.
-28. Nothing leaves approved.
+33. On entering approved, `place_order` calls `erp.create_invoice@1` with customerId = `f_vendor`, amount = `f_amount` and writes what it made into `f_order_id`, once per entry, even if it has moved on.
+34. While it is in approved, nobody changes `f_amount`, `f_vendor`, `f_cost_centre`, `f_justification`, `f_manager`, `f_claimed_by`, `f_summary`, `f_policy`, `f_flags` or `f_reason`.
+35. Nothing leaves approved.
 
 rejected (canceled)
-29. On entering rejected, `notify_rejected` calls `email.notify@1` with to = the requester, once per entry, even if it has moved on.
-30. While it is in rejected, nobody changes `f_amount`, `f_vendor`, `f_cost_centre`, `f_justification`, `f_manager`, `f_claimed_by`, `f_summary`, `f_policy`, `f_flags`, `f_reason` or `f_order_id`.
-31. Nothing leaves rejected.
+36. On entering rejected, `notify_rejected` calls `email.notify@1` with to = the requester, once per entry, even if it has moved on.
+37. While it is in rejected, nobody changes `f_amount`, `f_vendor`, `f_cost_centre`, `f_justification`, `f_manager`, `f_claimed_by`, `f_summary`, `f_policy`, `f_flags`, `f_reason` or `f_order_id`.
+38. Nothing leaves rejected.
 
 Who sees it
-32. A customer who sees it sees none of its fields, only its header.
-33. No one moves it to another container or narrows who sees it.
+39. A customer who sees it sees none of its fields, only its header.
+40. No one moves it to another container or narrows who sees it.
 
 Actions it calls
 - `hr.manager_of@1` (a check, low risk): Finds who approves for a requester: their manager in the HR directory. The requester is onBehalfOf when set, else createdBy.
@@ -81,4 +90,5 @@ Actions it calls
 
 Not covered by this reading
 - Who can see a given purchase: that is set for each Item and its container, not by its Type.
+- Who may create a purchase, and where, and who may move or narrow one, once a later version exists: the latest version of purchase decides, for every version.
 - How the kernel keeps its promises (retries, each write made once, recovery after a failure): the same for every Type.
