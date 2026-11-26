@@ -667,6 +667,27 @@ func parseStep(day1 time.Time, line string, timed bool) (Step, error) {
 		if err := withValues(j+3, false); err != nil {
 			return st, err
 		}
+	case "migrates":
+		st.Verb = Migrates
+		if st.Item, err = word(j, "the Item's name"); err != nil {
+			return st, err
+		}
+		if j+1 >= len(toks) || !toks[j+1].is("to") {
+			return st, fmt.Errorf("migrates %s: want to TYPE@VERSION", st.Item)
+		}
+		ty, err := word(j+2, "TYPE@VERSION after to")
+		if err != nil {
+			return st, err
+		}
+		m := typeRef.FindStringSubmatch(ty)
+		if m == nil {
+			return st, fmt.Errorf("%q: a Type is named with its version, such as vacation_request@3", ty)
+		}
+		st.Type = m[1]
+		st.Version, _ = strconv.Atoi(m[2])
+		if err := end(j + 3); err != nil {
+			return st, err
+		}
 	case "links", "unlinks":
 		st.Verb = Links
 		if verb == "unlinks" {

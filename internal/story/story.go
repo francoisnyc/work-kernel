@@ -66,6 +66,7 @@ const (
 	Creates    Verb = "creates"
 	Updates    Verb = "updates"
 	Moves      Verb = "moves"
+	Migrates   Verb = "migrates" // migrates ITEM to TYPE@VERSION
 	Links      Verb = "links"
 	Unlinks    Verb = "unlinks"
 	Sees       Verb = "sees"        // sees ITEM with values

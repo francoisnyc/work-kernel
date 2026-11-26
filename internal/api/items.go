@@ -317,6 +317,11 @@ var outcomes = map[itemservice.Outcome]kernelv1.TransitionOutcome{
 	itemservice.OutcomeError:   kernelv1.TransitionOutcome_TRANSITION_OUTCOME_ERROR,
 }
 
+// MigrateItem is a stub: not built yet (track 1, item 6, step 2).
+func (s *server) MigrateItem(ctx context.Context, req *connect.Request[kernelv1.MigrateItemRequest]) (*connect.Response[kernelv1.MigrateItemResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("MigrateItem is not built yet"))
+}
+
 func (s *server) TransitionItem(ctx context.Context, req *connect.Request[kernelv1.TransitionItemRequest]) (*connect.Response[kernelv1.TransitionItemResponse], error) {
 	p, m := caller(ctx), req.Msg
 	id, cerr := inNamespace(p, m.Name, "name")

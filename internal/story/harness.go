@@ -449,6 +449,11 @@ func (h *harness) step(ctx context.Context, i int) error {
 		}
 	case Updates:
 		res, werr = h.k.Update(ctx, itemservice.UpdateRequest{IdempotencyKey: key, Principal: p, ItemID: h.id(st.Item), Fields: fields})
+	case Migrates:
+		var mr itemservice.MigrateResult
+		mr, werr = h.k.Migrate(ctx, itemservice.MigrateRequest{IdempotencyKey: key, Principal: p, ItemID: h.id(st.Item),
+			TypeID: st.Type, TypeVersion: st.Version})
+		res = mr.WriteResult
 	case Moves:
 		var tr itemservice.TransitionResult
 		tr, werr = h.k.Transition(ctx, itemservice.TransitionRequest{IdempotencyKey: key, Principal: p,

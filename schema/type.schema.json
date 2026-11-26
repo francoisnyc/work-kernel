@@ -30,7 +30,15 @@
     "own": {"description": "What a customer sees of their own Items.", "$ref": "#/$defs/texts"},
     "shared": {"description": "What a customer sees of Items shared with them.", "$ref": "#/$defs/texts"},
     "placement_writable_by": {"description": "Who may place Items of this Type in a container: role:<name> entries.", "$ref": "#/$defs/texts"},
-    "start": {"$ref": "#/$defs/start"}
+    "start": {"$ref": "#/$defs/start"},
+    "migrate": {
+      "description": "Who may migrate an open Item of an older version to this one, while it is the latest. Absent: nobody.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "allowed": {"description": "role:<name> or principal:user:<id>.", "$ref": "#/$defs/texts"}
+      }
+    }
   },
   "$defs": {
     "text": {"description": "A text value. typedef reads any scalar as text for now.", "type": ["string", "number", "boolean", "null"]},
