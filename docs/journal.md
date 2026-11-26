@@ -6,6 +6,32 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
+- **The web Inbox, step 4 PR 2's Later items** (design.md, "The web Inbox on the view, as built"):
+  - **A claim on the stack (next, its own small change).** A Type in
+    `types/` with `claim` and a release move, and a role for a dev user,
+    so a real claim and release journey runs in the browser. About 20 Go
+    test files load `types/`: check the Go suite with it.
+  - **A place picker.** The place filter is a text box that takes an
+    Item's name or ID. A picker (search by words, or the containers the
+    caller works in) would make it usable without copying an ID.
+  - **The dropped labels.** "for your team" on "Waiting on me", and
+    "claimed by you". Both need the kernel to say why an Item is in the
+    view (which move, which entry), or `GetType` to show `claim`. Until
+    then the label is the tab, or the fields that hold the caller.
+  - **Role tabs from the kernel.** The tabs are the caller's roles that
+    some Type's `allowed` names: a reading of the Types in the browser.
+    It decides nothing, but a role named only from a done state gets a
+    tab that is always 0. The kernel could say which roles have a queue.
+  - **More than 50 waiting.** Oldest first puts a new arrival on a later
+    page. A busy approver may want "new since I last looked", or the
+    newest-first switch remembered.
+  - **Counts cost one call per tab** on load, on a place change and
+    after a move. Fine for a few tabs; the trigger for stored rows (3b)
+    names a count polled by many.
+  - **Live updates.** The page reads again after its own moves and on
+    Refresh; a colleague's claim shows only then (the button is refused
+    in between, with the kernel's refusal).
+  - **The PoC apps' inbox** still works out its own list (PR 1's Later).
 - **Inbox reads, step 4 PR 1's Later items** (design.md, "Inbox reads, as built"):
   - **An agent session's powers in `moves`.** `moves` is judged by the
     Type's rules for the agent and its user; a session without the
@@ -4578,3 +4604,50 @@ override in the scratchpad; Playwright through scratchpad configs using the prei
 **Open:** the Later items above. **Next session:** step 4's PR 2, the web Inbox on these reads (tabs for "waiting on
 me" and each role held, capped counts, oldest first, a place filter, claim and release by `TransitionItem` only;
 retire `inboxQueries` and `inboxTransitions` and list each of their tests), then step 5; 3b only on a trigger.
+
+## 2026-11-26 — Track 1, item 5, step 4, PR 2: the web Inbox on the view (Phases B to D)
+
+**Built:** the generic web UI's Inbox asks the kernel. `WhoAmI` once for the tabs ("Waiting on me", then each role the
+caller holds that a Type names); `CountItems` per tab ("50+" when capped); `SearchItems` with `waiting_on`, oldest
+waiting first, a page of 50, an order switch, a place filter (`filter.in`), [More] by token. A row shows who asked, how
+long it has waited and a label, and its buttons are exactly `Item.moves`, each one `TransitionItem`; after a move the
+rows and the numbers are read again. A customer gets one sentence and no call. `inboxQueries` and `inboxTransitions`
+are removed. design.md: "The web Inbox on the view, as built", and three pointers from older passages. Roadmap: PR 2
+built; a claiming Type on the stack as the next small change.
+
+**Changed (counted):** `web/src/pages/InboxPage.tsx` (rewritten), `web/src/model/inbox.ts` (new),
+`web/src/model/typeinfo.ts` (two functions removed), styles, one comment. No kernel, proto, Type or schema change; no new dependency.
+
+**Decided (the owner, through the coordinator):** every entry of `moves` is a button (option A; no "More" menu, which
+would need a new API field); the labels come from the data only, with two dropped; the empty sentences; the place
+filter as a text box; oldest first by default though a new arrival can land on page 2; claim and release tested
+against a fake kernel in this PR, and a claiming Type on the stack as its own small change afterwards. Phase C
+accepted by the coordinator's review.
+
+**Tests:** new: 23 for the model, 12 for the page against a fake kernel, 4 journeys. **Retired (approved):** 7 tests,
+8 assertions: `approval-inbox.test.ts` (1), `customers-inbox.test.ts` (3), the "the inbox" block of `typeinfo.test.ts`
+(3 tests, 4 assertions). **Fixture only:** `TransitionPanel.test.tsx` names its two transitions directly;
+`typeinfo.test.ts` lost two unused imports. No test changed after the tests gate.
+
+**Surprises:**
+- The stack cannot show a claim: no Type in `types/` has one, and the public API registers no Type. I asked before
+  building around it.
+- My first journey seed made incident@1 Items, and the desk agents' tab showed 0: only incident@2 and later name the
+  role. The count was right; the seed was wrong.
+- My 51-approval journey broke an existing one: bob's Inbox, oldest first, put the new vacation request on page 2.
+  That is the approved order doing what it says, so the journeys now cancel what they leave waiting.
+- Two status lines: the transition panel shows the answer on its row, so the page shows its own line only when the
+  row has left the list. Otherwise a journey that looks for "the" status finds two.
+- With the old page gone, "a customer's Inbox never searches a hidden field" became "makes no call", which is a
+  stronger test and a shorter one.
+
+**Numbers.** Web: typecheck clean, 492 unit tests, build. On the compose stack, in CI's order: the scenario passed
+(run word rundc2dcdaf, 138 steps); web Playwright 13 (9 existing, 4 new); apps/poc journeys 4. `go vet` clean and
+`go test ./...` green, 28 packages (no file outside `web/` and `docs/` changed).
+
+**Local workarounds, outside the repository (nothing committed):** dockerd started by hand; the stack from a compose
+override in the scratchpad; Playwright through scratchpad configs using the preinstalled Chromium; one screenshot of
+the page, published as a private page for the owner, not committed.
+
+**Open:** the Later items above. **Next session:** the claiming Type on the stack (a Type with `claim` and a release
+move, a role for a dev user, a real claim and release journey), then step 5; 3b only on a trigger.
