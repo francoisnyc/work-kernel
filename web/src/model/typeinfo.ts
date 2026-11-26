@@ -83,34 +83,6 @@ export function transitionsFrom(type: Type, state: string): TransitionView[] {
     .map((t) => ({ transition: t, systemOnly: isSystemOnly(t) }));
 }
 
-const namesAField = (t: Transition) => t.allowed.some((a) => a.startsWith("field:"));
-
-// One inbox search: Items of a Type (any version) in a state, where a
-// principal field holds the caller. Built from every transition whose
-// `allowed` names field:X.
-export type InboxQuery = { type: string; state: string; field: string };
-
-export function inboxQueries(types: Type[]): InboxQuery[] {
-  const found = new Map<string, InboxQuery>();
-  for (const type of types) {
-    const { ns, typeId } = parseTypeName(type.name);
-    for (const t of type.transitions) {
-      for (const a of t.allowed) {
-        if (!a.startsWith("field:")) continue;
-        const q = { type: `namespaces/${ns}/types/${typeId}`, state: t.fromState, field: a.slice("field:".length) };
-        found.set(`${q.type}|${q.state}|${q.field}`, q);
-      }
-    }
-  }
-  return [...found.entries()].sort(([a], [b]) => byText(a, b)).map(([, q]) => q);
-}
-
-// The transitions an inbox row offers: those leaving the Item's state, in
-// its own Type version, whose `allowed` names a field.
-export function inboxTransitions(type: Type, item: Item): Transition[] {
-  return type.transitions.filter((t) => t.fromState === item.state && namesAField(t));
-}
-
 // A link an Item of a Type can receive from other Types' Items: found by
 // scanning every Type's link types for this Type (or "*") among their
 // targets. name is the inverse (how this Item sees it), declared the name
