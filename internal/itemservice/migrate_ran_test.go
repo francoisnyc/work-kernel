@@ -1,10 +1,10 @@
-// Tests for track 1, item 6, step 2: the limit on an Item that has run an
+// Tests for track 1, item 6, steps 2 and 3a: an Item that has run an
 // action. An action's write-back is stamped with the version the Item was
-// on (hook:<type>@v<n>:<id>), and a version reads only its own stamps. So
-// an action finished under version 1 reads as unfinished under version 2
-// when version 2 declares the same hook on a state the Item entered: the
-// migrate is refused, and nothing runs again. Reading history written
-// before a migrate is a later step.
+// on (hook:<type>@v<n>:<id>). Step 2 read every entry under the version
+// the Item would go to, so an action finished under version 1 read as
+// unfinished under version 2 and the migrate was refused. Since step 3a
+// each entry is read under the version it was made under: the action is
+// finished, the migrate goes through, and nothing runs again.
 //
 // A reaction is different: its outcome record names the reaction without
 // a version (<type>:<id>), so one finished under version 1 reads as
@@ -14,15 +14,13 @@ package itemservice_test
 
 import (
 	"fmt"
-	"slices"
 	"testing"
 
 	"github.com/francoisnyc/work-kernel/internal/item"
 	"github.com/francoisnyc/work-kernel/internal/itemservice"
-	"github.com/francoisnyc/work-kernel/internal/lifecycle"
 )
 
-func TestMigrate_Quiet_AnActionFinishedUnderTheOldVersion_IsRefused(t *testing.T) {
+func TestMigrate_Quiet_AnActionFinishedUnderTheOldVersion_GoesThrough(t *testing.T) {
 	w := newMigWorld(t)
 	w.reg(t, migHooked(1, false, true, false, ""))
 	id := w.hooked(t, 1, "review", "ordered") // events 1, 2, 3
@@ -61,23 +59,16 @@ func TestMigrate_Quiet_AnActionFinishedUnderTheOldVersion_IsRefused(t *testing.T
 		t.Fatalf("after the write-back, under version 1: pending actions = %+v, %v; want none", se.PendingActions, err)
 	}
 
-	// Version 2 declares the same hook on the same state.
+	// Version 2 declares the same hook on the same state: the dry run finds
+	// nothing, the migrate goes through, and the loader owes nothing.
 	w.reg(t, migHooked(2, false, true, false, migAllowed))
-	deliverAll(t, id)
-	if got := w.dryRun(t, id, w.id("hk"), 2); !slices.Equal(got, []lifecycle.MigrationCheck{lifecycle.ActionUnfinished}) {
-		t.Errorf("the dry run: %v, want action_unfinished alone", got)
-	}
-	_, err = w.migrate(t, w.adm, id, w.id("hk"), 2)
-	assertNotMigratable(t, "the migrate", err, lifecycle.ActionUnfinished)
-	if v := versionOf(t, id); v != 1 {
-		t.Errorf("the request is on version %d, want 1", v)
-	}
+	w.migrateClean(t, id, w.id("hk"), 2)
 	// The order was placed once, and is not pending again.
 	if n := orders(); n != 1 {
 		t.Errorf("events written by place_order = %d, want 1", n)
 	}
 	if se, err = w.k.StateEntry(testCtx(t), id); err != nil || len(se.PendingActions) != 0 {
-		t.Errorf("after the refusal: pending actions = %+v, %v; want none", se.PendingActions, err)
+		t.Errorf("after the migrate: pending actions = %+v, %v; want none", se.PendingActions, err)
 	}
 }
 
