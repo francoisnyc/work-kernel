@@ -138,6 +138,8 @@ func TestOlderVersions_StoredForm(t *testing.T) {
 // newLatest are the versions added to types/ by this step: for each, the
 // version before it. (build_step is not here: nothing creates
 // build_step@1, so build_step@2 stays its latest and @1 is closed.)
+// ticket@9, added by step 2, is ticket@8 with the migrate key: it carries
+// ticket@8's start block, and is the latest ticket.
 var newLatest = map[string]int{
 	"bug": 3, "comment": 3, "desk": 3, "incident": 4, "note": 2, "reply": 2, "sla_goal": 3, "sla_policy": 2,
 	"sprint": 2, "story": 3, "task": 3, "ticket": 7, "vacation_request": 3,
@@ -193,6 +195,12 @@ func TestOlderVersions_TheRepositoryTypes(t *testing.T) {
 		if n, isNew := newLatest[ty.ID]; isNew && ty.Version == n+1 {
 			continue
 		}
+		if ty.ID == "ticket" && ty.Version == 9 {
+			if got := keeps(stored[name(ty.ID, ty.Version)]); got != "all" {
+				t.Errorf("ticket@9 start.older_versions = %v, want all, as ticket@8", got)
+			}
+			continue
+		}
 		if got := keeps(stored[name(ty.ID, ty.Version)]); got != nil {
 			t.Errorf("%s@%d has start.older_versions = %v; only the new latest versions should", ty.ID, ty.Version, got)
 		}
@@ -203,8 +211,12 @@ func TestOlderVersions_TheRepositoryTypes(t *testing.T) {
 		latest[ty.ID] = max(latest[ty.ID], ty.Version)
 	}
 	for id, before := range newLatest {
-		if latest[id] != before+1 {
-			t.Errorf("the latest %s in types/ is @%d, want @%d", id, latest[id], before+1)
+		want := before + 1
+		if id == "ticket" {
+			want = 9
+		}
+		if latest[id] != want {
+			t.Errorf("the latest %s in types/ is @%d, want @%d", id, latest[id], want)
 		}
 	}
 	if latest["build_step"] != 2 {

@@ -88,15 +88,24 @@ func TestMigrateKey_StoredForm(t *testing.T) {
 	}
 }
 
-// No Type of the repository has the key yet.
+// One Type of the repository has the key: ticket@9, for the role
+// ticket_admin (the scenario migrates a ticket to it).
 func TestMigrateKey_TheRepositoryTypes(t *testing.T) {
 	types, err := typedef.ParseDir("../../types")
 	if err != nil {
 		t.Fatalf("ParseDir: %v", err)
 	}
+	found := false
 	for _, ty := range types {
-		if ty.Migrate != nil {
-			t.Errorf("%s@%d has a migrate block %+v; none should yet", ty.ID, ty.Version, ty.Migrate)
+		if ty.ID == "ticket" && ty.Version == 9 {
+			found = ty.Migrate != nil && slices.Equal(ty.Migrate.Allowed, []string{"role:ticket_admin"})
+			continue
 		}
+		if ty.Migrate != nil {
+			t.Errorf("%s@%d has a migrate block %+v; only ticket@9 should", ty.ID, ty.Version, ty.Migrate)
+		}
+	}
+	if !found {
+		t.Errorf("ticket@9 should let role:ticket_admin migrate to it, and no one else")
 	}
 }
