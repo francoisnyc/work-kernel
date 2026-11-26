@@ -255,3 +255,23 @@ export async function cancelAll(baseURL: string, items: Item[]): Promise<void> {
     items.map((it) => ana.transitionItem({ name: it.name, requestId: randomUUID(), toState: "canceled", wait: create(DurationSchema, { seconds: 5n }) })),
   );
 }
+
+// --- Step 4's follow-up: a claim on the stack (equipment_request@1) ---
+
+// ana's equipment requests, created one after the other: the first waits
+// the longest. They wait on the desk agents (sam and lea), who take one
+// from the queue by claiming it.
+export async function seedEquipmentRequests(baseURL: string, titles: string[]): Promise<Item[]> {
+  const ana = api(baseURL, "ana");
+  const made: Item[] = [];
+  for (const title of titles) made.push(await createItem(ana, type("equipment_request", 1), { f_title: title }));
+  return made;
+}
+
+// Takes equipment requests still in the queue out of it: ana, who asked,
+// withdraws each. One that is claimed or decided is left as it is; a
+// failure here is not the journey's.
+export async function withdrawAll(baseURL: string, items: Item[]): Promise<void> {
+  const ana = api(baseURL, "ana");
+  await Promise.allSettled(items.map((it) => ana.transitionItem({ name: it.name, requestId: randomUUID(), toState: "withdrawn" })));
+}

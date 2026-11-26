@@ -9,16 +9,28 @@
 //   3. bob, an approver with 51 waiting below a place, sees "50+" and
 //      reads the next page with More.
 //   4. kim, a customer, gets one sentence and no call.
+//   5. sam claims an equipment request from the desk agents' queue; lea, a
+//      desk agent too, cannot decide it; sam releases it and it is back at
+//      the end of the queue (equipment_request@1, the first Type in types/
+//      with a claimed state).
 //
-// No Type on the stack has a claimed state yet, so claiming and releasing
-// are shown against a fake kernel in src/pages/InboxPage.test.tsx.
-//
-// Every journey narrows the Inbox to a place it has just made: the stack
-// keeps what earlier runs and the scenario left waiting.
+// Journeys 1 to 3 narrow the Inbox to a place they have just made: the
+// stack keeps what earlier runs and the scenario left waiting. Journey 5's
+// requests are at the top level, so it reads newest first and finds its
+// rows by their titles.
 //
 // Run: docker compose up -d --build --wait, then `npm run e2e` in web/.
 import { expect, test, type Page } from "@playwright/test";
-import { api, cancelAll, idOf, seedApprovalQueue, seedDeskQueue, seedEmptyPlace } from "./seed";
+import {
+  api,
+  cancelAll,
+  idOf,
+  seedApprovalQueue,
+  seedDeskQueue,
+  seedEmptyPlace,
+  seedEquipmentRequests,
+  withdrawAll,
+} from "./seed";
 import type { Item } from "../src/gen/kernel/v1/kernel_pb";
 
 const run = Date.now().toString(36);
@@ -26,8 +38,10 @@ const run = Date.now().toString(36);
 // What the journeys left waiting: canceled when they are done, so that
 // the other journeys' Inboxes are as they found them.
 const left: Item[] = [];
+const asked: Item[] = []; // equipment requests: withdrawn, not canceled
 test.afterAll(async ({ baseURL }) => {
   await cancelAll(baseURL!, left);
+  await withdrawAll(baseURL!, asked);
 });
 
 async function openInbox(page: Page, name: string) {
@@ -134,4 +148,67 @@ test("kim, a customer: one sentence, and the page asks the kernel nothing", asyn
   await expect(page.getByRole("tab")).toHaveCount(0);
   await page.waitForLoadState("networkidle");
   expect(calls).toEqual([]);
+});
+
+test("sam claims an equipment request; lea cannot decide it; sam releases it to the end of the queue", async ({ page, baseURL }) => {
+  // A word of this journey's own: the other journeys' rows carry `run`.
+  const word = `eq${run}`;
+  const laptop = `Laptop ${word}`;
+  const monitor = `Monitor ${word}`;
+  const made = await seedEquipmentRequests(baseURL!, [laptop, monitor]);
+  asked.push(...made);
+  const first = made[0];
+  // This run's rows, in the order shown. Newest waiting first, so they
+  // lead the list whatever earlier runs left in the queue.
+  const mine = (p: Page) => titles(p).filter({ hasText: word });
+  const row = (p: Page, title: string) => inbox(p).locator("> li").filter({ hasText: title });
+
+  await openInbox(page, "sam");
+  await page.getByLabel("Order").selectOption("Newest waiting first");
+  await page.getByRole("tab", { name: /desk_agent/ }).click();
+  // Both wait on the team: the monitor arrived last. The one move a desk
+  // agent has in the queue is to take the request.
+  await expect(mine(page)).toHaveText([monitor, laptop]);
+  await expect(row(page, laptop)).toContainText("equipment_request@1 · queue");
+  await expect(row(page, laptop)).toContainText("for your team (desk_agent)");
+  await expect(row(page, laptop).getByRole("button")).toHaveText(["Move to in_hand"]);
+
+  // The claim: one move. The laptop leaves the team's queue.
+  await row(page, laptop).getByRole("button", { name: "Move to in_hand" }).click();
+  await expect(page.getByRole("status")).toContainText("APPLIED");
+  await expect(mine(page)).toHaveText([monitor]);
+
+  // It is sam's now: in Waiting on me, named by the claim field, with
+  // the claimant's moves in the Type's order.
+  await page.getByRole("tab", { name: /Waiting on me/ }).click();
+  await expect(row(page, laptop)).toContainText("equipment_request@1 · in_hand");
+  await expect(row(page, laptop)).toContainText("f_handler is you");
+  await expect(row(page, laptop).getByRole("button")).toHaveText(["Move to fulfilled", "Move to declined", "Move to queue"]);
+
+  // lea is a desk agent too. The laptop is in neither of her tabs, and
+  // on its own page the kernel refuses her the decision.
+  await openInbox(page, "lea");
+  await page.getByLabel("Order").selectOption("Newest waiting first");
+  await expect(page.getByRole("tab", { name: /Waiting on me/ })).toHaveText(/\d/);
+  await expect(inbox(page)).toHaveAttribute("aria-busy", "false");
+  await expect(row(page, laptop)).toHaveCount(0);
+  await page.getByRole("tab", { name: /desk_agent/ }).click();
+  await expect(mine(page)).toHaveText([monitor]);
+  await page.goto(`/#/items/${idOf(first!)}`);
+  await page.getByRole("button", { name: "Move to fulfilled" }).click();
+  await expect(page.getByRole("alert")).toContainText("NOT_ALLOWED");
+  expect((await api(baseURL!, "lea").getItem({ name: first!.name })).item?.state).toBe("in_hand");
+
+  // sam releases it: back in the team's queue, as its newest arrival,
+  // which is the end of the queue when the oldest is served first.
+  await openInbox(page, "sam");
+  await page.getByLabel("Order").selectOption("Newest waiting first");
+  await row(page, laptop).getByRole("button", { name: "Move to queue" }).click();
+  await page.getByRole("tab", { name: /desk_agent/ }).click();
+  await expect(mine(page)).toHaveText([laptop, monitor]);
+  await expect(row(page, laptop).getByRole("button")).toHaveText(["Move to in_hand"]);
+
+  const got = (await api(baseURL!, "sam").getItem({ name: first!.name })).item;
+  expect(got?.state).toBe("queue");
+  expect(got?.fields?.f_handler ?? null).toBeNull();
 });

@@ -1961,6 +1961,43 @@ case ",$(meta checks)," in *,HAS_TIMER,*) ;; *) fail "checks: got '$(meta checks
 expect "the refused ticket stays on ticket@5" "$(ok ana item get "$mg2" | j .item.type)" "namespaces/acme/types/ticket/versions/5"
 
 # ---------------------------------------------------------------------------
+# A claim that binds, on the stack (track 1 item 5, step 4's follow-up):
+# equipment_request, the first Type in types/ with a claimed state. A desk
+# agent takes a request from the team's queue and is then the only one who
+# decides it; a release gives it back to the queue.
+# ---------------------------------------------------------------------------
+
+step "claim: sam takes ana's equipment request from the desk agents' queue; lea, a desk agent too, may not decide it; sam releases it; lea takes it and fulfils it"
+eq=$(ok ana item create --type equipment_request@1 --set "f_title=Laptop $w" | j .item.name)
+# In the queue it waits on the team, with one move for a desk agent: take it.
+# (--type keeps this run's incidents, which wait on the same team, out.)
+expect "the team's queue holds it" "$(ok sam inbox "$w" --type equipment_request --role desk_agent | names)" "$eq"
+expect "sam's move in the queue" "$(ok sam inbox "$w" --type equipment_request --role desk_agent | j '.items[0].moves | join(" ")')" "in_hand"
+expect "ana asked: nothing waits on her" "$(ok ana inbox "$w" --type equipment_request --count | j .count)" "0"
+# sam takes it: the claim names him, and it waits on him alone.
+taken=$(ok sam item transition "$eq" --to in_hand)
+expect "the claim names sam" "$(printf '%s' "$taken" | j '"\(.item.state) \(.item.fields.f_handler)"')" "in_hand user:sam"
+expect "it left the team's queue" "$(ok lea inbox "$w" --type equipment_request --role desk_agent | names)" ""
+expect "it waits on sam" "$(ok sam inbox "$w" --type equipment_request | names)" "$eq"
+expect "sam's moves: decide, or give it back" "$(ok sam inbox "$w" --type equipment_request | j '.items[0].moves | join(" ")')" "fulfilled declined queue"
+expect "it does not wait on lea" "$(ok lea inbox "$w" --type equipment_request | names)" ""
+# lea holds the role, and the claim is not hers: she may not decide it.
+# (She could release it: a release is `allowed`'s alone to decide, so a
+# colleague can take over a claim left behind.)
+refuse lea "PERMISSION_DENIED NOT_ALLOWED" item transition "$eq" --to fulfilled
+refuse lea "PERMISSION_DENIED NOT_ALLOWED" item transition "$eq" --to declined
+# sam releases it: back in the queue, the claim cleared.
+released=$(ok sam item transition "$eq" --to queue)
+expect "released: in the queue, nobody named" "$(printf '%s' "$released" | j '"\(.item.state) \(.item.fields.f_handler // "nobody")"')" "queue nobody"
+expect "the team's queue holds it again" "$(ok lea inbox "$w" --type equipment_request --role desk_agent | names)" "$eq"
+# lea takes it and fulfils it; then it waits on nobody.
+ok lea item transition "$eq" --to in_hand >/dev/null
+expect "it waits on lea now" "$(ok lea inbox "$w" --type equipment_request | names)" "$eq"
+refuse sam "PERMISSION_DENIED NOT_ALLOWED" item transition "$eq" --to fulfilled
+expect "lea fulfils it" "$(ok lea item transition "$eq" --to fulfilled | j .item.state)" "fulfilled"
+expect "fulfilled: it waits on nobody" "$(ok lea inbox "$w" --type equipment_request --count | j .count) $(ok sam inbox "$w" --type equipment_request --role desk_agent --count | j .count)" "0 0"
+
+# ---------------------------------------------------------------------------
 # Ventoux V2b: draft Types checked against every registered version, with
 # nothing registered (pli type validate, ValidateTypes).
 # ---------------------------------------------------------------------------
