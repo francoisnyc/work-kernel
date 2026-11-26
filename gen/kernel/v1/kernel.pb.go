@@ -2246,6 +2246,12 @@ type SearchItemsRequest struct {
 	// filter's Types (across every Type that declares it when the filter
 	// names none), else INVALID_ARGUMENT. Strings and enum names compare byte
 	// by byte, not by locale. Part of what a page token is bound to.
+	//
+	// One name is not a field: waiting_since, accepted only together with
+	// filter.waiting_on (else INVALID_ARGUMENT). It sorts the view by when
+	// each Item entered the state it is in: oldest waiting first, or with
+	// " desc" newest; Items that entered at the same instant by Item ID,
+	// ascending. A release puts an Item back in its queue as of the release.
 	OrderBy       string `protobuf:"bytes,7,opt,name=order_by,json=orderBy,proto3" json:"order_by,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
