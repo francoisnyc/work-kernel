@@ -1,0 +1,31 @@
+# equipment_request: someone asks the desk for equipment; the desk agents
+# take requests from a shared queue.
+#
+# The first Type in types/ with a claim (track 1 item 5, step 2): a desk
+# agent who takes a request from the queue claims it (f_handler names
+# them), and only they fulfil or decline it. They can hand it back to the
+# queue (a release), where any desk agent can take it again.
+id: equipment_request
+version: 1
+initial_state: queue
+
+fields:
+  - {id: f_title,   type: string}
+  - {id: f_handler, type: principal, writable_by: ['role:desk_agent']}
+
+states:
+  - {id: queue,     category: waiting}
+  - {id: in_hand,   category: active, claim: f_handler}
+  - {id: fulfilled, category: done}
+  - {id: declined,  category: canceled}
+  - {id: withdrawn, category: canceled}
+
+transitions:
+  # A desk agent takes it: the claim. Not the person who asked.
+  - {from: queue,   to: in_hand,   allowed: ['role:desk_agent'], except: [creator]}
+  # The claimant decides, or hands it back to the queue.
+  - {from: in_hand, to: fulfilled, allowed: ['role:desk_agent']}
+  - {from: in_hand, to: declined,  allowed: ['role:desk_agent']}
+  - {from: in_hand, to: queue,     allowed: ['role:desk_agent'], release: true, clears: [f_handler]}
+  # Whoever asked can withdraw it while nobody has taken it.
+  - {from: queue,   to: withdrawn, allowed: [creator]}

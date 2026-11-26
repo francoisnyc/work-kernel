@@ -143,6 +143,7 @@ func TestListTypes_EveryVersionInOrder(t *testing.T) {
 		"namespaces/globex/types/desk/versions/3",
 		"namespaces/globex/types/desk/versions/4",
 		"namespaces/globex/types/epic/versions/1",
+		"namespaces/globex/types/equipment_request/versions/1",
 		"namespaces/globex/types/fulfilment_task/versions/1",
 		"namespaces/globex/types/incident/versions/1",
 		"namespaces/globex/types/incident/versions/2",

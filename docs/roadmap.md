@@ -258,7 +258,8 @@ attack that found it as its test:
       opt-in: the five bake-off purchase Types gained the two keys, edited
       in place. Both bake-offs, scripts unchanged, now answer "does a claim
       hold?" with refused, and a colleague still takes over a claim left
-      behind. No proto or database change. No Type in `types/` uses it yet.
+      behind. No proto or database change. Since step 4's follow-up one
+      Type in `types/` uses it: `equipment_request@1`.
    3. **Oldest waiting first; who may act stored only when needed.** Split
       in two at its Phase A, on measurements (the owner's decision):
       - **3a. Waiting since. Built** (PR #98; `docs/design.md`, "Waiting
@@ -278,8 +279,7 @@ attack that found it as its test:
            namespace, or a measured p90 over 200 ms on the inbox page;
         2. a count polled by many people on every screen (a badge);
         3. agents polling their queue in a loop.
-      The order of what remains: a claiming Type on the stack (step 4's
-      small follow-up), step 5, then 3b on a trigger.
+      The order of what remains: step 5, then 3b on a trigger.
    4. **Queue extras and the screen.** Split in two PRs at its Phase A
       (the owner's decision):
       - **PR 1, the reads. Built** (PR #99; `docs/design.md`, "Inbox
@@ -299,12 +299,15 @@ attack that found it as its test:
         lists, each one `TransitionItem`. The browser decides nothing
         about who may act. The web's own inbox queries and list of moves
         are retired. Web only; no new dependency.
-      - **Next, a small change of its own: a claim on the stack.** One
-        Type in `types/` with a claimed state (`claim`) and a release
-        move, and a matching role for a dev user, so that a real claim
-        and release journey runs in the browser on the stack. Today no
-        Type in `types/` has a claim, and the screen's claim and release
-        are tested against a fake kernel.
+      - **The follow-up, a claim on the stack. Built** (PR #101;
+        `docs/design.md`, "The web Inbox on the view, as built", its
+        last note):
+        `equipment_request@1`, the first Type in `types/` with a claimed
+        state and a release move. Its queue is the desk agents', a role
+        two dev users already hold, so the dev tokens did not change. A
+        real claim and release journey runs in the browser on the stack,
+        and the scenario tells the same story through pli. One data file;
+        no kernel change.
    5. **Sent back to the requester:** a Type says a state waits on its
       requester (a `waiting` key on a transition), which also gives a
       customer a view.
