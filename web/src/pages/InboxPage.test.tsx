@@ -128,7 +128,11 @@ function kernel(opts: {
   const countItems = vi.fn(async (req: CountReq) =>
     create(CountItemsResponseSchema, opts.count ? opts.count(req.filter?.waitingOn ?? "", req) : { count: 0 }),
   );
-  const searchItems = vi.fn(async (req: SearchReq) => create(SearchItemsResponseSchema, await opts.rows(req.filter?.waitingOn ?? "", req)));
+  // Since the Inbox for people (PR 2b) a team tab also asks for its
+  // claimed rows (filter.claimed): none here.
+  const searchItems = vi.fn(async (req: SearchReq) =>
+    create(SearchItemsResponseSchema, req.filter?.claimed ? { items: [] } : await opts.rows(req.filter?.waitingOn ?? "", req)),
+  );
   const transitionItem = vi.fn(async (req: MoveReq) => {
     opts.move?.(req);
     return create(TransitionItemResponseSchema, { outcome: TransitionOutcome.APPLIED, commitSeq: 7n });
@@ -149,13 +153,22 @@ function show(k: ReturnType<typeof kernel>, principal = "user:fay") {
 const tab = (name: RegExp) => screen.getByRole("tab", { name });
 // Each row's title: the link that opens the row (a row may hold other
 // links, such as "Open it to answer").
-const rows = () => [...screen.getByRole("list", { name: "Inbox" }).querySelectorAll<HTMLAnchorElement>(":scope > li > a")];
+// Since the Inbox for people (PR 2b) the rows are in labelled lists
+// (Overdue, Waiting; a team's two sections) inside the Inbox region.
+const rows = () => [...screen.getByRole("region", { name: "Inbox" }).querySelectorAll<HTMLAnchorElement>("ul[aria-label] > li > a")];
 const titles = () => rows().map((a) => a.textContent);
 const rowOf = (title: string) => screen.getByRole("link", { name: title }).closest("li")!;
 const buttonsOf = (title: string) =>
   within(rowOf(title))
     .queryAllByRole("button")
     .map((b) => b.textContent);
+// Every move a row offers: its main button, then those behind More moves
+// (opened here when the row has it).
+const allMovesOf = async (title: string) => {
+  const more = within(rowOf(title)).queryByRole("button", { name: "More moves" });
+  if (more && more.getAttribute("aria-expanded") !== "true") await userEvent.click(more);
+  return buttonsOf(title).filter((b) => b !== "More moves");
+};
 
 // Since step 5 a customer's Inbox asks like anyone's: what was sent back
 // to her. She holds no role, so "Waiting on me" is her one tab.
@@ -171,7 +184,7 @@ test("a customer: one tab, Waiting on me, and what was sent back to her", async 
   expect(k.whoAmI).toHaveBeenCalledTimes(1);
   expect(k.searchItems).toHaveBeenLastCalledWith({ parent: NS, pageSize: 50, orderBy: "waiting_since", filter: { waitingOn: "me" } });
   expect(k.countItems.mock.calls.map(([req]) => req)).toEqual([{ parent: NS, filter: { waitingOn: "me" } }]);
-  expect(rowOf("Printer jams")).toHaveTextContent("asked by customer:kim · waiting 3 h · sent back to you");
+  expect(rowOf("Printer jams")).toHaveTextContent("You asked for this one · sent back to you · waiting 3 h");
   // She answers on the incident's own page: no button, a link to it.
   expect(buttonsOf("Printer jams")).toEqual([]);
   expect(within(rowOf("Printer jams")).getByRole("link", { name: "Open it to answer" })).toHaveAttribute("href", `#/items/${itemId(itemName(60))}`);
@@ -195,9 +208,9 @@ test("tabs: Waiting on me, then the caller's roles that a Type names, each with 
     count: (on) => ({ me: { count: 12 }, "role:finance": { count: 50, capped: true }, "role:approver": { count: 0 } })[on]!,
   });
   show(k);
-  await waitFor(() => expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Waiting on me 12", "approver 0", "finance 50+"]));
+  await waitFor(() => expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Waiting on me 12", "Approver 0", "Finance 50+"]));
   expect(tab(/Waiting on me/)).toHaveAttribute("aria-selected", "true");
-  expect(tab(/finance/)).toHaveAttribute("aria-selected", "false");
+  expect(tab(/Finance/)).toHaveAttribute("aria-selected", "false");
   expect(k.whoAmI).toHaveBeenCalledTimes(1);
   // One count per tab, each the tab's own filter and nothing else.
   expect(k.countItems.mock.calls.map(([req]) => req).sort((a, b) => (a.filter!.waitingOn! < b.filter!.waitingOn! ? -1 : 1))).toEqual([
@@ -223,17 +236,24 @@ test("the rows: Waiting on me, oldest waiting first, a page of 50; the order swi
   await waitFor(() => expect(titles()).toEqual(["Chairs", "Spare parts"]));
   expect(k.searchItems).toHaveBeenLastCalledWith({ parent: NS, pageSize: 50, orderBy: "waiting_since desc", filter: { waitingOn: "me" } });
 
-  await userEvent.click(tab(/finance/));
+  await userEvent.click(tab(/Finance/));
   await waitFor(() => expect(titles()).toEqual(["Laptops"]));
-  expect(tab(/finance/)).toHaveAttribute("aria-selected", "true");
-  expect(k.searchItems).toHaveBeenLastCalledWith({
+  expect(tab(/Finance/)).toHaveAttribute("aria-selected", "true");
+  // The team's queue, and (since PR 2b) its claimed rows, in the same order.
+  expect(k.searchItems).toHaveBeenCalledWith({
     parent: NS,
     pageSize: 50,
     orderBy: "waiting_since desc",
     filter: { waitingOn: "role:finance" },
   });
+  expect(k.searchItems).toHaveBeenCalledWith({
+    parent: NS,
+    pageSize: 50,
+    orderBy: "waiting_since desc",
+    filter: { waitingOn: "role:finance", claimed: true },
+  });
   // No search names a Type, a state or a field: the kernel works out what waits.
-  for (const [req] of k.searchItems.mock.calls) expect(Object.keys(req.filter!)).toEqual(["waitingOn"]);
+  for (const [req] of k.searchItems.mock.calls) expect(["waitingOn", "claimed"]).toEqual(expect.arrayContaining(Object.keys(req.filter!)));
 });
 
 test("a row says who asked, how long it has waited and why it is here", async () => {
@@ -243,16 +263,20 @@ test("a row says who asked, how long it has waited and why it is here", async ()
   });
   show(k);
   await waitFor(() => expect(titles()).toEqual(["Spare parts", "Laptops"]));
-  expect(rowOf("Spare parts")).toHaveTextContent("purchase@1 · finance_review (active)");
-  expect(rowOf("Spare parts")).toHaveTextContent("asked by user:ana · waiting 5 h · f_claimed_by is you");
+  expect(rowOf("Spare parts")).toHaveTextContent("purchase · finance_review");
+  expect(rowOf("Spare parts")).toHaveTextContent("user:ana asks · you are its f_claimed_by · waiting 5 h");
   // In the queue and in fay's view because she is in finance: the browser
   // does not re-derive that, so it gives no reason.
-  expect(rowOf("Laptops")).toHaveTextContent("asked by user:ana · waiting 3 h");
-  expect(rowOf("Laptops")).not.toHaveTextContent(/is you|your team/);
+  expect(rowOf("Laptops")).toHaveTextContent("user:ana asks · waiting 3 h");
+  expect(rowOf("Laptops")).not.toHaveTextContent(/you are its|your team/);
 
-  await userEvent.click(tab(/finance/));
+  // On the team's tab the tab's name says why (since PR 2b): the row adds
+  // nothing.
+  await userEvent.click(tab(/Finance/));
   await waitFor(() => expect(titles()).toEqual(["Laptops"]));
-  expect(rowOf("Laptops")).toHaveTextContent("asked by user:ana · waiting 3 h · for your team (finance)");
+  expect(tab(/Finance/)).toHaveAttribute("aria-selected", "true");
+  expect(rowOf("Laptops")).toHaveTextContent("user:ana asks · waiting 3 h");
+  expect(rowOf("Laptops")).not.toHaveTextContent(/your team/);
 });
 
 test("a row's buttons are exactly the server's moves, in its order; the Type's `allowed` decides none", async () => {
@@ -273,8 +297,13 @@ test("a row's buttons are exactly the server's moves, in its order; the Type's `
   });
   show(k);
   await waitFor(() => expect(titles()).toHaveLength(4));
-  expect(buttonsOf("All three")).toEqual(["Move to approved", "Move to rejected", "Move to finance_queue"]);
-  expect(buttonsOf("Another order")).toEqual(["Move to finance_queue", "Move to approved"]);
+  // Since PR 2b: the first move listed is the main button (purchase marks
+  // none primary), the rest behind More moves; together, the server's
+  // moves in its order.
+  expect(buttonsOf("All three")).toEqual(["Move to approved", "More moves"]);
+  expect(await allMovesOf("All three")).toEqual(["Move to approved", "Move to rejected", "Move to finance_queue"]);
+  expect(buttonsOf("Another order")).toEqual(["Move to finance_queue", "More moves"]);
+  expect(await allMovesOf("Another order")).toEqual(["Move to finance_queue", "Move to approved"]);
   expect(buttonsOf("Not hers")).toEqual([]);
   expect(within(rowOf("Not hers")).getByRole("link", { name: "Open it to answer" })).toHaveAttribute("href", `#/items/${itemId(itemName(3))}`);
   expect(buttonsOf("Reopened")).toEqual(["Move to finance_review"]);
@@ -339,8 +368,8 @@ test("nothing waiting: the page says so, on Waiting on me and on a role's tab", 
   expect(await screen.findByText("Nothing is waiting on you.")).toBeInTheDocument();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "More" })).not.toBeInTheDocument();
-  await userEvent.click(tab(/finance/));
-  expect(await screen.findByText("Nothing is waiting on finance.")).toBeInTheDocument();
+  await userEvent.click(tab(/Finance/));
+  expect(await screen.findByText("Nothing is waiting on Finance.")).toBeInTheDocument();
 });
 
 test("while a read is running the last rows stay, marked busy", async () => {
@@ -357,16 +386,16 @@ test("while a read is running the last rows stay, marked busy", async () => {
   });
   show(k);
   await waitFor(() => expect(titles()).toEqual(["Laptops", "Chairs"]));
-  expect(screen.getByRole("list", { name: "Inbox" })).toHaveAttribute("aria-busy", "false");
+  expect(screen.getByRole("region", { name: "Inbox" })).toHaveAttribute("aria-busy", "false");
 
   await userEvent.selectOptions(screen.getByLabelText("Order"), "Newest waiting first");
-  await waitFor(() => expect(screen.getByRole("list", { name: "Inbox" })).toHaveAttribute("aria-busy", "true"));
+  await waitFor(() => expect(screen.getByRole("region", { name: "Inbox" })).toHaveAttribute("aria-busy", "true"));
   expect(titles()).toEqual(["Laptops", "Chairs"]);
   expect(screen.queryByText("Nothing is waiting on you.")).not.toBeInTheDocument();
 
   await act(async () => release());
   await waitFor(() => expect(titles()).toEqual(["Chairs", "Laptops"]));
-  expect(screen.getByRole("list", { name: "Inbox" })).toHaveAttribute("aria-busy", "false");
+  expect(screen.getByRole("region", { name: "Inbox" })).toHaveAttribute("aria-busy", "false");
 });
 
 test("a refusal is shown as it came, and the page does not claim the inbox is empty", async () => {
@@ -398,9 +427,9 @@ test("claim, then release: each is one TransitionItem, and the rows and every co
     },
   });
   show(k);
-  await userEvent.click(await screen.findByRole("tab", { name: /finance/ }));
+  await userEvent.click(await screen.findByRole("tab", { name: /Finance/ }));
   await waitFor(() => expect(titles()).toEqual(["Chairs", "Laptops"]));
-  expect(tab(/finance/)).toHaveTextContent("finance 2");
+  expect(tab(/Finance/)).toHaveTextContent("Finance 2");
   expect(buttonsOf("Laptops")).toEqual(["Move to finance_review"]);
 
   // Claim: the Type's own move into the claimed state.
@@ -411,9 +440,9 @@ test("claim, then release: each is one TransitionItem, and the rows and every co
   expect(k.transitionItem.mock.calls[0]![0]).toMatchObject({ name: itemName(1), toState: "finance_review", fields: {} });
   expect(k.transitionItem.mock.calls[0]![0].requestId).toMatch(/^[0-9a-f-]{36}$/);
   // The answer stays on the page though the row has left this tab.
-  expect(screen.getByRole("status")).toHaveTextContent("Laptops: move to finance_review: APPLIED");
+  expect(screen.getByRole("status")).toHaveTextContent("Laptops: Move to finance_review: APPLIED");
   // Both numbers were read again, and the next search asks for this write.
-  await waitFor(() => expect(tab(/finance/)).toHaveTextContent("finance 1"));
+  await waitFor(() => expect(tab(/Finance/)).toHaveTextContent("Finance 1"));
   expect(tab(/Waiting on me/)).toHaveTextContent("Waiting on me 1");
   expect(k.countItems).toHaveBeenCalledTimes(2);
   expect(k.searchItems.mock.lastCall![0].minSeq).toBe(7n);
@@ -421,14 +450,16 @@ test("claim, then release: each is one TransitionItem, and the rows and every co
   // It is now in Waiting on me, with the claimant's moves.
   await userEvent.click(tab(/Waiting on me/));
   await waitFor(() => expect(titles()).toEqual(["Laptops"]));
-  expect(buttonsOf("Laptops")).toEqual(["Move to approved", "Move to rejected", "Move to finance_queue"]);
+  expect(buttonsOf("Laptops")).toEqual(["Move to approved", "More moves"]);
+  expect(await allMovesOf("Laptops")).toEqual(["Move to approved", "Move to rejected", "Move to finance_queue"]);
 
-  // Release: the Type's release move, a transition like any other.
+  // Release: the Type's release move, a transition like any other (behind
+  // More moves, opened above).
   await userEvent.click(within(rowOf("Laptops")).getByRole("button", { name: "Move to finance_queue" }));
   await waitFor(() => expect(k.transitionItem).toHaveBeenCalledTimes(2));
   expect(k.transitionItem.mock.calls[1]![0]).toMatchObject({ name: itemName(1), toState: "finance_queue" });
-  await waitFor(() => expect(tab(/finance/)).toHaveTextContent("finance 2"));
-  await userEvent.click(tab(/finance/));
+  await waitFor(() => expect(tab(/Finance/)).toHaveTextContent("Finance 2"));
+  await userEvent.click(tab(/Finance/));
   // Back in the team's queue, at its end.
   await waitFor(() => expect(titles()).toEqual(["Chairs", "Laptops"]));
 });
