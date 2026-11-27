@@ -360,7 +360,12 @@ attack that found it as its test:
           "The Inbox in words, as built (Inbox PR 2b)"): a row in words,
           its main move and More moves, Overdue then Waiting, "Nobody has
           these yet" then "Being handled", why a move is withheld.
-        - **2c, the side panel, several rows at once, the keyboard (next).**
+        - **2c, the side panel, several rows at once, the keyboard. Built**
+          (`docs/design.md`, "The Inbox panel, several rows and keys, as
+          built (Inbox PR 2c)"). PR 2 is done.
+      - **PR 3, an agent's request shown as one (next):** "Agent request"
+        on a row and in the panel, "for {person}", the agent's text as
+        plain text. Its own Phase A.
 6. **Moving open Items to a new version, and retiring old versions**,
    deliberately and checked: a change that must reach requests in flight;
    builds on starting work's steps 2 and 2b, already built (the latest

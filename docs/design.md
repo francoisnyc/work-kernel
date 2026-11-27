@@ -6409,7 +6409,51 @@ a fixture (`inHours`) and the fresh-claim wording.
 **Out of the mockup, for now:** "Requested by me", snooze, the header
 search, the greeting, avatars, the agent badge (PR 3).
 
-**Next.** 2c: the side panel, several rows at once, the keyboard.
+**Next.** 2c: the side panel, several rows at once, the keyboard. (Built:
+"The Inbox panel, several rows and keys, as built".)
+
+## The Inbox panel, several rows and keys, as built (Inbox PR 2c) (2026-11-27)
+
+The second half of PR 2 (decided at its Phase A, 2026-11-27). Web only;
+no kernel, contract or schema change; no who-may logic in the browser.
+
+**The side panel.** A row's title opens it (Enter on the title is its
+click); `#/inbox?item=<id>` keeps it open across a reload. An `<aside>`
+named by the row's title: the Type and the state's label, every field
+with its label, value (a person by name, "not set" when empty) and help,
+read only; the row's moves (all of `Item.moves`, a required field asked
+for in place before the move); the history folded, read with
+`ListItemEvents` only when unfolded (the Inbox's one extra call); a link
+to the full page; Close. Focus goes to its heading on open and back to
+the row's title on close. After a move from the panel the rows and counts
+are read again and the panel goes to the next row (`nextAfter`: the next
+still listed, else the one before, else none).
+
+**Several rows at once.** A checkbox per row ("Select {title}"), before
+its title. The bar ("Selected rows") offers a move only if every
+selected row lists it in `moves`, all are of one Type version, and each
+row's own move to it asks no field (`bulkMoves`), as "{label} ({n})".
+The rows move in the order they were selected, one `TransitionItem` after
+another; each answer is a line under "Results"; the rows that failed stay
+selected.
+
+**Keys,** on the Inbox's list only (its section's own handler; nothing on
+the window or the document), never while typing or with Ctrl, Meta or
+Alt (`inboxKey`): J and K move focus between the rows' titles, X selects
+the row, P makes its main move (in the panel, when it asks for fields),
+Enter opens the panel. Shown in a line under the list. No roving
+tabindex, which would take the titles out of the Tab order 2b's test
+holds (the owner's call).
+
+**The answer line** goes when a move starts and comes back with its
+answer, so it never shows an earlier move's.
+
+**Tests.** New: model 15, page 11, three journeys (bob approves from the
+panel with two required fields; sam takes two at once; J, K, X, Enter and
+P). The one earlier-approved test that changed, the owner's: 2b's Tab
+order now includes each row's checkbox.
+
+**Next.** PR 3: an agent's request shown as one.
 
 ## Out of scope for the spike
 
