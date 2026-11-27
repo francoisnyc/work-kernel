@@ -11,7 +11,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactElement } from "react";
 import { useSession } from "../app/session";
 import { TransitionOutcome, type Item } from "../gen/kernel/v1/kernel_pb";
-import { isCustomer } from "../model/customers";
 import {
   askedBy,
   countLabel,
@@ -34,22 +33,9 @@ import { TransitionPanel } from "../ui/TransitionPanel";
 type Last = { name: string; title: string; toState: string; outcome: string; reason: string };
 type Count = { count: number; capped: boolean };
 
+// A customer's Inbox is the same page: they hold no role, so "Waiting on
+// me" is their one tab, and it holds what was sent back to them (step 5).
 export function InboxPage(): ReactElement {
-  const session = useSession();
-  // Nothing waits on a customer yet (a request sent back to its requester
-  // is step 5): no call is made for them.
-  if (isCustomer(session.user)) {
-    return (
-      <>
-        <h1>Inbox</h1>
-        <p className="hint">Nothing waits on you here yet.</p>
-      </>
-    );
-  }
-  return <StaffInbox />;
-}
-
-function StaffInbox(): ReactElement {
   const session = useSession();
   const [roles, setRoles] = useState<string[]>();
   const [tabKey, setTabKey] = useState("me");
@@ -219,7 +205,11 @@ function StaffInbox(): ReactElement {
                   }}
                 />
               ) : (
-                <p className="hint">No move here is yours to make.</p>
+                // No move of theirs here (a customer answers by replying):
+                // the Item's own page is where to act.
+                <p>
+                  <a href={`#/items/${itemId(it.name)}`}>Open it to answer</a>
+                </p>
               )}
             </li>
           );
