@@ -157,14 +157,25 @@ const buttonsOf = (title: string) =>
     .queryAllByRole("button")
     .map((b) => b.textContent);
 
-test("a customer: one sentence, and no call at all", async () => {
-  const k = kernel({ rows: () => ({ items: [] }) });
+// Since step 5 a customer's Inbox asks like anyone's: what was sent back
+// to her. She holds no role, so "Waiting on me" is her one tab.
+test("a customer: one tab, Waiting on me, and what was sent back to her", async () => {
+  const k = kernel({
+    rows: (on) => ({ items: on === "me" ? [sentBack(60, "Printer jams", "customer:kim")] : [] }),
+    count: () => ({ count: 1 }),
+  });
   show(k, "customer:kim");
-  expect(screen.getByRole("heading", { name: "Inbox" })).toBeInTheDocument();
-  expect(screen.getByText("Nothing waits on you here yet.")).toBeInTheDocument();
-  expect(screen.queryByRole("tab")).not.toBeInTheDocument();
-  await act(async () => {});
-  for (const call of [k.whoAmI, k.countItems, k.searchItems, k.transitionItem]) expect(call).not.toHaveBeenCalled();
+  await waitFor(() => expect(titles()).toEqual(["Printer jams"]));
+  expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Waiting on me 1"]);
+  expect(screen.queryByText("Nothing waits on you here yet.")).not.toBeInTheDocument();
+  expect(k.whoAmI).toHaveBeenCalledTimes(1);
+  expect(k.searchItems).toHaveBeenLastCalledWith({ parent: NS, pageSize: 50, orderBy: "waiting_since", filter: { waitingOn: "me" } });
+  expect(k.countItems.mock.calls.map(([req]) => req)).toEqual([{ parent: NS, filter: { waitingOn: "me" } }]);
+  expect(rowOf("Printer jams")).toHaveTextContent("asked by customer:kim · waiting 3 h · sent back to you");
+  // She answers on the incident's own page: no button, a link to it.
+  expect(buttonsOf("Printer jams")).toEqual([]);
+  expect(within(rowOf("Printer jams")).getByRole("link", { name: "Open it to answer" })).toHaveAttribute("href", `#/items/${itemId(itemName(60))}`);
+  expect(k.transitionItem).not.toHaveBeenCalled();
 });
 
 test("tabs: Waiting on me, then the caller's roles that a Type names, each with its count; 50+ when capped", async () => {
@@ -257,7 +268,7 @@ test("a row's buttons are exactly the server's moves, in its order; the Type's `
   expect(buttonsOf("All three")).toEqual(["Move to approved", "Move to rejected", "Move to finance_queue"]);
   expect(buttonsOf("Another order")).toEqual(["Move to finance_queue", "Move to approved"]);
   expect(buttonsOf("Not hers")).toEqual([]);
-  expect(rowOf("Not hers")).toHaveTextContent("No move here is yours to make.");
+  expect(within(rowOf("Not hers")).getByRole("link", { name: "Open it to answer" })).toHaveAttribute("href", `#/items/${itemId(itemName(3))}`);
   expect(buttonsOf("Reopened")).toEqual(["Move to finance_review"]);
 });
 
