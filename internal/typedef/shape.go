@@ -306,5 +306,6 @@ func decodeType(doc *yaml.Node) (*Type, Problems) {
 		position(ps, doc)
 		return nil, ps
 	}
+	t.emptyHints = emptyHintPaths(doc.Content[0])
 	return &t, nil
 }

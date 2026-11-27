@@ -175,7 +175,7 @@ type Field struct {
 	UniqueAmongSiblings []string `yaml:"unique_among_siblings" json:"unique_among_siblings,omitempty"`
 	// Label and Help are presentation hints (the Inbox for people, PR 1):
 	// a short name for people and a line of help. They enforce nothing.
-	// Empty: none. Phase B stub: parsed and stored only.
+	// Empty: none. See hints.go for their checks.
 	Label string `yaml:"label" json:"label,omitempty"`
 	Help  string `yaml:"help" json:"help,omitempty"`
 }
@@ -215,7 +215,7 @@ type State struct {
 	Acting []ActingTimer `yaml:"acting" json:"acting,omitempty"`
 	// Label and Help are presentation hints (the Inbox for people, PR 1):
 	// a short name for people and a line of help. They enforce nothing.
-	// Empty: none. Phase B stub: parsed and stored only.
+	// Empty: none. See hints.go for their checks.
 	Label string `yaml:"label" json:"label,omitempty"`
 	Help  string `yaml:"help" json:"help,omitempty"`
 	// Due (a presentation hint) names a datetime field whose instant an
@@ -291,10 +291,10 @@ type Transition struct {
 	Sets map[string]string `yaml:"sets" json:"sets,omitempty"`
 	// Label and Help are presentation hints (the Inbox for people, PR 1):
 	// a short name for people and a line of help. They enforce nothing.
-	// Empty: none. Phase B stub: parsed and stored only.
+	// Empty: none. See hints.go for their checks.
 	Label string `yaml:"label" json:"label,omitempty"`
 	Help  string `yaml:"help" json:"help,omitempty"`
-	// Primary (a presentation hint) marks the main move out of its from
+	// Primary (a presentation hint; see hints.go) marks the main move out of its from
 	// state, for a screen's one button: at most one per state. It decides
 	// nothing about who may make it.
 	Primary bool `yaml:"primary" json:"primary,omitempty"`
@@ -374,6 +374,9 @@ type Type struct {
 	// Summary (a presentation hint) names the fields that summarise an
 	// Item under its title (a list row, a card): at most 3. Empty: none.
 	Summary []string `yaml:"summary" json:"summary,omitempty"`
+	// emptyHints are the paths of the labels and helps the YAML wrote as
+	// "", which a string cannot tell from none (see hints.go). Never stored.
+	emptyHints []string
 }
 
 // Migrate is a Type's migrate block. Allowed lists who may migrate Items
@@ -594,6 +597,8 @@ func (t *Type) check() error {
 	// A claimed state, and the moves that claim and release.
 	t.checkClaim(r)
 	t.checkWaitsOn(r)
+	// Presentation hints: words for people, which enforce nothing.
+	t.checkHints(r)
 
 	// A field only the kernel writes needs a writer: a hook that writes it,
 	// or another Type's reaction this Type accepts for it.
