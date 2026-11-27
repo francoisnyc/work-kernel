@@ -1,0 +1,57 @@
+approval@2
+
+Key
+- a customer: a person outside the organisation.
+- an agent: a program acting for a person; it may do only what both it and that person may do, and a field that names a person never names an agent.
+- the kernel: the system that runs the rules of every Type; it is never a person.
+- a reaction: a write a Type makes on another Item when something happens to one of its own; the other Item's Type must allow it.
+
+Fields
+- `f_title` (Request): text
+- `f_approver` (Approver): a person
+- `f_delegate` (Hand over to): a person
+
+In short
+1. An approval starts in pending.
+2. It moves only as listed below; any other move is refused.
+3. Every write keeps this true: `f_approver` is set; a write that would not is refused (approver_missing).
+4. Every write keeps this true: `f_delegate` is unset or `f_delegate` is `f_approver`; a write that would not is refused (delegate_not_approver).
+
+Who writes what
+5. Only the kernel writes `f_title`: access_request's reaction `request_approvals`.
+6. Only the kernel writes `f_approver`: access_request's reaction `request_approvals`, and the move from pending to pending.
+7. No two approvals in one container, both in pending or approved, hold the same `f_approver`.
+8. No agent writes its fields.
+
+Waiting for a decision (`pending`, active)
+9. While it is in pending, it waits on whoever `f_approver` names, or anyone with the role access_admin.
+10. Approve: whoever `f_approver` names, but never anyone who took part in creating its container, moves it from pending to approved, only if its container's state is pending.
+11. Reject: whoever `f_approver` names, but never anyone who took part in creating its container, moves it from pending to rejected, only if its container's state is pending.
+12. Hand over: whoever `f_approver` names, or anyone with the role access_admin, but never anyone who took part in creating its container, moves it from pending to pending, once `f_delegate` is set, only if its container's state is pending and `f_delegate` is not `f_approver`; the move sets `f_approver` to `f_delegate`.
+13. Only a reaction moves it from pending to canceled.
+
+Approved (`approved`, done)
+14. On entering approved, `move_approved` moves its container from pending to approved; if its container's rules refuse the move, it is skipped.
+15. Nothing leaves approved.
+
+Rejected (`rejected`, done)
+16. On entering rejected, `move_rejected` moves its container from pending to rejected; if its container's rules refuse the move, it is skipped.
+17. Nothing leaves rejected.
+
+Closed (`canceled`, canceled)
+18. Nothing leaves canceled.
+
+What other Types may do to it
+19. access_request's reaction `close_on_approved` may move it to canceled.
+20. access_request's reaction `close_on_rejected` may move it to canceled.
+21. access_request's reaction `close_on_withdrawn` may move it to canceled.
+22. access_request's reaction `request_approvals` may create it, setting `f_approver` and `f_title`.
+
+Who sees it
+23. A customer who sees it sees none of its fields, only its header.
+24. No one moves it to another container or narrows who sees it.
+
+Not covered by this reading
+- Who can see a given approval: that is set for each Item and its container, not by its Type.
+- Who may create an approval, and where, and who may move or narrow one, once a later version exists: the latest version of approval decides, for every version.
+- How the kernel keeps its promises (retries, each write made once, recovery after a failure): the same for every Type.

@@ -110,7 +110,7 @@ export function TransitionPanel({ type, item, principals, only, onTransition }: 
         {views.map(({ transition: t, systemOnly }) => (
           <li key={`${t.fromState}>${t.toState}`}>
             <button type="button" disabled={systemOnly || busy} onClick={() => start(t)}>
-              Move to {t.toState}
+              {t.label || `Move to ${t.toState}`}
             </button>
             {systemOnly && <span className="hint"> only the system can do this</span>}
             {rules(type, t).map((r) => (

@@ -95,8 +95,8 @@ test("kim, a customer: her portal, her incident, its replies, and nothing else",
   await expect(history.filter({ hasText: "sla_" })).toHaveCount(0);
 
   // Her moves: cancel (allowed names creator); not starting work.
-  await expect(page.getByRole("button", { name: "Move to canceled" })).toBeEnabled();
-  await expect(page.getByRole("button", { name: "Move to in_progress" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Cancel" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Start" })).toHaveCount(0);
 
   // lee's incident does not exist for her.
   await page.goto(`/#/items/${idOf(leesIncident)}`);

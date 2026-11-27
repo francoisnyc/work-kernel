@@ -268,6 +268,16 @@ export async function seedEquipmentRequests(baseURL: string, titles: string[]): 
   return made;
 }
 
+// The Inbox for people, PR 1b: ana's equipment requests as
+// equipment_request@2, whose moves carry labels ("Take it", "Mark
+// fulfilled", ...).
+export async function seedLabelledEquipmentRequests(baseURL: string, titles: string[]): Promise<Item[]> {
+  const ana = api(baseURL, "ana");
+  const made: Item[] = [];
+  for (const title of titles) made.push(await createItem(ana, type("equipment_request", 2), { f_title: title }));
+  return made;
+}
+
 // Takes equipment requests still in the queue out of it: ana, who asked,
 // withdraws each. One that is claimed or decided is left as it is; a
 // failure here is not the journey's.

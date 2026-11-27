@@ -1,0 +1,65 @@
+# approval@2 (the Inbox for people, PR 1b): approval@1 with words for
+# people (presentation hints: labels, a primary move), and nothing else
+# changed. Hints enforce nothing. access_request@2 creates this version;
+# access_request@1 still creates approval@1. The text below is approval@1's.
+#
+# One approver's decision on an access request (Jira 2.4b), made by the
+# request on submit, one per approver (for_each). Contained in its request,
+# whose readers it shares.
+#
+#   - Only its approver decides it, never whoever created the request
+#     (except: [container_creator]), and only while the request is pending.
+#   - Its approver, or access_admin, hands it over in place: pending ->
+#     pending sets f_approver from f_delegate. To someone who already holds
+#     a pending or approved approval on the same request is NOT_UNIQUE; to
+#     oneself, GUARD_FAILED. A delegate set any other way breaks the
+#     invariant delegate_not_approver.
+#   - A decision moves the request (target: container). The request's own
+#     guards count its approvals, so it moves once: until enough approvals
+#     have decided, the move is a skip (on_guard: skip), not a failure.
+#   - Nobody cancels one by hand: the request closes the leftovers.
+#   - Nobody moves or narrows one: it stays in the request it was made in.
+id: approval
+version: 2
+initial_state: pending
+
+fields:
+  - {id: f_title,    type: string,    writable_by: kernel, label: Request}   # the request's, for the Inbox
+  - {id: f_approver, type: principal, writable_by: kernel, unique_among_siblings: [pending, approved], label: Approver}
+  - {id: f_delegate, type: principal, label: Hand over to}
+
+states:
+  - {id: pending,  category: active, label: Waiting for a decision}
+  - {id: approved, category: done, label: Approved}
+  - {id: rejected, category: done, label: Rejected}
+  - {id: canceled, category: canceled, label: Closed}
+
+transitions:
+  - {from: pending, to: approved, allowed: ['field:f_approver'], except: [container_creator], guard: 'container.state == "pending"', label: Approve, primary: true}
+  - {from: pending, to: rejected, allowed: ['field:f_approver'], except: [container_creator], guard: 'container.state == "pending"', label: Reject}
+  # The hand-over.
+  - from: pending
+    to: pending
+    allowed: ['field:f_approver', 'role:access_admin']
+    except: [container_creator]
+    required: [f_delegate]
+    sets: {f_approver: 'f_delegate'}
+    guard: 'container.state == "pending" && f_delegate != f_approver'
+    label: Hand over
+  - {from: pending, to: canceled, allowed: [nobody]}
+
+invariants:
+  - {id: approver_missing,      rule: 'f_approver != null'}
+  - {id: delegate_not_approver, rule: 'f_delegate == null || f_delegate == f_approver'}
+
+reactions:
+  - {id: move_approved, kind: move, on: enter, state: approved, target: container, to: approved, target_from: [pending], on_guard: skip}
+  - {id: move_rejected, kind: move, on: enter, state: rejected, target: container, to: rejected, target_from: [pending], on_guard: skip}
+
+accepts_reactions:
+  'access_request:request_approvals':  {creates: [f_approver, f_title]}
+  'access_request:close_on_approved':  {moves: [canceled]}
+  'access_request:close_on_rejected':  {moves: [canceled]}
+  'access_request:close_on_withdrawn': {moves: [canceled]}
+
+placement_writable_by: [kernel]
