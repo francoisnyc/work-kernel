@@ -84,7 +84,7 @@ test("sam's desk tab: his own request says why he cannot take it; lea's is being
 
   const heldRow = rowIn(page, "Being handled", held);
   await expect(heldRow).toContainText("Lea has it");
-  await expect(heldRow).toContainText(/in hand (\d+ (s|min)|just arrived)/);
+  await expect(heldRow).toContainText(/in hand (\d+ (s|min)|just now)/);
   await expect(heldRow.getByRole("button")).toHaveText(["Hand back"]);
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
