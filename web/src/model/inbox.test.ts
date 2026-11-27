@@ -49,14 +49,14 @@ const purchase = create(TypeSchema, {
 });
 
 const me: InboxTab = { key: "me", label: "Waiting on me", waitingOn: "me" };
-const finance: InboxTab = { key: "role:finance", label: "finance", waitingOn: "role:finance", role: "finance" };
+const finance: InboxTab = { key: "role:finance", label: "Finance", waitingOn: "role:finance", role: "finance" };
 
 describe("inboxTabs", () => {
   test("Waiting on me first, then one tab per role the caller holds that some Type's `allowed` names, in byte order", () => {
     expect(inboxTabs(["auditor", "finance", "cfo", "approver"], [...allTypes, purchase])).toEqual([
       me,
-      { key: "role:approver", label: "approver", waitingOn: "role:approver", role: "approver" },
-      { key: "role:cfo", label: "cfo", waitingOn: "role:cfo", role: "cfo" },
+      { key: "role:approver", label: "Approver", waitingOn: "role:approver", role: "approver" },
+      { key: "role:cfo", label: "Cfo", waitingOn: "role:cfo", role: "cfo" },
       finance,
     ]);
   });
@@ -176,17 +176,21 @@ describe("whyYours", () => {
     fields: { f_manager: "user:bob", f_claimed_by: "user:fay", f_title: "user:fay" },
   });
 
+  // Since the Inbox for people (PR 2b): the tab's own name says it, so
+  // the row adds nothing.
   test("on a role's tab: the tab says it", () => {
-    expect(whyYours(finance, purchase, queued, "user:fay")).toBe("for your team (finance)");
-    expect(whyYours(finance, purchase, claimed, "user:fay")).toBe("for your team (finance)");
+    expect(whyYours(finance, purchase, queued, "user:fay")).toBe("");
+    expect(whyYours(finance, purchase, claimed, "user:fay")).toBe("");
   });
 
+  // Since the Inbox for people (PR 2b): "you are its {label}", the ID
+  // where the field has no label (none here).
   test("on Waiting on me: the principal fields that hold the caller, by their IDs, in the Type's order", () => {
-    expect(whyYours(me, purchase, claimed, "user:fay")).toBe("f_claimed_by is you");
-    expect(whyYours(me, purchase, claimed, "user:bob")).toBe("f_manager is you");
+    expect(whyYours(me, purchase, claimed, "user:fay")).toBe("you are its f_claimed_by");
+    expect(whyYours(me, purchase, claimed, "user:bob")).toBe("you are its f_manager");
     const both = item({ name: itemName(32), type: purchase.name, state: "finance_review", fields: { f_manager: "user:fay", f_claimed_by: "user:fay" } });
-    expect(whyYours(me, purchase, both, "user:fay")).toBe("f_manager, f_claimed_by is you");
-    expect(whyYours(me, vacation, aSubmittedVacation, "user:bob")).toBe("f_approver is you");
+    expect(whyYours(me, purchase, both, "user:fay")).toBe("you are its f_manager, f_claimed_by");
+    expect(whyYours(me, vacation, aSubmittedVacation, "user:bob")).toBe("you are its f_approver");
   });
 
   test("a string field that happens to hold the caller's ID is not a reason", () => {
@@ -234,7 +238,7 @@ describe("whyYours: sent back to you", () => {
     expect(whyYours(me, helpdesk, asked({ creator: "agent:portal-bot", creatorOnBehalfOf: "customer:kim" }), "agent:portal-bot")).toBe("");
     const open = item({ name: itemName(51), type: helpdesk.name, state: "open", creator: "user:ana" });
     expect(whyYours(me, helpdesk, open, "user:ana")).toBe("");
-    expect(whyYours(finance, helpdesk, asked({ creator: "user:fay" }), "user:fay")).toBe("for your team (finance)");
+    expect(whyYours(finance, helpdesk, asked({ creator: "user:fay" }), "user:fay")).toBe("");
     expect(whyYours(me, undefined, asked({ creator: "user:ana" }), "user:ana")).toBe("");
   });
 });

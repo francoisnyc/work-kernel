@@ -28,3 +28,7 @@ export function parseDevUsers(yamlText: string): DevUser[] {
     }))
     .filter((u) => u.principal.startsWith("user:") || u.principal.startsWith("customer:"));
 }
+
+// A person's name from the dev-token file (people.ts, which has no YAML
+// in it, so the session can use it in a production build).
+export { personName } from "./people";

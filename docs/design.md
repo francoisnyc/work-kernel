@@ -6340,7 +6340,76 @@ fields, a message and an enum in `kernel.v1` (additive, approved). No
 schema change; no web source change (the generated client only).
 
 **Next.** PR 2, the screen: "Nobody has these yet", then "Being handled"
-with who has each; a row's withheld moves said in words.
+with who has each; a row's withheld moves said in words. (Built in 2b:
+"The Inbox in words, as built".)
+
+## The Inbox in words, as built (Inbox PR 2b) (2026-11-27)
+
+Track 1, item 6 of `docs/roadmap.md`, the Inbox for people
+(`docs/plans/inbox-for-people.md`), PR 2 split by the owner at its Phase
+A: 2b (this: rows, groups, team tabs) and 2c (the side panel, several
+rows at once, the keyboard). Web only: the same four calls (`WhoAmI`,
+`CountItems`, `SearchItems` with `waiting_on`, `TransitionItem`), no
+kernel, contract or schema change. The page still decides nothing about
+who may act: its buttons are `Item.moves`, its reasons `Item.withheld`
+and the claim field.
+
+**A row, in words** (`web/src/model/inbox.ts`, pure functions):
+
+- its title; the Type's `summary` fields as "Label: value" (a person by
+  name); its Type and state ("equipment_request · In the queue");
+- who asked ("Ana asks", or "You asked for this one"), why it is yours
+  ("you are its Approver", "sent back to you"; nothing on a team tab,
+  whose name says it), how long ("waiting 3 h"; "in hand 5 h" in a state
+  with a claim, "in hand just now" under a second);
+- its due, where the state has `due`: "due in 2 h", or "due 4 h ago" in
+  amber (#8a4b08, about 6.5:1) with the word, never colour alone;
+- the main button: the move marked `primary` when the server lists it,
+  else the first it lists; the rest behind "More moves" (a real button,
+  `aria-expanded`, `aria-controls`). Together exactly `Item.moves`;
+- labels wherever the Type gives them; otherwise state IDs, field IDs and
+  "Move to {state}"; the Type's ID without its version.
+
+**Groups.** Waiting on me: Overdue, then Waiting, each in the chosen
+order. Worked out on the rows loaded: an overdue row on a later page
+shows once More loads it (a server filter is Later).
+
+**Team tabs.** A role's ID made readable ("Desk agent"; role labels are
+Later). Two reads: "Nobody has these yet" (the queue) and "Being handled"
+(`claimed: true`), each with its own More; the tab's number is the
+queue's. A claimed row says who has it ("Lea has it", "You have it",
+"Nobody holds it"), from `State.claim`'s field.
+
+**Why a move is withheld** (`Item.withheld`, each reason once): "You
+can't handle your own request" (`OWN_REQUEST`), "You can't decide on your
+own request" (`OWN_CONTAINER`), "{Name} has it" or "Nobody holds it"
+(`CLAIMED_BY_OTHER`), said once with the holder's line.
+
+**Names.** From the dev-token file the web loads in dev builds (its
+`name`, capitalised: "Sam"); otherwise the principal ID. A production
+build has no file and shows IDs. `model/people.ts` holds `personName`
+with no YAML in it, so the session can use it in every build.
+
+**The answer.** The page says each move's outcome by the move's label
+("Finance share: Approve: APPLIED"); the row's buttons (`TransitionPanel`
+in a compact mode: no rules text, no answer line) keep their refusal.
+
+**Accessible as built.** Labelled lists inside a labelled region, real
+buttons and links, Tab order title, main move, More moves, row by row;
+the amber's contrast checked in a test. Roving focus with J and K comes
+with the keys in 2c.
+
+**Tests.** New: model 30, page 14, two journeys (sam's overdue row; sam's
+desk tab with his own request and one lea is handling). Earlier-approved
+tests that changed, each the owner's: four model tests, eleven page
+tests, inbox journeys 1, 3 (`exact`), 5, 6 and 7, journey 2's helper and
+`exact`, smoke's "bob approves from the inbox"; and after the tests gate
+a fixture (`inHours`) and the fresh-claim wording.
+
+**Out of the mockup, for now:** "Requested by me", snooze, the header
+search, the greeting, avatars, the agent badge (PR 3).
+
+**Next.** 2c: the side panel, several rows at once, the keyboard.
 
 ## Out of scope for the spike
 

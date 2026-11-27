@@ -6,6 +6,12 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
+- **The Inbox in words, Inbox PR 2b's Later items** (design.md, "The Inbox in words, as built (Inbox PR 2b)"):
+  - **Overdue across pages.** Overdue is worked out on the rows loaded;
+    a server filter on a state's `due` would find them all.
+  - **Role labels.** A team tab reads its role's ID made readable ("Desk
+    agent"); the mockup's "Service desk" needs a label on the role.
+  - (Already Later: "an agent working, for {person}" on a claimed row.)
 - **Claimed rows and withheld moves, Inbox PR 2a's Later items** (design.md, "Claimed rows and withheld moves, as built (Inbox PR 2a)"):
   - **Only the claimant releases.** Today a colleague in the role may
     release another's claim (step 2's rule), so a claimed row offers them
@@ -5025,3 +5031,37 @@ passed (142 steps); web Playwright 16; apps/poc journeys 4. **The bake-offs:** n
 built from a vendored scratch copy; the web and PoC images from host builds; Playwright through scratchpad configs.
 
 **Open:** the Later items above. **Next session:** PR 2, the Inbox screen, its own Phase A.
+
+## 2026-11-27 — Track 1, item 6, the Inbox for people, PR 2b: rows, groups and team tabs (Phases A to D)
+
+**Built (web only):** a row in words (summary fields, Type and state, who asked by name, why it is yours in labels,
+waiting or in hand, due and amber), its main move and More moves, Overdue then Waiting, a team tab's "Nobody has these
+yet" and "Being handled" with their own More, the claim's holder, why a move is withheld, names from the dev-token
+file, readable role names. design.md: "The Inbox in words, as built (Inbox PR 2b)". Roadmap: PR 2 split, 2b built, 2c
+next.
+
+**Decided (the owner, through the coordinator):** at Phase A, the split into 2b and 2c; the main button falling back
+to the first move; overdue on the rows loaded; role IDs made readable; names from the dev file; the keys (for 2c); the
+withheld wordings; the earlier tests that change. After the tests gate: the `inHours` fixture, `exact` on the paging
+button, and "in hand just now".
+
+**Tests:** new: model 30, page 14, two journeys. Earlier-approved tests that changed, each in its own commit: four model
+tests, eleven page tests, inbox journeys 1, 2 (helper, `exact`), 3 (helper, `exact`), 5, 6, 7, smoke's "bob approves";
+then the fixture, the paging button's exact name and the fresh-claim wording.
+
+**Surprises:**
+- After a claim the row moves to "Being handled" and stays on the page, so the page's answer line, shown only once a
+  row had left, never showed: the page now always says the answer and the row's panel does not.
+- Playwright matches a button's name as a substring: "More" found every "More moves".
+- My own fixture put a past due a minute too close to now: "due 3 h ago" where the test meant four.
+- Docker stopped twice at its background time limit; the runs it broke passed on a fresh stack.
+
+**Numbers.** Web: typecheck, build, 543 unit tests; on the compose stack 18 web journeys, apps/poc 4, the scenario
+passed. `go vet` and `go test ./...` untouched and green. **The bake-offs:** not run; no file under `spikes/` changed.
+
+**Local workarounds, outside the repository (nothing committed):** dockerd started by hand; the stack's Go images from
+a vendored scratch copy; the web and PoC images from host builds; Playwright through scratchpad configs; the screenshots
+from a scratchpad spec.
+
+**Open:** the Later items above. **Next session:** 2c (the side panel, several rows at once, the keyboard), its own
+Phase A.

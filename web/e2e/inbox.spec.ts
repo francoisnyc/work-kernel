@@ -67,9 +67,14 @@ async function narrowTo(page: Page, placeId: string) {
   await page.getByRole("button", { name: "Apply" }).click();
 }
 
-const inbox = (page: Page) => page.getByRole("list", { name: "Inbox" });
+// Since the Inbox for people (PR 2b) the rows are in labelled lists
+// (Overdue, Waiting; a team's two sections) inside the Inbox region.
+const inbox = (page: Page) => page.getByRole("region", { name: "Inbox" });
+const rows = (page: Page) => inbox(page).locator("ul[aria-label] > li");
 // The rows' titles, in the order shown.
-const titles = (page: Page) => inbox(page).locator("> li > a");
+const titles = (page: Page) => inbox(page).locator("ul[aria-label] > li > a");
+// A team tab's queue: what nobody has claimed (its claimed rows are below).
+const queueTitles = (page: Page) => inbox(page).getByRole("list", { name: "Nobody has these yet" }).locator("> li > a");
 
 test("sam works the desk agents' queue: its tab and number, oldest first, a move from the row", async ({ page, baseURL }) => {
   const names = [`VPN down ${run}`, `Printer jam ${run}`, `Badge lost ${run}`];
@@ -79,20 +84,25 @@ test("sam works the desk agents' queue: its tab and number, oldest first, a move
   await openInbox(page, "sam");
   // sam holds desk_agent and ticket_admin; the Types name both in a move.
   await expect(page.getByRole("tab", { name: /Waiting on me/ })).toHaveAttribute("aria-selected", "true");
-  await page.getByRole("tab", { name: /desk_agent/ }).click();
+  await page.getByRole("tab", { name: /Desk agent/ }).click();
   await narrowTo(page, idOf(queue.desk));
 
   // The tab's number is the kernel's count of that queue below the desk.
-  await expect(page.getByRole("tab", { name: /desk_agent/ })).toHaveText(/desk_agent\s*3/);
+  await expect(page.getByRole("tab", { name: /Desk agent/ })).toHaveText(/Desk agent\s*3/);
   // Oldest waiting first: the order they were created in.
   await expect(titles(page)).toHaveText(names);
-  const first = inbox(page).locator("> li").filter({ hasText: names[0]! });
-  await expect(first).toContainText("incident@3 · new");
-  await expect(first).toContainText("asked by user:ana");
+  const first = rows(page).filter({ hasText: names[0]! });
+  await expect(first).toContainText("incident · new");
+  await expect(first).toContainText("Ana asks");
   await expect(first).toContainText(/waiting \d+ (s|min)|just arrived/);
-  await expect(first).toContainText("for your team (desk_agent)");
-  // The buttons are the moves the server lists for sam, in its order.
-  await expect(first.getByRole("button")).toHaveText(["Move to in_progress", "Move to canceled"]);
+  // On the team's tab, the tab's name says why it is here (PR 2b).
+  await expect(page.getByRole("tab", { name: /Desk agent/ })).toHaveAttribute("aria-selected", "true");
+  // The buttons are the moves the server lists for sam, in its order: the
+  // first as the main button (incident@3 marks none primary), the other
+  // behind More moves.
+  await expect(first.getByRole("button")).toHaveText(["Move to in_progress", "More moves"]);
+  await first.getByRole("button", { name: "More moves" }).click();
+  await expect(first.getByRole("button")).toHaveText(["Move to in_progress", "More moves", "Move to canceled"]);
 
   await page.getByLabel("Order").selectOption("Newest waiting first");
   await expect(titles(page)).toHaveText([...names].reverse());
@@ -104,7 +114,7 @@ test("sam works the desk agents' queue: its tab and number, oldest first, a move
   await first.getByRole("button", { name: "Move to in_progress" }).click();
   await expect(page.getByRole("status")).toContainText("APPLIED");
   await expect(titles(page)).toHaveText(names.slice(1));
-  await expect(page.getByRole("tab", { name: /desk_agent/ })).toHaveText(/desk_agent\s*2/);
+  await expect(page.getByRole("tab", { name: /Desk agent/ })).toHaveText(/Desk agent\s*2/);
   await expect(page.getByRole("alert")).toHaveCount(0);
 
   const got = await api(baseURL!, "sam").getItem({ name: queue.incidents[0]!.name });
@@ -117,8 +127,8 @@ test("ana, with nothing waiting below a place, sees the empty state", async ({ p
   await narrowTo(page, idOf(place));
   await expect(page.getByText("Nothing is waiting on you.")).toBeVisible();
   await expect(page.getByRole("tab", { name: /Waiting on me/ })).toHaveText(/Waiting on me\s*0/);
-  await expect(inbox(page).locator("> li")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "More" })).toHaveCount(0);
+  await expect(rows(page)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "More", exact: true })).toHaveCount(0);
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
@@ -134,11 +144,11 @@ test("bob has 51 approvals waiting below a place: 50+ on the tab, and More loads
   await expect(titles(page).first()).toHaveText(`Approve ${run} #1`);
   await expect(inbox(page)).not.toContainText(`Approve ${run} #51`);
 
-  await page.getByRole("button", { name: "More" }).click();
+  await page.getByRole("button", { name: "More", exact: true }).click();
   await expect(titles(page)).toHaveCount(51);
   await expect(titles(page).last()).toHaveText(`Approve ${run} #51`);
   await expect(titles(page).first()).toHaveText(`Approve ${run} #1`);
-  await expect(page.getByRole("button", { name: "More" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "More", exact: true })).toHaveCount(0);
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
@@ -177,17 +187,19 @@ test("sam claims an equipment request; lea cannot decide it; sam releases it to 
   const first = made[0];
   // This run's rows, in the order shown. Newest waiting first, so they
   // lead the list whatever earlier runs left in the queue.
-  const mine = (p: Page) => titles(p).filter({ hasText: word });
-  const row = (p: Page, title: string) => inbox(p).locator("> li").filter({ hasText: title });
+  const mine = (p: Page) => queueTitles(p).filter({ hasText: word });
+  const row = (p: Page, title: string) => rows(p).filter({ hasText: title });
+  const handled = (p: Page, title: string) =>
+    inbox(p).getByRole("list", { name: "Being handled" }).locator("> li").filter({ hasText: title });
 
   await openInbox(page, "sam");
   await page.getByLabel("Order").selectOption("Newest waiting first");
-  await page.getByRole("tab", { name: /desk_agent/ }).click();
+  await page.getByRole("tab", { name: /Desk agent/ }).click();
   // Both wait on the team: the monitor arrived last. The one move a desk
   // agent has in the queue is to take the request.
   await expect(mine(page)).toHaveText([monitor, laptop]);
-  await expect(row(page, laptop)).toContainText("equipment_request@1 · queue");
-  await expect(row(page, laptop)).toContainText("for your team (desk_agent)");
+  await expect(row(page, laptop)).toContainText("equipment_request · queue");
+  await expect(page.getByRole("tab", { name: /Desk agent/ })).toHaveAttribute("aria-selected", "true");
   await expect(row(page, laptop).getByRole("button")).toHaveText(["Move to in_hand"]);
 
   // The claim: one move. The laptop leaves the team's queue.
@@ -198,9 +210,11 @@ test("sam claims an equipment request; lea cannot decide it; sam releases it to 
   // It is sam's now: in Waiting on me, named by the claim field, with
   // the claimant's moves in the Type's order.
   await page.getByRole("tab", { name: /Waiting on me/ }).click();
-  await expect(row(page, laptop)).toContainText("equipment_request@1 · in_hand");
-  await expect(row(page, laptop)).toContainText("f_handler is you");
-  await expect(row(page, laptop).getByRole("button")).toHaveText(["Move to fulfilled", "Move to declined", "Move to queue"]);
+  await expect(row(page, laptop)).toContainText("equipment_request · in_hand");
+  await expect(row(page, laptop)).toContainText("you are its f_handler");
+  await expect(row(page, laptop).getByRole("button")).toHaveText(["Move to fulfilled", "More moves"]);
+  await row(page, laptop).getByRole("button", { name: "More moves" }).click();
+  await expect(row(page, laptop).getByRole("button")).toHaveText(["Move to fulfilled", "More moves", "Move to declined", "Move to queue"]);
 
   // lea is a desk agent too. The laptop is in neither of her tabs, and
   // on its own page the kernel refuses her the decision.
@@ -209,8 +223,12 @@ test("sam claims an equipment request; lea cannot decide it; sam releases it to 
   await expect(page.getByRole("tab", { name: /Waiting on me/ })).toHaveText(/\d/);
   await expect(inbox(page)).toHaveAttribute("aria-busy", "false");
   await expect(row(page, laptop)).toHaveCount(0);
-  await page.getByRole("tab", { name: /desk_agent/ }).click();
+  await page.getByRole("tab", { name: /Desk agent/ }).click();
   await expect(mine(page)).toHaveText([monitor]);
+  // Since PR 2b her desk tab shows it below, being handled: sam has it,
+  // and her one move there is to hand it back (a colleague may release).
+  await expect(handled(page, laptop)).toContainText("Sam has it");
+  await expect(handled(page, laptop).getByRole("button")).toHaveText(["Move to queue"]);
   await page.goto(`/#/items/${idOf(first!)}`);
   await page.getByRole("button", { name: "Move to fulfilled" }).click();
   await expect(page.getByRole("alert")).toContainText("NOT_ALLOWED");
@@ -220,8 +238,9 @@ test("sam claims an equipment request; lea cannot decide it; sam releases it to 
   // which is the end of the queue when the oldest is served first.
   await openInbox(page, "sam");
   await page.getByLabel("Order").selectOption("Newest waiting first");
+  await row(page, laptop).getByRole("button", { name: "More moves" }).click();
   await row(page, laptop).getByRole("button", { name: "Move to queue" }).click();
-  await page.getByRole("tab", { name: /desk_agent/ }).click();
+  await page.getByRole("tab", { name: /Desk agent/ }).click();
   await expect(mine(page)).toHaveText([laptop, monitor]);
   await expect(row(page, laptop).getByRole("button")).toHaveText(["Move to in_hand"]);
 
@@ -233,13 +252,13 @@ test("sam claims an equipment request; lea cannot decide it; sam releases it to 
 test("sam sends kim's incident back to her: in her Inbox, labelled; she answers on its page; it leaves", async ({ page, baseURL }) => {
   const title = `Scanner offline ${run}`;
   const { incident } = await seedSentBack(baseURL!, run, title);
-  const row = (p: Page) => inbox(p).locator("> li").filter({ hasText: title });
+  const row = (p: Page) => rows(p).filter({ hasText: title });
 
   await openInbox(page, "kim");
   // Her one tab; her row, oldest waiting first, found by its title.
   await expect(page.getByRole("tab")).toHaveCount(1);
-  await expect(row(page)).toContainText("incident@6 · waiting_for_customer");
-  await expect(row(page)).toContainText("asked by customer:kim");
+  await expect(row(page)).toContainText("incident · waiting_for_customer");
+  await expect(row(page)).toContainText("You asked for this one");
   await expect(row(page)).toContainText("sent back to you");
   // She answers by replying, not by a move: no button, a link to the incident.
   await expect(row(page).getByRole("button")).toHaveCount(0);
@@ -267,13 +286,13 @@ test("sam takes and fulfils an equipment request whose moves carry labels: each 
   const headset = `Headset ${word}`;
   const made = await seedLabelledEquipmentRequests(baseURL!, [headset]);
   asked.push(...made);
-  const row = (p: Page) => inbox(p).locator("> li").filter({ hasText: headset });
+  const row = (p: Page) => rows(p).filter({ hasText: headset });
 
   await openInbox(page, "sam");
   await page.getByLabel("Order").selectOption("Newest waiting first");
-  await page.getByRole("tab", { name: /desk_agent/ }).click();
+  await page.getByRole("tab", { name: /Desk agent/ }).click();
   // In the queue, the one move a desk agent has reads "Take it".
-  await expect(row(page)).toContainText("equipment_request@2 · queue");
+  await expect(row(page)).toContainText("equipment_request · In the queue");
   await expect(row(page).getByRole("button")).toHaveText(["Take it"]);
 
   await row(page).getByRole("button", { name: "Take it" }).click();
@@ -281,8 +300,11 @@ test("sam takes and fulfils an equipment request whose moves carry labels: each 
 
   // sam's now: the claimant's moves, by their labels, in the Type's order.
   await page.getByRole("tab", { name: /Waiting on me/ }).click();
-  await expect(row(page)).toContainText("equipment_request@2 · in_hand");
-  await expect(row(page).getByRole("button")).toHaveText(["Mark fulfilled", "Decline", "Hand back"]);
+  await expect(row(page)).toContainText("equipment_request · Being handled");
+  // Mark fulfilled is primary; the others behind More moves, in order.
+  await expect(row(page).getByRole("button")).toHaveText(["Mark fulfilled", "More moves"]);
+  await row(page).getByRole("button", { name: "More moves" }).click();
+  await expect(row(page).getByRole("button")).toHaveText(["Mark fulfilled", "More moves", "Decline", "Hand back"]);
 
   await row(page).getByRole("button", { name: "Mark fulfilled" }).click();
   await expect(page.getByRole("status")).toContainText("APPLIED");

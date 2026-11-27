@@ -5,6 +5,7 @@ import { createConnectTransport } from "@connectrpc/connect-web";
 import { createContext, useContext } from "react";
 import { ItemService, type Item, type Type } from "../gen/kernel/v1/kernel_pb";
 import type { DevUser } from "../model/devusers";
+import { personName } from "../model/people";
 import { displayTitle, shortId } from "../model/typeinfo";
 
 export type Api = Client<typeof ItemService>;
@@ -32,6 +33,8 @@ export class Session {
     readonly types: Type[],
     // Principals to suggest in principal fields.
     readonly principals: string[],
+    // The dev-token file's people, for their names (Inbox PR 2b).
+    readonly people: DevUser[] = [],
   ) {
     for (const t of types) this.byName.set(t.name, t);
   }
@@ -47,6 +50,9 @@ export class Session {
   typeOf(name: string): Type | undefined {
     return this.byName.get(name);
   }
+
+  // A person's name, or their ID (people.personName).
+  nameOf = (principal: string): string => personName(principal, this.people);
 
   titleOf = (item: Item): string => {
     const type = this.typeOf(item.type);

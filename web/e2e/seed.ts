@@ -315,3 +315,66 @@ export async function seedSentBack(baseURL: string, run: string, title: string):
   }
   return { desk, incident: created };
 }
+
+// --- The Inbox for people, PR 2b: rows, groups, team tabs ---
+
+export type OverdueDesk = { desk: Item; late: Item; onTime: Item };
+
+// lea's desk (desk@2) whose policy gives a P1 a first response in 3 s and
+// a P4 one in 4 h, and two new incidents of ana's in it (incident@7, whose
+// state new is due by f_due_first_response). Returns once the goals have
+// written both due instants and the P1's has passed: the P1 is overdue,
+// the P4 is not. A new incident waits on the desk agents, sam among them.
+export async function seedOverdueDesk(baseURL: string, run: string, lateTitle: string, onTimeTitle: string): Promise<OverdueDesk> {
+  const lea = api(baseURL, "lea");
+  const ana = api(baseURL, "ana");
+  const week = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"].map((d) => `${d} 00:00-24:00`);
+  const calendar = await createItem(lea, type("calendar", 1), { f_name: `Always ${run} od`, f_week: week, f_zone: "UTC" });
+  const targets: JsonObject = { f_name: `Fast P1 ${run}` };
+  ["p1", "p2", "p3", "p4"].forEach((p, i) => {
+    targets[`f_first_response_s_${p}`] = p === "p1" ? "3" : String(3600 * (i + 1));
+    targets[`f_resolution_s_${p}`] = String(4 * 3600 * (i + 1));
+  });
+  const policy = await createItem(lea, type("sla_policy", 1), targets);
+  const desk = await createItem(lea, type("desk", 2), { f_key: `OD${run}`, f_name: `Overdue desk ${run}` });
+  await lea.linkItems({ name: desk.name, requestId: randomUUID(), linkType: "calendar", target: calendar.name });
+  await lea.linkItems({ name: desk.name, requestId: randomUUID(), linkType: "sla_policy", target: policy.name });
+  const late = await createItem(ana, type("incident", 7), { f_title: lateTitle, f_priority: "P1" }, { container: desk.name });
+  const onTime = await createItem(ana, type("incident", 7), { f_title: onTimeTitle, f_priority: "P4" }, { container: desk.name });
+  const dueOf = async (it: Item) =>
+    until(`${it.fields?.f_title} first response due`, async () => {
+      const got = (await ana.getItem({ name: it.name })).item;
+      return typeof got?.fields?.f_due_first_response === "string" ? got.fields.f_due_first_response : undefined;
+    });
+  const lateDue = await dueOf(late);
+  await dueOf(onTime);
+  const wait = new Date(lateDue).getTime() - Date.now() + 1_000;
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  return { desk, late, onTime };
+}
+
+export type OwnAndClaimed = { own: Item; held: Item };
+
+// Two equipment requests (equipment_request@2) in the desk agents' queue:
+// sam's own, which he may not take (except: [creator]); and ana's, which
+// lea takes, so it is claimed, lea's to handle.
+export async function seedOwnAndClaimed(baseURL: string, ownTitle: string, heldTitle: string): Promise<OwnAndClaimed> {
+  const sam = api(baseURL, "sam");
+  const ana = api(baseURL, "ana");
+  const lea = api(baseURL, "lea");
+  const own = await createItem(sam, type("equipment_request", 2), { f_title: ownTitle });
+  const held = await createItem(ana, type("equipment_request", 2), { f_title: heldTitle });
+  const res = await lea.transitionItem({ name: held.name, requestId: randomUUID(), toState: "in_hand" });
+  if (res.outcome !== TransitionOutcome.APPLIED) throw new Error(`seed: lea takes ${heldTitle}: ${TransitionOutcome[res.outcome]} ${res.reason}`);
+  return { own, held };
+}
+
+// Puts seedOwnAndClaimed's requests out of the queues: sam withdraws his
+// own; lea hands ana's back and ana withdraws it. A failure here is not
+// the journey's.
+export async function clearOwnAndClaimed(baseURL: string, made: OwnAndClaimed): Promise<void> {
+  const move = (who: string, it: Item, to: string) => api(baseURL, who).transitionItem({ name: it.name, requestId: randomUUID(), toState: to });
+  await Promise.allSettled([move("sam", made.own, "withdrawn")]);
+  await Promise.allSettled([move("lea", made.held, "queue")]);
+  await Promise.allSettled([move("ana", made.held, "withdrawn")]);
+}

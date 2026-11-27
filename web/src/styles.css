@@ -265,3 +265,39 @@ ul.items.loading {
 ul.items > li > p.meta {
   margin: 0.15rem 0 0.4rem;
 }
+/* The Inbox for people (PR 2b): rows in words. */
+section.inbox.loading {
+  opacity: 0.5;
+}
+section.inbox h2 {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 1rem 0 0.4rem;
+  color: #555;
+}
+section.inbox ul.items > li > p {
+  margin: 0.15rem 0;
+}
+.summary,
+.kind,
+.why-not {
+  font-size: 0.9rem;
+}
+.kind {
+  color: #555;
+}
+.why-not {
+  color: #3e3d39;
+}
+/* Past its due: amber, with words ("due 4 h ago"), never colour alone. */
+.due.overdue {
+  color: #8a4b08;
+  font-weight: 600;
+}
+.row-moves {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
