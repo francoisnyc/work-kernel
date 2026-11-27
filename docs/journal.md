@@ -5065,3 +5065,34 @@ from a scratchpad spec.
 
 **Open:** the Later items above. **Next session:** 2c (the side panel, several rows at once, the keyboard), its own
 Phase A.
+
+## 2026-11-27 — Track 1, item 6, the Inbox for people, PR 2c: the side panel, several rows, keys (Phases B to D)
+
+**Built (web only):** a row's side panel (#/inbox?item=<id>; fields with labels and help, the moves, the history read
+when unfolded, the full page; focus in and back; the next row after a move); a checkbox per row and the selection bar
+(the moves every selected row lists, of one Type, asking no field; one move after another; a result per row; failed
+rows kept); J, K, X, P and Enter on the list. design.md: "The Inbox panel, several rows and keys, as built (Inbox PR
+2c)". Roadmap: PR 2 done; PR 3 next.
+
+**Decided (the owner, through the coordinator):** at PR 2's Phase A, the panel, the bar's rule and the keys. At the
+tests gate: no roving tabindex; "{label} ({n})"; the history read on unfold; 2b's Tab-order test with the checkbox.
+
+**Tests:** new: model 15, page 11, three journeys. Earlier-approved test that changed: 2b's Tab order (each row's
+checkbox).
+
+**Surprises:**
+- The bar first moved rows in display order, the journey in the order they were ticked: the bar now follows the
+  ticking order, which neither test had pinned otherwise.
+- 2b's answer line, now always shown, let a journey read the first move's "APPLIED" after a second move: the line goes
+  when a move starts.
+- A commit title called a test change approved before it was; amending it was refused, and the owner's later OK made
+  it true.
+- Running Prettier (not a project tool) reflowed a whole file; reformatted at the repository's width.
+
+**Numbers.** Web: typecheck, build, 569 unit tests; on the compose stack 21 web journeys (twice), apps/poc 4, the
+scenario passed. `go vet` and `go test ./...` untouched and green. **The bake-offs:** not run; no file under `spikes/`
+changed.
+
+**Local workarounds, outside the repository (nothing committed):** as for 2b.
+
+**Open:** the Later items above. **Next session:** PR 3, an agent's request shown as one, its own Phase A.
