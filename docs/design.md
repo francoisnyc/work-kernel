@@ -5448,6 +5448,9 @@ at a time (step 4). No mapping of states or fields (step 5). (Partly
 lifted in step 3a: a hook, enrich hook or reaction the new version adds
 on a state already entered is not owed for that entry, so it no longer
 refuses the migrate; timers in step 3b. See "Each state entry judged by its own version, as built (item 6, step 3a)".)
+(Timers lifted in step 3b, except acting timers: an Item whose state has
+a timer, or a timer at a field's instant, is migrated and its workflow
+reloads under the new version. See "Items with timers, as built (item 6, step 3b)".)
 
 **The reading.** A version with the block gains a section, *Who migrates
 Items to it*: "While this is the latest version of w_bill, anyone with
@@ -6002,7 +6005,8 @@ contract, schema or payload change.
 **Lifted:** a finished action (step 2's limit); a hook, enrich hook or
 reaction the new version adds on a state already entered; an undo the
 new version renames. **Still refused:** a state with a timer under either
-version (`HAS_TIMER`, step 3b); work unfinished under its own version
+version (`HAS_TIMER`, step 3b) (built: since step 3b only an acting timer
+refuses; see "Items with timers, as built (item 6, step 3b)"); work unfinished under its own version
 (`ACTION_UNFINISHED`, `REACTION_UNFINISHED`); an open hold; events not
 yet delivered. Still seventeen check codes.
 
@@ -6016,6 +6020,81 @@ flipped (`..._GoesThrough`: migrates, the action ran once).
 **The bake-offs**, both run in full: every verdict as before; the one
 already approved now reads `NOT_MIGRATABLE … checks: CLOSED` (was
 `CLOSED,ACTION_UNFINISHED`). No script changed.
+
+## Items with timers, as built (item 6, step 3b) (2026-11-27)
+
+Track 1, item 6, step 3, second part. Step 2 refused an Item whose state
+had a timer, because the workflow running it knew nothing of a migrate:
+it had loaded the old version's timer table once. Now such an Item is
+migrated, and its workflow reloads under the new version.
+
+**How a run learns of a migrate.** The `migrated` event, like any other,
+goes through the outbox to the relay. `lifecycle.StartsWorkflow` says a
+migrated event always needs the Item's workflow: the relay starts one if
+none runs (a new version may give the state a timer), and delivers it to
+a run alive under the old version even when the new version has nothing
+listening. The relay's rule is one line: an event goes to the Item's
+workflow when its Type listens, or when `StartsWorkflow` says it needs
+one. (The item service writes the outbox row when either version
+listens.) No signal, no new activity.
+
+**The hand-over.** In the update handler, a migrated event asks
+`workflow.GetVersion("migrate-reloads", DefaultVersion, 1)`; at version 1
+it marks the run migrated. At the top of its loop, a migrated run starts
+no new hook, waits until no hook it started is running and no update is
+half-handled, and continues as new with only the Item ID, nothing
+carried. The next run loads everything from Postgres under the new
+version, as a first run does. A run started by the migrated event itself
+loads under the new version and sees that event as already applied.
+
+**Old runs.** A history recorded before this step holds no migrated
+event (a migrate was refused while a run was alive), so its replay never
+reaches the `GetVersion` call. A run at `DefaultVersion` takes the event
+and goes on as before.
+
+**The timer under the new version.**
+- It counts from the state entry, with the new version's duration, as
+  every run counts; one already past fires at once (a migrate does not
+  postpone a deadline).
+- A timer at a field's instant is read again from the field the new
+  version names.
+- A timer whose move the old version refused is armed again: the new
+  version's rules may allow it.
+- A version without a timer on the state arms nothing, and the run
+  completes.
+
+**The old timer cannot act.** It goes with the old run. If it comes due
+before the run hears of the migrate, its move is refused: the internal
+door checks that a kernel write names the Item's version (before its
+expected `item_seq`), and it names the old one. The run counts that timer
+as spent and hands over when the migrated event arrives. In every case
+exactly one timer event is written, under the new version.
+
+**Still refused: an acting timer** (`HAS_TIMER`, now meaning "the state
+has an acting timer, under either version"; `lifecycle.HasActingTimer`
+replaces `HasStateTimer`). A reminder run started just before a migrate
+could not record itself after it (the version check), so it could be
+sent twice. Still seventeen check codes.
+
+**Recorded histories.** Two, recorded from the code that first had the
+reload (`TestMigrateTimers_E2E_ShorterUnderTheNewVersion`,
+`RECORD_HISTORIES=1`): `mt_migrated_continues_as_new.json` (the run that
+hears of the migrate and hands over) and `mt_reloaded_timer_fires.json`
+(the run that reloads and fires). Every recorded history replays, the ten
+older ones and these two.
+
+**Tests that changed** (approved): the three timer cases of
+`TestMigrate_Quiet` now migrate; the scenario's migrate step now
+migrates a ticket in `in_progress` (24 h timer), which reads `ticket@9`
+and stays in `in_progress`; in
+`TestMigrate_Timers_TheOldTimersMoveIsRefused`, the old timer's move sent
+with the pre-migrate `item_seq` is refused as invalid, not stale (the
+check order above).
+
+**Kernel changes:** `StartsWorkflow` and `HasActingTimer` (lifecycle); one
+condition in the relay; the quiet check; the workflow's hand-over. No
+contract, schema or payload change. The bake-offs, run in full: every
+verdict as before (their purchases have no timers).
 
 ## Out of scope for the spike
 

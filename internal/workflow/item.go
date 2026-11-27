@@ -112,6 +112,14 @@ const versionTimerWaitsForHold = "timer-waits-for-hold"
 // (To == RequestedTo), which no recorded event with Canceled can reach.
 const versionCanceledHoldNotAllowed = "canceled-hold-not-allowed"
 
+// versionMigrateReloads is the GetVersion change ID of track 1, item 6,
+// step 3b: a run that hears of a migrate (a migrated event) hands over to
+// a fresh run, which loads everything under the new version. Version 1 is
+// that; DefaultVersion is the old behaviour (the event is taken and
+// nothing else happens), which no recorded history with a migrated event
+// can reach: until this step a migrate was refused while a run was alive.
+const versionMigrateReloads = "migrate-reloads"
+
 // MaxRetryInterval caps the pause between two attempts of an activity. A
 // hook gives up when its next attempt cannot start within its budget, so it
 // may end up to this long before the budget runs out.
@@ -631,6 +639,9 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 		reacting      bool
 		kickReactions = func() {}
 	)
+	// migrated says the Item was migrated while this run was alive (step
+	// 3b): the run hands over once nothing it started is running.
+	var migrated bool
 	// addReaction queues a reaction for a trigger, unless that very one is
 	// queued already: a run that starts because of a trigger finds it in
 	// what LoadItem reported, and is then told of it too.
@@ -730,6 +741,12 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 					HookID: id, CauseSeq: ev.Seq, CorrelationID: ev.CorrelationID, Hop: ev.Hop,
 				})
 			}
+		}
+		// The Item now runs by another version: everything this run loaded
+		// (timers, hooks, reactions) may be wrong. Asked only of a migrated
+		// event, which no history recorded before the change carries.
+		if ev.Op == lifecycle.OpMigrated && workflow.GetVersion(ctx, versionMigrateReloads, workflow.DefaultVersion, 1) >= 1 {
+			migrated = true
 		}
 		if ev.To != "" {
 			// Leaving the state stops its acting timers; a new entry counts
@@ -1299,6 +1316,21 @@ func runItem(ctx workflow.Context, in Input, closeDelay time.Duration) error {
 	}
 
 	for {
+		// Migrated: hand over to a fresh run that loads the new version
+		// from Postgres (nothing carried), once no hook this run started is
+		// running and no update is half-handled. Its timers go with it; the
+		// new run arms the new version's, counting from the state entry.
+		// No new hook is started meanwhile.
+		if migrated && !gone {
+			if err := workflow.Await(ctx, func() bool { return running == 0 }); err != nil {
+				return err
+			}
+			if err := workflow.Await(ctx, handlersDone); err != nil {
+				return err
+			}
+			return workflow.NewContinueAsNewError(ctx, Name, Input{ItemID: in.ItemID})
+		}
+
 		// Hook work the last events (or the load) asked for.
 		if !gone {
 			pending := s.PendingEnrich

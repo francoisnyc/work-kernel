@@ -305,6 +305,12 @@ func (r *Relay) delivery(ctx context.Context, id uuid.UUID, ev pendingEvent) (d 
 			atFields = append(atFields, f)
 		}
 	}
+	// The Type decides, in one place, whether this event needs a running
+	// workflow: it enters a state with behavior, opens a hold, or is a
+	// migrate (lifecycle.StartsWorkflow).
+	start := lifecycle.StartsWorkflow(ty, lifecycle.Event{Op: ev.Op, Entered: entered, From: shape.From,
+		ClosesHold: holdID != "" && ev.Op != lifecycle.OpTransitionRequested,
+		Allowed:    ev.Op == "transition" && holdID != "" && !canceled})
 	return Delivery{
 		ItemID:   id.String(),
 		UpdateID: fmt.Sprintf("%s:%d", id, ev.Seq),
@@ -314,12 +320,12 @@ func (r *Relay) delivery(ctx context.Context, id uuid.UUID, ev pendingEvent) (d 
 			FieldIDs:      atFields,
 			CorrelationID: ev.CorrelationID, Hop: ev.Hop,
 		},
-		// The Type decides, in one place, whether this event needs a
-		// running workflow: it enters a state with behavior, or opens a hold.
-		Start: lifecycle.StartsWorkflow(ty, lifecycle.Event{Op: ev.Op, Entered: entered, From: shape.From,
-			ClosesHold: holdID != "" && ev.Op != lifecycle.OpTransitionRequested,
-			Allowed:    ev.Op == "transition" && holdID != "" && !canceled}),
-	}, lifecycle.HasListeners(ty), nil
+		Start: start,
+		// Delivered to the Item's own workflow when its Type listens, or
+		// when the event needs a workflow: a migrate whose new version has
+		// nothing listening must still reach a run alive under the old one
+		// (its outbox row exists because one of the two versions listens).
+	}, lifecycle.HasListeners(ty) || start, nil
 }
 
 // childDelivery returns, for the create event of an Item made inside a

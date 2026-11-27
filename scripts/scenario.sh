@@ -1927,7 +1927,7 @@ refuse triage-bot "NOT_FOUND NOT_FOUND" agent start --for user:ana --scopes "$th
 # Type. ticket@9 says who may: role:ticket_admin, which sam holds. The
 # ticket is open: no timer on its state, nothing unfinished, its events
 # delivered (the dry run is asked until the relay has caught up).
-step "migrate: sam dry-runs, then migrates ana's open ticket@5 to ticket@9; bob may not; a ticket whose state has a timer is refused"
+step "migrate: sam dry-runs, then migrates ana's open ticket@5 to ticket@9; bob may not; a ticket whose state has a timer is migrated too"
 mg=$(new_ticket ana --set f_assignee=user:ana)
 ok ana item transition "$mg" --to open >/dev/null
 refuse bob "PERMISSION_DENIED NOT_ALLOWED" item migrate "$mg" --to ticket@9
@@ -1952,13 +1952,17 @@ expect "its history ends with the migrate, which names the version it left" \
 	"ITEM_EVENT_KIND_MIGRATED user:sam namespaces/acme/types/ticket/versions/5 namespaces/acme/types/ticket/versions/9"
 # It moves on under ticket@9.
 expect "the migrated ticket starts work" "$(ok ana item transition "$mg" --to in_progress | j .item.state)" "in_progress"
-# In progress has a timer: such an Item is not migrated in this step.
+# In progress has a timer (24 h back to open): since step 3b such an Item is
+# migrated too, and its workflow reloads under ticket@9.
 mg2=$(new_ticket ana --set f_assignee=user:ana)
 ok ana item transition "$mg2" --to open >/dev/null
 ok ana item transition "$mg2" --to in_progress >/dev/null
-refuse sam "FAILED_PRECONDITION NOT_MIGRATABLE" item migrate "$mg2" --to ticket@9
-case ",$(meta checks)," in *,HAS_TIMER,*) ;; *) fail "checks: got '$(meta checks)', want HAS_TIMER among them" ;; esac
-expect "the refused ticket stays on ticket@5" "$(ok ana item get "$mg2" | j .item.type)" "namespaces/acme/types/ticket/versions/5"
+wait_until 10 "the dry run finds no problem for the ticket in progress" fits "$mg2"
+expect "the ticket in progress is migrated" \
+	"$(ok sam item migrate "$mg2" --to ticket@9 | j .item.type)" "namespaces/acme/types/ticket/versions/9"
+got=$(ok ana item get "$mg2")
+expect "it reads ticket@9" "$(printf '%s' "$got" | j .item.type)" "namespaces/acme/types/ticket/versions/9"
+expect "it is still in progress" "$(printf '%s' "$got" | j .item.state)" "in_progress"
 
 # ---------------------------------------------------------------------------
 # A claim that binds, on the stack (track 1 item 5, step 4's follow-up):
