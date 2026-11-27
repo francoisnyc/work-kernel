@@ -178,6 +178,14 @@ test("a customer: one tab, Waiting on me, and what was sent back to her", async 
   expect(k.transitionItem).not.toHaveBeenCalled();
 });
 
+test("a customer with nothing sent back: the empty sentence", async () => {
+  const k = kernel({ rows: () => ({ items: [] }) });
+  show(k, "customer:kim");
+  expect(await screen.findByText("Nothing is waiting on you.")).toBeInTheDocument();
+  expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Waiting on me 0"]);
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
 test("tabs: Waiting on me, then the caller's roles that a Type names, each with its count; 50+ when capped", async () => {
   // fay holds finance (purchase names it), approver (ticket names it) and
   // auditor (no Type names it: no tab).
