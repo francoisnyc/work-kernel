@@ -279,7 +279,8 @@ attack that found it as its test:
            namespace, or a measured p90 over 200 ms on the inbox page;
         2. a count polled by many people on every screen (a badge);
         3. agents polling their queue in a loop.
-      The order of what remains: step 5, then 3b on a trigger.
+      Item 5 is done (step 5 built, 2026-11-27); 3b waits on a
+      trigger. Next in track 1: the Inbox for people (below).
    4. **Queue extras and the screen.** Split in two PRs at its Phase A
       (the owner's decision):
       - **PR 1, the reads. Built** (PR #99; `docs/design.md`, "Inbox
@@ -319,12 +320,15 @@ attack that found it as its test:
         for staff and customers (a customer's `waiting_on: me`; `role:`
         still refused); `State.waits_on_requester` in `GetType`; the
         reading sentence. Test Types only.
-      - **PR 2, next:** `incident@6`, whose `waiting_for_customer`
-        waits on the requester, so a customer has an Inbox on the
-        stack; the screen's customer rows and the label "sent back to
-        you"; a journey and a scenario step. After item 6 step 3 has
-        merged (`incident@6` touches a workflow test file).
-   6. **The Inbox for people (agreed, next after item 6 and step 5's PR 2):** the screen built in step 4
+      - **PR 2, incident@6 and the screen. Built** (`docs/design.md`,
+        "Sent back to the requester, as built", its PR 2 part):
+        `incident@6`, whose `waiting_for_customer` waits on the
+        requester, so a customer has an Inbox on the stack; the web
+        Inbox's customer branch gone; the label "sent back to you",
+        from data only; a row with no move links "Open it to answer"; a
+        journey and a scenario step.
+      **Step 5 is built, and with it item 5.** Left on a trigger: 3b.
+   6. **The Inbox for people (agreed; next, now that item 6 and step 5's PR 2 are built):** the screen built in step 4
       is right underneath but reads as a developer's tool. Three PRs:
       words for people on the Type (labels, a primary move, summary
       fields: the first of theme 1's presentation hints, enforcing

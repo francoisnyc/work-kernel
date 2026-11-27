@@ -6,6 +6,16 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
+- **Sent back to the requester, step 5 PR 2's Later items** (design.md, "Sent back to the requester, as built", PR 2):
+  - **What answers a request sent back.** The incident's customer has no
+    move in `waiting_for_customer`; she replies, and a reaction moves it.
+    The row links the Item's page ("Open it to answer"). A Type could
+    declare what answers it (a reply, a field), so the row could offer it.
+  - **"Open it to answer" for staff rows.** It replaces "No move here is
+    yours to make." for every row with no move (the owner's decision).
+    The Inbox for people may give each kind of row its own words.
+  - **A customer's count in the banner.** The tab shows it; nothing else
+    on a customer's screens does yet.
 - **Sent back to the requester, step 5 PR 1's Later items** (design.md, "Sent back to the requester, as built"):
   - **vacation_request's "returned" state.** Sending a request back to
     draft cannot use the key: the draft is the initial state, and a fresh
@@ -4863,3 +4873,44 @@ Web: 492 unit tests, 14 journeys; apps/poc: 408, 4. Both bake-offs in full: ever
 
 **Open:** the Later items above. **Next session:** as the roadmap says, item 5 step 5's PR 2, then the Inbox for
 people (`docs/plans/inbox-for-people.md`); item 6 step 4 (bulk and status) when the owner chooses.
+
+## 2026-11-27 — Track 1, item 5, step 5, PR 2: incident@6 and the screen (Phases B to D)
+
+**Built:** `types/incident.v6.yaml`, `incident@5` with `waits_on: requester` on `waiting_for_customer` and nothing else
+(it keeps v5's start block, so older incidents stay open to new Items). The web Inbox's customer branch is gone: a
+customer's Inbox asks like anyone's, with one tab. The label "sent back to you", from data only (the state's
+`waits_on_requester`, and the caller is the requester). A row with no move links "Open it to answer" to the Item, for
+every row with none. design.md: the PR 2 part of "Sent back to the requester, as built", and the web Inbox's customer
+note. Roadmap: step 5 built, and with it item 5; next in track 1, the Inbox for people.
+
+**Changed (counted):** one Type file; `web/src/model/inbox.ts` (the label) and `web/src/pages/InboxPage.tsx` (the
+branch gone, the link); the three newest-version lists and two comments. No kernel, proto or schema change.
+
+**Decided (the owner, through the coordinator):** at step 5's Phase A, all of this PR's shape; at the tests gate, the
+earlier-approved tests that change, "Open it to answer" for every row with no move (staff too), and the newest-version
+lists moving with the Type file rather than with the tests (each reads the file at set-up).
+
+**Tests:** new: a scenario step (C14), a pli test (`type get incident@6`), three model tests, one page test, one
+journey. **Earlier-approved tests that changed, each in its own commit:** the four Go list and start-block assertions
+(70 Types; the two exact lists; incident@6 the latest, carrying @5's start block); PR #100's customer page test, its
+"Not hers" row and kim's journey; a page-test helper (fixture). The three newest-version lists moved with the Type
+file. No test changed after the tests gate.
+
+**Surprises:**
+- Adding a Type moved only list tests and one start-block test, as a scratch run had said; the readings, stories, PoC
+  and scenario took `incident@6` without a change.
+- The three newest-version lists cannot move before the Type file: each reads the file before any test runs, so it
+  would fail three whole packages at set-up.
+- A page-test helper read every link in a row as a title; the new link would have been one. It now reads the first.
+- Docker stopped in this container while no one was using it, and a background race run then reported 13 packages
+  failing on "cannot connect". Restarted and run again in full.
+
+**Numbers.** `go vet` clean; `go test ./...` green, 28 packages; `go test -race ./...` green. Web: typecheck, 496 unit
+tests; apps/poc: typecheck, 408. On the compose stack: the scenario passed (140 steps); web Playwright 15; apps/poc
+journeys 4. **The bake-offs:** not run; no file under `spikes/` changed.
+
+**Local workarounds, outside the repository (nothing committed):** dockerd started by hand; the stack from a compose
+override in the scratchpad; Playwright through scratchpad configs using the preinstalled Chromium.
+
+**Open:** the Later items above. **Next session:** item 5 is done. Next in track 1: the Inbox for people
+(`docs/plans/inbox-for-people.md`); 3b only on a trigger.
