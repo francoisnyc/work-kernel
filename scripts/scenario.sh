@@ -2033,7 +2033,7 @@ held=$(ok ana item create --type equipment_request@2 --set "f_title=Monitor $w" 
 ok sam item transition "$held" --to in_hand >/dev/null
 claimed() { ok "$1" inbox "$w" --type equipment_request --role desk_agent --claimed; }
 expect "not in the team's queue" "$(ok lea inbox "$w" --type equipment_request --role desk_agent | names)" ""
-expect "in the team's claimed rows, with its holder" "$(claimed lea | j '[.items[] | "\(.name) \(.fields.f_handler)"] | join(" ")')" "$held user:sam"
+expect "in the team's claimed rows, with its holder" "$(claimed lea | j '[.items[]? | "\(.name) \(.fields.f_handler)"] | join(" ")')" "$held user:sam"
 expect "lea may hand it back (a colleague may release)" "$(claimed lea | j '.items[0].moves // [] | join(" ")')" "queue"
 expect "deciding is withheld from lea: sam holds it" "$(claimed lea | j '[.items[0].withheld // [] | .[] | "\(.to_state):\(.reason)"] | join(" ")')" \
   "fulfilled:WITHHELD_REASON_CLAIMED_BY_OTHER declined:WITHHELD_REASON_CLAIMED_BY_OTHER"
