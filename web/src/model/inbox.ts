@@ -265,3 +265,38 @@ export function whyNot(type: Type | undefined, item: Item, principal: string, na
   }
   return out;
 }
+
+// --- The Inbox for people, PR 2c: the side panel, several rows, keys. ---
+// stub (Phase B): every function below answers nothing yet.
+
+// The moves the selection bar offers for the selected rows: a move every
+// row lists in Item.moves, when all rows are of one Type (version), and
+// only one with no required fields; in the first row's order.
+export function bulkMoves(rows: Item[], typeOf: (name: string) => Type | undefined): Transition[] {
+  return [];
+}
+
+// The row the panel moves to after a move: the first row after `moved` in
+// the list before the move that is still listed after it; else the last
+// still listed before it; else none.
+export function nextAfter(before: string[], after: string[], moved: string): string | undefined {
+  return undefined;
+}
+
+// What a key does on the list: J next row, K previous, Enter open the
+// panel, X select, P the main move. Nothing while typing (a text field,
+// a select, an editable element) or with Ctrl, Meta or Alt held.
+export type InboxKey = "next" | "prev" | "open" | "select" | "main";
+export function inboxKey(e: { key: string; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; target: EventTarget | null }): InboxKey | undefined {
+  return undefined;
+}
+
+// The Inbox's URL with a row's panel open ("#/inbox?item=<id>"), or none.
+export function panelHash(id: string): string {
+  return "#/inbox";
+}
+
+// The open panel's row ID from the Inbox's URL; "" when none.
+export function panelOf(hash: string): string {
+  return "";
+}
