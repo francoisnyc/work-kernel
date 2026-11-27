@@ -172,3 +172,53 @@ func Moves(ty *typedef.Type, state string, who Who, it ItemFacts) []string {
 	}
 	return moves
 }
+
+// Why a move is withheld (Inbox PR 2a): the codes of item.WithheldMove.
+const (
+	// ReasonOwnRequest: the move says except: [creator], and the principal
+	// (or the user an agent acts for) took part in creating the Item.
+	ReasonOwnRequest = "own_request"
+	// ReasonOwnContainer: the move says except: [container_creator], and
+	// the principal took part in creating the Item's container.
+	ReasonOwnContainer = "own_container"
+	// ReasonClaimedByOther: the state has a claim, and the principal does
+	// not hold it (someone else does, or nobody).
+	ReasonClaimedByOther = "claimed_by_other"
+)
+
+// Withheld lists the moves out of state that who's `allowed` lets in but
+// that MayMove refuses, in the Type's order, each with why: never nil,
+// empty when there are none. A move `allowed` does not let them make is
+// someone else's, not withheld, and is left out; so is every move for a
+// customer. It shares MayMove's pieces, so it cannot disagree with Moves.
+func Withheld(ty *typedef.Type, state string, who Who, it ItemFacts) []item.WithheldMove {
+	out := []item.WithheldMove{}
+	if CustomerOf(item.Principal{Actor: who.Actor, OnBehalfOf: who.OnBehalfOf}) != "" {
+		return out
+	}
+	st, _ := ty.State(state)
+	for _, tr := range ty.Transitions {
+		if tr.From != state || MayMove(st, tr, who, it) {
+			continue
+		}
+		// What `allowed` alone says: tr is a copy, so clearing its except
+		// list changes nothing in the Type.
+		open := tr
+		open.Except = nil
+		if !MayTransition(open, who, it) {
+			continue // someone else's move, not withheld from them
+		}
+		// The first refusal, in MayMove's order: except, then the claim.
+		reason := ReasonClaimedByOther
+		switch {
+		case slices.Contains(tr.Except, typedef.AllowedCreator) &&
+			TookPartInCreation(who.Actor, who.OnBehalfOf, it.CreatedBy, it.CreatedOnBehalfOf):
+			reason = ReasonOwnRequest
+		case slices.Contains(tr.Except, typedef.AllowedContainerCreator) &&
+			TookPartInCreation(who.Actor, who.OnBehalfOf, it.ContainerCreatedBy, it.ContainerCreatedOnBehalfOf):
+			reason = ReasonOwnContainer
+		}
+		out = append(out, item.WithheldMove{ToState: tr.To, Reason: reason})
+	}
+	return out
+}

@@ -6,6 +6,14 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
+- **Claimed rows and withheld moves, Inbox PR 2a's Later items** (design.md, "Claimed rows and withheld moves, as built (Inbox PR 2a)"):
+  - **Only the claimant releases.** Today a colleague in the role may
+    release another's claim (step 2's rule), so a claimed row offers them
+    the release. Making a release the holder's only is a policy change,
+    not decided.
+  - **"An agent working, for {person}" on a claimed row.** The claim field
+    holds the effective user; which agent claimed is only in the claiming
+    event's actor, an extra read the view does not make.
 - **Words for people, Inbox PR 1a's Later items** (design.md, "Words for people, as built (Inbox PR 1a)"):
   - **Hints from the latest version.** Hints are pinned with the Item's
     version, so an Item of an older version shows IDs. Presentation could
@@ -4987,3 +4995,33 @@ Playwright through scratchpad configs using the preinstalled Chromium.
 
 **Open:** the Later items above. **Next session:** PR 2a's Phase A (claimed rows with their holder; why a move is
 withheld); then PR 2, the screen.
+
+## 2026-11-27 — Track 1, item 6, the Inbox for people, PR 2a: claimed rows and withheld moves (Phases A to D)
+
+**Built:** `ItemFilter.claimed` (a role's claimed rows instead of its queue, with `waiting_on: role:<name>` only),
+`State.claim` in `GetType` and `ListTypes`, `Item.withheld` with `WithheldMove` and `WithheldReason` (`OWN_REQUEST`,
+`OWN_CONTAINER`, `CLAIMED_BY_OTHER`), filled where `Item.moves` is. `policy.Withheld` beside `policy.Moves`; one condition
+in the view's SQL; `pli --claimed`. design.md: "Claimed rows and withheld moves, as built (Inbox PR 2a)" and four
+pointers in the earlier sections. Roadmap: 2a built, PR 2 next.
+
+**Decided (the owner, through the coordinator):** at Phase A, the flag and two reads; `State.claim` rather than a
+derived field; the withheld shape, rule and codes; one PR; the release rule kept as step 2's. At the tests gate, the
+`except` reason first when both refuse, and a colleague offered the release on a claimed row.
+
+**Tests:** new: policy 3, item service 7, API 5, pli 2, one scenario step. No earlier test changed; none changed after
+the tests gate.
+
+**Surprises:**
+- The claimed rows were one condition: the queue's SQL already grouped states by whether they have a claim.
+- pli's test world holds no role with a claim, so the claimed rows themselves are tested on the stack only.
+- An empty claim field cannot be made by any write the kernel offers; the test empties it with SQL, standing in for
+  a migration.
+
+**Numbers.** `go vet` clean; `go test ./...` and `go test -race ./...` green, 28 packages; the new tests `-race
+-count=10` green. `buf lint` and `buf breaking` pass. Web: typecheck, 500 unit tests. On the compose stack: the scenario
+passed (142 steps); web Playwright 16; apps/poc journeys 4. **The bake-offs:** not run; no file under `spikes/` changed.
+
+**Local workarounds, outside the repository (nothing committed):** dockerd started by hand; the stack's Go images
+built from a vendored scratch copy; the web and PoC images from host builds; Playwright through scratchpad configs.
+
+**Open:** the Later items above. **Next session:** PR 2, the Inbox screen, its own Phase A.

@@ -968,7 +968,9 @@ and its scope: the insert already holds those key locks.)
 - `waiting_on` (`me`, or `role:<name>`): only the open Items that wait on
   the caller, or on a role; one more condition, with the others. See
   "Waiting on me, step 1, as built". A claimed Item waits on its claimant
-  only ("A claim that binds, as built").
+  only ("A claim that binds, as built"). (Since Inbox PR 2a, a role's
+  claimed rows too, with `claimed: true`: "Claimed rows and withheld
+  moves, as built".)
 - `order_by: waiting_since`, only with `waiting_on`: the view oldest
   waiting first (` desc`: newest), by when each Item entered its state
   (`items.state_entered_at`), ties by ID. See "Waiting since, as built".
@@ -5149,7 +5151,8 @@ is stored beside the field.
 
 - A claimed Item waits on its claimant only. It is in nobody else's `me`.
 - A role's queue (`role:<name>`) shows what nobody has claimed: a claimed
-  state is never in it.
+  state is never in it. (Since Inbox PR 2a, the claimed ones too, with
+  `claimed: true`.)
 - The release is not work: a state whose only named move is its release
   waits on nobody.
 - After a release, the Item is back in the queue at once (nothing stored).
@@ -5691,7 +5694,8 @@ email, or grants the agent has not used.
 
 **`Item.moves`** (field 16). The moves the caller may make now: the
 `to_state` of each transition out of the Item's state that the caller may
-make, in the Type's order.
+make, in the Type's order. (Since Inbox PR 2a, `Item.withheld` beside it:
+the moves withheld from the caller, and why.)
 
 - Filled only in an answer to `SearchItems` or `ListItems` whose filter
   has `waiting_on`. There, empty means "none for you" (a role's queue read
@@ -5773,6 +5777,7 @@ guess. Its two functions (`inboxQueries`, `inboxTransitions`) are gone.
 holds that some Type names in a transition's `allowed`, in byte order.
 A role no Type names can have no queue and gets no tab. A role's tab is
 `waiting_on: role:<name>`: what waits on the team and nobody has claimed.
+(Since Inbox PR 2a, the claimed ones too, with `claimed: true`.)
 
 **The rows.** Oldest waiting first by default, with a switch to newest
 (`waiting_since desc`). A row shows the title, the Type and state, who
@@ -6251,6 +6256,91 @@ read "Cancel" and "Start". No kernel, schema or contract change.
 Phase A: claimed rows of a team's queue with their holder ("Being
 handled"), and why a move is withheld ("you can't handle your own
 request"), judged in policy. Then PR 2, the screen.
+
+## Claimed rows and withheld moves, as built (Inbox PR 2a) (2026-11-27)
+
+Track 1, item 6 of `docs/roadmap.md`, the Inbox for people
+(`docs/plans/inbox-for-people.md`): the small kernel PR before PR 2's
+screen, approved in principle at PR 1's Phase A. It answers two things the
+mockup's team queue needs without who-may logic in the browser: who is
+handling a claimed row, and why a person cannot make a move.
+
+**`ItemFilter.claimed`** (field 8). With `waiting_on: role:<name>` only:
+false, the role's queue as before (what nobody has claimed); true, its
+claimed rows instead: the open Items in a state with a `claim` whose
+waiting moves name the role, whoever holds the claim. An empty claim
+field (an Item migrated into a claimed state) still counts.
+
+- **Two reads, not one mixed list:** the screen asks for the queue, then
+  the claimed rows, each paged and counted on its own. Order and paging as
+  for the queue; with `order_by: waiting_since`, a claimed row's instant is
+  when it was claimed. A page token is bound to `claimed`.
+- `SearchItems`, `ListItems` and `CountItems` take it. A tab's number
+  stays the queue's.
+- **Refused** (`INVALID_ARGUMENT` at `filter.claimed`): without
+  `waiting_on`, or with `me`. A customer asking for a role's queue is
+  refused at `filter.waiting_on`, as before.
+- **Built as one condition:** the role branch of the view's SQL keeps the
+  states without a claim for the queue, those with one for the claimed
+  rows; the same waiting moves (`policy.WaitingMoves`) and the same
+  open-hold rule. Visibility is unchanged: every Item through
+  `policy.Project`.
+
+**`State.claim`** (field 11) in `GetType` and `ListTypes`: the principal
+field that holds who claimed an Item in that state. Not a hint: the rule
+the kernel already enforced, now readable. The holder is that field's
+value on the Item, read like any field. The claim field holds the
+effective user (the user an agent acts for), so "Jon Okafor has it"
+works; "an agent working for Jon Okafor" is not recorded on the Item
+(Later).
+
+**`Item.withheld`** (field 17), `WithheldMove {to_state, reason}`,
+`WithheldReason`. Filled exactly where `Item.moves` is, never for a
+customer.
+
+- **Which moves:** those out of the Item's state that `allowed` lets the
+  caller in to (read without `except`) but `policy.MayMove` refuses. A
+  move the caller holds no role for is someone else's, not withheld, and
+  is not listed.
+- **The reason, the first refusal in `MayMove`'s order:**
+  `OWN_REQUEST` (`except: [creator]`, and the caller or the user an agent
+  acts for took part in creating the Item), `OWN_CONTAINER` (`except:
+  [container_creator]`), else `CLAIMED_BY_OTHER` (someone else holds the
+  claim, or nobody does). When `except` and the claim both refuse, the
+  `except` reason is given.
+- A code only: it names nobody. For `CLAIMED_BY_OTHER` the holder is in
+  the Item's own claim field.
+- **A release stays step 2's:** a colleague in the role may release
+  another's claim, so on a claimed row a colleague's move is the release
+  and the rest is `CLAIMED_BY_OTHER`. "Only the claimant releases" is not
+  decided (Later).
+
+**One rule, shared.** `policy.Withheld` reads `MayMove`, `MayTransition`
+(for the move without `except`) and `TookPartInCreation` (for the
+reason), the pieces `policy.Moves` reads; the item service's `fillMoves`
+fills both lists from the same roles and facts. A test over every Type in
+`types/`, five kinds of principal and eighteen kinds of Item holds them
+together: moves and withheld never share a move, every move `allowed`
+lets in is in exactly one of them, each reason is the first refusal, a
+customer gets none, and all three reasons are reached.
+
+**pli:** `--claimed` among the FILTERS (`inbox --role NAME --claimed`,
+`item search` and `item count`), sent as given; a waiting-on answer prints
+`withheld`. **The scenario** (one step): sam takes a request; lea reads
+the desk agents' claimed rows (sam holds it, her move is the release,
+deciding is `CLAIMED_BY_OTHER`); sam's own request in the queue (taking
+it is `OWN_REQUEST`, withdrawing it his move).
+
+**Tests.** policy 3 (each reason, the invariant, the moves unchanged);
+item service 7; API 5; pli 2; a scenario step. No earlier test changed.
+
+**Kernel changes:** `policy.Withheld`; `Filter.Claimed` and its check;
+one condition in the view's SQL; `fillMoves`; the API's mapping; three
+fields, a message and an enum in `kernel.v1` (additive, approved). No
+schema change; no web source change (the generated client only).
+
+**Next.** PR 2, the screen: "Nobody has these yet", then "Being handled"
+with who has each; a row's withheld moves said in words.
 
 ## Out of scope for the spike
 

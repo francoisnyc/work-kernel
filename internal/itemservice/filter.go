@@ -38,6 +38,11 @@ type Filter struct {
 	// In keeps the Items below this container, at any depth (track 1 item
 	// 5, step 4). Search and Count only; List has its own container.
 	In *uuid.UUID `json:",omitempty"`
+	// Claimed, with WaitingOn "role:<name>" only, keeps that role's
+	// claimed rows instead of its queue: the open Items in a state with a
+	// claim whose waiting moves name the role, whoever holds the claim
+	// (Inbox PR 2a). Anything else is an *InvalidError at filter.claimed.
+	Claimed bool `json:",omitempty"`
 }
 
 // FieldFilter is a condition on one field: Eq, or a range of one or two
@@ -60,7 +65,7 @@ type FieldFilter struct {
 // empty reports whether the filter says nothing.
 func (f Filter) empty() bool {
 	return len(f.TypeIDs) == 0 && len(f.States) == 0 && len(f.Categories) == 0 && len(f.Fields) == 0 &&
-		len(f.Links) == 0 && f.WaitingOn == "" && f.In == nil
+		len(f.Links) == 0 && f.WaitingOn == "" && f.In == nil && !f.Claimed
 }
 
 // sqlFilter is a Filter checked against the registered Types and turned into
@@ -154,8 +159,11 @@ func (k *Service) resolveFilter(ctx context.Context, p item.Principal, f Filter)
 			out.conds = append(out.conds, rowListing(all, ff.Field, fmt.Sprintf("f_vis_%d", i), out.args))
 		}
 	}
+	if f.Claimed && f.WaitingOn == "" {
+		return out, &InvalidError{Path: "filter.claimed", Reason: "want it with waiting_on role:<name>, a role's claimed rows"}
+	}
 	if f.WaitingOn != "" {
-		conds, err := k.waitingConds(ctx, p, all, f.WaitingOn, out.args)
+		conds, err := k.waitingConds(ctx, p, all, f.WaitingOn, f.Claimed, out.args)
 		if err != nil {
 			return out, err
 		}

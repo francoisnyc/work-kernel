@@ -25,6 +25,7 @@ import (
 type filterOpts struct {
 	types, states, categories, wheres, links, empties, notEmpties listFlag
 	orderBy, waitingOn, in                                        string
+	claimed                                                       bool
 }
 
 func filterFlags(fs *flag.FlagSet) *filterOpts {
@@ -37,6 +38,7 @@ func filterFlags(fs *flag.FlagSet) *filterOpts {
 	fs.Var(&f.notEmpties, "not-empty", "a field ID: Items where the field has a value; repeatable")
 	fs.Var(&f.links, "linked", "out:NAME=ITEM (Items that link to ITEM) or in:NAME=ITEM (Items ITEM links to, by the inverse name); repeatable")
 	fs.StringVar(&f.waitingOn, "waiting-on", "", "me or role:NAME: the open Items that wait on you, or on a role")
+	fs.BoolVar(&f.claimed, "claimed", false, "with a role's queue: its claimed rows instead, whoever holds them")
 	fs.StringVar(&f.in, "in", "", "a container ITEM: only the Items below it, at any depth (item search, item count, inbox)")
 	fs.StringVar(&f.orderBy, "order-by", "", "sort by a field: 'FIELD', 'FIELD asc' or 'FIELD desc' (default: newest first)")
 	return f
@@ -44,10 +46,10 @@ func filterFlags(fs *flag.FlagSet) *filterOpts {
 
 // filter builds the ItemFilter; nil when no flag was given.
 func (f *filterOpts) filter(ns string) (*kernelv1.ItemFilter, error) {
-	if len(f.types)+len(f.states)+len(f.categories)+len(f.wheres)+len(f.links)+len(f.empties)+len(f.notEmpties) == 0 && f.waitingOn == "" && f.in == "" {
+	if len(f.types)+len(f.states)+len(f.categories)+len(f.wheres)+len(f.links)+len(f.empties)+len(f.notEmpties) == 0 && f.waitingOn == "" && f.in == "" && !f.claimed {
 		return nil, nil
 	}
-	out := &kernelv1.ItemFilter{States: f.states, WaitingOn: f.waitingOn, In: f.in}
+	out := &kernelv1.ItemFilter{States: f.states, WaitingOn: f.waitingOn, In: f.in, Claimed: f.claimed}
 	for _, t := range f.types {
 		if !strings.Contains(t, "/") {
 			t = "namespaces/" + ns + "/types/" + t
