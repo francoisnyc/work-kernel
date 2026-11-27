@@ -301,3 +301,45 @@ section.inbox ul.items > li > p {
   gap: 0.5rem;
   align-items: flex-start;
 }
+/* The Inbox for people (PR 2c): the panel beside the list, the bar. */
+.inbox-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-start;
+}
+.inbox-body > section.inbox {
+  flex: 999 1 26rem;
+  min-width: 0;
+}
+.inbox-panel {
+  flex: 1 1 18rem;
+  min-width: 0;
+  border-left: 1px solid #ddd;
+  padding-left: 1rem;
+}
+.inbox-panel h2 {
+  margin-top: 0;
+}
+.panel-fields {
+  list-style: none;
+  padding: 0;
+}
+.panel-fields .label {
+  font-weight: 600;
+}
+.panel-fields .help {
+  display: block;
+  color: #555;
+  font-size: 0.85rem;
+}
+.selection-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  margin-bottom: 0.5rem;
+}

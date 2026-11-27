@@ -267,19 +267,28 @@ export function whyNot(type: Type | undefined, item: Item, principal: string, na
 }
 
 // --- The Inbox for people, PR 2c: the side panel, several rows, keys. ---
-// stub (Phase B): every function below answers nothing yet.
 
 // The moves the selection bar offers for the selected rows: a move every
 // row lists in Item.moves, when all rows are of one Type (version), and
 // only one with no required fields; in the first row's order.
 export function bulkMoves(rows: Item[], typeOf: (name: string) => Type | undefined): Transition[] {
-  return [];
+  const first = rows[0];
+  if (!first || rows.some((r) => r.type !== first.type)) return [];
+  const type = typeOf(first.type);
+  // Each row's own move to that state (rows may be in different states)
+  // must be listed for it and ask for no field.
+  const plain = (r: Item, to: string) => r.moves.includes(to) && rowMoves(type, r).find((t) => t.toState === to)?.required.length === 0;
+  return rowMoves(type, first).filter((t) => rows.every((r) => plain(r, t.toState)));
 }
 
 // The row the panel moves to after a move: the first row after `moved` in
 // the list before the move that is still listed after it; else the last
 // still listed before it; else none.
 export function nextAfter(before: string[], after: string[], moved: string): string | undefined {
+  const at = before.indexOf(moved);
+  const still = new Set(after);
+  for (let i = at + 1; i < before.length; i++) if (still.has(before[i]!)) return before[i];
+  for (let i = at - 1; i >= 0; i--) if (still.has(before[i]!)) return before[i];
   return undefined;
 }
 
@@ -287,16 +296,43 @@ export function nextAfter(before: string[], after: string[], moved: string): str
 // panel, X select, P the main move. Nothing while typing (a text field,
 // a select, an editable element) or with Ctrl, Meta or Alt held.
 export type InboxKey = "next" | "prev" | "open" | "select" | "main";
+const NOT_TYPING = new Set(["checkbox", "radio", "button", "submit", "reset"]);
 export function inboxKey(e: { key: string; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; target: EventTarget | null }): InboxKey | undefined {
-  return undefined;
+  if (e.ctrlKey || e.metaKey || e.altKey) return undefined;
+  const t = e.target;
+  if (t instanceof HTMLElement) {
+    if (t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement) return undefined;
+    if (t instanceof HTMLInputElement && !NOT_TYPING.has(t.type)) return undefined;
+    const editable = t.getAttribute("contenteditable");
+    if (t.isContentEditable || (editable !== null && editable !== "false")) return undefined;
+  }
+  switch (e.key) {
+    case "j":
+    case "J":
+      return "next";
+    case "k":
+    case "K":
+      return "prev";
+    case "Enter":
+      return "open";
+    case "x":
+    case "X":
+      return "select";
+    case "p":
+    case "P":
+      return "main";
+    default:
+      return undefined;
+  }
 }
 
 // The Inbox's URL with a row's panel open ("#/inbox?item=<id>"), or none.
 export function panelHash(id: string): string {
-  return "#/inbox";
+  return id === "" ? "#/inbox" : `#/inbox?item=${id}`;
 }
 
 // The open panel's row ID from the Inbox's URL; "" when none.
 export function panelOf(hash: string): string {
-  return "";
+  const [path = "", query = ""] = hash.replace(/^#\/?/, "").split("?");
+  return path === "inbox" ? (new URLSearchParams(query).get("item") ?? "") : "";
 }
