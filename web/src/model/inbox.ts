@@ -198,12 +198,13 @@ function span(ms: number): string | undefined {
   return `${Math.floor(seconds / size)} ${unit}`;
 }
 
-// "waiting 3 h"; "in hand 3 h" in a state with a claim (since the claim).
+// "waiting 3 h"; "in hand 3 h" in a state with a claim (since the claim),
+// "in hand just now" under a second.
 export function waitedLine(type: Type | undefined, item: Item, now: Date): string {
   const claimed = type?.states.find((s) => s.id === item.state)?.claim;
   if (!claimed) return waitingFor(item.stateTime, now);
   if (!item.stateTime) return "";
-  return `in hand ${span(now.getTime() - timestampDate(item.stateTime).getTime()) ?? "just arrived"}`;
+  return `in hand ${span(now.getTime() - timestampDate(item.stateTime).getTime()) ?? "just now"}`;
 }
 
 // When the Item is due in its state (the state's `due` field), and
