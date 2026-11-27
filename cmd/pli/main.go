@@ -140,6 +140,7 @@ const usage = `usage: pli [--server URL] [--tokens FILE] --as NAME [--session ID
 FILTERS: [--type TYPE]... [--state S]... [--category C]... [--where F=V|F>V|F>=V|F<V|F<=V]... [--empty F]... [--not-empty F]...
          [--linked out:NAME=ITEM | in:NAME=ITEM]...   (on a principal field, --where F=me is the caller)
          [--waiting-on me|role:NAME]                 (the open Items that wait on you, or on a role)
+         [--claimed]                                 (with --waiting-on role:NAME or inbox --role: its claimed rows instead)
          [--in ITEM]                                 (item search, item count and inbox: everything below a container)
          [--order-by 'FIELD [asc|desc]']             (default: newest first)
          [--order-by waiting_since]                  (with --waiting-on: oldest waiting first; 'waiting_since desc': newest)

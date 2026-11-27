@@ -172,3 +172,25 @@ func Moves(ty *typedef.Type, state string, who Who, it ItemFacts) []string {
 	}
 	return moves
 }
+
+// Why a move is withheld (Inbox PR 2a): the codes of item.WithheldMove.
+const (
+	// ReasonOwnRequest: the move says except: [creator], and the principal
+	// (or the user an agent acts for) took part in creating the Item.
+	ReasonOwnRequest = "own_request"
+	// ReasonOwnContainer: the move says except: [container_creator], and
+	// the principal took part in creating the Item's container.
+	ReasonOwnContainer = "own_container"
+	// ReasonClaimedByOther: the state has a claim, and the principal does
+	// not hold it (someone else does, or nobody).
+	ReasonClaimedByOther = "claimed_by_other"
+)
+
+// Withheld lists the moves out of state that who's `allowed` lets in but
+// that MayMove refuses, in the Type's order, each with why: never nil,
+// empty when there are none. A move `allowed` does not let them make is
+// someone else's, not withheld, and is left out; so is every move for a
+// customer. It shares MayMove's pieces, so it cannot disagree with Moves.
+func Withheld(ty *typedef.Type, state string, who Who, it ItemFacts) []item.WithheldMove {
+	return []item.WithheldMove{} // stub: Phase B
+}

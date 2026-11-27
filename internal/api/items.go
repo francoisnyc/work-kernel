@@ -88,6 +88,7 @@ func (s *server) view(ctx context.Context, p item.Principal, it item.Item) (*ker
 		out.StateTime = timestamppb.New(it.StateEnteredAt)
 	}
 	out.Moves = it.Moves
+	// stub (Inbox PR 2a, Phase B): Item.withheld is not filled yet.
 	// The category is the Type version's, for the state the Item is in.
 	if st, ok := ty.State(it.State); ok {
 		out.Category = categories[st.Category]
@@ -455,3 +456,7 @@ func (s *server) views(ctx context.Context, p item.Principal, its []item.Item) (
 	}
 	return out, nil
 }
+
+// withheldReasons maps policy's reason codes (item.WithheldMove.Reason) to
+// kernel.v1's WithheldReason. stub (Inbox PR 2a, Phase B): empty.
+var withheldReasons = map[string]kernelv1.WithheldReason{}

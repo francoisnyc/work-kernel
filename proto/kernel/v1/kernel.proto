@@ -161,6 +161,35 @@ message Item {
   // means the caller may make none (a role's queue asked by a
   // non-member). Everywhere else it is empty and says nothing.
   repeated string moves = 16;
+  // The moves out of the Item's state that the caller's `allowed` lets in
+  // but that are withheld from them, each with why: their own request
+  // (`except: [creator]`), their own container's (`except:
+  // [container_creator]`), or a claim someone else holds. A move the
+  // caller holds no role for is not withheld: it is someone else's and is
+  // not listed. Never shares a move with moves. Filled exactly where moves
+  // is, and never for a customer. A code only: it names nobody.
+  repeated WithheldMove withheld = 17;
+}
+
+// A move withheld from the caller, and why (Item.withheld).
+message WithheldMove {
+  // The state the move goes to.
+  string to_state = 1;
+  WithheldReason reason = 2;
+}
+
+// Why a move `allowed` lets the caller make is withheld from them.
+enum WithheldReason {
+  WITHHELD_REASON_UNSPECIFIED = 0;
+  // The move says `except: [creator]`, and the caller (or the user an
+  // agent acts for) took part in creating the Item.
+  WITHHELD_REASON_OWN_REQUEST = 1;
+  // The move says `except: [container_creator]`, and the caller took part
+  // in creating the Item's container.
+  WITHHELD_REASON_OWN_CONTAINER = 2;
+  // The Item's state has a claim, and someone else holds it (or nobody
+  // does). The holder is in the Item's own claim field (State.claim).
+  WITHHELD_REASON_CLAIMED_BY_OTHER = 3;
 }
 
 // One rollup of an Item: how many linked Items the caller can see, by state
@@ -461,6 +490,13 @@ message ItemFilter {
   // where. A container the caller cannot see, or that does not exist, is
   // NOT_FOUND. Part of what a page token is bound to.
   string in = 7;
+  // With waiting_on "role:<name>" only (else INVALID_ARGUMENT): false, the
+  // role's queue as above, what nobody has claimed; true, its claimed
+  // rows instead: the open Items in a state with a claim whose waiting
+  // moves name the role, whoever holds the claim (an empty claim field
+  // counts). Order and paging as for the queue; waiting_since is when the
+  // Item was claimed. Part of what a page token is bound to.
+  bool claimed = 8;
 }
 
 // Items with a link of this name to or from item, as the result Items see
@@ -1085,6 +1121,11 @@ message State {
   // in this state is due by (a screen marks it overdue once it has
   // passed). Empty: none. It enforces nothing and moves nothing.
   string due = 10;
+  // The principal field that holds who claimed an Item in this state
+  // (who alone may move it on; a release excepted). Empty: no claim. A
+  // rule of the Type, not a hint: the holder is that field's value on the
+  // Item.
+  string claim = 11;
 }
 
 // A state's timer after a duration.

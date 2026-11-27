@@ -56,6 +56,9 @@ func (s *server) filterIn(ctx context.Context, p item.Principal, f *kernelv1.Ite
 	// "Waiting on me": the kernel reads the value (me, role:<name>) and
 	// refuses anything else, at filter.waiting_on.
 	out.WaitingOn = f.WaitingOn
+	// A role's claimed rows instead of its queue: the kernel checks it
+	// goes with waiting_on role:<name>, at filter.claimed.
+	out.Claimed = f.Claimed
 	// A container to search below: a name in the caller's namespace; the
 	// kernel says whether the caller can see it.
 	in, cerr := optionalItem(p, f.In, "filter.in")

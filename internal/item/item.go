@@ -77,6 +77,18 @@ type Item struct {
 	// that the reader may make for who they are (policy.MayMove), in the
 	// Type's order. Only Search and List with Filter.WaitingOn fill it.
 	Moves []string
+	// Withheld are the moves out of the Item's state that the reader's
+	// `allowed` lets in but that `except` or the state's claim withholds
+	// from them, each with why (policy.Withheld). Filled where Moves is,
+	// never for a customer.
+	Withheld []WithheldMove
+}
+
+// WithheldMove is a move withheld from a reader, and why: one of policy's
+// Reason… codes.
+type WithheldMove struct {
+	ToState string
+	Reason  string
 }
 
 // Rollup is one computed value: how many linked Items the reader can see,

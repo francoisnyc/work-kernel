@@ -38,6 +38,11 @@ type Filter struct {
 	// In keeps the Items below this container, at any depth (track 1 item
 	// 5, step 4). Search and Count only; List has its own container.
 	In *uuid.UUID `json:",omitempty"`
+	// Claimed, with WaitingOn "role:<name>" only, keeps that role's
+	// claimed rows instead of its queue: the open Items in a state with a
+	// claim whose waiting moves name the role, whoever holds the claim
+	// (Inbox PR 2a). Anything else is an *InvalidError at filter.claimed.
+	Claimed bool `json:",omitempty"`
 }
 
 // FieldFilter is a condition on one field: Eq, or a range of one or two
