@@ -18,6 +18,10 @@
 // stack keeps what earlier runs and the scenario left waiting. Journey 5's
 // requests are at the top level, so it reads newest first and finds its
 // rows by their titles.
+//   6. sam sends kim's incident back to her (incident@6: waiting for its
+//      customer waits on its requester): it is in her Inbox, labelled "sent
+//      back to you", with no button and a link; she answers on its page with
+//      a reply, which brings it back to in_progress; it leaves her Inbox.
 //
 // Run: docker compose up -d --build --wait, then `npm run e2e` in web/.
 import { expect, test, type Page } from "@playwright/test";
@@ -29,6 +33,7 @@ import {
   seedDeskQueue,
   seedEmptyPlace,
   seedEquipmentRequests,
+  seedSentBack,
   withdrawAll,
 } from "./seed";
 import type { Item } from "../src/gen/kernel/v1/kernel_pb";
@@ -218,4 +223,36 @@ test("sam claims an equipment request; lea cannot decide it; sam releases it to 
   const got = (await api(baseURL!, "sam").getItem({ name: first!.name })).item;
   expect(got?.state).toBe("queue");
   expect(got?.fields?.f_handler ?? null).toBeNull();
+});
+
+test("sam sends kim's incident back to her: in her Inbox, labelled; she answers on its page; it leaves", async ({ page, baseURL }) => {
+  const title = `Scanner offline ${run}`;
+  const { incident } = await seedSentBack(baseURL!, run, title);
+  const row = (p: Page) => inbox(p).locator("> li").filter({ hasText: title });
+
+  await openInbox(page, "kim");
+  // Her one tab; her row, oldest waiting first, found by its title.
+  await expect(page.getByRole("tab")).toHaveCount(1);
+  await expect(row(page)).toContainText("incident@6 · waiting_for_customer");
+  await expect(row(page)).toContainText("asked by customer:kim");
+  await expect(row(page)).toContainText("sent back to you");
+  // She answers by replying, not by a move: no button, a link to the incident.
+  await expect(row(page).getByRole("button")).toHaveCount(0);
+  await row(page).getByRole("link", { name: "Open it to answer" }).click();
+  await expect(page.getByRole("heading", { name: title })).toBeVisible();
+
+  // Her reply, written inside the incident.
+  await page.goto(`/#/new?in=${idOf(incident)}`);
+  await page.getByLabel("Type", { exact: true }).selectOption("reply");
+  await page.getByLabel("f_body").fill(`It shows error 42 ${run}`);
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+
+  // The incident's own rule brings it back to in_progress (a reaction, by
+  // the worker); then it waits on the desk, not on her.
+  const kim = api(baseURL!, "kim");
+  await expect.poll(async () => (await kim.getItem({ name: incident.name })).item?.state, { timeout: 30_000 }).toBe("in_progress");
+  await openInbox(page, "kim");
+  await expect(inbox(page)).toHaveAttribute("aria-busy", "false");
+  await expect(row(page)).toHaveCount(0);
 });
