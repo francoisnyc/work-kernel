@@ -134,6 +134,10 @@ A Type is versioned YAML data that **names code but never contains it**.
   "Jira part 2, step 1 as built"). A state has `timer` or `at`, never both.
 - Approvals: a business state, decided by an ordinary transition; the kernel
   has no approval concept (see "Approval as a business state").
+- Presentation hints (optional; they enforce nothing): `label` and `help`
+  on a state, a transition and a field; `primary` on at most one move out
+  of a state; `summary` on the Type; `due` on a state. See "Words for
+  people, as built (Inbox PR 1a)".
 - An Item stays on the Type version it was created with, until someone who
   may migrates it to the latest one. Versioning rule:
   **pin the lifecycle, evolve the schema, float the policy.**
@@ -4030,8 +4034,10 @@ the list is closed, `reading.Parts()`):
 | start_in, start_who, start_latest (starting work, step 2) | A {type} is created only inside a {T}[, or at the top level] [/ only at the top level]. / {Any staff member who can see the container / Anyone with the role R / `principal` / Whoever {f} of the container names / Anyone who took part in creating the container} creates one; a customer creates one only where a container lets them. [/ No person creates a {type}: only a reaction does.] / While this is the latest version of {type}, these rules apply to creating a {type} of any version. |
 | customer_fields, own, shared, placement | A customer who sees it sees only {fields}, and sets only those when creating it. [/ ... sees none of its fields, only its header.] / A customer may create a {T} inside it, and sees the ones they requested. / The customer who requested it sees every {T} inside it, and may create one there. / {Anyone who can see it / Only holders of R / No one} moves it to another container or narrows who sees it. |
 
-Field IDs are written in code font; labels replace them when presentation
-hints exist (roadmap, theme 1).
+Where the Type gives labels, a state heading and the field list show the
+label beside the ID, and a move's sentence starts with its label; inside
+sentences IDs stay in code font (labels need not be unique). help,
+primary, summary and due are left out: presentation.
 
 **Expressions in words.** A closed subset reads in words: fields and the
 kernel's variables (today, the time of the write; "that instant" in an
@@ -6136,6 +6142,100 @@ check order above).
 condition in the relay; the quiet check; the workflow's hand-over. No
 contract, schema or payload change. The bake-offs, run in full: every
 verdict as before (their purchases have no timers).
+
+## Words for people, as built (Inbox PR 1a) (2026-11-27)
+
+Track 1, item 6 of `docs/roadmap.md`, the Inbox for people
+(`docs/plans/inbox-for-people.md`), PR 1, split by the owner into 1a (this:
+the kernel) and 1b (the Types in `types/` and the screen). The first of
+theme 1's presentation hints, and only those the Inbox needs now. **Hints
+enforce nothing and decide nothing:** no move, write, view or policy reads
+them; a screen does.
+
+**The keys** (all optional):
+
+```yaml
+summary: [f_title, f_amount]          # the Type: what a row says under its title
+fields:
+  - {id: f_approver, type: principal, label: Approver, help: Who decides}
+states:
+  - {id: pending, category: waiting, label: Waiting for a decision, due: f_due_approval}
+transitions:
+  - {from: pending, to: approved, allowed: ['field:f_approver'], label: Approve, primary: true}
+```
+
+- `label` and `help` on a field, a state and a transition.
+- `primary: true` on a transition: the row's one button.
+- `summary` on the Type: the fields a row or a card shows under the title.
+- `due` on a state: the datetime field whose instant an Item in that state
+  is due by; a screen marks it overdue once the instant has passed. It
+  arms nothing: a timer or an SLA goal moves the Item, as before.
+
+**Load checks** (stage 2, `typedef/hints.go`), every problem in the
+existing codes:
+
+| What | Code |
+| --- | --- |
+| A label not plain text or not 1 to 60 characters; a help not plain text or not 1 to 280. Plain text: one line, no control character, no space at either end, none of `<`, `>` or a backtick. Characters, not bytes; `label: ""` counts as written | `INVALID_VALUE` |
+| The same label twice among the fields, among the states, or among the moves out of one state, compared without regard to case (on the second) | `DUPLICATE` |
+| A second `primary` out of one state | `ONLY_ONE_ALLOWED` |
+| `primary` on a move no person makes (`allowed: [nobody]`, or only the timer and hooks) | `KEY_NOT_APPLICABLE` |
+| `summary` naming a field the Type lacks / one field twice / more than 3 | `UNKNOWN_FIELD` / `DUPLICATE` / `INVALID_VALUE` |
+| `due` naming a field the Type lacks / a field that is not one datetime | `UNKNOWN_FIELD` / `WRONG_FIELD_TYPE` |
+
+A Type without hints loads and is stored as before: the keys are left out
+of the stored JSON when empty, so no registered version's definition
+changes and none trips `VERSION_CHANGED`. A draft that adds a hint to a
+registered version is another definition (`VERSION_CHANGED`): hints come
+in a new version. The JSON Schema (`schema/type.schema.json`) has the keys,
+typed no stricter than stage 1.
+
+**Out through `GetType` and `ListTypes`** (`kernel.v1`, additive, approved
+by the owner): `Field.label` (9), `help` (10); `State.label` (8), `help`
+(9), `due` (10); `Transition.label` (11), `help` (12), `primary` (13);
+`Type.summary` (20). Empty means none: a screen shows the ID, as today.
+Types are not secret, so a customer reads them too; a hint is a word of
+the Type, never of an Item. No Item is read, so nothing goes through
+`policy.Project`.
+
+**The reading.** A labelled state's heading is its label, then its ID and
+category: "Waiting for a decision (`pending`, waiting)". The field list
+puts a label beside its ID: "`f_approver` (Approver): a person". A
+labelled move's sentence starts with its label: "Approve: whoever
+`f_approver` names moves it from pending to approved." Inside sentences
+states and fields stay IDs, since labels need not be unique across kinds.
+No new part and no witness: a label names, it does nothing. The nine hint
+keys are in `reading.LeftOut`, each with its reason. A Type without labels
+reads byte for byte as before (the three approved readings are
+unchanged).
+
+**Pinned with the version.** An Item shows the hints of its own version,
+like the rest of its Type: an Item of a version without hints shows IDs.
+Hints taken from the latest version instead are Later.
+
+**Tests.** typedef: the keys parsed, stored and round-tripped; nothing new
+stored without them (every Type in `types/`); a hint added to a registered
+version is `VERSION_CHANGED`; 15 Types that load, 26 problems, 4 wrong
+shapes; a schema corpus file with every key. API: `GetType` (staff and a
+customer) and `ListTypes` carry every hint. Reading: labels in headings,
+the field list and a move's sentence, changing only those lines; help,
+primary, summary and due changing nothing; the keys left out. No earlier
+test changed.
+
+**Kernel changes:** the keys and their checks in `typedef`; the schema;
+nine fields in `kernel.v1`; the reading. No schema change in Postgres, no
+item service, policy, write path or web source change (the web's
+generated client only).
+
+**Next.** 1b: `approval@2`, `access_request@2` (creating `approval@2`,
+`older_versions: [1]`), `equipment_request@2` (`older_versions: [1]`) and
+`incident@7` (`older_versions: all`), each adding hints only and `due`
+where a field gives one; the existing transition button reads its label
+("Approve"), else "Move to X"; the approved reading `approval@2`; a
+journey and a scenario step. Then 2a, a small kernel PR approved in
+principle: claimed rows of a team's queue with their holder ("Being
+handled"), and why a move is withheld ("you can't handle your own
+request"), judged in policy. Then PR 2, the screen.
 
 ## Out of scope for the spike
 

@@ -110,7 +110,8 @@ Web only; the same four calls as today (`WhoAmI`, `CountItems`,
   browser too).
 - No new answers yet: the moves the Type offers. "Not yet", a refusal
   reason and the approver's own values arrive with `question@1` and
-  `approval@2` ("Ask a person"), and the panel takes them then.
+  `approval@3` ("Ask a person"; `approval@2` is PR 1b's labels), and the
+  panel takes them then.
 
 ## Out of scope
 
