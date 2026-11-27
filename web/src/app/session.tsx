@@ -32,6 +32,8 @@ export class Session {
     readonly types: Type[],
     // Principals to suggest in principal fields.
     readonly principals: string[],
+    // The dev-token file's people, for their names (Inbox PR 2b).
+    readonly people: DevUser[] = [],
   ) {
     for (const t of types) this.byName.set(t.name, t);
   }
@@ -47,6 +49,9 @@ export class Session {
   typeOf(name: string): Type | undefined {
     return this.byName.get(name);
   }
+
+  // A person's name, or their ID (devusers.personName). stub (Phase B).
+  nameOf = (principal: string): string => principal;
 
   titleOf = (item: Item): string => {
     const type = this.typeOf(item.type);

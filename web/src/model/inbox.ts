@@ -28,7 +28,15 @@ export const INBOX_PAGE = 50;
 
 // What the page is showing: a tab, an order, an optional place (an Item's
 // name; "" for anywhere).
-export type InboxView = { parent: string; tab: InboxTab; order: InboxOrder; place: string };
+export type InboxView = {
+  parent: string;
+  tab: InboxTab;
+  order: InboxOrder;
+  place: string;
+  // A team tab's claimed rows ("Being handled", filter.claimed) instead of
+  // its queue (Inbox PR 2b). stub (Phase B): not sent yet.
+  claimed?: boolean;
+};
 
 const ME: InboxTab = { key: "me", label: "Waiting on me", waitingOn: "me" };
 
@@ -124,4 +132,70 @@ export function waitingFor(stateTime: Timestamp | undefined, now: Date): string 
   if (seconds < 1) return "just arrived";
   const [size, unit] = units.find(([s]) => seconds >= s)!;
   return `waiting ${Math.floor(seconds / size)} ${unit}`;
+}
+
+// --- The Inbox for people, PR 2b: rows, groups, team tabs. ---
+// stub (Phase B): every function below answers nothing yet.
+
+// A person's name for the page (devusers.personName), or the ID.
+export type NameOf = (principal: string) => string;
+
+// A role's ID made readable for its tab: "desk_agent" is "Desk agent".
+export function roleLabel(role: string): string {
+  return role;
+}
+
+// A state's label, or its ID when the Type gives none.
+export function stateLabel(type: Type | undefined, state: string): string {
+  return state;
+}
+
+// The row's main button and the rest (the "More moves" disclosure): the
+// move marked primary when the server lists it, else the first it lists.
+export function splitMoves(type: Type | undefined, item: Item): { main?: Transition; others: Transition[] } {
+  return { others: rowMoves(type, item) };
+}
+
+// The Type's summary fields that hold a value, as "Label: value", in the
+// summary's order; a principal is named.
+export function summaryLine(type: Type | undefined, item: Item, nameOf: NameOf): string[] {
+  return [];
+}
+
+// "Ana asks", or "You asked for this one".
+export function askedLine(item: Item, principal: string, nameOf: NameOf): string {
+  return "";
+}
+
+// "waiting 3 h"; "in hand 3 h" in a state with a claim.
+export function waitedLine(type: Type | undefined, item: Item, now: Date): string {
+  return "";
+}
+
+// When the Item is due in its state (the state's `due` field), and
+// whether that has passed.
+export type Due = { text: string; overdue: boolean };
+export function dueOf(type: Type | undefined, item: Item, now: Date): Due | undefined {
+  return undefined;
+}
+
+// Overdue first, then the rest, each in the order given.
+export function groupRows(rows: Item[], typeOf: (name: string) => Type | undefined, now: Date): { overdue: Item[]; waiting: Item[] } {
+  return { overdue: [], waiting: rows };
+}
+
+// Who holds the Item's claim: the value of its state's claim field; ""
+// when the state has no claim or nobody holds it.
+export function holderOf(type: Type | undefined, item: Item): string {
+  return "";
+}
+
+// "Lea has it", "You have it", "Nobody holds it"; "" in a state with no claim.
+export function holderLine(type: Type | undefined, item: Item, principal: string, nameOf: NameOf): string {
+  return "";
+}
+
+// Why the withheld moves are withheld, in words, each once.
+export function whyNot(type: Type | undefined, item: Item, principal: string, nameOf: NameOf): string[] {
+  return [];
 }
