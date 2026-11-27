@@ -6227,13 +6227,28 @@ nine fields in `kernel.v1`; the reading. No schema change in Postgres, no
 item service, policy, write path or web source change (the web's
 generated client only).
 
-**Next.** 1b: `approval@2`, `access_request@2` (creating `approval@2`,
-`older_versions: [1]`), `equipment_request@2` (`older_versions: [1]`) and
-`incident@7` (`older_versions: all`), each adding hints only and `due`
-where a field gives one; the existing transition button reads its label
-("Approve"), else "Move to X"; the approved reading `approval@2`; a
-journey and a scenario step. Then 2a, a small kernel PR approved in
-principle: claimed rows of a team's queue with their holder ("Being
+**PR 1b, the Types and the button, as built.** Four new versions, each
+the one before plus hints and a start line (no state, move or field
+changed):
+`approval@2` (labels, "Approve" the primary move); `access_request@2`
+(labels, `summary: [f_reason]`, `due` on pending, and its approval
+reaction creates `approval@2`; `older_versions: [1]`);
+`equipment_request@2` (labels, "Take it" and "Mark fulfilled" primary;
+`older_versions: [1]`); `incident@7` (labels, `summary: [f_priority,
+f_assignee]`, `due` on new and in_progress; `older_versions: all`). The
+labels are the owner's. The web's transition button reads a move's label,
+else "Move to {state}"; nothing else on the screen reads a hint yet. The
+approved reading `readings/approval@2.txt` is compared exactly. Tests: a
+reading test, four page tests, a journey (sam takes and fulfils a
+labelled equipment request) and a scenario step (approval@2's labels,
+primary and reading). Earlier-approved tests that changed, each approved
+by the owner: the Type counts and lists (74 Types), the start-block test,
+the "no hint stored" test (now: the four store theirs, the rest none),
+and kim's journey, whose incident is now `incident@7`, so her buttons
+read "Cancel" and "Start". No kernel, schema or contract change.
+
+**Next.** 2a, a small kernel PR approved in principle, with its own
+Phase A: claimed rows of a team's queue with their holder ("Being
 handled"), and why a move is withheld ("you can't handle your own
 request"), judged in policy. Then PR 2, the screen.
 

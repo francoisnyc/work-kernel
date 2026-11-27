@@ -4954,3 +4954,36 @@ not run; no file under `spikes/` changed.
 mirror.gcr.io; the stack's Go images built from a vendored scratch copy and run with `docker compose up --no-build`.
 
 **Open:** the Later items above. **Next session:** PR 1b (the four Types, the button, a journey); then 2a's Phase A.
+
+## 2026-11-27 — Track 1, item 6, the Inbox for people, PR 1b: the Types and the button (Phases B to D)
+
+**Built:** four new Type versions adding hints, with the owner's labels: `approval@2`, `access_request@2` (creates
+`approval@2`; `older_versions: [1]`), `equipment_request@2` (`older_versions: [1]`) and `incident@7`
+(`older_versions: all`). The web's transition button reads a move's label, else "Move to {state}". The approved reading
+`readings/approval@2.txt`. design.md: the 1b part of "Words for people, as built". Roadmap: 1b built, 2a next.
+
+**Decided (the owner, through the coordinator):** the labels, state and field labels included, and "Resume"; the tests
+at the tests gate; `TestHints_AbsentStoresNothingNew` made stricter (the four must store their hints, the rest none);
+kim's journey reading "Cancel" and "Start".
+
+**Tests:** new: a reading test, four page tests, one journey, one scenario step. **Earlier-approved tests that changed,
+each in its own commit:** the Type count and lists (74 Types), the start-block test (incident@7 the latest);
+`TestHints_AbsentStoresNothingNew`; kim's journey in `web/e2e/customer.spec.ts` (two button names). The three
+newest-version lists moved with the Type file.
+
+**Surprises:**
+- kim's journey broke only once the button read labels: the New page creates the latest incident, now `incident@7`.
+  Its "no Move to in_progress button" check would have passed whatever the page did, so it was renamed, not dropped.
+  The dry run before the tests gate missed it because it ran `main`'s web code, which ignores labels.
+- Docker stopped twice in this container when its background task hit its time limit; restarted by hand.
+
+**Numbers.** `go vet` clean; `go test ./...` and `go test -race ./...` green, 28 packages. Web: typecheck, 500 unit
+tests. On the compose stack: the scenario passed (141 steps); web Playwright 16; apps/poc journeys 4. **The
+bake-offs:** not run; no file under `spikes/` changed.
+
+**Local workarounds, outside the repository (nothing committed):** dockerd started by hand; the Temporal image from
+mirror.gcr.io; the stack's Go images built from a vendored scratch copy; the web and PoC images from host builds;
+Playwright through scratchpad configs using the preinstalled Chromium.
+
+**Open:** the Later items above. **Next session:** PR 2a's Phase A (claimed rows with their holder; why a move is
+withheld); then PR 2, the screen.

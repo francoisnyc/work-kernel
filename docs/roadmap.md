@@ -345,14 +345,15 @@ attack that found it as its test:
         on fields, states and moves, `primary`, `summary` and `due`; their
         load checks; nine additive fields out through `GetType` and
         `ListTypes`; labels in the reading. Test Types only.
-      - **PR 1b, the Types and the button (next):** `approval@2`,
+      - **PR 1b, the Types and the button. Built** (`docs/design.md`,
+        "Words for people, as built", its 1b part): `approval@2`,
         `access_request@2`, `equipment_request@2` and `incident@7` with
         labels (so "Ask a person" takes `approval@3`); the existing
         transition button reads its label; a journey and a scenario step.
-      - **PR 2a, approved in principle, before PR 2:** a small kernel PR:
+      - **PR 2a, next; approved in principle, before PR 2:** a small kernel PR:
         claimed rows of a team's queue with their holder, and why a move
         is withheld ("you can't handle your own request"), judged in
-        policy. Its own Phase A after 1b.
+        policy. Its own Phase A.
 6. **Moving open Items to a new version, and retiring old versions**,
    deliberately and checked: a change that must reach requests in flight;
    builds on starting work's steps 2 and 2b, already built (the latest
