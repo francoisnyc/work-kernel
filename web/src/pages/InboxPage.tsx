@@ -202,6 +202,8 @@ export function InboxPage(): ReactElement {
 
   const move: Move = async (it, toState, fields, requestId) => {
     const before = inOrder(rows ?? [], held).map((r) => r.name);
+    // The line says this move's answer only: the last one's goes now.
+    setLast(undefined);
     const res = await session.api.transitionItem({
       name: it.name,
       requestId,
@@ -236,6 +238,7 @@ export function InboxPage(): ReactElement {
   // The selection bar's move: one TransitionItem per selected row, one
   // after another; a result per row; the rows that failed stay selected.
   async function moveAll(rowsToMove: Item[], toState: string, label: string) {
+    setLast(undefined);
     const lines: string[] = [];
     const failed = new Set<string>();
     for (const it of rowsToMove) {
