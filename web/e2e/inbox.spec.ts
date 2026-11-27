@@ -128,7 +128,7 @@ test("ana, with nothing waiting below a place, sees the empty state", async ({ p
   await expect(page.getByText("Nothing is waiting on you.")).toBeVisible();
   await expect(page.getByRole("tab", { name: /Waiting on me/ })).toHaveText(/Waiting on me\s*0/);
   await expect(rows(page)).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "More" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "More", exact: true })).toHaveCount(0);
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
@@ -144,11 +144,11 @@ test("bob has 51 approvals waiting below a place: 50+ on the tab, and More loads
   await expect(titles(page).first()).toHaveText(`Approve ${run} #1`);
   await expect(inbox(page)).not.toContainText(`Approve ${run} #51`);
 
-  await page.getByRole("button", { name: "More" }).click();
+  await page.getByRole("button", { name: "More", exact: true }).click();
   await expect(titles(page)).toHaveCount(51);
   await expect(titles(page).last()).toHaveText(`Approve ${run} #51`);
   await expect(titles(page).first()).toHaveText(`Approve ${run} #1`);
-  await expect(page.getByRole("button", { name: "More" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "More", exact: true })).toHaveCount(0);
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
