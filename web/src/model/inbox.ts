@@ -11,6 +11,7 @@ import { timestampDate, type Timestamp } from "@bufbuild/protobuf/wkt";
 import {
   FieldType,
   TransitionSchema,
+  WithheldReason,
   type CountItemsRequestSchema,
   type Item,
   type SearchItemsRequestSchema,
@@ -34,7 +35,7 @@ export type InboxView = {
   order: InboxOrder;
   place: string;
   // A team tab's claimed rows ("Being handled", filter.claimed) instead of
-  // its queue (Inbox PR 2b). stub (Phase B): not sent yet.
+  // its queue (Inbox PR 2b).
   claimed?: boolean;
 };
 
@@ -52,11 +53,15 @@ export function inboxTabs(roles: readonly string[], types: Type[]): InboxTab[] {
     }
   }
   const held = [...new Set(roles)].filter((r) => named.has(r)).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-  return [ME, ...held.map((r) => ({ key: `role:${r}`, label: r, waitingOn: `role:${r}`, role: r }))];
+  return [ME, ...held.map((r) => ({ key: `role:${r}`, label: roleLabel(r), waitingOn: `role:${r}`, role: r }))];
 }
 
-function filterOf(v: Pick<InboxView, "tab" | "place">) {
-  return v.place === "" ? { waitingOn: v.tab.waitingOn } : { waitingOn: v.tab.waitingOn, in: v.place };
+function filterOf(v: Pick<InboxView, "tab" | "place" | "claimed">) {
+  return {
+    waitingOn: v.tab.waitingOn,
+    ...(v.place === "" ? {} : { in: v.place }),
+    ...(v.claimed ? { claimed: true } : {}),
+  };
 }
 
 // The search a view sends: the tab's waiting_on, the order, a page of 50,
@@ -95,21 +100,22 @@ export function rowMoves(type: Type | undefined, item: Item): Transition[] {
 }
 
 // Why a row is in this tab, as far as the data says it directly:
-//   - on a role's tab, the tab: "for your team (finance)";
+//   - on a role's tab, nothing: the tab's name says it (PR 2b);
 //   - on Waiting on me, "sent back to you" when the Item's state says it
 //     waits on its requester (GetType's waits_on_requester) and the caller
 //     is its requester (askedBy);
-//   - on Waiting on me, the principal fields that hold the caller, by ID:
-//     "f_approver is you"; nothing when no field does (the kernel put the
+//   - on Waiting on me, the principal fields that hold the caller, by
+//     label (the ID without one): "you are its Approver"; nothing when no
+//     field does (the kernel put the
 //     Item in the view; the browser does not re-derive why).
 export function whyYours(tab: InboxTab, type: Type | undefined, item: Item, principal: string): string {
-  if (tab.role !== undefined) return `for your team (${tab.role})`;
+  if (tab.role !== undefined) return "";
   const state = type?.states.find((s) => s.id === item.state);
   if (state?.waitsOnRequester && askedBy(item) === principal) return "sent back to you";
-  const ids = (type?.fields ?? [])
+  const labels = (type?.fields ?? [])
     .filter((f) => f.type === FieldType.PRINCIPAL && item.fields?.[f.id] === principal)
-    .map((f) => f.id);
-  return ids.length === 0 ? "" : `${ids.join(", ")} is you`;
+    .map((f) => f.label || f.id);
+  return labels.length === 0 ? "" : `you are its ${labels.join(", ")}`;
 }
 
 // Who asked: the creator, or the user an agent created the Item for.
@@ -135,67 +141,126 @@ export function waitingFor(stateTime: Timestamp | undefined, now: Date): string 
 }
 
 // --- The Inbox for people, PR 2b: rows, groups, team tabs. ---
-// stub (Phase B): every function below answers nothing yet.
+// Words for what the kernel sends: the Type's hints (labels, primary,
+// summary, due), State.claim, Item.moves and Item.withheld. Nothing here
+// decides who may act.
 
-// A person's name for the page (devusers.personName), or the ID.
+// A person's name for the page (people.personName), or the ID.
 export type NameOf = (principal: string) => string;
 
 // A role's ID made readable for its tab: "desk_agent" is "Desk agent".
+// The kernel has no role labels (Later).
 export function roleLabel(role: string): string {
-  return role;
+  const words = role.replaceAll("_", " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 // A state's label, or its ID when the Type gives none.
 export function stateLabel(type: Type | undefined, state: string): string {
-  return state;
+  return type?.states.find((s) => s.id === state)?.label || state;
 }
 
 // The row's main button and the rest (the "More moves" disclosure): the
 // move marked primary when the server lists it, else the first it lists.
+// Together they are exactly Item.moves, in the server's order.
 export function splitMoves(type: Type | undefined, item: Item): { main?: Transition; others: Transition[] } {
-  return { others: rowMoves(type, item) };
+  const moves = rowMoves(type, item);
+  const main = moves.find((t) => t.primary) ?? moves[0];
+  return { main, others: moves.filter((t) => t !== main) };
 }
 
 // The Type's summary fields that hold a value, as "Label: value", in the
 // summary's order; a principal is named.
 export function summaryLine(type: Type | undefined, item: Item, nameOf: NameOf): string[] {
-  return [];
+  const out: string[] = [];
+  for (const id of type?.summary ?? []) {
+    const field = type?.fields.find((f) => f.id === id);
+    const value = item.fields?.[id];
+    if (value === undefined || value === null || value === "" || (Array.isArray(value) && value.length === 0)) continue;
+    const show = (v: unknown) =>
+      field?.type === FieldType.PRINCIPAL && typeof v === "string" ? nameOf(v) : typeof v === "boolean" ? (v ? "yes" : "no") : String(v);
+    out.push(`${field?.label || id}: ${Array.isArray(value) ? value.map(show).join(", ") : show(value)}`);
+  }
+  return out;
 }
 
 // "Ana asks", or "You asked for this one".
 export function askedLine(item: Item, principal: string, nameOf: NameOf): string {
-  return "";
+  const who = askedBy(item);
+  return who === principal ? "You asked for this one" : `${nameOf(who)} asks`;
 }
 
-// "waiting 3 h"; "in hand 3 h" in a state with a claim.
+// The largest unit that fits, rounded down: "3 h". undefined under a second.
+function span(ms: number): string | undefined {
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 1) return undefined;
+  const [size, unit] = units.find(([s]) => seconds >= s)!;
+  return `${Math.floor(seconds / size)} ${unit}`;
+}
+
+// "waiting 3 h"; "in hand 3 h" in a state with a claim (since the claim).
 export function waitedLine(type: Type | undefined, item: Item, now: Date): string {
-  return "";
+  const claimed = type?.states.find((s) => s.id === item.state)?.claim;
+  if (!claimed) return waitingFor(item.stateTime, now);
+  if (!item.stateTime) return "";
+  return `in hand ${span(now.getTime() - timestampDate(item.stateTime).getTime()) ?? "just arrived"}`;
 }
 
 // When the Item is due in its state (the state's `due` field), and
-// whether that has passed.
+// whether that has passed. Clock time.
 export type Due = { text: string; overdue: boolean };
 export function dueOf(type: Type | undefined, item: Item, now: Date): Due | undefined {
-  return undefined;
+  const field = type?.states.find((s) => s.id === item.state)?.due;
+  const value = field ? item.fields?.[field] : undefined;
+  if (typeof value !== "string") return undefined;
+  const at = Date.parse(value);
+  if (Number.isNaN(at)) return undefined;
+  const ahead = at - now.getTime();
+  if (ahead > 0) {
+    const s = span(ahead);
+    if (s) return { text: `due in ${s}`, overdue: false };
+  }
+  const s = span(-ahead);
+  return { text: s ? `due ${s} ago` : "due now", overdue: true };
 }
 
-// Overdue first, then the rest, each in the order given.
+// Overdue first, then the rest, each in the order given. Worked out on
+// the rows loaded: an overdue row on a later page shows once it is loaded.
 export function groupRows(rows: Item[], typeOf: (name: string) => Type | undefined, now: Date): { overdue: Item[]; waiting: Item[] } {
-  return { overdue: [], waiting: rows };
+  const overdue: Item[] = [];
+  const waiting: Item[] = [];
+  for (const it of rows) (dueOf(typeOf(it.type), it, now)?.overdue ? overdue : waiting).push(it);
+  return { overdue, waiting };
 }
 
 // Who holds the Item's claim: the value of its state's claim field; ""
 // when the state has no claim or nobody holds it.
 export function holderOf(type: Type | undefined, item: Item): string {
-  return "";
+  const claim = type?.states.find((s) => s.id === item.state)?.claim;
+  const held = claim ? item.fields?.[claim] : undefined;
+  return typeof held === "string" ? held : "";
 }
 
 // "Lea has it", "You have it", "Nobody holds it"; "" in a state with no claim.
 export function holderLine(type: Type | undefined, item: Item, principal: string, nameOf: NameOf): string {
-  return "";
+  if (!type?.states.find((s) => s.id === item.state)?.claim) return "";
+  const holder = holderOf(type, item);
+  if (holder === "") return "Nobody holds it";
+  return holder === principal ? "You have it" : `${nameOf(holder)} has it`;
 }
 
-// Why the withheld moves are withheld, in words, each once.
+// Why the withheld moves are withheld (Item.withheld), in words, each once.
 export function whyNot(type: Type | undefined, item: Item, principal: string, nameOf: NameOf): string[] {
-  return [];
+  const out: string[] = [];
+  for (const w of item.withheld) {
+    let text = "";
+    if (w.reason === WithheldReason.OWN_REQUEST) text = "You can't handle your own request";
+    else if (w.reason === WithheldReason.OWN_CONTAINER) text = "You can't decide on your own request";
+    else if (w.reason === WithheldReason.CLAIMED_BY_OTHER) {
+      const holder = holderOf(type, item);
+      text = holder === "" ? "Nobody holds it" : `${nameOf(holder)} has it`;
+    }
+    if (text !== "" && !out.includes(text)) out.push(text);
+  }
+  return out;
 }

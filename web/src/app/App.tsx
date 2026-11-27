@@ -46,11 +46,12 @@ export function App(): ReactElement {
     api.listTypes({ parent: `namespaces/${user.namespace}` }).then(
       (res) => {
         if (!current) return;
-        const principals = users.filter((u) => u.namespace === user.namespace).map((u) => u.principal);
+        const people = users.filter((u) => u.namespace === user.namespace);
+        const principals = people.map((u) => u.principal);
         // A customer meets every Type as it is shown to them: its customer
         // fields, and only the moves whose allowed names creator.
         const types = isCustomer(user) ? res.types.map(customerView) : res.types;
-        setSession(new Session(user, api, types, principals));
+        setSession(new Session(user, api, types, principals, people));
         setError(undefined);
       },
       (e) => current && setError(e),

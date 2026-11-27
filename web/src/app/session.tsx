@@ -5,6 +5,7 @@ import { createConnectTransport } from "@connectrpc/connect-web";
 import { createContext, useContext } from "react";
 import { ItemService, type Item, type Type } from "../gen/kernel/v1/kernel_pb";
 import type { DevUser } from "../model/devusers";
+import { personName } from "../model/people";
 import { displayTitle, shortId } from "../model/typeinfo";
 
 export type Api = Client<typeof ItemService>;
@@ -50,8 +51,8 @@ export class Session {
     return this.byName.get(name);
   }
 
-  // A person's name, or their ID (devusers.personName). stub (Phase B).
-  nameOf = (principal: string): string => principal;
+  // A person's name, or their ID (people.personName).
+  nameOf = (principal: string): string => personName(principal, this.people);
 
   titleOf = (item: Item): string => {
     const type = this.typeOf(item.type);

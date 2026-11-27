@@ -29,9 +29,6 @@ export function parseDevUsers(yamlText: string): DevUser[] {
     .filter((u) => u.principal.startsWith("user:") || u.principal.startsWith("customer:"));
 }
 
-// A person's name from the dev-token file: its `name`, capitalised
-// ("sam" is "Sam"); the principal's ID when the file does not have them.
-// stub (Inbox PR 2b, Phase B).
-export function personName(principal: string, people: readonly DevUser[]): string {
-  return principal;
-}
+// A person's name from the dev-token file (people.ts, which has no YAML
+// in it, so the session can use it in a production build).
+export { personName } from "./people";

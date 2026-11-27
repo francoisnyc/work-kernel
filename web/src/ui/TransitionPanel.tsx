@@ -23,6 +23,10 @@ export type TransitionPanelProps = {
   // Only these transitions (the inbox's rows); default: all leaving the
   // Item's state.
   only?: Transition[];
+  // A row's buttons only (the Inbox for people, PR 2b): no rules text, no
+  // "no transition" hint, and no answer line (the page says the answer);
+  // the move's form, a refusal and Check again as always.
+  compact?: boolean;
   // fields: the patch of the transition's required fields, changed ones
   // only. requestId: new for each move asked; the same again when the user
   // asks again about a PENDING one.
@@ -49,7 +53,7 @@ function rules(type: Type, t: Transition): string[] {
   return out;
 }
 
-export function TransitionPanel({ type, item, principals, only, onTransition }: TransitionPanelProps): ReactElement {
+export function TransitionPanel({ type, item, principals, only, compact, onTransition }: TransitionPanelProps): ReactElement {
   const views: TransitionView[] = only
     ? only.map((t) => ({ transition: t, systemOnly: isSystemOnly(t) }))
     : transitionsFrom(type, item.state);
@@ -105,7 +109,7 @@ export function TransitionPanel({ type, item, principals, only, onTransition }: 
           Held: check {item.hold.check} is running, waiting to move to {item.hold.requestedState}
         </p>
       )}
-      {views.length === 0 && <p className="hint">No transition leaves {item.state}.</p>}
+      {views.length === 0 && !compact && <p className="hint">No transition leaves {item.state}.</p>}
       <ul>
         {views.map(({ transition: t, systemOnly }) => (
           <li key={`${t.fromState}>${t.toState}`}>
@@ -113,7 +117,7 @@ export function TransitionPanel({ type, item, principals, only, onTransition }: 
               {t.label || `Move to ${t.toState}`}
             </button>
             {systemOnly && <span className="hint"> only the system can do this</span>}
-            {rules(type, t).map((r) => (
+            {(compact ? [] : rules(type, t)).map((r) => (
               <span key={r} className="rule">
                 {r}
               </span>
@@ -144,7 +148,7 @@ export function TransitionPanel({ type, item, principals, only, onTransition }: 
           </button>
         </form>
       )}
-      {asked && (
+      {asked && !compact && (
         <p role="status" className={`outcome outcome-${outcome.toLowerCase()}`}>
           Move to {asked.toState}: <strong>{outcome}</strong> {asked.answer.reason}
         </p>
