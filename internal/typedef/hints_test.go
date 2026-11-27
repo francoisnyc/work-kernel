@@ -24,6 +24,7 @@ package typedef_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -124,7 +125,9 @@ func TestHints_Parse(t *testing.T) {
 var hintKeys = []string{`"label"`, `"help"`, `"primary"`, `"summary"`, `"due"`}
 
 // A Type without hints stores nothing new: every Type in types/ keeps its
-// stored definition byte for byte, so no registered version changes.
+// stored definition byte for byte, so no registered version changes. The
+// four versions PR 1b added with hints (the owner's approved change) are
+// the only ones that store them, and they do.
 func TestHints_AbsentStoresNothingNew(t *testing.T) {
 	bare := mustParse(t, `
 id: hw_bare
@@ -142,16 +145,36 @@ transitions:
 	if err != nil {
 		t.Fatalf("ParseDir: %v", err)
 	}
+	// The hint keys each of PR 1b's versions stores.
+	withHints := map[string][]string{
+		"approval@2":          {`"label"`, `"primary"`},
+		"access_request@2":    {`"label"`, `"primary"`, `"summary"`, `"due"`},
+		"equipment_request@2": {`"label"`, `"primary"`},
+		"incident@7":          {`"label"`, `"primary"`, `"summary"`, `"due"`},
+	}
+	seen := 0
 	for _, ty := range append([]*typedef.Type{bare}, types...) {
 		data, err := json.Marshal(ty)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if keys, ok := withHints[fmt.Sprintf("%s@%d", ty.ID, ty.Version)]; ok {
+			seen++
+			for _, k := range keys {
+				if !strings.Contains(string(data), k) {
+					t.Errorf("%s@%d: stored definition does not name %s", ty.ID, ty.Version, k)
+				}
+			}
+			continue
 		}
 		for _, k := range hintKeys {
 			if strings.Contains(string(data), k) {
 				t.Errorf("%s@%d: stored definition names %s", ty.ID, ty.Version, k)
 			}
 		}
+	}
+	if seen != len(withHints) {
+		t.Errorf("found %d of the %d versions with hints in types/", seen, len(withHints))
 	}
 }
 
