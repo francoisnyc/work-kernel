@@ -392,18 +392,21 @@ test("a team tab with nothing: the empty sentence names the team readably", asyn
   expect(await screen.findByText("Nothing is waiting on Desk agent.")).toBeInTheDocument();
 });
 
+// Since PR 2c each row starts with its checkbox ("Select {title}"), a
+// Tab stop of its own before the title.
 test("accessible as built: the sections are labelled lists, and Tab goes title, main move, More moves, row by row", async () => {
   const k = kernel({ rows: (req) => ({ items: isTeam(req) ? [] : [accessRow(1, "First", 5), accessRow(2, "Second", 6)] }) });
   show(k);
   await waitFor(() => expect(titlesIn("Waiting")).toEqual(["First", "Second"]));
   expect(inbox().tagName).toBe("SECTION");
   screen.getByRole("link", { name: "First" }).focus();
-  const order = [document.activeElement?.textContent];
-  for (let i = 0; i < 5; i++) {
+  const name = () => document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.textContent;
+  const order = [name()];
+  for (let i = 0; i < 6; i++) {
     await userEvent.tab();
-    order.push(document.activeElement?.textContent);
+    order.push(name());
   }
-  expect(order).toEqual(["First", "Approve", "More moves", "Second", "Approve", "More moves"]);
+  expect(order).toEqual(["First", "Approve", "More moves", "Select Second", "Second", "Approve", "More moves"]);
 });
 
 // The amber of an overdue due: at least 4.5:1 against the page and a
