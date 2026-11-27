@@ -6,6 +6,13 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
+- **Words for people, Inbox PR 1a's Later items** (design.md, "Words for people, as built (Inbox PR 1a)"):
+  - **Hints from the latest version.** Hints are pinned with the Item's
+    version, so an Item of an older version shows IDs. Presentation could
+    float from the latest version, as the start block does.
+  - **Warnings for missing hints.** A Type with some labels and not others
+    loads silently; a warning (Ventoux item 3) could name the gaps.
+  - **Labels in other languages.** One label per element for now.
 - **Sent back to the requester, step 5 PR 2's Later items** (design.md, "Sent back to the requester, as built", PR 2):
   - **What answers a request sent back.** The incident's customer has no
     move in `waiting_for_customer`; she replies, and a reaction moves it.
@@ -4914,3 +4921,36 @@ override in the scratchpad; Playwright through scratchpad configs using the prei
 
 **Open:** the Later items above. **Next session:** item 5 is done. Next in track 1: the Inbox for people
 (`docs/plans/inbox-for-people.md`); 3b only on a trigger.
+
+## 2026-11-27 — Track 1, item 6, the Inbox for people, PR 1a: words for people in the kernel (Phases A to D)
+
+**Built:** optional presentation hints on a Type: `label` and `help` on fields, states and moves, `primary` on a
+move, `summary` on the Type, `due` on a state; their load checks (`typedef/hints.go`) in the existing problem codes; the
+JSON Schema keys; nine additive `kernel.v1` fields filled by `GetType` and `ListTypes`; the reading names labelled
+states, fields and moves by their labels. design.md: the Type-section bullet, the reading's sentence on labels, and
+"Words for people, as built (Inbox PR 1a)". Roadmap: PR 1 split into 1a (built) and 1b (next), and PR 2a. The plan and
+the roadmap: "Ask a person" takes `approval@3`.
+
+**Decided (the owner, through the coordinator):** at Phase A, the split into 1a and 1b; the keys, with `due` added
+from the mockup; the contract field numbers; the three extra checks (one label per kind, `summary` at most 3, no
+`primary` on a move no person makes); new versions in 1b, `approval@2` taking the labels; hints pinned with the
+version; PR 2a in principle; the mockup's other gaps out. At the tests gate, duplicate labels compared without case.
+
+**Tests:** new: typedef 6 (with 45 cases), API 2, reading 4, one schema corpus file. No earlier test changed. Three
+existing schema tests failed between the tests gate and the build, until the schema had the keys.
+
+**Surprises:**
+- A Go string cannot tell `label: ""` from no label; the parser keeps the paths of hints written empty, never stored.
+- A problem's what-to-do must be a fixed string (a guard test), so the limits are in the message instead.
+- Adding four Type versions in a scratch copy moved only four list and start-block tests, as for incident@6.
+- Docker builds here cannot verify the Go module proxy's certificate; the scenario ran on images built from a
+  vendored scratch copy.
+
+**Numbers.** `go vet` clean; `go test ./...` and `go test -race ./...` green; the new tests `-race -count=10` green.
+`buf lint` and `buf breaking` pass. Web: typecheck, 496 unit tests. Scenario on the stack: passed. **The bake-offs:**
+not run; no file under `spikes/` changed.
+
+**Local workarounds, outside the repository (nothing committed):** dockerd started by hand; the Temporal image from
+mirror.gcr.io; the stack's Go images built from a vendored scratch copy and run with `docker compose up --no-build`.
+
+**Open:** the Later items above. **Next session:** PR 1b (the four Types, the button, a journey); then 2a's Phase A.

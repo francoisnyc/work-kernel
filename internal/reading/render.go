@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/francoisnyc/work-kernel/internal/contracts"
 	"github.com/francoisnyc/work-kernel/internal/lifecycle"
@@ -92,6 +93,13 @@ func (r *renderer) say(parts []Part, paths []string, text string) {
 	r.n++
 	last := &r.sections[len(r.sections)-1]
 	last.Sentences = append(last.Sentences, Sentence{N: r.n, Kind: parts[0], Parts: parts, Text: text, Paths: paths})
+}
+
+// uncapitalize lowers the first letter of a sentence that now follows a
+// label ("Approve: whoever ..."); an identifier in code font keeps its case.
+func uncapitalize(s string) string {
+	r, n := utf8.DecodeRuneInString(s)
+	return string(unicode.ToLower(r)) + s[n:]
 }
 
 func capitalize(s string) string {
@@ -425,7 +433,11 @@ var categoryWords = map[string]string{
 
 func (r *renderer) state(i int) {
 	t, s := r.t, r.t.States[i]
-	r.section(at("%s (%s)", s.ID, categoryWords[s.Category]))
+	if s.Label != "" {
+		r.section(at("%s (`%s`, %s)", s.Label, s.ID, categoryWords[s.Category]))
+	} else {
+		r.section(at("%s (%s)", s.ID, categoryWords[s.Category]))
+	}
 
 	// What entering it does.
 	for li, l := range t.Links {
@@ -688,6 +700,10 @@ func (r *renderer) move(ti int) {
 	if len(tr.Sets) > 0 {
 		text += "; the move sets " + assignments(r.ctx, tr.Sets)
 		parts = append(parts, MoveSets)
+	}
+	if tr.Label != "" {
+		// A label names the move for people; the sentence follows it.
+		text = tr.Label + ": " + uncapitalize(text)
 	}
 	r.say(parts, []string{at("transitions[%d]", ti)}, text+".")
 }
@@ -1283,7 +1299,11 @@ func fieldList(t *typedef.Type) []string {
 				w = "a set of " + strings.TrimPrefix(w, "values ")
 			}
 		}
-		out = append(out, "`"+f.ID+"`: "+w)
+		name := "`" + f.ID + "`"
+		if f.Label != "" {
+			name += " (" + f.Label + ")"
+		}
+		out = append(out, name+": "+w)
 	}
 	return out
 }

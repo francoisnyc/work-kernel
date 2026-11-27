@@ -338,7 +338,21 @@ attack that found it as its test:
       queues, several rows at once), and an agent's request shown as
       one. Brief, and the owner's three decisions (all agreed,
       2026-11-27): `docs/plans/inbox-for-people.md`. Not part of item
-      5's done; before track 2's authoring test.
+      5's done; before track 2's authoring test. PR 1 split in two at
+      its Phase A (the owner, 2026-11-27):
+      - **PR 1a, words for people in the kernel. Built** (`docs/design.md`,
+        "Words for people, as built (Inbox PR 1a)"): `label` and `help`
+        on fields, states and moves, `primary`, `summary` and `due`; their
+        load checks; nine additive fields out through `GetType` and
+        `ListTypes`; labels in the reading. Test Types only.
+      - **PR 1b, the Types and the button (next):** `approval@2`,
+        `access_request@2`, `equipment_request@2` and `incident@7` with
+        labels (so "Ask a person" takes `approval@3`); the existing
+        transition button reads its label; a journey and a scenario step.
+      - **PR 2a, approved in principle, before PR 2:** a small kernel PR:
+        claimed rows of a team's queue with their holder, and why a move
+        is withheld ("you can't handle your own request"), judged in
+        policy. Its own Phase A after 1b.
 6. **Moving open Items to a new version, and retiring old versions**,
    deliberately and checked: a change that must reach requests in flight;
    builds on starting work's steps 2 and 2b, already built (the latest
@@ -497,8 +511,9 @@ question or approval):
   fields (amount, target, action), not only in the agent's prose, and the
   agent's text is shown as the agent's. `approval@1` exists, but as the
   child approval of a request (a kernel-written title, the approver, a
-  delegate); it has no such fields, so this is a new version of it or a
-  Type of its own.
+  delegate); it has no such fields, so this is a new version of it
+  (`approval@3`: `approval@2` is the Inbox for people's labels) or a Type
+  of its own.
 
 **Two ways in:**
 

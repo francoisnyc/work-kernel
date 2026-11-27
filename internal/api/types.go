@@ -52,18 +52,18 @@ var categories = map[string]kernelv1.StateCategory{
 func typeOut(ns string, t *typedef.Type) *kernelv1.Type {
 	out := &kernelv1.Type{
 		Name: typeName(ns, t.ID, t.Version), TypeId: t.ID, Version: int32(t.Version),
-		InitialState: t.InitialState,
+		InitialState: t.InitialState, Summary: t.Summary,
 	}
 	for _, f := range t.Fields {
 		out.Fields = append(out.Fields, &kernelv1.Field{
 			Id: f.ID, Type: fieldTypes[f.Type], Options: f.Options, WritableBy: fieldWriters[f.WritableBy],
 			WritableByRoles: f.WritableByRoles, Multiple: f.Multiple, Max: int32(f.Max),
-			UniqueAmongSiblings: f.UniqueAmongSiblings,
+			UniqueAmongSiblings: f.UniqueAmongSiblings, Label: f.Label, Help: f.Help,
 		})
 	}
 	for _, s := range t.States {
 		st := &kernelv1.State{Id: s.ID, Category: categories[s.Category], Frozen: s.Frozen,
-			WaitsOnRequester: s.WaitsOn == typedef.WaitsOnRequester}
+			WaitsOnRequester: s.WaitsOn == typedef.WaitsOnRequester, Label: s.Label, Help: s.Help, Due: s.Due}
 		// Types are not secret: a client sees what a state will do by itself.
 		if s.Timer != nil {
 			st.Timer = &kernelv1.StateTimer{After: s.Timer.After, ToState: s.Timer.To}
@@ -87,7 +87,7 @@ func typeOut(ns string, t *typedef.Type) *kernelv1.Type {
 		out.Transitions = append(out.Transitions, &kernelv1.Transition{
 			FromState: tr.From, ToState: tr.To, Guard: tr.Guard, Required: tr.Required,
 			Allowed: tr.Allowed, Except: tr.Except, Escape: tr.Escape, Checked: checked, Clears: tr.Clears,
-			Sets: tr.Sets,
+			Sets: tr.Sets, Label: tr.Label, Help: tr.Help, Primary: tr.Primary,
 		})
 	}
 	for _, l := range t.Links {

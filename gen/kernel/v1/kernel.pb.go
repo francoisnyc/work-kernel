@@ -3975,8 +3975,12 @@ type Type struct {
 	// Jira 2.4b: who may move or narrow Items of this version: "kernel"
 	// (nobody) or role:<name> entries; empty is anyone who sees the Item.
 	PlacementWritableBy []string `protobuf:"bytes,19,rep,name=placement_writable_by,json=placementWritableBy,proto3" json:"placement_writable_by,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// Presentation hint (the Inbox for people, PR 1): the field IDs that
+	// summarise an Item of this version under its title, in a list row or a
+	// card; at most 3. Empty: none. A hint enforces nothing.
+	Summary       []string `protobuf:"bytes,20,rep,name=summary,proto3" json:"summary,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Type) Reset() {
@@ -4138,6 +4142,13 @@ func (x *Type) GetCustomerFields() []string {
 func (x *Type) GetPlacementWritableBy() []string {
 	if x != nil {
 		return x.PlacementWritableBy
+	}
+	return nil
+}
+
+func (x *Type) GetSummary() []string {
+	if x != nil {
+		return x.Summary
 	}
 	return nil
 }
@@ -4937,8 +4948,13 @@ type Field struct {
 	Max int32 `protobuf:"varint,7,opt,name=max,proto3" json:"max,omitempty"`
 	// Jira 2.4b: the states in which no two siblings hold the same value.
 	UniqueAmongSiblings []string `protobuf:"bytes,8,rep,name=unique_among_siblings,json=uniqueAmongSiblings,proto3" json:"unique_among_siblings,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// Presentation hints (the Inbox for people, PR 1): a short name for
+	// people, plain text of at most 60 characters, and a line of help, at
+	// most 280. Empty: none; show the ID. They enforce nothing.
+	Label         string `protobuf:"bytes,9,opt,name=label,proto3" json:"label,omitempty"`
+	Help          string `protobuf:"bytes,10,opt,name=help,proto3" json:"help,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Field) Reset() {
@@ -5027,6 +5043,20 @@ func (x *Field) GetUniqueAmongSiblings() []string {
 	return nil
 }
 
+func (x *Field) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *Field) GetHelp() string {
+	if x != nil {
+		return x.Help
+	}
+	return ""
+}
+
 type State struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Id       string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -5052,8 +5082,17 @@ type State struct {
 	// moves name: the Type's `waits_on: requester`. Such an Item is in its
 	// requester's "waiting on me" view, a customer's included.
 	WaitsOnRequester bool `protobuf:"varint,7,opt,name=waits_on_requester,json=waitsOnRequester,proto3" json:"waits_on_requester,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Presentation hints (the Inbox for people, PR 1): a short name for
+	// people, plain text of at most 60 characters, and a line of help, at
+	// most 280. Empty: none; show the ID. They enforce nothing.
+	Label string `protobuf:"bytes,8,opt,name=label,proto3" json:"label,omitempty"`
+	Help  string `protobuf:"bytes,9,opt,name=help,proto3" json:"help,omitempty"`
+	// Presentation hint: a datetime field of the Type whose instant an Item
+	// in this state is due by (a screen marks it overdue once it has
+	// passed). Empty: none. It enforces nothing and moves nothing.
+	Due           string `protobuf:"bytes,10,opt,name=due,proto3" json:"due,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *State) Reset() {
@@ -5133,6 +5172,27 @@ func (x *State) GetWaitsOnRequester() bool {
 		return x.WaitsOnRequester
 	}
 	return false
+}
+
+func (x *State) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *State) GetHelp() string {
+	if x != nil {
+		return x.Help
+	}
+	return ""
+}
+
+func (x *State) GetDue() string {
+	if x != nil {
+		return x.Due
+	}
+	return ""
 }
 
 // A state's timer after a duration.
@@ -5392,7 +5452,16 @@ type Transition struct {
 	// these fields (INVALID_ARGUMENT). An expression that cannot be
 	// evaluated refuses the move (FAILED_PRECONDITION / EFFECT_FAILED,
 	// metadata field).
-	Sets          map[string]string `protobuf:"bytes,10,rep,name=sets,proto3" json:"sets,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Sets map[string]string `protobuf:"bytes,10,rep,name=sets,proto3" json:"sets,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Presentation hints (the Inbox for people, PR 1): a short name for the
+	// move, plain text of at most 60 characters, and a line of help, at most
+	// 280. Empty: none; show the to_state. They enforce nothing.
+	Label string `protobuf:"bytes,11,opt,name=label,proto3" json:"label,omitempty"`
+	Help  string `protobuf:"bytes,12,opt,name=help,proto3" json:"help,omitempty"`
+	// The main move out of its from_state, for a screen's one button: at
+	// most one per state, and only on a move a person can make. A hint: it
+	// decides nothing about who may make it (see Item.moves).
+	Primary       bool `protobuf:"varint,13,opt,name=primary,proto3" json:"primary,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5495,6 +5564,27 @@ func (x *Transition) GetSets() map[string]string {
 		return x.Sets
 	}
 	return nil
+}
+
+func (x *Transition) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *Transition) GetHelp() string {
+	if x != nil {
+		return x.Help
+	}
+	return ""
+}
+
+func (x *Transition) GetPrimary() bool {
+	if x != nil {
+		return x.Primary
+	}
+	return false
 }
 
 type GetTypeRequest struct {
@@ -7331,7 +7421,7 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\rvalidate_only\x18\x05 \x01(\bR\fvalidateOnly\x12+\n" +
 	"\x11expected_audience\x18\x06 \x01(\tR\x10expectedAudience\"2\n" +
 	"\x14ApproveWidenResponse\x12\x1a\n" +
-	"\baudience\x18\x01 \x01(\tR\baudience\"\xad\x06\n" +
+	"\baudience\x18\x01 \x01(\tR\baudience\"\xc7\x06\n" +
 	"\x04Type\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x17\n" +
 	"\atype_id\x18\x02 \x01(\tR\x06typeId\x12\x18\n" +
@@ -7355,7 +7445,8 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\x03own\x18\x10 \x03(\tR\x03own\x12\x16\n" +
 	"\x06shared\x18\x11 \x03(\tR\x06shared\x12'\n" +
 	"\x0fcustomer_fields\x18\x12 \x03(\tR\x0ecustomerFields\x122\n" +
-	"\x15placement_writable_by\x18\x13 \x03(\tR\x13placementWritableBy\"1\n" +
+	"\x15placement_writable_by\x18\x13 \x03(\tR\x13placementWritableBy\x12\x18\n" +
+	"\asummary\x18\x14 \x03(\tR\asummary\"1\n" +
 	"\x05Offer\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05field\x18\x02 \x01(\tR\x05field\"J\n" +
@@ -7426,7 +7517,7 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\bon_enter\x18\x01 \x01(\tR\aonEnter\x12\x14\n" +
 	"\x05field\x18\x02 \x01(\tR\x05field\x12\x16\n" +
 	"\x06equals\x18\x03 \x01(\tR\x06equals\x12\x14\n" +
-	"\x05state\x18\x04 \x01(\tR\x05state\"\xa2\x02\n" +
+	"\x05state\x18\x04 \x01(\tR\x05state\"\xcc\x02\n" +
 	"\x05Field\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12(\n" +
 	"\x04type\x18\x02 \x01(\x0e2\x14.kernel.v1.FieldTypeR\x04type\x12\x18\n" +
@@ -7436,7 +7527,10 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\x11writable_by_roles\x18\x05 \x03(\tR\x0fwritableByRoles\x12\x1a\n" +
 	"\bmultiple\x18\x06 \x01(\bR\bmultiple\x12\x10\n" +
 	"\x03max\x18\a \x01(\x05R\x03max\x122\n" +
-	"\x15unique_among_siblings\x18\b \x03(\tR\x13uniqueAmongSiblings\"\x94\x02\n" +
+	"\x15unique_among_siblings\x18\b \x03(\tR\x13uniqueAmongSiblings\x12\x14\n" +
+	"\x05label\x18\t \x01(\tR\x05label\x12\x12\n" +
+	"\x04help\x18\n" +
+	" \x01(\tR\x04help\"\xd0\x02\n" +
 	"\x05State\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x124\n" +
 	"\bcategory\x18\x02 \x01(\x0e2\x18.kernel.v1.StateCategoryR\bcategory\x12\x16\n" +
@@ -7444,7 +7538,11 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\x06acting\x18\x04 \x03(\v2\x16.kernel.v1.ActingTimerR\x06acting\x12+\n" +
 	"\x05timer\x18\x05 \x01(\v2\x15.kernel.v1.StateTimerR\x05timer\x12\"\n" +
 	"\x02at\x18\x06 \x01(\v2\x12.kernel.v1.AtTimerR\x02at\x12,\n" +
-	"\x12waits_on_requester\x18\a \x01(\bR\x10waitsOnRequester\"=\n" +
+	"\x12waits_on_requester\x18\a \x01(\bR\x10waitsOnRequester\x12\x14\n" +
+	"\x05label\x18\b \x01(\tR\x05label\x12\x12\n" +
+	"\x04help\x18\t \x01(\tR\x04help\x12\x10\n" +
+	"\x03due\x18\n" +
+	" \x01(\tR\x03due\"=\n" +
 	"\n" +
 	"StateTimer\x12\x14\n" +
 	"\x05after\x18\x01 \x01(\tR\x05after\x12\x19\n" +
@@ -7463,7 +7561,7 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\x04hook\x18\b \x01(\tR\x04hook\x1a7\n" +
 	"\tSetsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xe2\x02\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xa6\x03\n" +
 	"\n" +
 	"Transition\x12\x1d\n" +
 	"\n" +
@@ -7477,7 +7575,10 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\x06except\x18\b \x03(\tR\x06except\x12\x16\n" +
 	"\x06clears\x18\t \x03(\tR\x06clears\x123\n" +
 	"\x04sets\x18\n" +
-	" \x03(\v2\x1f.kernel.v1.Transition.SetsEntryR\x04sets\x1a7\n" +
+	" \x03(\v2\x1f.kernel.v1.Transition.SetsEntryR\x04sets\x12\x14\n" +
+	"\x05label\x18\v \x01(\tR\x05label\x12\x12\n" +
+	"\x04help\x18\f \x01(\tR\x04help\x12\x18\n" +
+	"\aprimary\x18\r \x01(\bR\aprimary\x1a7\n" +
 	"\tSetsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"$\n" +

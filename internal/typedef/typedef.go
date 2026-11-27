@@ -173,6 +173,11 @@ type Field struct {
 	// field: no two Items of this Type in the same container, both in one
 	// of these states, hold the same value. Phase B stub: parsed only.
 	UniqueAmongSiblings []string `yaml:"unique_among_siblings" json:"unique_among_siblings,omitempty"`
+	// Label and Help are presentation hints (the Inbox for people, PR 1):
+	// a short name for people and a line of help. They enforce nothing.
+	// Empty: none. See hints.go for their checks.
+	Label string `yaml:"label" json:"label,omitempty"`
+	Help  string `yaml:"help" json:"help,omitempty"`
 }
 
 // State is one lifecycle state. Every state has a category.
@@ -208,6 +213,14 @@ type State struct {
 	// action hook after a delay, without a transition, optionally again at
 	// an interval, at most Max times per entry into the state.
 	Acting []ActingTimer `yaml:"acting" json:"acting,omitempty"`
+	// Label and Help are presentation hints (the Inbox for people, PR 1):
+	// a short name for people and a line of help. They enforce nothing.
+	// Empty: none. See hints.go for their checks.
+	Label string `yaml:"label" json:"label,omitempty"`
+	Help  string `yaml:"help" json:"help,omitempty"`
+	// Due (a presentation hint) names a datetime field whose instant an
+	// Item in this state is due by. It enforces nothing. Empty: none.
+	Due string `yaml:"due" json:"due,omitempty"`
 }
 
 // ActingTimer runs its hook (an action hook with on: timer) After the event
@@ -276,6 +289,15 @@ type Transition struct {
 	// evaluated in the move's own write, on the guard's view of the fields
 	// plus cause.at and today. A result of null unsets the field.
 	Sets map[string]string `yaml:"sets" json:"sets,omitempty"`
+	// Label and Help are presentation hints (the Inbox for people, PR 1):
+	// a short name for people and a line of help. They enforce nothing.
+	// Empty: none. See hints.go for their checks.
+	Label string `yaml:"label" json:"label,omitempty"`
+	Help  string `yaml:"help" json:"help,omitempty"`
+	// Primary (a presentation hint; see hints.go) marks the main move out of its from
+	// state, for a screen's one button: at most one per state. It decides
+	// nothing about who may make it.
+	Primary bool `yaml:"primary" json:"primary,omitempty"`
 
 	// Program is Guard compiled, filled when the Type is loaded; nil when
 	// there is no guard. The "-" tag keeps it out of YAML and JSON. Package
@@ -349,6 +371,12 @@ type Type struct {
 	// an older version to this one, while it is the latest. nil: nobody.
 	// The latest version's block decides (see migrate.go).
 	Migrate *Migrate `yaml:"migrate" json:"migrate,omitempty"`
+	// Summary (a presentation hint) names the fields that summarise an
+	// Item under its title (a list row, a card): at most 3. Empty: none.
+	Summary []string `yaml:"summary" json:"summary,omitempty"`
+	// emptyHints are the paths of the labels and helps the YAML wrote as
+	// "", which a string cannot tell from none (see hints.go). Never stored.
+	emptyHints []string
 }
 
 // Migrate is a Type's migrate block. Allowed lists who may migrate Items
@@ -569,6 +597,8 @@ func (t *Type) check() error {
 	// A claimed state, and the moves that claim and release.
 	t.checkClaim(r)
 	t.checkWaitsOn(r)
+	// Presentation hints: words for people, which enforce nothing.
+	t.checkHints(r)
 
 	// A field only the kernel writes needs a writer: a hook that writes it,
 	// or another Type's reaction this Type accepts for it.

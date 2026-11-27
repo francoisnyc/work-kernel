@@ -790,6 +790,10 @@ message Type {
   // Jira 2.4b: who may move or narrow Items of this version: "kernel"
   // (nobody) or role:<name> entries; empty is anyone who sees the Item.
   repeated string placement_writable_by = 19;
+  // Presentation hint (the Inbox for people, PR 1): the field IDs that
+  // summarise an Item of this version under its title, in a list row or a
+  // card; at most 3. Empty: none. A hint enforces nothing.
+  repeated string summary = 20;
 }
 
 // A named principal field a Type offers to the hooks of contained Items.
@@ -1011,6 +1015,11 @@ message Field {
   int32 max = 7;
   // Jira 2.4b: the states in which no two siblings hold the same value.
   repeated string unique_among_siblings = 8;
+  // Presentation hints (the Inbox for people, PR 1): a short name for
+  // people, plain text of at most 60 characters, and a line of help, at
+  // most 280. Empty: none; show the ID. They enforce nothing.
+  string label = 9;
+  string help = 10;
 }
 
 // Who may write a field.
@@ -1067,6 +1076,15 @@ message State {
   // moves name: the Type's `waits_on: requester`. Such an Item is in its
   // requester's "waiting on me" view, a customer's included.
   bool waits_on_requester = 7;
+  // Presentation hints (the Inbox for people, PR 1): a short name for
+  // people, plain text of at most 60 characters, and a line of help, at
+  // most 280. Empty: none; show the ID. They enforce nothing.
+  string label = 8;
+  string help = 9;
+  // Presentation hint: a datetime field of the Type whose instant an Item
+  // in this state is due by (a screen marks it overdue once it has
+  // passed). Empty: none. It enforces nothing and moves nothing.
+  string due = 10;
 }
 
 // A state's timer after a duration.
@@ -1156,6 +1174,15 @@ message Transition {
   // evaluated refuses the move (FAILED_PRECONDITION / EFFECT_FAILED,
   // metadata field).
   map<string, string> sets = 10;
+  // Presentation hints (the Inbox for people, PR 1): a short name for the
+  // move, plain text of at most 60 characters, and a line of help, at most
+  // 280. Empty: none; show the to_state. They enforce nothing.
+  string label = 11;
+  string help = 12;
+  // The main move out of its from_state, for a screen's one button: at
+  // most one per state, and only on a move a person can make. A hint: it
+  // decides nothing about who may make it (see Item.moves).
+  bool primary = 13;
 }
 
 message GetTypeRequest {

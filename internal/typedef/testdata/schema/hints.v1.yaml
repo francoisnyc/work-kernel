@@ -1,0 +1,22 @@
+# Corpus for the schema tests (Ventoux V2c): presentation hints (the Inbox
+# for people, PR 1a): a label and a help on a field, a state and a move; a
+# primary move; the fields that summarise an Item; the field a state is due
+# by. It loads on its own (stages a and b).
+id: corpus_hints
+version: 1
+initial_state: open
+summary: [f_title, f_approver]
+
+fields:
+  - {id: f_title,    type: string,    label: Request, help: What the person asks for}
+  - {id: f_approver, type: principal, label: Approver}
+  - {id: f_due_at,   type: datetime,  label: Decision due}
+
+states:
+  - {id: open,     category: waiting, label: Waiting for a decision, help: The approver decides, due: f_due_at}
+  - {id: approved, category: done,    label: Approved}
+  - {id: refused,  category: done,    label: Refused}
+
+transitions:
+  - {from: open, to: approved, allowed: ['field:f_approver'], label: Approve, help: The request goes ahead, primary: true}
+  - {from: open, to: refused,  allowed: ['field:f_approver'], label: Refuse}

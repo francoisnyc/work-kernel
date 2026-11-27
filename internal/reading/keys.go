@@ -118,4 +118,17 @@ var LeftOut = map[string]string{
 	"fields[].max":      "the field list at the top: the most values a field holds is checked on every write",
 	"states[].id":       "a state's heading names it",
 	"states[].category": "a label in the state's heading: it decides which views show the Item, not what the engine does to it",
+
+	// Presentation hints (the Inbox for people, PR 1a): words for screens.
+	// A label names its field, state or move beside the ID (the field list,
+	// the state's heading, the move's sentence); none is a rule.
+	"fields[].label":        "a name for people, shown beside the ID in the field list: it changes nothing the engine does",
+	"fields[].help":         "help for people on a screen: it changes nothing the engine does",
+	"states[].label":        "a name for people, shown in the state's heading beside the ID: it changes nothing the engine does",
+	"states[].help":         "help for people on a screen: it changes nothing the engine does",
+	"states[].due":          "which field a screen shows as the state's due time: it changes nothing the engine does; a timer or an SLA goal moves the Item",
+	"transitions[].label":   "a name for people, starting the move's sentence: it changes nothing the engine does",
+	"transitions[].help":    "help for people on a screen: it changes nothing the engine does",
+	"transitions[].primary": "which move a screen offers first: it decides nothing about who may make it",
+	"summary":               "which fields a screen shows under an Item's title: it changes nothing the engine does",
 }
