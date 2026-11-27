@@ -107,6 +107,14 @@ Ideas noted during the spike, not built yet.
   - **A count** ("50+") still reads the view: 3 ms where many wait, up to
     40 ms at 550,000 open for someone with nothing waiting. The first
     thing the table would speed up.
+- **Items with timers, step 3b's Later items** (design.md, "Items with timers, as built"):
+  - **Acting timers stay refused:** a reminder run in flight at a migrate
+    cannot be seen, so it could be sent twice. Lifting it needs a way to
+    see a run in flight.
+  - **A bulk migrate (step 4) may fire many overdue timers at once:** a
+    migrated Item's timer counts from its state entry, so every Item past
+    the new version's duration moves at the same moment. Step 4 should
+    say whether to pace them.
 - **Each state entry judged by its own version, step 3a's Later items** (design.md, "Each state entry judged by its own version, as built"):
   - **Acting timers stay refused** (`HAS_TIMER`, also after step 3b): a
     reminder run started just before a migrate could not record itself
@@ -4820,3 +4828,38 @@ alone. Fresh results kept out.
 **Open:** the Later items above. **Next session:** step 3b, Items with timers (Phase B: the workflow's reload behind
 a `workflow.GetVersion` change ID, `StartsWorkflow` for a migrated event, `HAS_TIMER` narrowed to acting timers, the
 end-to-end and replay tests, the scenario step).
+
+## 2026-11-27 — Track 1, item 6, step 3b: Items with timers (Phase D)
+
+**Built:** an Item whose state has a timer, or a timer at a field's instant, can be migrated. A migrated event always
+reaches the Item's workflow (`lifecycle.StartsWorkflow`; the relay delivers an event that needs a workflow even when
+nothing listens). The run that hears of it, behind `workflow.GetVersion("migrate-reloads")`, waits for what it has
+running and continues as new with only the Item ID; the next run loads the new version and arms its timer from the
+state entry. The old version's timer cannot act: its move names the old version and is refused. `HAS_TIMER` now
+means an acting timer (`lifecycle.HasActingTimer`, replacing `HasStateTimer`). design.md: "Items with timers, as
+built", and a note in step 2's and step 3a's sections. Roadmap: step 3 done; what remains of item 6.
+
+**Decided (the owner, through the coordinator):** at step 3's Phase A: the run learns by the migrated event, the
+reload behind a `GetVersion` change ID, the timer from the state entry, a refused timer armed again, a timer at an
+instant re-read, acting timers still refused. Phase B, "Ok": the tests, and the relay condition. Phase C: one
+assertion changed with the owner's OK (the old timer's move is refused as invalid, not stale).
+
+**Tests:** new: lifecycle 1; item service 3 (an acting timer still refuses; a timer at an instant does not; the old
+timer's move refused); workflow unit 2 (the hand-over; the old version keeps the run); end to end 8 (v2 shorter,
+longer, without a timer, adding one, overdue, at an instant, the old timer racing the migrate, a timer v1 refused
+armed again); replay of two new recorded histories. **Earlier tests changed (approved):** the three timer cases of
+`TestMigrate_Quiet`; the scenario's ticket in `in_progress` (now migrated); the one assertion above.
+
+**Surprises:**
+- I said in Phase B that the old timer's move would be stale before the run heard of the migrate. The internal door
+  checks the version first, so it is invalid; the outcome is the same, and the owner approved the assertion.
+- The relay delivered an event only when the Item's current version listened: a migrate to a version with nothing
+  listening would never have reached the run alive under the old one.
+- The new run, started by the migrated event itself, sees that event as already applied: it never hands over twice.
+
+**Numbers.** `go vet` clean; `go test ./...` and `go test -race ./...` green, 28 packages; the new tests `-race
+-count=10`, the end-to-end ones `-count=3`, green. Every recorded history replays (12). Scenario on the stack: passed.
+Web: 492 unit tests, 14 journeys; apps/poc: 408, 4. Both bake-offs in full: every verdict as recorded.
+
+**Open:** the Later items above. **Next session:** as the roadmap says, item 5 step 5's PR 2, then the Inbox for
+people (`docs/plans/inbox-for-people.md`); item 6 step 4 (bulk and status) when the owner chooses.
