@@ -26,6 +26,7 @@ import {
   type SearchItemsRequestSchema,
   type TransitionItemRequestSchema,
 } from "../gen/kernel/v1/kernel_pb";
+import { itemId } from "../model/typeinfo";
 import { NS, item, itemName, refusal, ticket, typeName } from "../test/fixtures";
 import { InboxPage } from "./InboxPage";
 
@@ -82,6 +83,34 @@ function claimed(n: number, title: string, by: string, moves = ["approved", "rej
   });
 }
 
+// An incident-like case: in `asked` it waits on its requester (step 5,
+// GetType's waits_on_requester); the requester answers by replying, so
+// she has no move there.
+const helpCase = create(TypeSchema, {
+  name: typeName("helpcase", 1),
+  typeId: "helpcase",
+  version: 1,
+  fields: [{ id: "f_title", type: FieldType.STRING }],
+  states: [
+    { id: "open", category: StateCategory.WAITING },
+    { id: "asked", category: StateCategory.WAITING, waitsOnRequester: true },
+  ],
+  transitions: [{ fromState: "asked", toState: "open" }],
+});
+
+function sentBack(n: number, title: string, requester: string): Item {
+  return item({
+    name: itemName(n),
+    type: helpCase.name,
+    state: "asked",
+    category: StateCategory.WAITING,
+    creator: requester,
+    fields: { f_title: title },
+    stateTime: hoursAgo(3),
+    moves: [],
+  });
+}
+
 type SearchReq = MessageInitShape<typeof SearchItemsRequestSchema>;
 type CountReq = MessageInitShape<typeof CountItemsRequestSchema>;
 type MoveReq = MessageInitShape<typeof TransitionItemRequestSchema>;
@@ -109,7 +138,7 @@ function kernel(opts: {
 
 function show(k: ReturnType<typeof kernel>, principal = "user:fay") {
   const user = { name: principal.split(":")[1]!, token: "t", principal, namespace: "acme", roles: [] };
-  const session = new Session(user, k as unknown as Api, [purchase, ticket], ["user:fay", "user:gus"]);
+  const session = new Session(user, k as unknown as Api, [purchase, ticket, helpCase], ["user:fay", "user:gus"]);
   return render(
     <SessionProvider value={session}>
       <InboxPage />
@@ -118,7 +147,9 @@ function show(k: ReturnType<typeof kernel>, principal = "user:fay") {
 }
 
 const tab = (name: RegExp) => screen.getByRole("tab", { name });
-const rows = () => within(screen.getByRole("list", { name: "Inbox" })).queryAllByRole("link");
+// Each row's title: the link that opens the row (a row may hold other
+// links, such as "Open it to answer").
+const rows = () => [...screen.getByRole("list", { name: "Inbox" }).querySelectorAll<HTMLAnchorElement>(":scope > li > a")];
 const titles = () => rows().map((a) => a.textContent);
 const rowOf = (title: string) => screen.getByRole("link", { name: title }).closest("li")!;
 const buttonsOf = (title: string) =>
@@ -126,14 +157,33 @@ const buttonsOf = (title: string) =>
     .queryAllByRole("button")
     .map((b) => b.textContent);
 
-test("a customer: one sentence, and no call at all", async () => {
+// Since step 5 a customer's Inbox asks like anyone's: what was sent back
+// to her. She holds no role, so "Waiting on me" is her one tab.
+test("a customer: one tab, Waiting on me, and what was sent back to her", async () => {
+  const k = kernel({
+    rows: (on) => ({ items: on === "me" ? [sentBack(60, "Printer jams", "customer:kim")] : [] }),
+    count: () => ({ count: 1 }),
+  });
+  show(k, "customer:kim");
+  await waitFor(() => expect(titles()).toEqual(["Printer jams"]));
+  expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Waiting on me 1"]);
+  expect(screen.queryByText("Nothing waits on you here yet.")).not.toBeInTheDocument();
+  expect(k.whoAmI).toHaveBeenCalledTimes(1);
+  expect(k.searchItems).toHaveBeenLastCalledWith({ parent: NS, pageSize: 50, orderBy: "waiting_since", filter: { waitingOn: "me" } });
+  expect(k.countItems.mock.calls.map(([req]) => req)).toEqual([{ parent: NS, filter: { waitingOn: "me" } }]);
+  expect(rowOf("Printer jams")).toHaveTextContent("asked by customer:kim · waiting 3 h · sent back to you");
+  // She answers on the incident's own page: no button, a link to it.
+  expect(buttonsOf("Printer jams")).toEqual([]);
+  expect(within(rowOf("Printer jams")).getByRole("link", { name: "Open it to answer" })).toHaveAttribute("href", `#/items/${itemId(itemName(60))}`);
+  expect(k.transitionItem).not.toHaveBeenCalled();
+});
+
+test("a customer with nothing sent back: the empty sentence", async () => {
   const k = kernel({ rows: () => ({ items: [] }) });
   show(k, "customer:kim");
-  expect(screen.getByRole("heading", { name: "Inbox" })).toBeInTheDocument();
-  expect(screen.getByText("Nothing waits on you here yet.")).toBeInTheDocument();
-  expect(screen.queryByRole("tab")).not.toBeInTheDocument();
-  await act(async () => {});
-  for (const call of [k.whoAmI, k.countItems, k.searchItems, k.transitionItem]) expect(call).not.toHaveBeenCalled();
+  expect(await screen.findByText("Nothing is waiting on you.")).toBeInTheDocument();
+  expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Waiting on me 0"]);
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
 
 test("tabs: Waiting on me, then the caller's roles that a Type names, each with its count; 50+ when capped", async () => {
@@ -226,7 +276,7 @@ test("a row's buttons are exactly the server's moves, in its order; the Type's `
   expect(buttonsOf("All three")).toEqual(["Move to approved", "Move to rejected", "Move to finance_queue"]);
   expect(buttonsOf("Another order")).toEqual(["Move to finance_queue", "Move to approved"]);
   expect(buttonsOf("Not hers")).toEqual([]);
-  expect(rowOf("Not hers")).toHaveTextContent("No move here is yours to make.");
+  expect(within(rowOf("Not hers")).getByRole("link", { name: "Open it to answer" })).toHaveAttribute("href", `#/items/${itemId(itemName(3))}`);
   expect(buttonsOf("Reopened")).toEqual(["Move to finance_review"]);
 });
 

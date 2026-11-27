@@ -1691,6 +1691,25 @@ ok sam item update "$a3" --readers user:sam,user:lea,user:ana >/dev/null
 # step 2b): ana's incident@1 of B2 is narrowed by desk agents only, too.
 refuse ana "PERMISSION_DENIED PLACEMENT_NOT_WRITABLE" item update "$b3" --readers user:ana,user:sam
 
+step "C14: sent back to kim: her incident@6 waits on her while it waits for its customer; her reply brings it back"
+# incident@6 is incident@5 with waits_on: requester on waiting_for_customer
+# (track 1 item 5, step 5). No move out of that state names anyone: before
+# this version the incident waited on nobody there; now it waits on kim.
+c14=$(ok kim item create --type incident@6 --in "$portal" --set "f_title=Printer jams $w" --set f_priority=P3 | j .item.name)
+expect "kim's inbox before: nothing waits on her" "$(ok kim inbox "$w" --count | j .count)" "0"
+ok sam item transition "$c14" --to in_progress >/dev/null
+ok sam item transition "$c14" --to waiting_for_customer >/dev/null
+expect "kim's inbox: her incident, sent back to her" "$(ok kim inbox "$w" | names)" "$c14"
+expect "her row: no move of hers (she answers by replying), her fields only" \
+	"$(ok kim inbox "$w" | j '.items[0] | "\(.moves // [] | length) \(.fields | keys | join(","))"')" "0 f_priority,f_title"
+expect "kim's count" "$(ok kim inbox "$w" --count | j .count)" "1"
+expect "lee's inbox: nothing of kim's" "$(ok lee inbox "$w" --count | j .count)" "0"
+expect "sam's inbox: it waits on kim, not on him" "$(ok sam inbox "$w" | j '[.items[]?.name] | index("'"$c14"'") // "none"')" "none"
+refuse kim "INVALID_ARGUMENT INVALID_REQUEST" inbox --role desk_agent
+ok kim item create --type reply@2 --in "$c14" --set "f_body=It jams on page two $w" >/dev/null
+wait_until 30 "kim's reply brings it back" state_is kim "$c14" in_progress
+expect "kim's inbox after: nothing waits on her" "$(ok kim inbox "$w" --count | j .count)" "0"
+
 # ---------------------------------------------------------------------------
 # Scenario E (Jira 2.4b): an access request. A resource says who approves
 # it and how many must; a request inside it copies both on submit, gets one

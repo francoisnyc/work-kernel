@@ -8,7 +8,7 @@
 //   2. ana, with nothing waiting below a place, sees the empty state.
 //   3. bob, an approver with 51 waiting below a place, sees "50+" and
 //      reads the next page with More.
-//   4. kim, a customer, gets one sentence and no call.
+//   4. kim, a customer: one tab, and the page asks for her own view only.
 //   5. sam claims an equipment request from the desk agents' queue; lea, a
 //      desk agent too, cannot decide it; sam releases it and it is back at
 //      the end of the queue (equipment_request@1, the first Type in types/
@@ -18,6 +18,10 @@
 // stack keeps what earlier runs and the scenario left waiting. Journey 5's
 // requests are at the top level, so it reads newest first and finds its
 // rows by their titles.
+//   6. sam sends kim's incident back to her (incident@6: waiting for its
+//      customer waits on its requester): it is in her Inbox, labelled "sent
+//      back to you", with no button and a link; she answers on its page with
+//      a reply, which brings it back to in_progress; it leaves her Inbox.
 //
 // Run: docker compose up -d --build --wait, then `npm run e2e` in web/.
 import { expect, test, type Page } from "@playwright/test";
@@ -29,6 +33,7 @@ import {
   seedDeskQueue,
   seedEmptyPlace,
   seedEquipmentRequests,
+  seedSentBack,
   withdrawAll,
 } from "./seed";
 import type { Item } from "../src/gen/kernel/v1/kernel_pb";
@@ -132,22 +137,29 @@ test("bob has 51 approvals waiting below a place: 50+ on the tab, and More loads
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
-test("kim, a customer: one sentence, and the page asks the kernel nothing", async ({ page }) => {
+// Since step 5 a customer's Inbox asks like anyone's: who she is, her one
+// tab's number, and her own view. Never a role's queue: she holds none.
+test("kim, a customer: one tab, and the page asks for her own view only", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("Act as").selectOption("kim");
   await expect(page.getByRole("banner")).toContainText("acting as kim");
   // Only what the Inbox itself asks counts: the page before it has read.
   await page.waitForLoadState("networkidle");
-  const calls: string[] = [];
+  const calls: { rpc: string; body: string }[] = [];
   page.on("request", (req) => {
-    if (req.url().includes("/api/")) calls.push(req.url().split("/").pop()!);
+    if (req.url().includes("/api/")) calls.push({ rpc: req.url().split("/").pop()!, body: req.postData() ?? "" });
   });
   await page.getByRole("link", { name: "Inbox" }).click();
   await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
-  await expect(page.getByText("Nothing waits on you here yet.")).toBeVisible();
-  await expect(page.getByRole("tab")).toHaveCount(0);
+  await expect(page.getByRole("tab")).toHaveText([/^Waiting on me\s*\d+\+?$/]);
+  await expect(page.getByText("Nothing waits on you here yet.")).toHaveCount(0);
   await page.waitForLoadState("networkidle");
-  expect(calls).toEqual([]);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  expect(new Set(calls.map((c) => c.rpc))).toEqual(new Set(["WhoAmI", "CountItems", "SearchItems"]));
+  for (const c of calls.filter((c) => c.rpc !== "WhoAmI")) {
+    expect(c.body).toContain('"waitingOn":"me"');
+    expect(c.body).not.toContain("role:");
+  }
 });
 
 test("sam claims an equipment request; lea cannot decide it; sam releases it to the end of the queue", async ({ page, baseURL }) => {
@@ -211,4 +223,36 @@ test("sam claims an equipment request; lea cannot decide it; sam releases it to 
   const got = (await api(baseURL!, "sam").getItem({ name: first!.name })).item;
   expect(got?.state).toBe("queue");
   expect(got?.fields?.f_handler ?? null).toBeNull();
+});
+
+test("sam sends kim's incident back to her: in her Inbox, labelled; she answers on its page; it leaves", async ({ page, baseURL }) => {
+  const title = `Scanner offline ${run}`;
+  const { incident } = await seedSentBack(baseURL!, run, title);
+  const row = (p: Page) => inbox(p).locator("> li").filter({ hasText: title });
+
+  await openInbox(page, "kim");
+  // Her one tab; her row, oldest waiting first, found by its title.
+  await expect(page.getByRole("tab")).toHaveCount(1);
+  await expect(row(page)).toContainText("incident@6 · waiting_for_customer");
+  await expect(row(page)).toContainText("asked by customer:kim");
+  await expect(row(page)).toContainText("sent back to you");
+  // She answers by replying, not by a move: no button, a link to the incident.
+  await expect(row(page).getByRole("button")).toHaveCount(0);
+  await row(page).getByRole("link", { name: "Open it to answer" }).click();
+  await expect(page.getByRole("heading", { name: title })).toBeVisible();
+
+  // Her reply, written inside the incident.
+  await page.goto(`/#/new?in=${idOf(incident)}`);
+  await page.getByLabel("Type", { exact: true }).selectOption("reply");
+  await page.getByLabel("f_body").fill(`It shows error 42 ${run}`);
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+
+  // The incident's own rule brings it back to in_progress (a reaction, by
+  // the worker); then it waits on the desk, not on her.
+  const kim = api(baseURL!, "kim");
+  await expect.poll(async () => (await kim.getItem({ name: incident.name })).item?.state, { timeout: 30_000 }).toBe("in_progress");
+  await openInbox(page, "kim");
+  await expect(inbox(page)).toHaveAttribute("aria-busy", "false");
+  await expect(row(page)).toHaveCount(0);
 });

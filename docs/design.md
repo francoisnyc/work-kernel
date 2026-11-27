@@ -5818,7 +5818,9 @@ does not then claim the Inbox is empty.
 **A customer** gets "Nothing waits on you here yet." and the page makes
 no call: `waiting_on` refuses a customer until step 5. It is one branch
 to remove then, not a second page. (Since step 5, PR 1: `me` answers;
-`role:` still refused. The page's branch goes in PR 2.)
+`role:` still refused. Since PR 2 the branch is gone: a customer's Inbox
+asks like anyone's, with one tab; "Sent back to the requester, as
+built".)
 
 **Oldest first, and page 2.** A page holds 50. Someone with more than 50
 waiting sees a new arrival only after [More], or by switching to newest
@@ -5951,6 +5953,45 @@ comes in PR 2.
 `WaitsOnRequester` and one case in `WaitsOn`; one SQL group and the
 customer branch in the view; one reading sentence; one contract field.
 No migration, no new dependency.
+
+### PR 2: incident@6 and the screen (2026-11-27)
+
+**`incident@6`** is `incident@5` with one key, `waits_on: requester` on
+`waiting_for_customer`, and nothing else; v5 is untouched. It keeps v5's
+start block, `older_versions: all`, so incidents @1 to @5 stay open to
+new Items (the PoC, the stories and the scenario create @3). Before this
+version an incident waiting for its customer waited on nobody: no move
+out of that state names anyone. Now it waits on its requester, and the
+customer answers by replying, which the incident's own reaction turns
+into the move back to `in_progress`.
+
+**A customer's Inbox on the stack.** The web Inbox lost its customer
+branch: a customer's page asks like anyone's (`WhoAmI`, `CountItems`,
+`SearchItems` with `waiting_on: me`), with one tab, "Waiting on me", as
+they hold no role.
+
+- **"sent back to you"**, from data only: the Item's state says
+  `waits_on_requester` (`GetType`), and the caller is the Item's
+  requester (`creator_on_behalf_of`, else `creator`). Two comparisons; no
+  rule is evaluated in the browser. It comes before "f_x is you".
+- **A row with no move links "Open it to answer"** to the Item's page,
+  for every row with none, staff included (it replaces "No move here is
+  yours to make."). The incident's customer has no move in
+  `waiting_for_customer`: her reply is written on the incident's page.
+
+**Shown by:** a journey (sam sends kim's incident back; it is in her
+Inbox, labelled, with no button and the link; she replies on its page;
+the reaction brings it back; it leaves her Inbox); a scenario step (C14,
+the same through `pli inbox`, with lee and sam seeing nothing of it and
+kim's `--role` refused); `pli type get incident@6` showing the key.
+
+**Earlier-approved tests that changed:** the Type lists (70 Types; two
+exact lists), the older-versions test (incident@6 is the latest and
+carries @5's start block, as ticket@9 carries @8's); the three lists of
+newest versions registered before the tests (item service, relay,
+workflow) now name `incident.v6`; PR #100's customer page test and
+journey (the customer's Inbox now asks) and the row with no move (now
+the link). One page-test helper reads each row's title link only.
 
 ## Each state entry judged by its own version, as built (item 6, step 3a) (2026-11-26)
 

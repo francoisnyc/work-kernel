@@ -88,11 +88,16 @@ export function rowMoves(type: Type | undefined, item: Item): Transition[] {
 
 // Why a row is in this tab, as far as the data says it directly:
 //   - on a role's tab, the tab: "for your team (finance)";
+//   - on Waiting on me, "sent back to you" when the Item's state says it
+//     waits on its requester (GetType's waits_on_requester) and the caller
+//     is its requester (askedBy);
 //   - on Waiting on me, the principal fields that hold the caller, by ID:
 //     "f_approver is you"; nothing when no field does (the kernel put the
 //     Item in the view; the browser does not re-derive why).
 export function whyYours(tab: InboxTab, type: Type | undefined, item: Item, principal: string): string {
   if (tab.role !== undefined) return `for your team (${tab.role})`;
+  const state = type?.states.find((s) => s.id === item.state);
+  if (state?.waitsOnRequester && askedBy(item) === principal) return "sent back to you";
   const ids = (type?.fields ?? [])
     .filter((f) => f.type === FieldType.PRINCIPAL && item.fields?.[f.id] === principal)
     .map((f) => f.id);

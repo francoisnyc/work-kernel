@@ -21,7 +21,7 @@
 // shares one Postgres: each test registers Types of its own, with IDs no
 // other test uses, so that a start block here never judges a create
 // elsewhere. The one start block of types/ that says where is incident's
-// (in: [desk]): incident@5 is registered before any test runs
+// (in: [desk]): incident@6 is registered before any test runs
 // (newest_types_test.go), so every incident of this package is created
 // inside a desk.
 package itemservice_test

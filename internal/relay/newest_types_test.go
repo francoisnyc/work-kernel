@@ -18,7 +18,7 @@ import (
 // (track 1, item 6, step 1: a create names the latest version).
 func registerNewestTypes(ctx context.Context) error {
 	for _, name := range []string{
-		"bug.v4", "comment.v4", "desk.v4", "incident.v5", "note.v3", "reply.v3", "sprint.v3", "story.v4", "task.v4",
+		"bug.v4", "comment.v4", "desk.v4", "incident.v6", "note.v3", "reply.v3", "sprint.v3", "story.v4", "task.v4",
 		"ticket.v8", "ticket.v9", "vacation_request.v4", "sla/sla_goal.v4", "sla/sla_policy.v3",
 	} {
 		data, err := os.ReadFile("../../types/" + name + ".yaml")

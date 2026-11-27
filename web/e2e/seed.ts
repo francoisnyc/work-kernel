@@ -275,3 +275,33 @@ export async function withdrawAll(baseURL: string, items: Item[]): Promise<void>
   const ana = api(baseURL, "ana");
   await Promise.allSettled(items.map((it) => ana.transitionItem({ name: it.name, requestId: randomUUID(), toState: "withdrawn" })));
 }
+
+// --- Step 5: sent back to the requester (incident@6) ---
+
+export type SentBack = { desk: Item; incident: Item };
+
+// lea's portal (desk@2, calendar and policy linked) and kim's P3 incident in
+// it, as incident@6, which sam takes and sends back to her: in
+// waiting_for_customer it waits on its requester, kim.
+export async function seedSentBack(baseURL: string, run: string, title: string): Promise<SentBack> {
+  const lea = api(baseURL, "lea");
+  const kim = api(baseURL, "kim");
+  const sam = api(baseURL, "sam");
+  const week = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"].map((d) => `${d} 00:00-24:00`);
+  const calendar = await createItem(lea, type("calendar", 1), { f_name: `Always ${run} sb`, f_week: week, f_zone: "UTC" });
+  const targets: JsonObject = { f_name: `Standard ${run} sb` };
+  ["p1", "p2", "p3", "p4"].forEach((p, i) => {
+    targets[`f_first_response_s_${p}`] = String(3600 * (i + 1));
+    targets[`f_resolution_s_${p}`] = String(4 * 3600 * (i + 1));
+  });
+  const policy = await createItem(lea, type("sla_policy", 1), targets);
+  const desk = await createItem(lea, type("desk", 2), { f_key: `SB${run}`, f_name: `Help portal ${run}` });
+  await lea.linkItems({ name: desk.name, requestId: randomUUID(), linkType: "calendar", target: calendar.name });
+  await lea.linkItems({ name: desk.name, requestId: randomUUID(), linkType: "sla_policy", target: policy.name });
+  const created = await createItem(kim, type("incident", 6), { f_title: title, f_priority: "P3" }, { container: desk.name });
+  for (const to of ["in_progress", "waiting_for_customer"]) {
+    const res = await sam.transitionItem({ name: created.name, requestId: randomUUID(), toState: to, wait: create(DurationSchema, { seconds: 5n }) });
+    if (res.outcome !== TransitionOutcome.APPLIED) throw new Error(`seed: kim's incident to ${to}: ${TransitionOutcome[res.outcome]} ${res.reason}`);
+  }
+  return { desk, incident: created };
+}
