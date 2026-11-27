@@ -112,7 +112,7 @@ const people: DevUser[] = [
 ];
 
 const hoursAgo = (h: number) => timestampFromDate(new Date(Date.now() - h * 3_600_000 - 5_000));
-const inHours = (h: number) => new Date(Date.now() + h * 3_600_000 + 60_000).toISOString();
+const inHours = (h: number) => new Date(Date.now() + h * 3_600_000 + Math.sign(h) * 60_000).toISOString();
 
 function accessRow(n: number, title: string, dueInHours: number, moves = ["rejected", "approved"]): Item {
   return item({
