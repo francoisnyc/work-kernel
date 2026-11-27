@@ -343,3 +343,17 @@ section.inbox ul.items > li > p {
   border-radius: 6px;
   margin-bottom: 0.5rem;
 }
+.inbox-panel .item-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.inbox-panel input,
+.inbox-panel select,
+.inbox-panel textarea {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.inbox-panel .field {
+  grid-template-columns: 1fr;
+}
