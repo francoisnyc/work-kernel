@@ -355,8 +355,12 @@ attack that found it as its test:
         team's claimed rows with their holder (`ItemFilter.claimed`,
         `State.claim`), and why a move is withheld ("you can't handle
         your own request"; `Item.withheld`), judged in policy.
-      - **PR 2, the screen (next):** the Inbox rebuilt over the same calls,
-        with "Being handled" and the withheld moves in words.
+      - **PR 2, the screen,** split at its Phase A (the owner, 2026-11-27):
+        - **2b, rows, groups and team tabs. Built** (`docs/design.md`,
+          "The Inbox in words, as built (Inbox PR 2b)"): a row in words,
+          its main move and More moves, Overdue then Waiting, "Nobody has
+          these yet" then "Being handled", why a move is withheld.
+        - **2c, the side panel, several rows at once, the keyboard (next).**
 6. **Moving open Items to a new version, and retiring old versions**,
    deliberately and checked: a change that must reach requests in flight;
    builds on starting work's steps 2 and 2b, already built (the latest
