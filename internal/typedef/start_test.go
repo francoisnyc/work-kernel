@@ -63,7 +63,7 @@ func TestStart_Parses(t *testing.T) {
 
 // The repository's Types: incident@4 is the one with a block that says
 // where, in: [desk] and no allowed (owner's decision, option B), and
-// incident@5 carries it on. No other says where or who: the latest
+// incident@5 and @6 carry it on. No other says where or who: the latest
 // versions added by track 1, item 6, step 1 hold start.older_versions
 // alone (start_older_test.go checks them).
 func TestStart_TheRepositoryTypes(t *testing.T) {
