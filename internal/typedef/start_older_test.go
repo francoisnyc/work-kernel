@@ -21,6 +21,7 @@ package typedef_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -209,6 +210,22 @@ func TestOlderVersions_TheRepositoryTypes(t *testing.T) {
 			}
 			continue
 		}
+		// The Inbox for people, PR 1b: incident@7 is incident@6 with words
+		// for people, and carries incident@6's start block;
+		// access_request@2 and equipment_request@2 keep version 1 open for
+		// what still creates it.
+		if ty.ID == "incident" && ty.Version == 7 {
+			if got := keeps(stored[name(ty.ID, ty.Version)]); got != "all" {
+				t.Errorf("incident@7 start.older_versions = %v, want all, as incident@6", got)
+			}
+			continue
+		}
+		if (ty.ID == "access_request" || ty.ID == "equipment_request") && ty.Version == 2 {
+			if got := keeps(stored[name(ty.ID, ty.Version)]); fmt.Sprint(got) != "[1]" {
+				t.Errorf("%s@2 start.older_versions = %v, want [1]", ty.ID, got)
+			}
+			continue
+		}
 		if got := keeps(stored[name(ty.ID, ty.Version)]); got != nil {
 			t.Errorf("%s@%d has start.older_versions = %v; only the new latest versions should", ty.ID, ty.Version, got)
 		}
@@ -224,7 +241,7 @@ func TestOlderVersions_TheRepositoryTypes(t *testing.T) {
 		case "ticket":
 			want = 9
 		case "incident":
-			want = 6
+			want = 7
 		}
 		if latest[id] != want {
 			t.Errorf("the latest %s in types/ is @%d, want @%d", id, latest[id], want)
