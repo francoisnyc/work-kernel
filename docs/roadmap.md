@@ -359,14 +359,23 @@ attack that found it as its test:
       administrator migrates the purchases in flight (after a dry run with
       no problems) and finance's approval then sends each to the CFO; the
       one already approved is refused. A contract addition; no database
-      change. **Still open:** an Item whose state has a timer; **an Item
-      that has finished an action** while the latest version keeps that
-      hook (an action's record carries its version; it fails closed);
-      a version that adds a hook or reaction on a state already entered;
-      one Item at a time; links that only loosen are refused.
-   3. **Items with timers, and Items that have finished an action:** the
-      workflow reloads under the new version, and history written before
-      a migrate is read as what it was.
+      change. **Still open:** an Item whose state has a timer (step 3b);
+      one Item at a time; links that only loosen are refused. (An Item
+      that has finished an action, and a version that adds a hook or
+      reaction on a state already entered: since step 3a.)
+   3. **Items with timers, and Items that have finished an action**, in
+      two parts:
+      - **3a. Each state entry judged by its own version. Built**
+        (`docs/design.md`, "Each state entry judged by its own version,
+        as built"): history written before a migrate is read as what it
+        was, by the migrate's quiet check and the workflow's loader
+        alike. A finished action stays finished; what a new version adds
+        on a state already entered is not owed for that entry. No
+        contract or schema change. The bake-offs' already-approved
+        purchase is now refused for being closed alone.
+      - **3b. Items with timers** (next): the workflow reloads under the
+        new version, the timer counting from the state entry; acting
+        timers stay refused.
    4. **Bulk and status:** every open Item of a version, with a dry-run
       list; which versions are open, and how many open Items each holds,
       in `ListTypes`.
@@ -760,7 +769,8 @@ test:
    version names can migrate a request in flight to it, after a dry run;
    in both bake-offs the migrated purchases then go to the CFO. **Still
    open:** every request of a version at once (step 4), and requests whose
-   state has a timer or that have finished an action (step 3).
+   state has a timer (step 3b). (Requests that have finished an action:
+   since step 3a.)
 5. **Known, and planned elsewhere:** a claim is only a field, so a colleague
    can still decide (team queues with an enforced claim, under "Pilots serve
    generality"). Since built: track 1, item 5, step 2 (a state's `claim`).

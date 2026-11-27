@@ -242,15 +242,15 @@ func migrationFacts(ctx context.Context, tx pgx.Tx, id uuid.UUID, it lockedItem)
 	return f, nil
 }
 
-// notQuiet reports what makes the Item not quiet, under the version it is
-// on (old) and under the one it would move to (latest): an open hold; an
-// action or enrich hook, a reaction or an undo not finished; a timer on
-// its state; an event still in the outbox.
+// notQuiet reports what makes the Item not quiet: an open hold; an action
+// or enrich hook, a reaction or an undo not finished; a timer on its state
+// under the version it is on (old) or the one it would move to (latest);
+// an event still in the outbox.
 //
-// Both versions are asked because what is pending is computed for every
-// entry the Item ever made, under whatever Type it is read with: an action
-// the new version declares on a state the Item entered before would
-// otherwise run for that old entry.
+// Pending work is read as the workflow's loader reads it: each entry under
+// the version it was made under (step 3a). What the latest version adds
+// on a state the Item already entered is not owed for that entry, so it
+// holds nothing back.
 //
 // The Item's row is locked, and every event of an Item is written under
 // that lock, so what is read here cannot change before this transaction
@@ -270,7 +270,8 @@ func (k *Service) notQuiet(ctx context.Context, tx pgx.Tx, id uuid.UUID, it lock
 		add(lifecycle.MigrateHeld)
 	}
 	// The event that entered the Item's state, and the hooks that wrote
-	// for it: an enrich hook of the state that has not is unfinished.
+	// for it: an enrich hook owed for that entry that has not is
+	// unfinished.
 	var entered int64
 	if err := tx.QueryRow(ctx,
 		`select item_seq from item_events where item_id = $1 and op in ('create', 'transition') order by item_seq desc limit 1`,
@@ -287,30 +288,34 @@ func (k *Service) notQuiet(ctx context.Context, tx pgx.Tx, id uuid.UUID, it lock
 	if err != nil {
 		return nil, fmt.Errorf("read hooks run: %w", err)
 	}
+	// Pending work, each entry judged by the version it was made under
+	// (step 3a): the same readers the workflow's loader uses, so a migrate
+	// that goes through leaves the loader nothing owed for an older entry.
+	// What the latest version declares is owed only from the next entry.
+	enrich, err := k.owedEnrich(ctx, tx, id, old, it.State, entered, ran)
+	if err != nil {
+		return nil, err
+	}
+	actions, err := k.pendingActions(ctx, tx, id, old)
+	if err != nil {
+		return nil, err
+	}
+	if len(actions) > 0 || len(enrich) > 0 {
+		add(lifecycle.ActionUnfinished)
+	}
+	undos, err := k.pendingUndos(ctx, tx, id, old)
+	if err != nil {
+		return nil, err
+	}
+	reactions, err := k.pendingReactions(ctx, tx, id, old)
+	if err != nil {
+		return nil, err
+	}
+	if len(undos) > 0 || len(reactions) > 0 {
+		add(lifecycle.ReactionUnfinished)
+	}
+	// A timer under either version: not migrated in this step (step 3b).
 	for _, ty := range []*typedef.Type{old, latest} {
-		actions, err := k.pendingActions(ctx, tx, id, ty)
-		if err != nil {
-			return nil, err
-		}
-		if len(actions) > 0 {
-			add(lifecycle.ActionUnfinished)
-		}
-		for _, h := range lifecycle.EnrichHooks(ty, it.State) {
-			if !slices.Contains(ran, h.ID) {
-				add(lifecycle.ActionUnfinished)
-			}
-		}
-		undos, err := k.pendingUndos(ctx, tx, id, ty)
-		if err != nil {
-			return nil, err
-		}
-		reactions, err := k.pendingReactions(ctx, tx, id, ty)
-		if err != nil {
-			return nil, err
-		}
-		if len(undos) > 0 || len(reactions) > 0 {
-			add(lifecycle.ReactionUnfinished)
-		}
 		if lifecycle.HasStateTimer(ty, it.State) {
 			add(lifecycle.HasTimer)
 		}

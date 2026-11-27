@@ -593,19 +593,21 @@ func (w migWorld) hooked(t *testing.T, version int, path ...string) uuid.UUID {
 
 // Each thing that makes an Item not quiet, under the version it is on and
 // under the version it would move to. Nothing runs the workflow here, so a
-// hold stays open and an action stays unfinished.
+// hold stays open and an action stays unfinished. An action only the new
+// version declares, on the state the Item entered under the old one, is
+// not owed for that entry (step 3a): no problem.
 func TestMigrate_Quiet(t *testing.T) {
 	cases := []struct {
 		name string
 		// what version 1 and version 2 declare: a check, an order, a timer
 		v1, v2 [3]bool
 		path   []string
-		want   lifecycle.MigrationCheck
+		want   lifecycle.MigrationCheck // "": the Item is quiet
 	}{
 		{"an open hold", [3]bool{true, false, false}, [3]bool{true, false, false}, []string{"review"}, lifecycle.MigrateHeld},
 		{"an action unfinished", [3]bool{false, true, false}, [3]bool{false, true, false}, []string{"review", "ordered"}, lifecycle.ActionUnfinished},
 		{"an action only the new version declares, on the state the Item is in",
-			[3]bool{false, false, false}, [3]bool{false, true, false}, []string{"review", "ordered"}, lifecycle.ActionUnfinished},
+			[3]bool{false, false, false}, [3]bool{false, true, false}, []string{"review", "ordered"}, ""},
 		{"a timer on its state", [3]bool{false, false, true}, [3]bool{false, false, true}, []string{"review", "waiting"}, lifecycle.HasTimer},
 		{"a timer only the new version declares", [3]bool{false, false, false}, [3]bool{false, false, true}, []string{"review", "waiting"}, lifecycle.HasTimer},
 		{"a timer only the old version declares", [3]bool{false, false, true}, [3]bool{false, false, false}, []string{"review", "waiting"}, lifecycle.HasTimer},
@@ -616,6 +618,10 @@ func TestMigrate_Quiet(t *testing.T) {
 			w.reg(t, migHooked(1, c.v1[0], c.v1[1], c.v1[2], ""))
 			id := w.hooked(t, 1, c.path...)
 			w.reg(t, migHooked(2, c.v2[0], c.v2[1], c.v2[2], migAllowed))
+			if c.want == "" {
+				w.migrateClean(t, id, w.id("hk"), 2)
+				return
+			}
 			deliverAll(t, id) // so that undelivered events are not what is found
 			if got := w.dryRun(t, id, w.id("hk"), 2); !slices.Equal(got, []lifecycle.MigrationCheck{c.want}) {
 				t.Errorf("the dry run: %v, want %s alone", got, c.want)
@@ -630,17 +636,18 @@ func TestMigrate_Quiet(t *testing.T) {
 }
 
 // An action the new version adds on a state the Item entered and has
-// since left would run for that old entry: such an Item is refused too.
-// One the Item never entered holds nothing back.
+// since left is not owed for that old entry (step 3a): the Item that is
+// done is refused for being closed, and for nothing else. One the Item
+// never entered holds nothing back either.
 func TestMigrate_Quiet_AnActionTheNewVersionAddsOnAStateAlreadyLeft(t *testing.T) {
 	w := newMigWorld(t)
 	w.reg(t, migHooked(1, false, false, false, ""))
 	left := w.hooked(t, 1, "review", "ordered", "done")
 	never := w.hooked(t, 1, "review")
 	w.reg(t, migHooked(2, false, true, false, migAllowed))
-	// The one that is done is closed, and that is said first.
-	if got := w.dryRun(t, left, w.id("hk"), 2); !slices.Equal(got, []lifecycle.MigrationCheck{lifecycle.MigrateClosed, lifecycle.ActionUnfinished}) {
-		t.Errorf("an Item that entered ordered under version 1 and is done: %v, want closed, action_unfinished", got)
+	// The one that is done is closed.
+	if got := w.dryRun(t, left, w.id("hk"), 2); !slices.Equal(got, []lifecycle.MigrationCheck{lifecycle.MigrateClosed}) {
+		t.Errorf("an Item that entered ordered under version 1 and is done: %v, want closed alone", got)
 	}
 	if got := w.dryRun(t, never, w.id("hk"), 2); len(got) != 0 {
 		t.Errorf("an Item that never entered ordered: %v, want no problem", got)
@@ -662,7 +669,9 @@ func TestMigrate_Quiet_AnActionTheNewVersionAddsOnAStateAlreadyLeft(t *testing.T
 	}
 }
 
-// A create reaction not yet run, under either version.
+// A create reaction not yet run, under the version that owes it. One only
+// the new version declares, on the state entered under the old one, is not
+// owed for that entry (step 3a): the migrate goes through.
 func TestMigrate_Quiet_AReactionUnfinished(t *testing.T) {
 	bench := func(version int, reacts bool, rest string) string {
 		src := "\nid: bench_{s}\nversion: " + string(rune('0'+version)) + `
@@ -679,19 +688,29 @@ transitions:
 		return src + rest
 	}
 	const auto = "\nid: auto_{s}\nversion: 1\nfields:\n  - {id: f_title, type: string}\naccepts_reactions:\n  bench_{s}:make: {creates: [f_title]}\n"
-	for name, c := range map[string][2]bool{"declared by both versions": {true, true}, "declared by the new version only": {false, true}} {
+	for name, c := range map[string]struct {
+		v1, v2 bool
+		want   []lifecycle.MigrationCheck // nil: the Item is quiet
+	}{
+		"declared by both versions":        {true, true, []lifecycle.MigrationCheck{lifecycle.ReactionUnfinished}},
+		"declared by the new version only": {false, true, nil},
+	} {
 		t.Run(name, func(t *testing.T) {
 			w := newMigWorld(t)
 			w.reg(t, auto)
-			w.reg(t, bench(1, c[0], ""))
+			w.reg(t, bench(1, c.v1, ""))
 			b := w.container(t, w.lea, w.id("bench"), nil)
 			if err := w.move(t, w.lea, b, "working"); err != nil {
 				t.Fatalf("lea starts the bench: %v", err)
 			}
-			w.reg(t, bench(2, c[1], migAllowed))
+			w.reg(t, bench(2, c.v2, migAllowed))
+			if c.want == nil {
+				w.migrateClean(t, b, w.id("bench"), 2)
+				return
+			}
 			deliverAll(t, b)
-			if got := w.dryRun(t, b, w.id("bench"), 2); !slices.Equal(got, []lifecycle.MigrationCheck{lifecycle.ReactionUnfinished}) {
-				t.Errorf("the dry run: %v, want reaction_unfinished alone", got)
+			if got := w.dryRun(t, b, w.id("bench"), 2); !slices.Equal(got, c.want) {
+				t.Errorf("the dry run: %v, want %v", got, c.want)
 			}
 		})
 	}
