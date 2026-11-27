@@ -324,15 +324,16 @@ attack that found it as its test:
         stack; the screen's customer rows and the label "sent back to
         you"; a journey and a scenario step. After item 6 step 3 has
         merged (`incident@6` touches a workflow test file).
-   6. **The Inbox for people (proposed):** the screen built in step 4
+   6. **The Inbox for people (agreed, next after item 6 and step 5's PR 2):** the screen built in step 4
       is right underneath but reads as a developer's tool. Three PRs:
       words for people on the Type (labels, a primary move, summary
       fields: the first of theme 1's presentation hints, enforcing
       nothing), the Inbox rebuilt over the same four calls (one line per
       row, one primary button, a side panel, ownership shown in team
       queues, several rows at once), and an agent's request shown as
-      one. Brief and the owner's three decisions:
-      `docs/plans/inbox-for-people.md`. Not part of item 5's done.
+      one. Brief, and the owner's three decisions (all agreed,
+      2026-11-27): `docs/plans/inbox-for-people.md`. Not part of item
+      5's done; before track 2's authoring test.
 6. **Moving open Items to a new version, and retiring old versions**,
    deliberately and checked: a change that must reach requests in flight;
    builds on starting work's steps 2 and 2b, already built (the latest

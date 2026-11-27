@@ -119,10 +119,12 @@ Web only; the same four calls as today (`WhoAmI`, `CountItems`,
   step 5 gives the requester.
 - Real display names from sign-on (hosting, after the decision point).
 
-## For the owner to decide
+## The owner's decisions (2026-11-27)
 
-1. Presentation hints now, as this subset, before theme 1: a change to the
-   Type format and to `docs/design.md`.
-2. Additive fields in `GetType` (an API contract change).
-3. Where it sits: after item 6 and item 5 step 5's PR 2, before track 2's
-   authoring test, whose author reads the same labels in the reading.
+All three agreed:
+
+1. Presentation hints now, as this subset, before the rest of theme 1: the
+   Type format and `docs/design.md` change accordingly.
+2. Additive fields in `GetType` (an API contract change), approved.
+3. Order: after item 6 and item 5 step 5's PR 2, before track 2's authoring
+   test.
