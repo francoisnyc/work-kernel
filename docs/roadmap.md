@@ -350,10 +350,13 @@ attack that found it as its test:
         `access_request@2`, `equipment_request@2` and `incident@7` with
         labels (so "Ask a person" takes `approval@3`); the existing
         transition button reads its label; a journey and a scenario step.
-      - **PR 2a, next; approved in principle, before PR 2:** a small kernel PR:
-        claimed rows of a team's queue with their holder, and why a move
-        is withheld ("you can't handle your own request"), judged in
-        policy. Its own Phase A.
+      - **PR 2a, claimed rows and withheld moves. Built** (`docs/design.md`,
+        "Claimed rows and withheld moves, as built (Inbox PR 2a)"): a
+        team's claimed rows with their holder (`ItemFilter.claimed`,
+        `State.claim`), and why a move is withheld ("you can't handle
+        your own request"; `Item.withheld`), judged in policy.
+      - **PR 2, the screen (next):** the Inbox rebuilt over the same calls,
+        with "Being handled" and the withheld moves in words.
 6. **Moving open Items to a new version, and retiring old versions**,
    deliberately and checked: a change that must reach requests in flight;
    builds on starting work's steps 2 and 2b, already built (the latest
