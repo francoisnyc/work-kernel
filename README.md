@@ -449,3 +449,8 @@ only Postgres or only Temporal leaves the two out of step.
   `docker compose -f docker-compose.yml -f compose.dev.yaml up -d --build --wait`.
 - `CLAUDE.md` says how this repository is worked on; `docs/step-prompts.md`
   holds the build steps.
+
+## License
+
+[MIT](LICENSE). The dependencies keep their own licenses (MIT, BSD and
+Apache 2.0, all compatible).
