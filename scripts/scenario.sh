@@ -2021,6 +2021,33 @@ expect "lea fulfils it" "$(ok lea item transition "$eq" --to fulfilled | j .item
 expect "fulfilled: it waits on nobody" "$(ok lea inbox "$w" --type equipment_request --count | j .count) $(ok sam inbox "$w" --type equipment_request --role desk_agent --count | j .count)" "0 0"
 
 # ---------------------------------------------------------------------------
+# The Inbox for people, PR 2a: a team's claimed rows, and why a move is
+# withheld. --claimed reads the desk agents' claimed rows instead of their
+# queue, with who holds each (the claim field); withheld says, by a code,
+# which moves the reader's role would allow but the claim or `except`
+# refuses them.
+# ---------------------------------------------------------------------------
+
+step "claimed rows: sam takes a request; lea reads the desk agents' claimed rows (sam holds it; deciding is withheld from her, CLAIMED_BY_OTHER); sam's own request: taking it is withheld from him (OWN_REQUEST)"
+held=$(ok ana item create --type equipment_request@2 --set "f_title=Monitor $w" | j .item.name)
+ok sam item transition "$held" --to in_hand >/dev/null
+claimed() { ok "$1" inbox "$w" --type equipment_request --role desk_agent --claimed; }
+expect "not in the team's queue" "$(ok lea inbox "$w" --type equipment_request --role desk_agent | names)" ""
+expect "in the team's claimed rows, with its holder" "$(claimed lea | j '[.items[] | "\(.name) \(.fields.f_handler)"] | join(" ")')" "$held user:sam"
+expect "lea may hand it back (a colleague may release)" "$(claimed lea | j '.items[0].moves // [] | join(" ")')" "queue"
+expect "deciding is withheld from lea: sam holds it" "$(claimed lea | j '[.items[0].withheld // [] | .[] | "\(.to_state):\(.reason)"] | join(" ")')" \
+  "fulfilled:WITHHELD_REASON_CLAIMED_BY_OTHER declined:WITHHELD_REASON_CLAIMED_BY_OTHER"
+expect "sam, who holds it: his moves, nothing withheld" "$(claimed sam | j '"\(.items[0].moves // [] | join(" ")) \(.items[0].withheld // [] | length)"')" "fulfilled declined queue 0"
+expect "the claimed rows counted" "$(ok lea inbox "$w" --type equipment_request --role desk_agent --claimed --count | j .count)" "1"
+own=$(ok sam item create --type equipment_request@2 --set "f_title=Dock $w" | j .item.name)
+queued() { ok "$1" inbox "$w" --type equipment_request --role desk_agent; }
+expect "sam's own request is in the team's queue" "$(queued sam | names)" "$own"
+expect "taking it is withheld from him: his own request" "$(queued sam | j '[.items[0].withheld // [] | .[] | "\(.to_state):\(.reason)"] | join(" ")')" "in_hand:WITHHELD_REASON_OWN_REQUEST"
+expect "his one move there: withdraw it" "$(queued sam | j '.items[0].moves // [] | join(" ")')" "withdrawn"
+expect "lea may take it; nothing withheld from her" "$(queued lea | j '"\(.items[0].moves // [] | join(" ")) \(.items[0].withheld // [] | length)"')" "in_hand 0"
+refuse lea "INVALID_ARGUMENT INVALID_REQUEST" inbox --claimed
+
+# ---------------------------------------------------------------------------
 # The Inbox for people, PR 1b: words for people on the Type. approval@2 is
 # approval@1 with labels: GetType sends them, and the reading names the
 # move by its label.
