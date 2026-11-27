@@ -201,6 +201,44 @@ describe("whyYours", () => {
   });
 });
 
+// Sent back to the requester (track 1 item 5, step 5): a state whose Type
+// says waits_on_requester (GetType), and the caller is the Item's
+// requester. Two comparisons of what the data says; no rule is evaluated.
+describe("whyYours: sent back to you", () => {
+  const helpdesk = create(TypeSchema, {
+    name: typeName("case", 1),
+    typeId: "case",
+    version: 1,
+    fields: [{ id: "f_title", type: FieldType.STRING }, { id: "f_agent", type: FieldType.PRINCIPAL }],
+    states: [
+      { id: "open", category: StateCategory.WAITING },
+      { id: "asked", category: StateCategory.WAITING, waitsOnRequester: true },
+    ],
+  });
+  const asked = (init: { creator: string; creatorOnBehalfOf?: string; fields?: Record<string, string> }) =>
+    item({ name: itemName(50), type: helpdesk.name, state: "asked", ...init });
+
+  test("the requester, in a state that waits on its requester: sent back to you", () => {
+    expect(whyYours(me, helpdesk, asked({ creator: "customer:kim" }), "customer:kim")).toBe("sent back to you");
+    expect(whyYours(me, helpdesk, asked({ creator: "user:ana" }), "user:ana")).toBe("sent back to you");
+    // An agent created it for kim: kim asked for it.
+    expect(whyYours(me, helpdesk, asked({ creator: "agent:portal-bot", creatorOnBehalfOf: "customer:kim" }), "customer:kim")).toBe("sent back to you");
+  });
+
+  test("it says that before the fields that hold the caller", () => {
+    expect(whyYours(me, helpdesk, asked({ creator: "user:ana", fields: { f_agent: "user:ana" } }), "user:ana")).toBe("sent back to you");
+  });
+
+  test("not for someone else, not in another state, not on a role's tab", () => {
+    expect(whyYours(me, helpdesk, asked({ creator: "customer:kim" }), "customer:lee")).toBe("");
+    expect(whyYours(me, helpdesk, asked({ creator: "agent:portal-bot", creatorOnBehalfOf: "customer:kim" }), "agent:portal-bot")).toBe("");
+    const open = item({ name: itemName(51), type: helpdesk.name, state: "open", creator: "user:ana" });
+    expect(whyYours(me, helpdesk, open, "user:ana")).toBe("");
+    expect(whyYours(finance, helpdesk, asked({ creator: "user:fay" }), "user:fay")).toBe("for your team (finance)");
+    expect(whyYours(me, undefined, asked({ creator: "user:ana" }), "user:ana")).toBe("");
+  });
+});
+
 describe("askedBy", () => {
   test("the creator; the user an agent created it for, when there is one", () => {
     expect(askedBy(item({ name: itemName(40), creator: "user:ana" }))).toBe("user:ana");
