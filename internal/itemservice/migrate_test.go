@@ -595,7 +595,10 @@ func (w migWorld) hooked(t *testing.T, version int, path ...string) uuid.UUID {
 // under the version it would move to. Nothing runs the workflow here, so a
 // hold stays open and an action stays unfinished. An action only the new
 // version declares, on the state the Item entered under the old one, is
-// not owed for that entry (step 3a): no problem.
+// not owed for that entry (step 3a): no problem. A plain timer on the
+// state, under either version, holds nothing back either (step 3b): the
+// workflow reloads under the new version. (An acting timer still does:
+// migrate_timers_test.go.)
 func TestMigrate_Quiet(t *testing.T) {
 	cases := []struct {
 		name string
@@ -608,9 +611,9 @@ func TestMigrate_Quiet(t *testing.T) {
 		{"an action unfinished", [3]bool{false, true, false}, [3]bool{false, true, false}, []string{"review", "ordered"}, lifecycle.ActionUnfinished},
 		{"an action only the new version declares, on the state the Item is in",
 			[3]bool{false, false, false}, [3]bool{false, true, false}, []string{"review", "ordered"}, ""},
-		{"a timer on its state", [3]bool{false, false, true}, [3]bool{false, false, true}, []string{"review", "waiting"}, lifecycle.HasTimer},
-		{"a timer only the new version declares", [3]bool{false, false, false}, [3]bool{false, false, true}, []string{"review", "waiting"}, lifecycle.HasTimer},
-		{"a timer only the old version declares", [3]bool{false, false, true}, [3]bool{false, false, false}, []string{"review", "waiting"}, lifecycle.HasTimer},
+		{"a timer on its state", [3]bool{false, false, true}, [3]bool{false, false, true}, []string{"review", "waiting"}, ""},
+		{"a timer only the new version declares", [3]bool{false, false, false}, [3]bool{false, false, true}, []string{"review", "waiting"}, ""},
+		{"a timer only the old version declares", [3]bool{false, false, true}, [3]bool{false, false, false}, []string{"review", "waiting"}, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
