@@ -8,7 +8,7 @@
 //   2. ana, with nothing waiting below a place, sees the empty state.
 //   3. bob, an approver with 51 waiting below a place, sees "50+" and
 //      reads the next page with More.
-//   4. kim, a customer, gets one sentence and no call.
+//   4. kim, a customer: one tab, and the page asks for her own view only.
 //   5. sam claims an equipment request from the desk agents' queue; lea, a
 //      desk agent too, cannot decide it; sam releases it and it is back at
 //      the end of the queue (equipment_request@1, the first Type in types/
@@ -132,22 +132,29 @@ test("bob has 51 approvals waiting below a place: 50+ on the tab, and More loads
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
-test("kim, a customer: one sentence, and the page asks the kernel nothing", async ({ page }) => {
+// Since step 5 a customer's Inbox asks like anyone's: who she is, her one
+// tab's number, and her own view. Never a role's queue: she holds none.
+test("kim, a customer: one tab, and the page asks for her own view only", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("Act as").selectOption("kim");
   await expect(page.getByRole("banner")).toContainText("acting as kim");
   // Only what the Inbox itself asks counts: the page before it has read.
   await page.waitForLoadState("networkidle");
-  const calls: string[] = [];
+  const calls: { rpc: string; body: string }[] = [];
   page.on("request", (req) => {
-    if (req.url().includes("/api/")) calls.push(req.url().split("/").pop()!);
+    if (req.url().includes("/api/")) calls.push({ rpc: req.url().split("/").pop()!, body: req.postData() ?? "" });
   });
   await page.getByRole("link", { name: "Inbox" }).click();
   await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
-  await expect(page.getByText("Nothing waits on you here yet.")).toBeVisible();
-  await expect(page.getByRole("tab")).toHaveCount(0);
+  await expect(page.getByRole("tab")).toHaveText([/^Waiting on me\s*\d+\+?$/]);
+  await expect(page.getByText("Nothing waits on you here yet.")).toHaveCount(0);
   await page.waitForLoadState("networkidle");
-  expect(calls).toEqual([]);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  expect(new Set(calls.map((c) => c.rpc))).toEqual(new Set(["WhoAmI", "CountItems", "SearchItems"]));
+  for (const c of calls.filter((c) => c.rpc !== "WhoAmI")) {
+    expect(c.body).toContain('"waitingOn":"me"');
+    expect(c.body).not.toContain("role:");
+  }
 });
 
 test("sam claims an equipment request; lea cannot decide it; sam releases it to the end of the queue", async ({ page, baseURL }) => {
