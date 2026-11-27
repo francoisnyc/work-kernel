@@ -81,8 +81,10 @@ test("bob approves ana's vacation request from the inbox", async ({ page, baseUR
   await page.getByRole("link", { name: "Inbox" }).click();
   const row = page.getByRole("listitem").filter({ hasText: comment });
   await expect(row).toBeVisible();
-  // The row offers the approver's moves only.
+  // The row offers the approver's moves only: the first as its main
+  // button, the other behind More moves (the Inbox for people, PR 2b).
   await expect(row.getByRole("button", { name: "Move to approved" })).toBeVisible();
+  await row.getByRole("button", { name: "More moves" }).click();
   await expect(row.getByRole("button", { name: "Move to rejected" })).toBeVisible();
   await expect(row.getByRole("button", { name: "Move to withdrawn" })).toHaveCount(0);
 
