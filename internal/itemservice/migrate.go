@@ -243,9 +243,9 @@ func migrationFacts(ctx context.Context, tx pgx.Tx, id uuid.UUID, it lockedItem)
 }
 
 // notQuiet reports what makes the Item not quiet: an open hold; an action
-// or enrich hook, a reaction or an undo not finished; a timer on its state
-// under the version it is on (old) or the one it would move to (latest);
-// an event still in the outbox.
+// or enrich hook, a reaction or an undo not finished; an acting timer on
+// its state under the version it is on (old) or the one it would move to
+// (latest); an event still in the outbox.
 //
 // Pending work is read as the workflow's loader reads it: each entry under
 // the version it was made under (step 3a). What the latest version adds
@@ -314,9 +314,10 @@ func (k *Service) notQuiet(ctx context.Context, tx pgx.Tx, id uuid.UUID, it lock
 	if len(undos) > 0 || len(reactions) > 0 {
 		add(lifecycle.ReactionUnfinished)
 	}
-	// A timer under either version: not migrated in this step (step 3b).
+	// An acting timer under either version (step 3b): not migrated. A
+	// plain timer or a timer at an instant is reloaded by the workflow.
 	for _, ty := range []*typedef.Type{old, latest} {
-		if lifecycle.HasStateTimer(ty, it.State) {
+		if lifecycle.HasActingTimer(ty, it.State) {
 			add(lifecycle.HasTimer)
 		}
 	}
