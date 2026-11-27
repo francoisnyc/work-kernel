@@ -308,8 +308,8 @@ func TestPli_Types(t *testing.T) {
 	for _, ty := range list["types"].([]any) {
 		names = append(names, ty.(map[string]any)["name"].(string))
 	}
-	if !slices.Contains(names, "namespaces/acme/types/ticket/versions/3") || len(names) != 69 {
-		t.Errorf("type list = %v, want the 69 Types of types/", names)
+	if !slices.Contains(names, "namespaces/acme/types/ticket/versions/3") || len(names) != 70 {
+		t.Errorf("type list = %v, want the 70 Types of types/", names)
 	}
 	ty := ok(t, "bob", "type", "get", "ticket@3")["type"].(map[string]any)
 	if ty["initial_state"] != "triage" {

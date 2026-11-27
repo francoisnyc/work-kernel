@@ -201,6 +201,14 @@ func TestOlderVersions_TheRepositoryTypes(t *testing.T) {
 			}
 			continue
 		}
+		// incident@6 (track 1 item 5, step 5) is incident@5 with waits_on
+		// on one state: it carries incident@5's start block.
+		if ty.ID == "incident" && ty.Version == 6 {
+			if got := keeps(stored[name(ty.ID, ty.Version)]); got != "all" {
+				t.Errorf("incident@6 start.older_versions = %v, want all, as incident@5", got)
+			}
+			continue
+		}
 		if got := keeps(stored[name(ty.ID, ty.Version)]); got != nil {
 			t.Errorf("%s@%d has start.older_versions = %v; only the new latest versions should", ty.ID, ty.Version, got)
 		}
@@ -212,8 +220,11 @@ func TestOlderVersions_TheRepositoryTypes(t *testing.T) {
 	}
 	for id, before := range newLatest {
 		want := before + 1
-		if id == "ticket" {
+		switch id {
+		case "ticket":
 			want = 9
+		case "incident":
+			want = 6
 		}
 		if latest[id] != want {
 			t.Errorf("the latest %s in types/ is @%d, want @%d", id, latest[id], want)
