@@ -38,7 +38,8 @@
       "properties": {
         "allowed": {"description": "role:<name> or principal:user:<id>.", "$ref": "#/$defs/texts"}
       }
-    }
+    },
+    "summary": {"description": "A presentation hint: the fields that summarise an Item under its title (a list row, a card), at most 3. It enforces nothing.", "$ref": "#/$defs/texts"}
   },
   "$defs": {
     "text": {"description": "A text value. typedef reads any scalar as text for now.", "type": ["string", "number", "boolean", "null"]},
@@ -78,7 +79,9 @@
         "multiple": {"description": "The field holds a set of values.", "$ref": "#/$defs/flag"},
         "max": {"description": "A multiple field's most values (0: no limit).", "$ref": "#/$defs/count"},
         "writable_by": {"$ref": "#/$defs/writableBy"},
-        "unique_among_siblings": {"description": "Fields whose values are unique among the Items of one container.", "$ref": "#/$defs/texts"}
+        "unique_among_siblings": {"description": "Fields whose values are unique among the Items of one container.", "$ref": "#/$defs/texts"},
+        "label": {"description": "A presentation hint: a short name for people, plain text of at most 60 characters. It enforces nothing.", "$ref": "#/$defs/text"},
+        "help": {"description": "A presentation hint: a line of help for people, plain text of at most 280 characters. It enforces nothing.", "$ref": "#/$defs/text"}
       }
     },
     "state": {
@@ -94,7 +97,10 @@
         "waits_on": {"description": "Whom an Item in this state waits on besides whoever its moves name: requester, the person who asked for it.", "$ref": "#/$defs/text"},
         "timer": {"$ref": "#/$defs/timer"},
         "at": {"$ref": "#/$defs/atTimer"},
-        "acting": {"description": "Timers that act without leaving the state.", "type": ["array", "null"], "items": {"$ref": "#/$defs/actingTimer"}}
+        "acting": {"description": "Timers that act without leaving the state.", "type": ["array", "null"], "items": {"$ref": "#/$defs/actingTimer"}},
+        "label": {"description": "A presentation hint: a short name for people, plain text of at most 60 characters. It enforces nothing.", "$ref": "#/$defs/text"},
+        "help": {"description": "A presentation hint: a line of help for people, plain text of at most 280 characters. It enforces nothing.", "$ref": "#/$defs/text"},
+        "due": {"description": "A presentation hint: the datetime field whose instant an Item in this state is due by. It enforces nothing.", "$ref": "#/$defs/text"}
       }
     },
     "start": {
@@ -159,7 +165,10 @@
         "release": {"description": "Gives up the claim of the state the move leaves: allowed alone decides it. It must clear the claim field.", "$ref": "#/$defs/flag"},
         "escape": {"description": "May leave a state while a hold is open.", "$ref": "#/$defs/flag"},
         "clears": {"description": "Fields the move unsets.", "$ref": "#/$defs/texts"},
-        "sets": {"description": "Computed effects: field -> CEL expression.", "$ref": "#/$defs/textMap"}
+        "sets": {"description": "Computed effects: field -> CEL expression.", "$ref": "#/$defs/textMap"},
+        "label": {"description": "A presentation hint: a short name for people, plain text of at most 60 characters. It enforces nothing.", "$ref": "#/$defs/text"},
+        "help": {"description": "A presentation hint: a line of help for people, plain text of at most 280 characters. It enforces nothing.", "$ref": "#/$defs/text"},
+        "primary": {"description": "A presentation hint: the main move out of its state, for a screen's one button; at most one per state, on a move a person makes. It decides nothing about who may make it.", "$ref": "#/$defs/flag"}
       }
     },
     "hook": {
