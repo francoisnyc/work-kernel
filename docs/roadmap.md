@@ -612,6 +612,49 @@ attachments, so an agent can put files and links on an Item. Attachments
 are not built: a fourth unbuilt piece beside the three under "What every
 way in needs".
 
+**Cards on a surface the company does not trust** (a design note before
+any card is built; Slack is the owner's case at work, and the same holds
+for Teams, email and any chat client). The rules stay behind the screen,
+so a card can be offered where the surface itself is untrusted. Three
+risks, each answered by the kernel, not by the surface:
+
+1. **What the card shows (confidentiality).** Each surface is a destination
+   with its own clearance, beside the person: `policy.Project` takes the
+   surface into account (kernel rule: every outbound path goes through
+   it). Closed by default: a title, who asks, and a link to the kernel's
+   own screen; a Type names the fields that may leave to a given surface.
+   The details appear only after the person signs in to the kernel's
+   screen. As ventoux's sink policies, in the kernel's terms.
+2. **Who really decided (integrity).** The surface vouches for who clicked;
+   if the surface, an account on it or its app is compromised, that claim
+   is worth nothing. So:
+   - the clerk judges every click as any write: who may move, guards,
+     closed fields. A forged click can do no more than that person could;
+   - each card carries the Item's version (`etag`); a click on an old card
+     is refused, so nothing is decided twice and no click replays;
+   - **a move can require a strong sign-in.** The Type marks it (for
+     example the high-risk class proposed with `pli check`); on an
+     untrusted surface its button opens a signed link to the kernel's
+     screen (single-use, one person, one Item, one move, an expiry: "Work
+     done from a chat", below), and the person confirms behind the
+     company's single sign-on; the click is still judged by the rules;
+   - the surface's app is a service principal of its own, closed by
+     default: it relays decisions only for people it is mapped to, only
+     for moves the Type allows from that surface, and writes nothing
+     itself;
+   - the history records the surface ("approved by Sam, via Slack"), as it
+     records `on_behalf_of`.
+3. **The surface as a phishing channel.** A card never asks for a
+   credential and links only to the kernel's own address; text written by
+   a requester or an agent is escaped for the surface's markup (a link
+   dressed as another), as it is rendered inertly in the browser (borrowed
+   item 7 above).
+
+Not built, three pieces: projection per surface; a strong sign-in
+required by a move; the surface in the history. Signed links are the
+fourth, already planned. Low-risk decisions may then be made on the
+surface; high-risk ones always finish behind the company's sign-in.
+
 Depends on track 1, item 5: without queues, a binding claim and "waiting
 on me", the kernel adds little over the inboxes that exist. Proposed for
 the six weeks, after item 5, as part of the landing (the plan's open
