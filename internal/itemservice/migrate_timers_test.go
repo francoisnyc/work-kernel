@@ -102,10 +102,11 @@ func TestMigrate_Timers_ATimerAtAnInstantNoLongerRefuses(t *testing.T) {
 }
 
 // The old version's timer cannot move a migrated Item. Sent as the old run
-// would send it, with the item_seq it last saw, it is stale: the migrate
-// moved item_seq, so the run looks again (and hears of the migrate). Sent
-// with the current item_seq, it names the old version: invalid. Either
-// way nothing is written.
+// would send it, with the item_seq it last saw, or with the current one,
+// it names the old version: invalid. (The internal door checks the version
+// a kernel write names before its expected item_seq, so the version answers
+// first.) Either way nothing is written; the run hands over once it hears
+// of the migrate.
 func TestMigrate_Timers_TheOldTimersMoveIsRefused(t *testing.T) {
 	w := newMigWorld(t)
 	typ := w.id("hk")
@@ -129,8 +130,8 @@ func TestMigrate_Timers_TheOldTimersMoveIsRefused(t *testing.T) {
 		})
 		return err
 	}
-	if err := fire(se.ItemSeq); !errors.Is(err, itemservice.ErrStale) {
-		t.Errorf("the old timer with the item_seq it saw before the migrate: %v, want ErrStale", err)
+	if err := fire(se.ItemSeq); !errors.Is(err, itemservice.ErrInvalid) {
+		t.Errorf("the old timer with the item_seq it saw before the migrate: %v, want ErrInvalid (it names version 1)", err)
 	}
 	if err := fire(w.entry(t, id).ItemSeq); !errors.Is(err, itemservice.ErrInvalid) {
 		t.Errorf("the old timer with the current item_seq: %v, want ErrInvalid (it names version 1)", err)
