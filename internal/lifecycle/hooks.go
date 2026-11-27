@@ -47,6 +47,13 @@ func StartsWorkflow(t *typedef.Type, ev Event) bool {
 	if ev.Op == OpTransitionRequested {
 		return true
 	}
+	// A migrate (track 1, item 6, step 3b): a run alive under the old
+	// version must reload under the new one, and a new version may give
+	// the Item's state a timer that needs a run to arm it. A run with
+	// nothing to do completes at once.
+	if ev.Op == OpMigrated {
+		return true
+	}
 	// A hold closed any other way than allowed (denied, failed, canceled
 	// by an escape) on a Type whose held reaction holds a move from this
 	// state: the reaction may have committed, and its undo must run even

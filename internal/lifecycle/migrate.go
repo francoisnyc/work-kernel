@@ -28,7 +28,7 @@ const (
 	MigrateHeld          MigrationCheck = "held"                   // an open hold
 	ActionUnfinished     MigrationCheck = "action_unfinished"      // an action or enrich hook has not finished, under either version
 	ReactionUnfinished   MigrationCheck = "reaction_unfinished"    // a reaction or an undo has not finished, under either version
-	HasTimer             MigrationCheck = "has_timer"              // the state has a timer, under either version
+	HasTimer             MigrationCheck = "has_timer"              // the state has an acting timer, under either version
 	EventsUndelivered    MigrationCheck = "events_undelivered"     // events of the Item are still in the outbox
 	StateMissing         MigrationCheck = "state_missing"          // the new version has no such state
 	FieldMissing         MigrationCheck = "field_missing"          // a field holding a value is not in the new version
@@ -89,14 +89,13 @@ func SortMisfits(ms []Misfit) {
 	slices.SortStableFunc(ms, func(a, b Misfit) int { return cmp.Compare(checkRank[a.Check], checkRank[b.Check]) })
 }
 
-// HasStateTimer reports whether a state has anything that plays out over
-// time while an Item stays in it: a timer, a timer at a field's instant,
-// or an acting timer of either sort. An Item in such a state is not
-// migrated in this step (track 1, item 6, step 3 will).
-func HasStateTimer(t *typedef.Type, state string) bool {
-	_, timer := TimerFor(t, state)
-	_, at := AtTimerFor(t, state)
-	return timer || at || len(ActingTimers(t, state)) > 0 || len(ActingAtTimers(t, state)) > 0
+// HasActingTimer reports whether a state has an acting timer, on a
+// schedule or at an instant. An Item in such a state is not migrated (track
+// 1, item 6, step 3b): a run started just before a migrate could not
+// record itself after it, so it could act twice. A plain timer, or a timer
+// at a field's instant, is reloaded by the workflow under the new version.
+func HasActingTimer(t *typedef.Type, state string) bool {
+	return len(ActingTimers(t, state)) > 0 || len(ActingAtTimers(t, state)) > 0
 }
 
 // Fits reports every reason an Item on version from does not fit version
