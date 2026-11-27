@@ -42,8 +42,10 @@ const noOpenHold = `not exists (select 1 from item_holds h where h.item_id = m.i
 
 // waitingConds checks a waiting_on value and returns its SQL conditions,
 // adding their arguments to args (all named w_…). all is every registered
-// Type version.
-func (k *Service) waitingConds(ctx context.Context, p item.Principal, all []*typedef.Type, on string,
+// Type version. claimed (Filter.Claimed, with a role only) turns a role's
+// queue into its claimed rows: the same moves, out of the states with a
+// claim instead of those without.
+func (k *Service) waitingConds(ctx context.Context, p item.Principal, all []*typedef.Type, on string, claimed bool,
 	args pgx.NamedArgs) ([]string, error) {
 	invalid := func(reason string) error { return &InvalidError{Path: "filter.waiting_on", Reason: reason} }
 	role, isRole := strings.CutPrefix(on, typedef.AllowedRolePrefix)
@@ -56,6 +58,9 @@ func (k *Service) waitingConds(ctx context.Context, p item.Principal, all []*typ
 	customer := policy.CustomerOf(p) != ""
 	if customer && isRole {
 		return nil, invalid("a customer has no role's queue; ask for me")
+	}
+	if claimed && !isRole {
+		return nil, &InvalidError{Path: "filter.claimed", Reason: "want it with waiting_on role:<name>, a role's claimed rows"}
 	}
 
 	who := policy.Who{Actor: p.Actor, OnBehalfOf: p.OnBehalfOf}
@@ -99,8 +104,9 @@ func (k *Service) waitingConds(ctx context.Context, p item.Principal, all []*typ
 				continue // a customer's moves never make anything wait on them
 			}
 			for _, tr := range policy.WaitingMoves(t, st.ID) {
-				// A claimed Item is its claimant's, not the queue's.
-				cond, ok := "true", st.Claim == "" && slices.Contains(tr.Allowed, typedef.AllowedRolePrefix+role)
+				// A claimed Item is its claimant's, not the queue's; the
+				// role's claimed rows are exactly those (whoever holds them).
+				cond, ok := "true", (st.Claim != "") == claimed && slices.Contains(tr.Allowed, typedef.AllowedRolePrefix+role)
 				if !isRole {
 					cond, ok = moveCond(st, tr, who, fields)
 				}

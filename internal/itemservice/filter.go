@@ -65,7 +65,7 @@ type FieldFilter struct {
 // empty reports whether the filter says nothing.
 func (f Filter) empty() bool {
 	return len(f.TypeIDs) == 0 && len(f.States) == 0 && len(f.Categories) == 0 && len(f.Fields) == 0 &&
-		len(f.Links) == 0 && f.WaitingOn == "" && f.In == nil
+		len(f.Links) == 0 && f.WaitingOn == "" && f.In == nil && !f.Claimed
 }
 
 // sqlFilter is a Filter checked against the registered Types and turned into
@@ -159,8 +159,11 @@ func (k *Service) resolveFilter(ctx context.Context, p item.Principal, f Filter)
 			out.conds = append(out.conds, rowListing(all, ff.Field, fmt.Sprintf("f_vis_%d", i), out.args))
 		}
 	}
+	if f.Claimed && f.WaitingOn == "" {
+		return out, &InvalidError{Path: "filter.claimed", Reason: "want it with waiting_on role:<name>, a role's claimed rows"}
+	}
 	if f.WaitingOn != "" {
-		conds, err := k.waitingConds(ctx, p, all, f.WaitingOn, out.args)
+		conds, err := k.waitingConds(ctx, p, all, f.WaitingOn, f.Claimed, out.args)
 		if err != nil {
 			return out, err
 		}

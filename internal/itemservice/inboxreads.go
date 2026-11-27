@@ -114,7 +114,8 @@ func (k *Service) WhoAmI(ctx context.Context, p item.Principal) (Me, error) {
 
 // fillMoves sets Moves on each Item of a waiting_on answer: the moves out
 // of its state that the principal may make (policy.Moves), in the Type's
-// order. Roles are read once; the creators of the Items' containers in one
+// order; and Withheld, the moves their `allowed` lets in that except or
+// the claim refuses them (policy.Withheld). Roles are read once; the creators of the Items' containers in one
 // query (for except: [container_creator]).
 func (k *Service) fillMoves(ctx context.Context, p item.Principal, items []item.Item) error {
 	if len(items) == 0 {
@@ -170,6 +171,7 @@ func (k *Service) fillMoves(ctx context.Context, p item.Principal, items []item.
 			facts.ContainerCreatedBy, facts.ContainerCreatedOnBehalfOf = c.by, c.behalf
 		}
 		it.Moves = policy.Moves(ty, it.State, who, facts)
+		it.Withheld = policy.Withheld(ty, it.State, who, facts)
 	}
 	return nil
 }

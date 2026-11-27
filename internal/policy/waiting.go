@@ -192,5 +192,33 @@ const (
 // someone else's, not withheld, and is left out; so is every move for a
 // customer. It shares MayMove's pieces, so it cannot disagree with Moves.
 func Withheld(ty *typedef.Type, state string, who Who, it ItemFacts) []item.WithheldMove {
-	return []item.WithheldMove{} // stub: Phase B
+	out := []item.WithheldMove{}
+	if CustomerOf(item.Principal{Actor: who.Actor, OnBehalfOf: who.OnBehalfOf}) != "" {
+		return out
+	}
+	st, _ := ty.State(state)
+	for _, tr := range ty.Transitions {
+		if tr.From != state || MayMove(st, tr, who, it) {
+			continue
+		}
+		// What `allowed` alone says: tr is a copy, so clearing its except
+		// list changes nothing in the Type.
+		open := tr
+		open.Except = nil
+		if !MayTransition(open, who, it) {
+			continue // someone else's move, not withheld from them
+		}
+		// The first refusal, in MayMove's order: except, then the claim.
+		reason := ReasonClaimedByOther
+		switch {
+		case slices.Contains(tr.Except, typedef.AllowedCreator) &&
+			TookPartInCreation(who.Actor, who.OnBehalfOf, it.CreatedBy, it.CreatedOnBehalfOf):
+			reason = ReasonOwnRequest
+		case slices.Contains(tr.Except, typedef.AllowedContainerCreator) &&
+			TookPartInCreation(who.Actor, who.OnBehalfOf, it.ContainerCreatedBy, it.ContainerCreatedOnBehalfOf):
+			reason = ReasonOwnContainer
+		}
+		out = append(out, item.WithheldMove{ToState: tr.To, Reason: reason})
+	}
+	return out
 }

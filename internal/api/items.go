@@ -14,6 +14,7 @@ import (
 	kernelv1 "github.com/francoisnyc/work-kernel/gen/kernel/v1"
 	"github.com/francoisnyc/work-kernel/internal/item"
 	"github.com/francoisnyc/work-kernel/internal/itemservice"
+	"github.com/francoisnyc/work-kernel/internal/policy"
 	"github.com/francoisnyc/work-kernel/internal/typedef"
 )
 
@@ -88,7 +89,9 @@ func (s *server) view(ctx context.Context, p item.Principal, it item.Item) (*ker
 		out.StateTime = timestamppb.New(it.StateEnteredAt)
 	}
 	out.Moves = it.Moves
-	// stub (Inbox PR 2a, Phase B): Item.withheld is not filled yet.
+	for _, w := range it.Withheld {
+		out.Withheld = append(out.Withheld, &kernelv1.WithheldMove{ToState: w.ToState, Reason: withheldReasons[w.Reason]})
+	}
 	// The category is the Type version's, for the state the Item is in.
 	if st, ok := ty.State(it.State); ok {
 		out.Category = categories[st.Category]
@@ -458,5 +461,9 @@ func (s *server) views(ctx context.Context, p item.Principal, its []item.Item) (
 }
 
 // withheldReasons maps policy's reason codes (item.WithheldMove.Reason) to
-// kernel.v1's WithheldReason. stub (Inbox PR 2a, Phase B): empty.
-var withheldReasons = map[string]kernelv1.WithheldReason{}
+// kernel.v1's WithheldReason.
+var withheldReasons = map[string]kernelv1.WithheldReason{
+	policy.ReasonOwnRequest:     kernelv1.WithheldReason_WITHHELD_REASON_OWN_REQUEST,
+	policy.ReasonOwnContainer:   kernelv1.WithheldReason_WITHHELD_REASON_OWN_CONTAINER,
+	policy.ReasonClaimedByOther: kernelv1.WithheldReason_WITHHELD_REASON_CLAIMED_BY_OTHER,
+}

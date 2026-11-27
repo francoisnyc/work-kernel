@@ -21,7 +21,7 @@ type filter struct{ itemservice.Filter }
 
 func (f filter) empty() bool {
 	return len(f.TypeIDs) == 0 && len(f.States) == 0 && len(f.Categories) == 0 && len(f.Fields) == 0 &&
-		len(f.Links) == 0 && f.WaitingOn == "" && f.In == nil
+		len(f.Links) == 0 && f.WaitingOn == "" && f.In == nil && !f.Claimed
 }
 
 // parseTypeID reads a Type's name without a version: namespaces/{ns}/types/{type}.
