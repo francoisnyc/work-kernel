@@ -4876,7 +4876,7 @@ people (`docs/plans/inbox-for-people.md`); item 6 step 4 (bulk and status) when 
 
 ## 2026-11-27 — Track 1, item 5, step 5, PR 2: incident@6 and the screen (Phases B to D)
 
-**Built:** `types/incident.v6.yaml`, `incident@5` with `waits_on: requester` on `waiting_for_customer` and nothing else
+**Built (PR #107):** `types/incident.v6.yaml`, `incident@5` with `waits_on: requester` on `waiting_for_customer` and nothing else
 (it keeps v5's start block, so older incidents stay open to new Items). The web Inbox's customer branch is gone: a
 customer's Inbox asks like anyone's, with one tab. The label "sent back to you", from data only (the state's
 `waits_on_requester`, and the caller is the requester). A row with no move links "Open it to answer" to the Item, for

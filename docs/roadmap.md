@@ -320,8 +320,9 @@ attack that found it as its test:
         for staff and customers (a customer's `waiting_on: me`; `role:`
         still refused); `State.waits_on_requester` in `GetType`; the
         reading sentence. Test Types only.
-      - **PR 2, incident@6 and the screen. Built** (`docs/design.md`,
-        "Sent back to the requester, as built", its PR 2 part):
+      - **PR 2, incident@6 and the screen. Built** (PR #107;
+        `docs/design.md`, "Sent back to the requester, as built", its
+        PR 2 part):
         `incident@6`, whose `waiting_for_customer` waits on the
         requester, so a customer has an Inbox on the stack; the web
         Inbox's customer branch gone; the label "sent back to you",
