@@ -26,6 +26,7 @@ import {
   type SearchItemsRequestSchema,
   type TransitionItemRequestSchema,
 } from "../gen/kernel/v1/kernel_pb";
+import { itemId } from "../model/typeinfo";
 import { NS, item, itemName, refusal, ticket, typeName } from "../test/fixtures";
 import { InboxPage } from "./InboxPage";
 
@@ -82,6 +83,34 @@ function claimed(n: number, title: string, by: string, moves = ["approved", "rej
   });
 }
 
+// An incident-like case: in `asked` it waits on its requester (step 5,
+// GetType's waits_on_requester); the requester answers by replying, so
+// she has no move there.
+const helpCase = create(TypeSchema, {
+  name: typeName("helpcase", 1),
+  typeId: "helpcase",
+  version: 1,
+  fields: [{ id: "f_title", type: FieldType.STRING }],
+  states: [
+    { id: "open", category: StateCategory.WAITING },
+    { id: "asked", category: StateCategory.WAITING, waitsOnRequester: true },
+  ],
+  transitions: [{ fromState: "asked", toState: "open" }],
+});
+
+function sentBack(n: number, title: string, requester: string): Item {
+  return item({
+    name: itemName(n),
+    type: helpCase.name,
+    state: "asked",
+    category: StateCategory.WAITING,
+    creator: requester,
+    fields: { f_title: title },
+    stateTime: hoursAgo(3),
+    moves: [],
+  });
+}
+
 type SearchReq = MessageInitShape<typeof SearchItemsRequestSchema>;
 type CountReq = MessageInitShape<typeof CountItemsRequestSchema>;
 type MoveReq = MessageInitShape<typeof TransitionItemRequestSchema>;
@@ -109,7 +138,7 @@ function kernel(opts: {
 
 function show(k: ReturnType<typeof kernel>, principal = "user:fay") {
   const user = { name: principal.split(":")[1]!, token: "t", principal, namespace: "acme", roles: [] };
-  const session = new Session(user, k as unknown as Api, [purchase, ticket], ["user:fay", "user:gus"]);
+  const session = new Session(user, k as unknown as Api, [purchase, ticket, helpCase], ["user:fay", "user:gus"]);
   return render(
     <SessionProvider value={session}>
       <InboxPage />
@@ -118,7 +147,9 @@ function show(k: ReturnType<typeof kernel>, principal = "user:fay") {
 }
 
 const tab = (name: RegExp) => screen.getByRole("tab", { name });
-const rows = () => within(screen.getByRole("list", { name: "Inbox" })).queryAllByRole("link");
+// Each row's title: the link that opens the row (a row may hold other
+// links, such as "Open it to answer").
+const rows = () => [...screen.getByRole("list", { name: "Inbox" }).querySelectorAll<HTMLAnchorElement>(":scope > li > a")];
 const titles = () => rows().map((a) => a.textContent);
 const rowOf = (title: string) => screen.getByRole("link", { name: title }).closest("li")!;
 const buttonsOf = (title: string) =>
