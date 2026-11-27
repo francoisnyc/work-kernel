@@ -2021,6 +2021,23 @@ expect "lea fulfils it" "$(ok lea item transition "$eq" --to fulfilled | j .item
 expect "fulfilled: it waits on nobody" "$(ok lea inbox "$w" --type equipment_request --count | j .count) $(ok sam inbox "$w" --type equipment_request --role desk_agent --count | j .count)" "0 0"
 
 # ---------------------------------------------------------------------------
+# The Inbox for people, PR 1b: words for people on the Type. approval@2 is
+# approval@1 with labels: GetType sends them, and the reading names the
+# move by its label.
+# ---------------------------------------------------------------------------
+
+step "words for people: approval@2's moves carry labels and one primary; its reading starts the move with its label"
+expect "approve: its label, and primary" \
+	"$(ok ana type get approval@2 | j '[.type.transitions[] | select(.from_state == "pending" and .to_state == "approved") | "\(.label) \(.primary)"][0]')" "Approve true"
+expect "reject: its label, not primary" \
+	"$(ok ana type get approval@2 | j '[.type.transitions[] | select(.from_state == "pending" and .to_state == "rejected") | "\(.label) \(.primary // false)"][0]')" "Reject false"
+expect "pending's label" "$(ok ana type get approval@2 | j '[.type.states[] | select(.id == "pending") | .label][0]')" "Waiting for a decision"
+expect "approval@1 has none" "$(ok ana type get approval@1 | j '[.type.transitions[].label // empty] | length')" "0"
+ok ana type explain approval@2 >"$tmp/reading"
+grep -q '^Waiting for a decision (`pending`, active)$' "$tmp/reading" || fail "no labelled heading for pending:" "$(cat "$tmp/reading")"
+grep -q '^[0-9]*\. Approve: whoever `f_approver` names' "$tmp/reading" || fail "the move to approved does not start with its label:" "$(cat "$tmp/reading")"
+
+# ---------------------------------------------------------------------------
 # Ventoux V2b: draft Types checked against every registered version, with
 # nothing registered (pli type validate, ValidateTypes).
 # ---------------------------------------------------------------------------

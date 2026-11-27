@@ -22,6 +22,10 @@
 //      customer waits on its requester): it is in her Inbox, labelled "sent
 //      back to you", with no button and a link; she answers on its page with
 //      a reply, which brings it back to in_progress; it leaves her Inbox.
+//   7. sam takes and fulfils an equipment request whose moves carry labels
+//      (equipment_request@2, the Inbox for people, PR 1b): each button reads
+//      its move's label, "Take it", then "Mark fulfilled", "Decline" and
+//      "Hand back", instead of "Move to {state}".
 //
 // Run: docker compose up -d --build --wait, then `npm run e2e` in web/.
 import { expect, test, type Page } from "@playwright/test";
@@ -33,6 +37,7 @@ import {
   seedDeskQueue,
   seedEmptyPlace,
   seedEquipmentRequests,
+  seedLabelledEquipmentRequests,
   seedSentBack,
   withdrawAll,
 } from "./seed";
@@ -255,4 +260,31 @@ test("sam sends kim's incident back to her: in her Inbox, labelled; she answers 
   await openInbox(page, "kim");
   await expect(inbox(page)).toHaveAttribute("aria-busy", "false");
   await expect(row(page)).toHaveCount(0);
+});
+
+test("sam takes and fulfils an equipment request whose moves carry labels: each button reads its label", async ({ page, baseURL }) => {
+  const word = `lb${run}`;
+  const headset = `Headset ${word}`;
+  const made = await seedLabelledEquipmentRequests(baseURL!, [headset]);
+  asked.push(...made);
+  const row = (p: Page) => inbox(p).locator("> li").filter({ hasText: headset });
+
+  await openInbox(page, "sam");
+  await page.getByLabel("Order").selectOption("Newest waiting first");
+  await page.getByRole("tab", { name: /desk_agent/ }).click();
+  // In the queue, the one move a desk agent has reads "Take it".
+  await expect(row(page)).toContainText("equipment_request@2 · queue");
+  await expect(row(page).getByRole("button")).toHaveText(["Take it"]);
+
+  await row(page).getByRole("button", { name: "Take it" }).click();
+  await expect(page.getByRole("status")).toContainText("APPLIED");
+
+  // sam's now: the claimant's moves, by their labels, in the Type's order.
+  await page.getByRole("tab", { name: /Waiting on me/ }).click();
+  await expect(row(page)).toContainText("equipment_request@2 · in_hand");
+  await expect(row(page).getByRole("button")).toHaveText(["Mark fulfilled", "Decline", "Hand back"]);
+
+  await row(page).getByRole("button", { name: "Mark fulfilled" }).click();
+  await expect(page.getByRole("status")).toContainText("APPLIED");
+  expect((await api(baseURL!, "sam").getItem({ name: made[0]!.name })).item?.state).toBe("fulfilled");
 });
