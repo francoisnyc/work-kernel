@@ -169,6 +169,14 @@ message Item {
   // not listed. Never shares a move with moves. Filled exactly where moves
   // is, and never for a customer. A code only: it names nobody.
   repeated WithheldMove withheld = 17;
+  // Who put the Item in the state it is in: the actor of its create or of
+  // its latest transition, the event whose time is state_time (user:,
+  // agent:, system:timer, a hook or a reaction). Filled on every read and
+  // every write's answer, for whoever may read the Item's history: it is
+  // the actor that history shows for that event.
+  string state_actor = 18;
+  // The user that actor acted for, when an agent did; else empty.
+  string state_actor_on_behalf_of = 19;
 }
 
 // A move withheld from the caller, and why (Item.withheld).
