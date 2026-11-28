@@ -3,7 +3,7 @@
 //
 //   1. triage-bot, in a session for ana, gives ana's ticket a priority and
 //      moves it to where it waits on the approvers: bob's row reads "Agent
-//      request · for Ana"; its panel says "triage-bot, for Ana" and, under
+//      request · for Ana"; its panel says "Triage agent, for Ana" and, under
 //      the warning, what the agent wrote (the priority).
 //   2. The portal's agent opened kim's incident for her; sam sent it back
 //      to her: her row reads "Agent request · for you".
@@ -40,7 +40,7 @@ test("bob's row of ana's ticket that triage-bot moved for her: Agent request · 
 
   await inbox(page).getByRole("link", { name: title, exact: true }).click();
   const aside = page.getByRole("complementary", { name: title });
-  await expect(aside).toContainText("triage-bot, for Ana");
+  await expect(aside).toContainText("Triage agent, for Ana");
   const wrote = aside.getByRole("region", { name: "What the agent wrote" });
   await expect(wrote).toContainText("Written by an agent. Check it before you decide.");
   await expect(wrote).toContainText("f_priority");

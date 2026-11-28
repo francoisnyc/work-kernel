@@ -5,7 +5,7 @@ package typedef
 // kernel stores them and sends them out through GetType. This file refuses,
 // at load, a hint a screen could not use as written:
 //
-//   - label and help, on a field, a state and a transition: plain text
+//   - label and help, on the Type, a field, a state and a transition: plain text
 //     (one line, no control characters, no space at either end, none of
 //     < > or a backtick), a label 1 to 60 characters, a help 1 to 280
 //     (INVALID_VALUE);
@@ -38,6 +38,7 @@ const (
 
 // checkHints runs the checks above on the whole Type.
 func (t *Type) checkHints(r reporter) {
+	t.checkWords(r, "", "the Type", t.Label, t.Help)
 	labels := map[string]string{} // lower-case label -> the field that has it
 	for i, f := range t.Fields {
 		t.checkWords(r, at("fields", i), "field "+f.ID, f.Label, f.Help)
@@ -88,7 +89,7 @@ func (t *Type) checkWords(r reporter, p, what, label, help string) {
 			continue
 		}
 		if why := notPlainText(w.text, w.max); why != "" {
-			r.fail(CodeInvalidValue, at(p, w.key), "Write plain text on one line, within its length, or remove the key",
+			r.fail(CodeInvalidValue, hintPath(p, w.key), "Write plain text on one line, within its length, or remove the key",
 				"%s: %s %q %s", what, w.key, w.text, why)
 		}
 	}
@@ -186,12 +187,29 @@ func (t *Type) checkSummary(r reporter) {
 
 // keySet reports whether the YAML wrote key at path p with an empty
 // value: a label or a help of "" reads as none, but was written.
-func (t *Type) keySet(p, key string) bool { return slices.Contains(t.emptyHints, at(p, key)) }
+func (t *Type) keySet(p, key string) bool { return slices.Contains(t.emptyHints, hintPath(p, key)) }
+
+// hintPath is the path of key at p; p is "" for the Type's own keys.
+func hintPath(p, key string) string {
+	if p == "" {
+		return key
+	}
+	return at(p, key)
+}
 
 // emptyHintPaths lists the labels and helps the document writes as "" on
 // a field, a state or a transition (decodeType keeps them on the Type).
 func emptyHintPaths(root *yaml.Node) []string {
 	var out []string
+	empty := func(v *yaml.Node) bool {
+		v = resolveAlias(v)
+		return v != nil && v.Kind == yaml.ScalarNode && v.Tag == "!!str" && v.Value == ""
+	}
+	for _, key := range []string{"label", "help"} {
+		if _, v := mappingEntry(root, key); empty(v) {
+			out = append(out, key)
+		}
+	}
 	for _, list := range []string{"fields", "states", "transitions"} {
 		_, seq := mappingEntry(root, list)
 		if seq = resolveAlias(seq); seq == nil || seq.Kind != yaml.SequenceNode {

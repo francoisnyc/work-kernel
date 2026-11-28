@@ -26,7 +26,9 @@ import {
   TransitionOutcome,
   type Item,
   type ItemEvent,
+  type Transition,
   type TransitionItemResponse,
+  type Type,
 } from "../gen/kernel/v1/kernel_pb";
 import type { JsonObject } from "@bufbuild/protobuf";
 import { refusalOf } from "../model/refusal";
@@ -36,13 +38,13 @@ import {
   nextAfter,
   panelHash,
   panelOf,
-  rowMoves,
   agentBadge,
   agentLine,
   agentMark,
   agentWritten,
   askedLine,
   countLabel,
+  dueInstant,
   dueOf,
   groupRows,
   holderLine,
@@ -58,7 +60,8 @@ import {
   type InboxOrder,
   type InboxTab,
 } from "../model/inbox";
-import { itemId } from "../model/typeinfo";
+import { itemId, typeLabel } from "../model/typeinfo";
+import { dayAndTime, fromNow, fullInstant } from "../model/when";
 import { RefusalView } from "../ui/RefusalView";
 import { TransitionPanel } from "../ui/TransitionPanel";
 
@@ -336,7 +339,7 @@ export function InboxPage(): ReactElement {
       </>
     );
   return (
-    <>
+    <div className="inbox-page">
       <h1>Inbox</h1>
       <div role="tablist" aria-label="Queues" className="tabs">
         {tabs.map((t) => (
@@ -435,14 +438,16 @@ export function InboxPage(): ReactElement {
         </section>
         {open && <Panel key={open.name} item={open} onMove={move} onClose={() => closePanel(open.name)} />}
       </div>
-    </>
+    </div>
   );
 }
 
-// One row, in words: its title; the Type's summary fields; its Type and
-// state; who asked, why it is the caller's, how long it waited and when
-// it is due; who holds its claim and why a move is withheld; its main
-// move, and the rest behind More moves.
+// One row, in words (the Inbox, the look: a card): its title, with its
+// Type by label and its state beside it, and the agent's badge; who asked,
+// why it is the caller's, how long it waited and when it is due; the
+// Type's summary fields; who holds its claim and why a move is withheld,
+// or that there is nothing for the caller; its main move, the one dark
+// button, and the rest behind "⋯" (More actions).
 function Row({
   item: it,
   tab,
@@ -459,36 +464,60 @@ function Row({
   onSelect: () => void;
 }): ReactElement {
   const session = useSession();
-  const [open, setOpen] = useState(false);
-  const moresId = useId();
   const type = session.typeOf(it.type);
   const me = session.user.principal;
   const { main, others } = splitMoves(type, it);
   const summary = summaryLine(type, it, session.nameOf);
   const due = dueOf(type, it, now);
-  const about = [askedLine(it, me, session.nameOf), whyYours(tab, type, it, me), waitedLine(type, it, now)].filter((s) => s !== "");
+  const yours = whyYours(tab, type, it, me);
+  const about = [askedLine(it, me, session.nameOf), yours, waitedLine(type, it, now)].filter((s) => s !== "");
   const why = [holderLine(type, it, me, session.nameOf), ...whyNot(type, it, me, session.nameOf)].filter(
     (s, i, all) => s !== "" && all.indexOf(s) === i,
   );
-  const typeId = type?.typeId ?? it.type.split("/types/")[1]?.split("/")[0] ?? "";
   const make = (toState: string, fields: JsonObject, requestId: string) => onMove(it, toState, fields, requestId);
   const title = session.titleOf(it);
   // An agent's request (PR 3b): an agent created it or put it in its state.
   const mark = agentMark(it, me, session.nameOf);
+  // Sent back to the reader: they answer on the Item's own page (a
+  // customer replies there). Any other row without a move of theirs says
+  // why, and its title opens it.
+  const sentBack = yours === "sent back to you";
+  if ((!type || !main) && !sentBack && why.length === 0) why.push("Nothing for you to do here");
   return (
-    <li data-row={it.name}>
+    <li data-row={it.name} className="row">
       <input type="checkbox" aria-label={`Select ${title}`} checked={selected} onChange={onSelect} />{" "}
       {/* The title opens the row's panel (PR 2c); the panel links to the full page. */}
       <a
         href={panelHash(itemId(it.name))}
         data-row={it.name}
+        className="row-title"
         onClick={(e) => {
           e.preventDefault();
           go(panelHash(itemId(it.name)));
         }}
       >
         {title}
-      </a>
+      </a>{" "}
+      <span className="kind">
+        {typeLabel(type, session.types, it.type)} · {stateLabel(type, it.state)}
+      </span>
+      {mark && (
+        <>
+          {" "}
+          <AgentBadge text={agentBadge(mark)} />
+        </>
+      )}
+      <p className="meta">
+        {about.join(" · ")}
+        {due && (
+          <>
+            {" · "}
+            <span className={due.overdue ? "due overdue" : "due"} title={fullInstant(dueInstant(type, it))}>
+              {due.text}
+            </span>
+          </>
+        )}
+      </p>
       {summary.length > 0 && (
         <p className="summary">
           {summary.map((s, i) => (
@@ -499,24 +528,6 @@ function Row({
           ))}
         </p>
       )}
-      <p className="kind">
-        {typeId} · {stateLabel(type, it.state)}
-        {mark && (
-          <>
-            {" · "}
-            <span className="agent-badge">{agentBadge(mark)}</span>
-          </>
-        )}
-      </p>
-      <p className="meta">
-        {about.join(" · ")}
-        {due && (
-          <>
-            {" · "}
-            <span className={due.overdue ? "due overdue" : "due"}>{due.text}</span>
-          </>
-        )}
-      </p>
       {why.length > 0 && (
         <p className="why-not">
           {why.map((s, i) => (
@@ -528,27 +539,82 @@ function Row({
         </p>
       )}
       {type && main ? (
-        <div className="row-moves">
-          <TransitionPanel type={type} item={it} principals={session.principals} only={[main]} compact onTransition={make} />
-          {others.length > 0 && (
-            <>
-              <button type="button" className="quiet" aria-expanded={open} aria-controls={moresId} onClick={() => setOpen((o) => !o)}>
-                More moves
-              </button>
-              <div id={moresId} hidden={!open}>
-                <TransitionPanel type={type} item={it} principals={session.principals} only={others} compact onTransition={make} />
-              </div>
-            </>
-          )}
-        </div>
+        <RowMoves type={type} item={it} main={main} others={others} onTransition={make} />
       ) : (
-        // No move of theirs here (a customer answers by replying): the
-        // Item's own page is where to act.
-        <p>
-          <a href={`#/items/${itemId(it.name)}`}>Open it to answer</a>
-        </p>
+        sentBack && (
+          <p className="row-moves">
+            <a href={`#/items/${itemId(it.name)}`}>Open it to answer</a>
+          </p>
+        )
       )}
     </li>
+  );
+}
+
+// A row's moves: the main one, the one dark button; the others behind a
+// "⋯" disclosure button labelled More actions (aria-expanded, real buttons
+// inside). Escape, in it or on the button, closes it and puts focus back
+// on the button.
+function RowMoves({
+  type,
+  item: it,
+  main,
+  others,
+  onTransition,
+}: {
+  type: Type;
+  item: Item;
+  main: Transition;
+  others: Transition[];
+  onTransition: (toState: string, fields: JsonObject, requestId: string) => Promise<TransitionItemResponse>;
+}): ReactElement {
+  const session = useSession();
+  const [open, setOpen] = useState(false);
+  const moresId = useId();
+  const button = useRef<HTMLButtonElement>(null);
+  function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    if (e.key !== "Escape" || !open) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setOpen(false);
+    button.current?.focus();
+  }
+  return (
+    <div className="row-moves" onKeyDown={onKeyDown}>
+      <TransitionPanel type={type} item={it} principals={session.principals} only={[main]} compact main={main.toState} onTransition={onTransition} />
+      {others.length > 0 && (
+        <div className="more">
+          <button
+            ref={button}
+            type="button"
+            className="more-button"
+            aria-label="More actions"
+            aria-expanded={open}
+            aria-controls={moresId}
+            onClick={() => setOpen((o) => !o)}
+          >
+            ⋯
+          </button>
+          <div id={moresId} className="more-moves" hidden={!open}>
+            <TransitionPanel type={type} item={it} principals={session.principals} only={others} compact onTransition={onTransition} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// "Agent request", with a small robot: the words carry the meaning; the
+// icon and the colour only mark it.
+function AgentBadge({ text }: { text: string }): ReactElement {
+  return (
+    <span className="agent-badge">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" focusable="false">
+        <rect x="5" y="7" width="14" height="11" rx="3" />
+        <path d="M12 3v4M9 12h.01M15 12h.01" />
+      </svg>
+      {text}
+    </span>
   );
 }
 
@@ -577,20 +643,38 @@ function Panel({ item: it, onMove, onClose }: { item: Item; onMove: Move; onClos
     );
   }, [session, it.name, marked]);
   const written = mark ? agentWritten(type, it, events, session.nameOf) : [];
-  const show = (id: string, principal: boolean): string => {
+  const now = new Date();
+  // A field's value in words: a person by name, an instant as the reader
+  // says it ("today 6:43 pm · in 5 h") with the whole instant as a
+  // tooltip, never raw.
+  const show = (id: string, kind: FieldType): ReactElement | string => {
     const v = it.fields?.[id];
     if (v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0)) return "not set";
-    const one = (x: unknown) => (principal && typeof x === "string" ? session.nameOf(x) : String(x));
+    if (kind === FieldType.DATETIME && typeof v === "string" && dayAndTime(v, now) !== "") {
+      return <span title={fullInstant(v)}>{`${dayAndTime(v, now)} · ${fromNow(v, now)}`}</span>;
+    }
+    const one = (x: unknown) => (kind === FieldType.PRINCIPAL && typeof x === "string" ? session.nameOf(x) : String(x));
     return Array.isArray(v) ? v.map(one).join(", ") : one(v);
   };
-  const moves = rowMoves(type, it);
+  // An agent's text once: while the box shows what the agent wrote, the
+  // field list leaves those fields out.
+  const inBox = new Set(written.map((w) => w.field));
+  // The main move first, the one dark button; then the others, in the
+  // server's order.
+  const { main, others } = splitMoves(type, it);
+  const moves = main ? [main, ...others] : [];
   return (
     <aside aria-labelledby={headingId} className="inbox-panel">
       <h2 id={headingId} ref={heading} tabIndex={-1}>
         {title}
       </h2>
       <p className="kind">
-        {type?.typeId ?? ""} · {stateLabel(type, it.state)}
+        {mark && (
+          <>
+            <AgentBadge text="Agent request" />{" "}
+          </>
+        )}
+        {typeLabel(type, session.types, it.type)} · {stateLabel(type, it.state)}
       </p>
       {mark && <p className="agent-line">{agentLine(mark)}</p>}
       {written.length > 0 && (
@@ -608,22 +692,27 @@ function Panel({ item: it, onMove, onClose }: { item: Item; onMove: Move; onClos
         </section>
       )}
       <ul aria-label="Fields" className="panel-fields">
-        {(type?.fields ?? []).map((f) => (
-          <li key={f.id}>
-            <span className="label">{f.label || f.id}</span>: <span>{show(f.id, f.type === FieldType.PRINCIPAL)}</span>
-            {f.help && <span className="help"> {f.help}</span>}
-          </li>
-        ))}
+        {(type?.fields ?? [])
+          .filter((f) => !inBox.has(f.id))
+          .map((f) => (
+            <li key={f.id}>
+              <span className="label">{f.label || f.id}</span>: <span>{show(f.id, f.type)}</span>
+              {f.help && <span className="help"> {f.help}</span>}
+            </li>
+          ))}
       </ul>
       {type && moves.length > 0 && (
-        <TransitionPanel
-          type={type}
-          item={it}
-          principals={session.principals}
-          only={moves}
-          compact
-          onTransition={(toState, fields, requestId) => onMove(it, toState, fields, requestId)}
-        />
+        <div role="group" aria-label="Moves" className="panel-moves">
+          <TransitionPanel
+            type={type}
+            item={it}
+            principals={session.principals}
+            only={moves}
+            compact
+            main={main?.toState}
+            onTransition={(toState, fields, requestId) => onMove(it, toState, fields, requestId)}
+          />
+        </div>
       )}
       <details onToggle={(e) => setHistoryOpen(e.currentTarget.open)}>
         <summary>History</summary>

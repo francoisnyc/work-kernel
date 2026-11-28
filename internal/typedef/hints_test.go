@@ -155,6 +155,11 @@ transitions:
 		"equipment_request@2": {`"label"`, `"primary"`},
 		"incident@7":          {`"label"`, `"primary"`, `"summary"`, `"due"`},
 		"incident@8":          {`"label"`, `"primary"`, `"summary"`, `"due"`},
+		// The Inbox, the look: the versions that add the Type's own label.
+		"approval@3":          {`"label"`, `"primary"`},
+		"access_request@4":    {`"label"`, `"primary"`, `"summary"`, `"due"`},
+		"equipment_request@3": {`"label"`, `"primary"`},
+		"incident@9":          {`"label"`, `"primary"`, `"summary"`, `"due"`},
 	}
 	seen := 0
 	for _, ty := range append([]*typedef.Type{bare}, types...) {

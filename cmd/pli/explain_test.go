@@ -64,12 +64,12 @@ func TestPli_TypeExplain_ADraft(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir := tree(t, map[string]string{"incident.v9.yaml": strings.Replace(string(v3), "\nversion: 3\n", "\nversion: 9\n", 1)})
-	r := pli(t, "ana", "type", "explain", "--draft", "incident@9", dir)
+	dir := tree(t, map[string]string{"incident.v10.yaml": strings.Replace(string(v3), "\nversion: 3\n", "\nversion: 10\n", 1)})
+	r := pli(t, "ana", "type", "explain", "--draft", "incident@10", dir)
 	if r.code != 0 || r.stderr != "" {
 		t.Fatalf("exit %d, stderr %q", r.code, r.stderr)
 	}
-	if want := strings.Replace(readingFile(t, "incident@3"), "incident@3\n", "incident@9\n", 1); r.stdout != want {
+	if want := strings.Replace(readingFile(t, "incident@3"), "incident@3\n", "incident@10\n", 1); r.stdout != want {
 		t.Errorf("stdout =\n%s", r.stdout)
 	}
 }

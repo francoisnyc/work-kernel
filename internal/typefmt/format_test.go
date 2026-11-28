@@ -55,6 +55,13 @@ transitions:
 `,
 	},
 	{
+		// The Inbox, the look: the Type's own label and help come right
+		// after its version.
+		name: "the Type's label and help follow its version",
+		in:   "initial_state: open\nhelp: Ask for access\nid: t\nlabel: Access request\nversion: 1\n",
+		want: "id: t\nversion: 1\nlabel: Access request\nhelp: Ask for access\ninitial_state: open\n",
+	},
+	{
 		name: "the document's own comment keeps its blank line",
 		in:   "# The header.\n\n# The id.\nid: t\nversion: 1\n",
 		want: "# The header.\n\n# The id.\nid: t\nversion: 1\n",

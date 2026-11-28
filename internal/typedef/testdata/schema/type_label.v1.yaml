@@ -1,0 +1,17 @@
+# Corpus for the schema tests: the Type's own label and help (the Inbox,
+# the look). It loads on its own (stages a and b).
+id: corpus_type_label
+version: 1
+label: Corpus request
+help: A Type with a name and a line of help for people
+initial_state: open
+
+states:
+  - id: open
+    category: todo
+  - id: done
+    category: done
+
+transitions:
+  - from: open
+    to: done

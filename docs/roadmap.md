@@ -351,7 +351,8 @@ attack that found it as its test:
       - **PR 1b, the Types and the button. Built** (`docs/design.md`,
         "Words for people, as built", its 1b part): `approval@2`,
         `access_request@2`, `equipment_request@2` and `incident@7` with
-        labels (so "Ask a person" takes `approval@3`); the existing
+        labels (so "Ask a person" took `approval@3`, and since the
+        Inbox's look, `approval@4`); the existing
         transition button reads its label; a journey and a scenario step.
       - **PR 2a, claimed rows and withheld moves. Built** (`docs/design.md`,
         "Claimed rows and withheld moves, as built (Inbox PR 2a)"): a
@@ -381,12 +382,13 @@ attack that found it as its test:
         across pages, role labels, only the claimant releases, an agent
         working for someone on a claimed row, agents' display names. The
         new answers ("Not yet", a refusal reason, the approver's own
-        values) come with "Ask a person" (`question@1`, `approval@3`).
-      - **The look (agreed, 2026-11-28; next):** the behaviour is built, the
-        look is still the admin page's. One web PR: the mockup's styling,
-        words that read ("Approver: you"), dates in words, a label on the
-        Type, an agent's text once, agents by name. Brief, and the owner's
-        two decisions (both agreed): `docs/plans/inbox-the-look.md`.
+        values) come with "Ask a person" (`question@1`, `approval@4`).
+      - **The look. Built** (`docs/design.md`, "The Inbox, the look, as
+        built"; brief `docs/plans/inbox-the-look.md`): the mockup's
+        styling, words that read ("Approver: you"), dates in words, the
+        Type's own `label` and `help` (`approval@3`, `access_request@4`,
+        `equipment_request@3`, `incident@9`), an agent's text once, agents
+        by name from the dev-token file.
         What this roadmap names next in track 1, for the owner to choose:
         item 6's step 4 (bulk and status), its step 5 if a real case asks;
         and track 2's authoring test, which the Inbox was to come before.
@@ -573,7 +575,8 @@ question or approval):
   agent's text is shown as the agent's. `approval@1` exists, but as the
   child approval of a request (a kernel-written title, the approver, a
   delegate); it has no such fields, so this is a new version of it
-  (`approval@3`: `approval@2` is the Inbox for people's labels) or a Type
+  (`approval@4`: `approval@2` is the Inbox for people's labels, `approval@3`
+  the Inbox look's Type label) or a Type
   of its own.
 
 **Two ways in:**

@@ -5,7 +5,7 @@
 //      (incident@7): the P1, past its first response due, is in Overdue,
 //      first, "due … ago" in amber; the P4 is in Waiting, "due in …". A row
 //      says its summary, Type and state, who asked by name, and offers its
-//      primary move ("Start"), the rest behind More moves.
+//      primary move ("Start"), the rest behind More actions (⋯).
 //   2. sam's desk tab: his own request is in "Nobody has these yet" and
 //      says why he cannot take it; the one lea took is in "Being handled",
 //      "Lea has it", and sam's one move there is to hand it back.
@@ -51,19 +51,19 @@ test("sam's Waiting on me: the overdue incident first, in amber; the rest waitin
 
   const lateRow = rowIn(page, "Overdue", late);
   await expect(lateRow).toContainText("Priority: P1");
-  await expect(lateRow).toContainText("incident · New");
+  await expect(lateRow).toContainText("Incident · New");
   await expect(lateRow).toContainText("Ana asks");
   await expect(lateRow.locator(".overdue")).toHaveText(/^due \d+ (s|min) ago$/);
   await expect(rowIn(page, "Waiting", onTime)).toContainText(/due in \d+ h/);
   await expect(rowIn(page, "Waiting", onTime).locator(".overdue")).toHaveCount(0);
 
-  // Start is the primary move; Cancel waits behind More moves.
-  await expect(lateRow.getByRole("button")).toHaveText(["Start", "More moves"]);
-  const more = lateRow.getByRole("button", { name: "More moves" });
+  // Start is the primary move; Cancel waits behind More actions (⋯).
+  await expect(lateRow.getByRole("button")).toHaveText(["Start", "⋯"]);
+  const more = lateRow.getByRole("button", { name: "More actions" });
   await expect(more).toHaveAttribute("aria-expanded", "false");
   await more.click();
   await expect(more).toHaveAttribute("aria-expanded", "true");
-  await expect(lateRow.getByRole("button")).toHaveText(["Start", "More moves", "Cancel"]);
+  await expect(lateRow.getByRole("button")).toHaveText(["Start", "⋯", "Cancel"]);
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 

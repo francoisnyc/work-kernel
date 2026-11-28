@@ -43,7 +43,7 @@ import (
 // name keep their order, after the known ones; a mapping at a path not
 // listed here (the author's own keys, as in sets) keeps its order.
 var Keys = map[string][]string{
-	"": {"id", "version", "initial_state", "fields", "states", "transitions", "hooks", "links", "incoming",
+	"": {"id", "version", "label", "help", "initial_state", "fields", "states", "transitions", "hooks", "links", "incoming",
 		"rollups", "reactions", "invariants", "accepts_reactions", "readable_by_reactions", "offers",
 		"customer_fields", "own", "shared", "placement_writable_by", "start", "migrate", "summary"},
 	".fields[]":             {"id", "type", "options", "multiple", "max", "writable_by", "unique_among_siblings", "label", "help"},

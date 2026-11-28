@@ -116,3 +116,15 @@ export function displayTitle(type: Type, item: Item): string {
   }
   return `${type.typeId} ${shortId(item.name)}`;
 }
+
+// A Type by its label (the Inbox, the look): its own, else the label of
+// the newest version of the same Type ID that has one (a label names the
+// Type: seeds and reactions still create older versions), else its ID.
+// typeNameOf is the Item's type name, for a Type the page does not have.
+export function typeLabel(type: Type | undefined, types: readonly Type[], typeNameOf = ""): string {
+  if (type?.label) return type.label;
+  const id = type?.typeId ?? (typeNameOf === "" ? "" : parseTypeName(typeNameOf).typeId);
+  let newest: Type | undefined;
+  for (const t of types) if (t.typeId === id && t.label !== "" && (!newest || t.version > newest.version)) newest = t;
+  return newest?.label ?? id;
+}

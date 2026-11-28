@@ -158,16 +158,18 @@ const tab = (name: RegExp) => screen.getByRole("tab", { name });
 const rows = () => [...screen.getByRole("region", { name: "Inbox" }).querySelectorAll<HTMLAnchorElement>("ul[aria-label] > li > a")];
 const titles = () => rows().map((a) => a.textContent);
 const rowOf = (title: string) => screen.getByRole("link", { name: title }).closest("li")!;
+// A button's name: its aria-label (the "⋯" button is "More actions",
+// since the Inbox, the look), else its text.
 const buttonsOf = (title: string) =>
   within(rowOf(title))
     .queryAllByRole("button")
-    .map((b) => b.textContent);
-// Every move a row offers: its main button, then those behind More moves
+    .map((b) => b.getAttribute("aria-label") ?? b.textContent);
+// Every move a row offers: its main button, then those behind More actions
 // (opened here when the row has it).
 const allMovesOf = async (title: string) => {
-  const more = within(rowOf(title)).queryByRole("button", { name: "More moves" });
+  const more = within(rowOf(title)).queryByRole("button", { name: "More actions" });
   if (more && more.getAttribute("aria-expanded") !== "true") await userEvent.click(more);
-  return buttonsOf(title).filter((b) => b !== "More moves");
+  return buttonsOf(title).filter((b) => b !== "More actions");
 };
 
 // Since step 5 a customer's Inbox asks like anyone's: what was sent back
@@ -264,11 +266,11 @@ test("a row says who asked, how long it has waited and why it is here", async ()
   show(k);
   await waitFor(() => expect(titles()).toEqual(["Spare parts", "Laptops"]));
   expect(rowOf("Spare parts")).toHaveTextContent("purchase · finance_review");
-  expect(rowOf("Spare parts")).toHaveTextContent("user:ana asks · you are its f_claimed_by · waiting 5 h");
+  expect(rowOf("Spare parts")).toHaveTextContent("user:ana asks · f_claimed_by: you · waiting 5 h");
   // In the queue and in fay's view because she is in finance: the browser
   // does not re-derive that, so it gives no reason.
   expect(rowOf("Laptops")).toHaveTextContent("user:ana asks · waiting 3 h");
-  expect(rowOf("Laptops")).not.toHaveTextContent(/you are its|your team/);
+  expect(rowOf("Laptops")).not.toHaveTextContent(/: you|your team/);
 
   // On the team's tab the tab's name says why (since PR 2b): the row adds
   // nothing.
@@ -298,14 +300,19 @@ test("a row's buttons are exactly the server's moves, in its order; the Type's `
   show(k);
   await waitFor(() => expect(titles()).toHaveLength(4));
   // Since PR 2b: the first move listed is the main button (purchase marks
-  // none primary), the rest behind More moves; together, the server's
+  // none primary), the rest behind More actions; together, the server's
   // moves in its order.
-  expect(buttonsOf("All three")).toEqual(["Move to approved", "More moves"]);
+  expect(buttonsOf("All three")).toEqual(["Move to approved", "More actions"]);
   expect(await allMovesOf("All three")).toEqual(["Move to approved", "Move to rejected", "Move to finance_queue"]);
-  expect(buttonsOf("Another order")).toEqual(["Move to finance_queue", "More moves"]);
+  expect(buttonsOf("Another order")).toEqual(["Move to finance_queue", "More actions"]);
   expect(await allMovesOf("Another order")).toEqual(["Move to finance_queue", "Move to approved"]);
   expect(buttonsOf("Not hers")).toEqual([]);
-  expect(within(rowOf("Not hers")).getByRole("link", { name: "Open it to answer" })).toHaveAttribute("href", `#/items/${itemId(itemName(3))}`);
+  // Since the Inbox, the look: a row with nothing for the reader offers no
+  // link (its title opens it) and says so; this one has no claim or
+  // withheld move to name, so the plain words.
+  expect(within(rowOf("Not hers")).queryByRole("link", { name: "Open it to answer" })).not.toBeInTheDocument();
+  expect(within(rowOf("Not hers")).getAllByRole("link").map((a) => a.textContent)).toEqual(["Not hers"]);
+  expect(rowOf("Not hers")).toHaveTextContent("Nothing for you to do here");
   expect(buttonsOf("Reopened")).toEqual(["Move to finance_review"]);
 });
 
@@ -450,11 +457,11 @@ test("claim, then release: each is one TransitionItem, and the rows and every co
   // It is now in Waiting on me, with the claimant's moves.
   await userEvent.click(tab(/Waiting on me/));
   await waitFor(() => expect(titles()).toEqual(["Laptops"]));
-  expect(buttonsOf("Laptops")).toEqual(["Move to approved", "More moves"]);
+  expect(buttonsOf("Laptops")).toEqual(["Move to approved", "More actions"]);
   expect(await allMovesOf("Laptops")).toEqual(["Move to approved", "Move to rejected", "Move to finance_queue"]);
 
   // Release: the Type's release move, a transition like any other (behind
-  // More moves, opened above).
+  // More actions, opened above).
   await userEvent.click(within(rowOf("Laptops")).getByRole("button", { name: "Move to finance_queue" }));
   await waitFor(() => expect(k.transitionItem).toHaveBeenCalledTimes(2));
   expect(k.transitionItem.mock.calls[1]![0]).toMatchObject({ name: itemName(1), toState: "finance_queue" });

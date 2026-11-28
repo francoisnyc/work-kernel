@@ -838,6 +838,11 @@ message Type {
   // summarise an Item of this version under its title, in a list row or a
   // card; at most 3. Empty: none. A hint enforces nothing.
   repeated string summary = 20;
+  // Presentation hints (the Inbox, the look): the Type's own name for
+  // people, plain text of at most 60 characters, and a line of help, at
+  // most 280. Empty: none (a screen shows type_id). A hint enforces nothing.
+  string label = 21;
+  string help = 22;
 }
 
 // A named principal field a Type offers to the hooks of contained Items.

@@ -9,6 +9,8 @@
   "properties": {
     "id": {"description": "The Type's ID: lower case, digits and _.", "type": ["string", "number", "boolean"]},
     "version": {"description": "The version, 1 or more. A registered version never changes: publish the next one.", "type": "integer"},
+    "label": {"description": "A presentation hint: the Type's own short name for people, plain text of at most 60 characters. It enforces nothing.", "$ref": "#/$defs/text"},
+    "help": {"description": "A presentation hint: a line of help about the Type for people, plain text of at most 280 characters. It enforces nothing.", "$ref": "#/$defs/text"},
     "initial_state": {"description": "The state Items start in.", "$ref": "#/$defs/text"},
     "fields": {"description": "The fields Items of this Type hold.", "type": ["array", "null"], "items": {"$ref": "#/$defs/field"}},
     "states": {"description": "The states, each with a category.", "type": ["array", "null"], "items": {"$ref": "#/$defs/state"}},

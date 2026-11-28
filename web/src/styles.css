@@ -359,8 +359,15 @@ section.inbox ul.items > li > p {
 }
 /* The Inbox for people (PR 3b): an agent's request. */
 .agent-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.8rem;
   font-weight: 600;
   color: #5b2db0;
+  background: #efe7fb;
+  border-radius: 6px;
+  padding: 0.15rem 0.5rem;
 }
 .agent-wrote {
   background: #f4f0fa;
@@ -380,4 +387,283 @@ section.inbox ul.items > li > p {
 /* An agent's text, as written: a text node, its line breaks kept. */
 .agent-text {
   white-space: pre-wrap;
+}
+
+/* The Inbox, the look (docs/plans/inbox-the-look.md): the mockup's
+   cards, one dark button per row, tabs as tabs. Only the Inbox page
+   (.inbox-page) and its panel; other pages keep the plain look. Colours
+   are 4.5:1 or more on the white they sit on; touch targets 44 px. */
+.inbox-page {
+  --ink: #1b1b1a;
+  --muted: #5e5d58;
+  --line: #e4e3de;
+  --edge: #c9c8c1;
+  --card: #ffffff;
+  --tint: #e9e8e3;
+  color: var(--ink);
+}
+.inbox-page button {
+  min-height: 44px;
+  padding: 0 1rem;
+  margin: 0;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+}
+.inbox-page button:disabled {
+  color: #6b6a65;
+}
+.inbox-page .main-move {
+  color: #ffffff;
+  background: #1b1b1a;
+  border-color: #1b1b1a;
+  font-weight: 600;
+}
+/* Tabs as tabs: the selected one underlined, its count a pill. */
+.inbox-page .tabs {
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--line);
+}
+.inbox-page .tabs [role="tab"] {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 0.75rem;
+}
+.inbox-page .tabs [role="tab"][aria-selected="true"] {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+.inbox-page .tabs .count {
+  opacity: 1;
+  margin-left: 0.25rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 10px;
+  font-size: 0.75rem;
+  background: var(--tint);
+  color: var(--ink);
+}
+.inbox-page .tabs .count:empty {
+  display: none;
+}
+.inbox-page .tabs [aria-selected="true"] .count {
+  background: var(--ink);
+  color: #ffffff;
+}
+/* The order and place controls: one quiet line. */
+.inbox-page .inbox-controls {
+  font-size: 0.85rem;
+  color: var(--muted);
+  gap: 0.4rem 0.6rem;
+}
+.inbox-page .inbox-controls select,
+.inbox-page .inbox-controls input {
+  min-height: 44px;
+  box-sizing: border-box;
+  font: inherit;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: var(--card);
+  padding: 0 0.5rem;
+}
+.inbox-page .inbox-controls button {
+  border-color: transparent;
+  background: transparent;
+  color: #0b57a4;
+  padding: 0 0.5rem;
+}
+/* A row is a card: line 1 the title, its Type and state, the agent's
+   badge; then who asks, why it is yours, how long; then the summary;
+   the moves at the right. */
+.inbox-page ul.items {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.inbox-page li.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 0.6rem;
+  row-gap: 0.15rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+}
+.inbox-page li.row > input[type="checkbox"] {
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  flex: none;
+}
+.inbox-page li.row > .row-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+}
+.inbox-page li.row > .row-title:hover {
+  text-decoration: underline;
+}
+.inbox-page li.row > .kind {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+/* The moves at the right of the first line; the words below it. */
+.inbox-page li.row > .row-moves {
+  order: 1;
+  margin: 0 0 0 auto;
+}
+.inbox-page section.inbox li.row > p {
+  order: 2;
+  flex-basis: 100%;
+  margin: 0 0 0 calc(24px + 0.6rem);
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.inbox-page section.inbox li.row > p.why-not {
+  color: #3e3d39;
+}
+.inbox-page .row-moves {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.inbox-page .transitions li {
+  padding: 0;
+  border: 0;
+}
+.inbox-page .transitions ul {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0;
+  margin: 0;
+}
+/* More actions: the ⋯ button, and the moves it discloses below it. */
+.inbox-page .more {
+  position: relative;
+}
+.inbox-page .more-button {
+  width: 44px;
+  padding: 0;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+.inbox-page .more-moves {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 2;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.5rem;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.12);
+  min-width: 10rem;
+}
+.inbox-page .more-moves .transitions ul {
+  flex-direction: column;
+  align-items: stretch;
+}
+.inbox-page .more-moves[hidden] {
+  display: none;
+}
+.inbox-page section.inbox h2 {
+  border-bottom: 0;
+  color: var(--muted);
+}
+.inbox-page section.inbox h2:first-child,
+.inbox-page section.inbox h2 {
+  margin-top: 1rem;
+}
+/* The Inbox takes a wider column than the other pages (the mockup's list
+   and panel side by side), so the panel's moves fit in a row. */
+main:has(> .inbox-page) {
+  max-width: 90rem;
+}
+.inbox-page .inbox-body > section.inbox {
+  flex: 999 1 30rem;
+}
+/* The panel: white, its moves in one row, the main move first. */
+.inbox-page .inbox-panel {
+  flex: 1 1 26rem;
+  max-width: 36rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+}
+.inbox-page .inbox-panel .kind {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.inbox-page .panel-fields li {
+  padding: 0.2rem 0;
+}
+.inbox-page .panel-moves {
+  margin: 0.75rem 0;
+}
+.inbox-page .agent-wrote {
+  background: #f7f4fc;
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+}
+.inbox-page .agent-wrote h3 {
+  color: #5b2db0;
+  font-size: 0.8rem;
+}
+.inbox-page .agent-wrote .warning {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+/* Several rows at once: the dark bar. */
+.inbox-page .selection-bar {
+  background: var(--ink);
+  color: #ffffff;
+  border: 0;
+  border-radius: 10px;
+}
+.inbox-page .selection-bar button {
+  background: #ffffff;
+  color: var(--ink);
+  border-color: #ffffff;
+}
+.inbox-page .selection-bar button.quiet {
+  background: transparent;
+  color: #ffffff;
+  border-color: #8a8984;
+}
+/* A phone: the moves go under the words. */
+@media (max-width: 40rem) {
+  .inbox-page li.row > .row-moves {
+    order: 3;
+    margin: 0.5rem 0 0 calc(24px + 0.6rem);
+  }
+  .inbox-page .more-moves {
+    left: 0;
+    right: auto;
+  }
+}
+/* Text targets in the Inbox at least 24 px high (WCAG 2.5.8). */
+.inbox-page li.row > .row-title,
+.inbox-page .inbox-panel a {
+  display: inline-block;
+  padding: 0.2rem 0;
+}
+.inbox-page .inbox-panel summary {
+  padding: 0.2rem 0;
 }

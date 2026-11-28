@@ -12,6 +12,8 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"go.yaml.in/yaml/v3"
 
@@ -28,6 +30,10 @@ type Token struct {
 	// "role:" prefix). The item service adds them at start, in dev-token
 	// mode only; it never removes one.
 	Roles []string `yaml:"roles,omitempty"`
+	// DisplayName is an agent's name for screens (the Inbox, the look),
+	// until sign-on brings real names: optional, agents only (a person's
+	// screen name comes from Name), plain text of 1 to 60 characters.
+	DisplayName string `yaml:"display_name,omitempty"`
 }
 
 type file struct {
@@ -156,8 +162,17 @@ func Parse(data []byte) ([]Token, error) {
 	if len(f.Tokens) == 0 {
 		return nil, errors.New("dev tokens: no tokens")
 	}
+	// Which entries write display_name at all: an empty one is written,
+	// and refused, not absent.
+	var keys struct {
+		Tokens []map[string]any `yaml:"tokens"`
+	}
+	if err := yaml.Unmarshal(data, &keys); err != nil {
+		return nil, fmt.Errorf("dev tokens: %w", err)
+	}
 	tokens, names := map[string]bool{}, map[string]bool{}
 	for i, t := range f.Tokens {
+		_, hasDisplay := keys.Tokens[i]["display_name"]
 		fail := func(format string, args ...any) error {
 			return fmt.Errorf("dev tokens: entry %d (%s): %s", i+1, t.Name, fmt.Sprintf(format, args...))
 		}
@@ -180,6 +195,10 @@ func Parse(data []byte) ([]Token, error) {
 			return nil, fail("token %q is used twice", t.Token)
 		case names[t.Name]:
 			return nil, fail("name %q is used twice", t.Name)
+		case hasDisplay && !item.IsKind(t.Principal, item.KindAgent):
+			return nil, fail("display_name is for an agent; %s's screen name is its name", t.Principal)
+		case hasDisplay && !plainName(t.DisplayName):
+			return nil, fail("display_name %q must be plain text of 1 to 60 characters on one line, with no space at either end", t.DisplayName)
 		}
 		for _, r := range t.Roles {
 			if !roleName.MatchString(r) {
@@ -200,4 +219,11 @@ func customerPower(p string) bool {
 		return true
 	}
 	return strings.HasPrefix(p, item.PowerTransitionPrefix)
+}
+
+// plainName reports whether s is a screen name: 1 to 60 characters, one
+// line, no control character, no space at either end.
+func plainName(s string) bool {
+	n := utf8.RuneCountInString(s)
+	return n >= 1 && n <= 60 && strings.IndexFunc(s, unicode.IsControl) < 0 && strings.TrimSpace(s) == s
 }
