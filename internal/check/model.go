@@ -18,13 +18,13 @@ import (
 type val uint8
 
 const (
-	vEmpty val = iota
-	vSet       // a value (not a principal)
-	vAny       // empty or any value: written by someone, or not known
-	vRequester // a principal field naming the requester
-	vColleague // ... a colleague
-	vAgent     // ... the agent
-	vNamed     // ... whoever the field names: a person the kernel chose
+	vEmpty     val = iota
+	vSet           // a value (not a principal)
+	vAny           // empty or any value: written by someone, or not known
+	vRequester     // a principal field naming the requester
+	vColleague     // ... a colleague
+	vAgent         // ... the agent
+	vNamed         // ... whoever the field names: a person the kernel chose
 )
 
 // The stand-in principals. They are not real IDs: "@" is not in any.
