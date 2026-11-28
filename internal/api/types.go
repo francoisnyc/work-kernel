@@ -52,7 +52,7 @@ var categories = map[string]kernelv1.StateCategory{
 func typeOut(ns string, t *typedef.Type) *kernelv1.Type {
 	out := &kernelv1.Type{
 		Name: typeName(ns, t.ID, t.Version), TypeId: t.ID, Version: int32(t.Version),
-		InitialState: t.InitialState, Summary: t.Summary,
+		InitialState: t.InitialState, Summary: t.Summary, Label: t.Label, Help: t.Help,
 	}
 	for _, f := range t.Fields {
 		out.Fields = append(out.Fields, &kernelv1.Field{

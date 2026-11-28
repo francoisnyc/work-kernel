@@ -118,10 +118,19 @@ func at(format string, args ...any) string { return fmt.Sprintf(format, args...)
 func (r *renderer) inShort() {
 	t := r.t
 	r.section("In short")
+	// The Type by its own label when it has one (the Inbox, the look):
+	// "An Access request (`access_request`)", as a state reads "Draft
+	// (`draft`, to do)".
+	// A label is a hint, not an element of the Type: the sentence cites
+	// what it says about the Type (keys.go, LeftOut).
+	name := capitalize(article(t.ID)) + " " + t.ID
+	if t.Label != "" {
+		name = at("%s %s (`%s`)", capitalize(article(strings.ToLower(t.Label))), t.Label, t.ID)
+	}
 	if noLifecycle(t) {
-		r.say([]Part{NoLifecycle}, []string{"initial_state", "states[0]"}, at("%s %s has no lifecycle: it stays in `%s`.", capitalize(article(t.ID)), t.ID, typedef.ImplicitState))
+		r.say([]Part{NoLifecycle}, []string{"initial_state", "states[0]"}, at("%s has no lifecycle: it stays in `%s`.", name, typedef.ImplicitState))
 	} else {
-		r.say([]Part{Starts}, []string{"initial_state"}, at("%s %s starts in %s.", capitalize(article(t.ID)), t.ID, t.InitialState))
+		r.say([]Part{Starts}, []string{"initial_state"}, at("%s starts in %s.", name, t.InitialState))
 		r.say([]Part{Closed}, []string{"initial_state"}, "It moves only as listed below; any other move is refused.")
 	}
 	for i, inv := range t.Invariants {

@@ -131,4 +131,7 @@ var LeftOut = map[string]string{
 	"transitions[].help":    "help for people on a screen: it changes nothing the engine does",
 	"transitions[].primary": "which move a screen offers first: it decides nothing about who may make it",
 	"summary":               "which fields a screen shows under an Item's title: it changes nothing the engine does",
+	// The Type's own (the Inbox, the look).
+	"label": "a name for people, starting the reading's first sentence beside the ID: it changes nothing the engine does",
+	"help":  "help for people on a screen: it changes nothing the engine does",
 }
