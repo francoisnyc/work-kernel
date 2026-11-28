@@ -398,9 +398,9 @@ func TestJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	var doc struct {
-		Findings []map[string]any `json:"findings"`
-		NotChecked []string       `json:"not_checked"`
-		Assumed    []string       `json:"assumed"`
+		Findings   []map[string]any `json:"findings"`
+		NotChecked []string         `json:"not_checked"`
+		Assumed    []string         `json:"assumed"`
 	}
 	if err := json.Unmarshal(data, &doc); err != nil {
 		t.Fatal(err)
