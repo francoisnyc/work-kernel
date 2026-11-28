@@ -130,17 +130,17 @@ func TestExplainType_EveryNamespace(t *testing.T) {
 // A draft is checked against every registered version, as ValidateTypes
 // checks it; a sound one is read, named as it would be.
 func TestExplainType_ADraft(t *testing.T) {
-	src := strings.Replace(readType(t, "incident.v3.yaml"), "\nversion: 3\n", "\nversion: 9\n", 1)
+	src := strings.Replace(readType(t, "incident.v3.yaml"), "\nversion: 3\n", "\nversion: 10\n", 1)
 	res, err := explainType(as("ana"), t, &kernelv1.ExplainTypeRequest{Parent: "namespaces/acme",
-		Sources: []*kernelv1.TypeSource{tsrc("drafts/incident.v9.yaml", src)}, TypeId: "incident", Version: 9})
+		Sources: []*kernelv1.TypeSource{tsrc("drafts/incident.v10.yaml", src)}, TypeId: "incident", Version: 10})
 	if err != nil {
 		t.Fatalf("ExplainType: %v", err)
 	}
 	if len(res.Problems) != 0 {
 		t.Fatalf("problems:\n%s", problemLines(res.Problems))
 	}
-	want := strings.Replace(approvedReading(t, "incident@3"), "incident@3\n", "incident@9\n", 1)
-	if res.Reading.GetType() != "namespaces/acme/types/incident/versions/9" || res.Reading.GetText() != want {
+	want := strings.Replace(approvedReading(t, "incident@3"), "incident@3\n", "incident@10\n", 1)
+	if res.Reading.GetType() != "namespaces/acme/types/incident/versions/10" || res.Reading.GetText() != want {
 		t.Errorf("reading = %s\n%s", res.Reading.GetType(), res.Reading.GetText())
 	}
 	// A draft identical to a registered version is read like it.
