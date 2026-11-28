@@ -55,6 +55,23 @@ const (
 	// Something in the Type the checker cannot model: never a silent
 	// clean.
 	CodeUnchecked Code = "UNCHECKED"
+
+	// PR 2: dead rules and drafts.
+	//
+	// A reachable state, not done or canceled, with ways out, from which
+	// no path leads to a done or canceled state (a loop with no end). A
+	// state from which a stuck state can be reached is STUCK_STATE's.
+	CodeNoWayOut Code = "NO_WAY_OUT"
+	// A state no Item can ever be in, whoever holds which role.
+	CodeUnreachableState Code = "UNREACHABLE_STATE"
+	// A transition, timer, at-timer, reaction or hook that can never
+	// happen or run.
+	CodeNeverFires Code = "NEVER_FIRES"
+	// In a draft (a reachable state whose every move out is allowed:
+	// [creator]), a colleague may change a field any person may write.
+	// Fields only holders of a role may write are the Type's intent, not
+	// a finding.
+	CodeColleagueEditsDraft Code = "COLLEAGUE_EDITS_DRAFT"
 )
 
 // Kinds of witness step.
@@ -64,6 +81,8 @@ const (
 	StepTimer    = "timer"
 	StepAt       = "at"
 	StepReaction = "reaction"
+	// StepWrite: someone writes fields, the Item staying in its state.
+	StepWrite = "write"
 )
 
 // Step is one step of a witness: who does what, in plain words.
