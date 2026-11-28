@@ -14,8 +14,12 @@ Ideas noted during the spike, not built yet.
     {state}". A `vacation_request@6` also clashes with `TestCheck_ActionMajors`'s hand-picked next version.
   - **Label-only versions are heavy.** A Type label needed four new versions and a dozen list and count tests changed;
     hints that float from the latest version (below, PR 1a's Later) would make such a change one file.
-  - **The panel's many moves wrap one under another** on a narrow panel (ticket@9 offers six); a Type's `primary` and
-    labels keep it short where the Type has them.
+  - **A reaction's actor shown to people.** A row of an Item a reaction created names its actor's ID as who asks:
+    "reaction:access_request:fulfil asks" (fulfilment tasks in the desk queue). It could name the request's
+    requester, or "Made by the access request".
+  - **No labelled Type opens a field to agents.** Only ticket@9's `f_priority` is open to agents, so "What the agent
+    wrote" shows on a Type with no labels; the screenshots show an agent's move on incident@9 and the box on ticket@9.
+    A Type version opening a field to agents (as ticket@7 did) and a seed for it would show both on one screen.
 - **An agent's request, Inbox PR 3's Later items** (design.md, "An agent's request on the screen, as built"):
   - **A free-text field open to agents on the stack.** None yet: the journey's agent field is a priority; free text
     comes with "Ask a person" (`question@1`, `approval@4`).
