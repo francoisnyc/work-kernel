@@ -382,6 +382,11 @@ attack that found it as its test:
         working for someone on a claimed row, agents' display names. The
         new answers ("Not yet", a refusal reason, the approver's own
         values) come with "Ask a person" (`question@1`, `approval@3`).
+      - **The look (proposed, 2026-11-28):** the behaviour is built, the
+        look is still the admin page's. One web PR: the mockup's styling,
+        words that read ("Approver: you"), dates in words, a label on the
+        Type, an agent's text once, agents by name. Brief and two
+        decisions: `docs/plans/inbox-the-look.md`.
         What this roadmap names next in track 1, for the owner to choose:
         item 6's step 4 (bulk and status), its step 5 if a real case asks;
         and track 2's authoring test, which the Inbox was to come before.
