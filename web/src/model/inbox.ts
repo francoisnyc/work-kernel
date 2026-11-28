@@ -106,7 +106,8 @@ export function rowMoves(type: Type | undefined, item: Item): Transition[] {
 //     waits on its requester (GetType's waits_on_requester) and the caller
 //     is its requester (askedBy);
 //   - on Waiting on me, the principal fields that hold the caller, by
-//     label (the ID without one): "you are its Approver"; nothing when no
+//     label (the ID without one): "Approver: you" (the Inbox, the look);
+//     nothing when no
 //     field does (the kernel put the
 //     Item in the view; the browser does not re-derive why).
 export function whyYours(tab: InboxTab, type: Type | undefined, item: Item, principal: string): string {
@@ -116,7 +117,7 @@ export function whyYours(tab: InboxTab, type: Type | undefined, item: Item, prin
   const labels = (type?.fields ?? [])
     .filter((f) => f.type === FieldType.PRINCIPAL && item.fields?.[f.id] === principal)
     .map((f) => f.label || f.id);
-  return labels.length === 0 ? "" : `you are its ${labels.join(", ")}`;
+  return labels.length === 0 ? "" : `${labels.join(", ")}: you`;
 }
 
 // Who asked: the creator, or the user an agent created the Item for.
@@ -224,6 +225,14 @@ export function dueOf(type: Type | undefined, item: Item, now: Date): Due | unde
   }
   const s = span(-ahead);
   return { text: s ? `due ${s} ago` : "due now", overdue: true };
+}
+
+// The instant the Item is due by in its state (the state's `due` field),
+// as the server sends it; "" when none.
+export function dueInstant(type: Type | undefined, item: Item): string {
+  const field = type?.states.find((s) => s.id === item.state)?.due;
+  const value = field ? item.fields?.[field] : undefined;
+  return typeof value === "string" ? value : "";
 }
 
 // Overdue first, then the rest, each in the order given. Worked out on
@@ -355,7 +364,10 @@ export function agentMark(item: Item, principal: string, nameOf: NameOf): AgentM
       : ["", ""];
   if (actor === "") return undefined;
   const forWhom = behalf === "" ? "" : behalf === principal ? "you" : nameOf(behalf);
-  return { agent: actor.slice(AGENT.length), forWhom };
+  // Its display name from the dev-token file (the Inbox, the look), else
+  // its ID without "agent:".
+  const named = nameOf(actor);
+  return { agent: named !== actor ? named : actor.slice(AGENT.length), forWhom };
 }
 
 // The row's badge: "Agent request · for Ana", or "Agent request".

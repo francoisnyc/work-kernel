@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactElement } from "react";
 import { customerView, isCustomer, pickerLabel } from "../model/customers";
-import type { DevUser } from "../model/devusers";
+import type { DevAgent, DevUser } from "../model/devusers";
 import { BoardPage } from "../pages/BoardPage";
 import { InboxPage } from "../pages/InboxPage";
 import { ItemPage } from "../pages/ItemPage";
@@ -18,22 +18,30 @@ import { Session, SessionProvider, apiFor } from "./session";
 const DEV_USERS = import.meta.env.VITE_DEV_USERS === "1";
 const CHOSEN = "pli.actAs"; // sessionStorage: per tab, so two tabs can be two users
 
-async function loadDevUsers(): Promise<DevUser[]> {
-  const { parseDevUsers } = await import("../model/devusers");
+// The file's users, and its agents for their names on screens (the
+// Inbox, the look).
+async function loadDevUsers(): Promise<{ users: DevUser[]; agents: DevAgent[] }> {
+  const { parseDevAgents, parseDevUsers } = await import("../model/devusers");
   const res = await fetch("/dev-tokens.yaml", { cache: "no-store" });
   if (!res.ok) throw new Error(`the dev-token file is not served here (HTTP ${res.status})`);
-  return parseDevUsers(await res.text());
+  const text = await res.text();
+  return { users: parseDevUsers(text), agents: parseDevAgents(text) };
 }
 
 export function App(): ReactElement {
   const [users, setUsers] = useState<DevUser[]>([]);
+  const [agents, setAgents] = useState<DevAgent[]>([]);
   const [chosen, setChosen] = useState(() => sessionStorage.getItem(CHOSEN) ?? "");
   const [session, setSession] = useState<Session>();
   const [error, setError] = useState<unknown>();
   const route = parseHash(useHash());
 
   useEffect(() => {
-    if (DEV_USERS) loadDevUsers().then(setUsers, setError);
+    if (DEV_USERS)
+      loadDevUsers().then((f) => {
+        setUsers(f.users);
+        setAgents(f.agents);
+      }, setError);
   }, []);
 
   // Choosing a user starts over: their client, their namespace's Types.
@@ -51,7 +59,8 @@ export function App(): ReactElement {
         // A customer meets every Type as it is shown to them: its customer
         // fields, and only the moves whose allowed names creator.
         const types = isCustomer(user) ? res.types.map(customerView) : res.types;
-        setSession(new Session(user, api, types, principals, people));
+        const named = agents.filter((a) => a.namespace === user.namespace);
+        setSession(new Session(user, api, types, principals, people, named));
         setError(undefined);
       },
       (e) => current && setError(e),
@@ -59,7 +68,7 @@ export function App(): ReactElement {
     return () => {
       current = false;
     };
-  }, [user, users]);
+  }, [user, users, agents]);
 
   function actAs(name: string) {
     sessionStorage.setItem(CHOSEN, name);

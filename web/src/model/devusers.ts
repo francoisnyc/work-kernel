@@ -10,6 +10,19 @@ export type DevUser = { name: string; token: string; principal: string; namespac
 // out: an agent needs a session, which the UI does not start. Throws on a
 // file without a tokens list.
 export function parseDevUsers(yamlText: string): DevUser[] {
+  return tokensOf(yamlText)
+    .map((t) => ({
+      name: String(t.name),
+      token: String(t.token),
+      principal: String(t.principal),
+      namespace: String(t.namespace),
+      roles: Array.isArray(t.roles) ? t.roles.map(String) : [],
+    }))
+    .filter((u) => u.principal.startsWith("user:") || u.principal.startsWith("customer:"));
+}
+
+// The file's token entries. Throws on a file without a tokens list.
+function tokensOf(yamlText: string): Record<string, unknown>[] {
   let doc: unknown;
   try {
     doc = parse(yamlText);
@@ -18,15 +31,7 @@ export function parseDevUsers(yamlText: string): DevUser[] {
   }
   const tokens = (doc as { tokens?: unknown } | null | undefined)?.tokens;
   if (!Array.isArray(tokens)) throw new Error("dev users: the file has no tokens list");
-  return tokens
-    .map((t: Record<string, unknown>) => ({
-      name: String(t.name),
-      token: String(t.token),
-      principal: String(t.principal),
-      namespace: String(t.namespace),
-      roles: Array.isArray(t.roles) ? t.roles.map(String) : [],
-    }))
-    .filter((u) => u.principal.startsWith("user:") || u.principal.startsWith("customer:"));
+  return tokens as Record<string, unknown>[];
 }
 
 // A person's name from the dev-token file (people.ts, which has no YAML
@@ -37,7 +42,15 @@ export { personName } from "./people";
 // look): `display_name`, "" when the file gives none.
 export type DevAgent = { name: string; principal: string; namespace: string; displayName: string };
 
-// The file's agents, in the file's order. STUB for the Phase B tests.
-export function parseDevAgents(_yamlText: string): DevAgent[] {
-  return [];
+// The file's agents, in the file's order. Throws on a file without a
+// tokens list, as parseDevUsers does.
+export function parseDevAgents(yamlText: string): DevAgent[] {
+  return tokensOf(yamlText)
+    .filter((t) => String(t.principal).startsWith("agent:"))
+    .map((t) => ({
+      name: String(t.name),
+      principal: String(t.principal),
+      namespace: String(t.namespace),
+      displayName: typeof t.display_name === "string" ? t.display_name : "",
+    }));
 }

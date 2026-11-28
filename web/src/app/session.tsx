@@ -36,7 +36,7 @@ export class Session {
     // The dev-token file's people, for their names (Inbox PR 2b).
     readonly people: DevUser[] = [],
     // The dev-token file's agents, for their display names (the Inbox, the
-    // look). STUB for the Phase B tests: not used for names yet.
+    // look). Never principals to suggest: a person field names no agent.
     readonly agents: DevAgent[] = [],
   ) {
     for (const t of types) this.byName.set(t.name, t);
@@ -55,7 +55,7 @@ export class Session {
   }
 
   // A person's name, or their ID (people.personName).
-  nameOf = (principal: string): string => personName(principal, this.people);
+  nameOf = (principal: string): string => personName(principal, this.people, this.agents);
 
   titleOf = (item: Item): string => {
     const type = this.typeOf(item.type);
