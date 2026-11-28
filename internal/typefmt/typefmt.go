@@ -12,8 +12,8 @@
 // The layout:
 //   - Every mapping is in block style, two spaces deeper than its key.
 //   - A list whose items are all scalars (or an empty list) is written on
-//     one line, `[a, b]`; any other list is in block style, its items at
-//     the same depth as... two spaces deeper than its key.
+//     one line, `[a, b]`; any other list is in block style, its items
+//     two spaces deeper than its key.
 //   - Keys are in the order Keys gives for their place; keys it does not
 //     name follow, in their own order.
 //   - Scalars are written as they were: quotes, escapes and numbers kept.
