@@ -82,8 +82,19 @@ why, at Phase A (CLAUDE.md, tests are protected).
 
 - The chat-app card (the mockup's third screen): with "Ask a person".
 - "Not yet", a refusal reason and the approver's own values: with
-  `approval@3`.
+  `approval@4` (this brief's `approval@3` carries the Type's label; the
+  owner's answer at Phase A, 2026-11-28).
 - Any page other than the Inbox.
+
+## As built
+
+Built as `docs/design.md`, "The Inbox, the look, as built", with the
+owner's seven answers at Phase A (2026-11-28): the label of the newest
+version of the same Type when the Item's has none; `approval@3` for the
+label, "Ask a person" moving to `approval@4`; the Type and state kept,
+quiet, beside the title; "Open it to answer" only on a row sent back to
+the reader; the "⋯" as a disclosure button; `display_name` on an agent's
+token; the system font stack.
 
 ## The owner's decisions (2026-11-28)
 

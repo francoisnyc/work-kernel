@@ -6544,7 +6544,8 @@ Later, not decided: overdue across pages (a server filter on a state's
 `due`), role labels, only the claimant releases, an agent working for
 someone on a claimed row, agents' display names. The new answers ("Not
 yet", a refusal reason, the approver's own values) come with "Ask a
-person" (`question@1`, `approval@3`).
+person" (`question@1`, `approval@4`: `approval@3` is the Inbox's look,
+the Type's own label).
 
 ## pli check, as built (PR 1) (2026-11-28)
 
@@ -6811,6 +6812,78 @@ registered and creatable.
 web and PoC seeds and the tests all name their versions (incident@1 to
 @7, vacation_request@3, access_request@1), so they keep the old rules. A
 create that names no version gets the new ones.
+
+## The Inbox, the look, as built (2026-11-28)
+
+The brief `docs/plans/inbox-the-look.md`: the Inbox reads and looks like
+the owner's mockup. Web, plus one hint on the Type. The behaviour of
+"The Inbox for people" is unchanged; the scenario script is unchanged.
+
+**The Type's own label and help** (the owner's decision of 2026-11-28).
+A Type may carry `label` and `help` at its top, right after `version`:
+presentation hints, as on a field, a state and a move, checked as those
+are (plain text on one line; a label 1 to 60 characters, a help 1 to
+280; INVALID_VALUE at `label` or `help`). They enforce nothing. The JSON
+Schema and `typefmt`'s key order name them; `kernel.v1.Type` gains
+`label` (21) and `help` (22), additive, through `GetType` and
+`ListTypes`; empty means none. The reading's first sentence names the
+Type by its label: "An Access request (`access_request`) starts in
+draft." (the label is a hint, left out of the cited paths, as the other
+labels are).
+
+**Four label-only versions:** `approval@3` ("Approval"),
+`access_request@4` ("Access request"), `equipment_request@3`
+("Equipment request") and `incident@9` ("Incident"), each the version
+before with its label, its start block keeping the older versions open
+(`access_request@4`: 1 to 3; `equipment_request@3`: 1 and 2;
+`incident@9`: all; `approval@3` has none, as `approval@2`: only a
+reaction creates an approval). "Ask a person" now takes `approval@4`.
+
+**A Type by its label on the screen.** The label of the Item's version;
+when it has none, the label of the newest version of the same Type ID
+that has one (a label names the Type, and the seeds, the scenario and
+the reactions still create older versions); the ID otherwise. Beside a
+row's title, quiet: "Equipment request · In the queue".
+
+**Words that read.** Why a row is yours: "Approver: you" ("{label}:
+you"). A row with nothing for the reader says why (who has it, the
+withheld move's reason, else "Nothing for you to do here") and offers no
+link: its title opens it. A row sent back to the reader keeps "Open it
+to answer". An instant in words, on the reader's clock and locale
+(`web/src/model/when.ts`): "today 1:43 pm", "tomorrow 9:00 am", "28 Nov",
+with "in 5 h" or "4 h ago" beside a datetime field in the panel; the
+whole instant in a tooltip on it and on a row's due; never raw.
+
+**An agent's text once.** While "What the agent wrote" shows, the
+panel's field list leaves out those fields.
+
+**Agents by name.** An agent's token in the dev-token file may carry
+`display_name` ("Triage agent"): optional, agents only, plain text of 1
+to 60 characters, checked by `internal/devtoken` (one bad entry refuses
+the file). `name` stays the `pli --as` handle. The web reads the file's
+agents apart from its users (the people picker still leaves agents out),
+and names an agent by its display name, by its ID without "agent:"
+otherwise. Until sign-on brings real names.
+
+**The mockup's styling**, on the Inbox page only (`.inbox-page`): a row
+is a card (title, Type and state, the agent's badge; then who asks, why,
+how long, in amber past due; then the summary fields); the main move the
+one dark button (`.main-move`); the others behind a "⋯" disclosure
+button labelled "More actions" (`aria-expanded`, real buttons inside;
+Escape closes it and returns focus); the panel's moves in one group,
+main first; tabs underlined with a count pill; the order and place in
+one quiet line; the agent's badge purple with a small robot icon (inline
+SVG, `aria-hidden`), its words carrying the meaning. System font stack.
+
+**Accessibility, checked on the stack:** a keyboard walk (every stop
+named, focus visible), the disclosure by keyboard, buttons 44 px high,
+text targets 24 px, every colour pair 4.5:1 or more (the lowest, a
+disabled button, 5.4:1), no colour-only meaning. Screenshots beside the
+mockup and the pass: the PR's private Artifact.
+
+**Not built (Later, `docs/journal.md`):** the mockup's greeting line,
+app header and search, initials avatars, the "Today" group, its A/T/H
+keys, "Agent status"; labels for `vacation_request` and `ticket`.
 
 ## Out of scope for the spike
 

@@ -6,11 +6,19 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
+- **The Inbox, the look's Later items** (design.md, "The Inbox, the look, as built"):
+  - **The mockup's extras.** Its greeting line ("Good afternoon, Sam. 3 things wait on you"), the app's header with
+    search, initials avatars, a "Today" group (the screen says "Waiting"), its A/T/H keys (the screen keeps J, K,
+    Enter, X, P), and "Agent status: waiting on you".
+  - **Labels for `vacation_request` and `ticket`.** Neither has words for people; their rows show IDs and "Move to
+    {state}". A `vacation_request@6` also clashes with `TestCheck_ActionMajors`'s hand-picked next version.
+  - **Label-only versions are heavy.** A Type label needed four new versions and a dozen list and count tests changed;
+    hints that float from the latest version (below, PR 1a's Later) would make such a change one file.
+  - **The panel's many moves wrap one under another** on a narrow panel (ticket@9 offers six); a Type's `primary` and
+    labels keep it short where the Type has them.
 - **An agent's request, Inbox PR 3's Later items** (design.md, "An agent's request on the screen, as built"):
-  - **Agents' display names.** An agent shows by its ID without "agent:"; the kernel names no agent, and the dev
-    file's users list leaves agents out.
   - **A free-text field open to agents on the stack.** None yet: the journey's agent field is a priority; free text
-    comes with "Ask a person" (`question@1`, `approval@3`).
+    comes with "Ask a person" (`question@1`, `approval@4`).
 - **The Inbox in words, Inbox PR 2b's Later items** (design.md, "The Inbox in words, as built (Inbox PR 2b)"):
   - **Overdue across pages.** Overdue is worked out on the rows loaded;
     a server filter on a state's `due` would find them all.
@@ -5311,3 +5319,29 @@ CI.
   reaction after the page has loaded.
 
 **Open:** none. **Next session:** `pli check` PR 3, witnesses as stories.
+
+## 2026-11-28 — The Inbox, the look (Phases A to D)
+
+**Built:** the brief `docs/plans/inbox-the-look.md`. The Type's own `label` and `help` (typedef checks as the other
+labels, JSON Schema, typefmt key order, `kernel.v1.Type.label`/`help` 21 and 22, the reading's first sentence);
+`approval@3`, `access_request@4`, `equipment_request@3`, `incident@9`, label only; an agent's `display_name` in the
+dev-token file (`internal/devtoken`, the web). The web Inbox in the mockup's look: cards, one dark main move, the
+others behind a "⋯" disclosure (More actions), tabs with count pills, the panel's moves in one group, the agent badge
+with a robot icon; "Approver: you"; rows with nothing to do say why, no link; instants in words with tooltips
+(`when.ts`); an agent's text once; the Type by its label, falling back to the newest version's. design.md, "The Inbox,
+the look, as built"; roadmap; "Ask a person" now `approval@4`.
+
+**Decided (the owner, through the coordinator):** at Phase A, seven answers (the plan's "As built"). At the tests
+gate: the tests as pushed (19046ed), "Nothing for you to do here" included.
+
+**Tests:** see the PR. Changed since 19046ed: only with the owner's approval (the PR lists them).
+
+**Surprises:**
+- The stack's images could not fetch Go modules or npm packages through this session's TLS proxy; a local compose
+  override (scratch Dockerfiles trusting the proxy's CA, build on the host network) built them. Nothing in the repo.
+- `prettier` is not the repo's formatter: running it reformatted files at another width; reverted.
+- Two existing tests take incident@9 as "the next free version" for a draft; a third clash of the kind #122 met.
+- A Type label is a hint, so the reading cannot cite it as an element; my Phase B test asked for that.
+
+**Open:** none. **Next session:** what the roadmap names next in track 1 (item 6's step 4), or track 2's authoring
+test, as the owner chooses.
