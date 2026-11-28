@@ -4142,7 +4142,12 @@ type Type struct {
 	// Presentation hint (the Inbox for people, PR 1): the field IDs that
 	// summarise an Item of this version under its title, in a list row or a
 	// card; at most 3. Empty: none. A hint enforces nothing.
-	Summary       []string `protobuf:"bytes,20,rep,name=summary,proto3" json:"summary,omitempty"`
+	Summary []string `protobuf:"bytes,20,rep,name=summary,proto3" json:"summary,omitempty"`
+	// Presentation hints (the Inbox, the look): the Type's own name for
+	// people, plain text of at most 60 characters, and a line of help, at
+	// most 280. Empty: none (a screen shows type_id). A hint enforces nothing.
+	Label         string `protobuf:"bytes,21,opt,name=label,proto3" json:"label,omitempty"`
+	Help          string `protobuf:"bytes,22,opt,name=help,proto3" json:"help,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4315,6 +4320,20 @@ func (x *Type) GetSummary() []string {
 		return x.Summary
 	}
 	return nil
+}
+
+func (x *Type) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *Type) GetHelp() string {
+	if x != nil {
+		return x.Help
+	}
+	return ""
 }
 
 // A named principal field a Type offers to the hooks of contained Items.
@@ -7605,7 +7624,7 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\rvalidate_only\x18\x05 \x01(\bR\fvalidateOnly\x12+\n" +
 	"\x11expected_audience\x18\x06 \x01(\tR\x10expectedAudience\"2\n" +
 	"\x14ApproveWidenResponse\x12\x1a\n" +
-	"\baudience\x18\x01 \x01(\tR\baudience\"\xc7\x06\n" +
+	"\baudience\x18\x01 \x01(\tR\baudience\"\xf1\x06\n" +
 	"\x04Type\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x17\n" +
 	"\atype_id\x18\x02 \x01(\tR\x06typeId\x12\x18\n" +
@@ -7630,7 +7649,9 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\x06shared\x18\x11 \x03(\tR\x06shared\x12'\n" +
 	"\x0fcustomer_fields\x18\x12 \x03(\tR\x0ecustomerFields\x122\n" +
 	"\x15placement_writable_by\x18\x13 \x03(\tR\x13placementWritableBy\x12\x18\n" +
-	"\asummary\x18\x14 \x03(\tR\asummary\"1\n" +
+	"\asummary\x18\x14 \x03(\tR\asummary\x12\x14\n" +
+	"\x05label\x18\x15 \x01(\tR\x05label\x12\x12\n" +
+	"\x04help\x18\x16 \x01(\tR\x04help\"1\n" +
 	"\x05Offer\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05field\x18\x02 \x01(\tR\x05field\"J\n" +
