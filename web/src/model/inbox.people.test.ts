@@ -199,11 +199,11 @@ describe("whyYours: in labels", () => {
   const me: InboxTab = { key: "me", label: "Waiting on me", waitingOn: "me" };
   const team: InboxTab = { key: "role:desk_agent", label: "Desk agent", waitingOn: "role:desk_agent", role: "desk_agent" };
   test("on Waiting on me, the principal fields that hold the caller, by their labels", () => {
-    expect(whyYours(me, access, pendingAccess({ f_approver: "user:sam" }), "user:sam")).toBe("you are its Approver");
+    expect(whyYours(me, access, pendingAccess({ f_approver: "user:sam" }), "user:sam")).toBe("Approver: you");
   });
   test("a field with no label: its ID", () => {
     const it = item({ name: itemName(5), type: bare.name, state: "open", fields: { f_owner: "user:sam" } });
-    expect(whyYours(me, bare, it, "user:sam")).toBe("you are its f_owner");
+    expect(whyYours(me, bare, it, "user:sam")).toBe("f_owner: you");
   });
   test("on a team tab, nothing: the tab says it", () => {
     expect(whyYours(team, desk, item({ name: itemName(6), type: desk.name, state: "queue" }), "user:sam")).toBe("");

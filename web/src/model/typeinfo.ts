@@ -116,3 +116,11 @@ export function displayTitle(type: Type, item: Item): string {
   }
   return `${type.typeId} ${shortId(item.name)}`;
 }
+
+// A Type by its label (the Inbox, the look): its own, else the newest
+// version's of the same Type ID that has one, else its ID. typeNameOf is
+// the Item's type name, for a Type the page does not have. STUB for the
+// Phase B tests: the ID only.
+export function typeLabel(type: Type | undefined, _types: readonly Type[], typeNameOf = ""): string {
+  return type?.typeId ?? (typeNameOf === "" ? "" : parseTypeName(typeNameOf).typeId);
+}

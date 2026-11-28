@@ -32,3 +32,12 @@ export function parseDevUsers(yamlText: string): DevUser[] {
 // A person's name from the dev-token file (people.ts, which has no YAML
 // in it, so the session can use it in a production build).
 export { personName } from "./people";
+
+// An agent of the dev-token file, for its name on screens (the Inbox, the
+// look): `display_name`, "" when the file gives none.
+export type DevAgent = { name: string; principal: string; namespace: string; displayName: string };
+
+// The file's agents, in the file's order. STUB for the Phase B tests.
+export function parseDevAgents(_yamlText: string): DevAgent[] {
+  return [];
+}

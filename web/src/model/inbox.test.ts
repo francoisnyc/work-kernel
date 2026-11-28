@@ -183,14 +183,15 @@ describe("whyYours", () => {
     expect(whyYours(finance, purchase, claimed, "user:fay")).toBe("");
   });
 
-  // Since the Inbox for people (PR 2b): "you are its {label}", the ID
-  // where the field has no label (none here).
+  // Since the Inbox for people (PR 2b), by label, the ID where the field
+  // has no label (none here). Since the Inbox, the look: "{label}: you",
+  // in place of "you are its {label}".
   test("on Waiting on me: the principal fields that hold the caller, by their IDs, in the Type's order", () => {
-    expect(whyYours(me, purchase, claimed, "user:fay")).toBe("you are its f_claimed_by");
-    expect(whyYours(me, purchase, claimed, "user:bob")).toBe("you are its f_manager");
+    expect(whyYours(me, purchase, claimed, "user:fay")).toBe("f_claimed_by: you");
+    expect(whyYours(me, purchase, claimed, "user:bob")).toBe("f_manager: you");
     const both = item({ name: itemName(32), type: purchase.name, state: "finance_review", fields: { f_manager: "user:fay", f_claimed_by: "user:fay" } });
-    expect(whyYours(me, purchase, both, "user:fay")).toBe("you are its f_manager, f_claimed_by");
-    expect(whyYours(me, vacation, aSubmittedVacation, "user:bob")).toBe("you are its f_approver");
+    expect(whyYours(me, purchase, both, "user:fay")).toBe("f_manager, f_claimed_by: you");
+    expect(whyYours(me, vacation, aSubmittedVacation, "user:bob")).toBe("f_approver: you");
   });
 
   test("a string field that happens to hold the caller's ID is not a reason", () => {

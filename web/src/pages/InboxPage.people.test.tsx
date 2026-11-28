@@ -6,7 +6,8 @@
 //     long it waited, and when it is due, in amber with a word once past;
 //   - its main button: the move marked primary when the server lists it,
 //     else the first it lists; the others behind "More moves", a real
-//     button with aria-expanded;
+//     button with aria-expanded (since the Inbox, the look: a "⋯" button
+//     labelled "More actions");
 //   - Waiting on me: Overdue, then Waiting, on the rows loaded;
 //   - a team tab: "Nobody has these yet" (the queue), then "Being
 //     handled" (filter.claimed), each paged on its own; the tab's number
@@ -192,10 +193,12 @@ const inbox = () => screen.getByRole("region", { name: "Inbox" });
 const list = (name: string) => within(inbox()).getByRole("list", { name });
 const titlesIn = (name: string) => [...list(name).querySelectorAll<HTMLAnchorElement>(":scope > li > a")].map((a) => a.textContent);
 const rowOf = (title: string) => screen.getByRole("link", { name: title }).closest("li")!;
+// A button's name: its aria-label (the "⋯" button is "More actions",
+// since the Inbox, the look), else its text.
 const buttonsOf = (title: string) =>
   within(rowOf(title))
     .queryAllByRole("button")
-    .map((b) => b.textContent);
+    .map((b) => b.getAttribute("aria-label") ?? b.textContent);
 const isTeam = (req: SearchReq) => req.filter?.waitingOn === "role:desk_agent";
 
 test("a row: title, summary, Type and state, who asked, why it is yours, how long, and when it is due", async () => {
@@ -205,7 +208,7 @@ test("a row: title, summary, Type and state, who asked, why it is yours, how lon
   const row = rowOf("Finance share");
   expect(within(row).getByText("Reason: quarterly close")).toBeInTheDocument();
   expect(row).toHaveTextContent("access · Waiting for approval");
-  expect(row).toHaveTextContent("Ana asks · you are its Approver · waiting 3 h · due in 5 h");
+  expect(row).toHaveTextContent("Ana asks · Approver: you · waiting 3 h · due in 5 h");
   // Not overdue: the due is said, not marked.
   expect(within(row).getByText("due in 5 h")).not.toHaveClass("overdue");
   // No IDs where the Type gives labels.
@@ -233,13 +236,13 @@ test("nothing overdue: no Overdue heading, only Waiting", async () => {
   expect(within(inbox()).getAllByRole("heading", { level: 2 }).map((h) => h.textContent)).toEqual(["Waiting"]);
 });
 
-test("the main button is the primary move when listed, the rest behind More moves (aria-expanded)", async () => {
+test("the main button is the primary move when listed, the rest behind More actions (aria-expanded)", async () => {
   const k = kernel({ rows: (req) => ({ items: isTeam(req) ? [] : [accessRow(1, "Finance share", 5)] }) });
   show(k);
   await waitFor(() => expect(titlesIn("Waiting")).toEqual(["Finance share"]));
   // Approve is primary, though Reject comes first in the server's list.
-  expect(buttonsOf("Finance share")).toEqual(["Approve", "More moves"]);
-  const more = within(rowOf("Finance share")).getByRole("button", { name: "More moves" });
+  expect(buttonsOf("Finance share")).toEqual(["Approve", "More actions"]);
+  const more = within(rowOf("Finance share")).getByRole("button", { name: "More actions" });
   expect(more).toHaveAttribute("aria-expanded", "false");
   await userEvent.click(more);
   expect(more).toHaveAttribute("aria-expanded", "true");
@@ -248,17 +251,17 @@ test("the main button is the primary move when listed, the rest behind More move
   expect(within(panel).getAllByRole("button").map((b) => b.textContent)).toEqual(["Reject"]);
   await userEvent.click(more);
   expect(more).toHaveAttribute("aria-expanded", "false");
-  expect(buttonsOf("Finance share")).toEqual(["Approve", "More moves"]);
+  expect(buttonsOf("Finance share")).toEqual(["Approve", "More actions"]);
 });
 
-test("primary not listed for the caller: the first listed move is the main button; one move: no More moves", async () => {
+test("primary not listed for the caller: the first listed move is the main button; one move: no More actions", async () => {
   const k = kernel({
     rows: (req) => ({ items: isTeam(req) ? [] : [accessRow(1, "Only reject", 5, ["rejected"]), accessRow(2, "Both", 5, ["rejected", "approved"])] }),
   });
   show(k);
   await waitFor(() => expect(titlesIn("Waiting")).toEqual(["Only reject", "Both"]));
   expect(buttonsOf("Only reject")).toEqual(["Reject"]);
-  expect(buttonsOf("Both")).toEqual(["Approve", "More moves"]);
+  expect(buttonsOf("Both")).toEqual(["Approve", "More actions"]);
 });
 
 test("a Type with no hints: IDs, and Move to {state}", async () => {
@@ -277,7 +280,7 @@ test("a Type with no hints: IDs, and Move to {state}", async () => {
   expect(rowOf("Bare one")).toHaveTextContent("bare · open");
   // zoe is not in the dev-token file: her ID.
   expect(rowOf("Bare one")).toHaveTextContent("user:zoe asks · waiting 1 h");
-  expect(buttonsOf("Bare one")).toEqual(["Move to done", "More moves"]);
+  expect(buttonsOf("Bare one")).toEqual(["Move to done", "More actions"]);
 });
 
 test("names: from the dev-token file; without it, the ID", async () => {
@@ -394,7 +397,7 @@ test("a team tab with nothing: the empty sentence names the team readably", asyn
 
 // Since PR 2c each row starts with its checkbox ("Select {title}"), a
 // Tab stop of its own before the title.
-test("accessible as built: the sections are labelled lists, and Tab goes title, main move, More moves, row by row", async () => {
+test("accessible as built: the sections are labelled lists, and Tab goes title, main move, More actions, row by row", async () => {
   const k = kernel({ rows: (req) => ({ items: isTeam(req) ? [] : [accessRow(1, "First", 5), accessRow(2, "Second", 6)] }) });
   show(k);
   await waitFor(() => expect(titlesIn("Waiting")).toEqual(["First", "Second"]));
@@ -406,7 +409,7 @@ test("accessible as built: the sections are labelled lists, and Tab goes title, 
     await userEvent.tab();
     order.push(name());
   }
-  expect(order).toEqual(["First", "Approve", "More moves", "Select Second", "Second", "Approve", "More moves"]);
+  expect(order).toEqual(["First", "Approve", "More actions", "Select Second", "Second", "Approve", "More actions"]);
 });
 
 // The amber of an overdue due: at least 4.5:1 against the page and a
