@@ -5193,6 +5193,38 @@ stay as found, for PR 2.
 
 **Open:** PR 2's scope as planned. **Next session:** PR 2, dead rules and a colleague editing a draft.
 
+## 2026-11-28 — Track 2, `pli check`, PR 2: dead rules, loops, drafts; two PR 1 fixes (Phases A to D)
+
+**Built:** UNREACHABLE_STATE, NEVER_FIRES, NO_WAY_OUT and COLLEAGUE_EDITS_DRAFT in `internal/check`; the every-role
+world for "it can never happen"; and two fixes to PR 1 (a Type only another Type's reaction makes is created in the
+model; multi-value principal samples were wrapped twice). design.md: "pli check, as built (PR 2)", and PR 1's text
+corrected (the Types with warnings). Roadmap: PR 2 built; the follow-up step next.
+
+**Decided (the owner, through the coordinator):** at Phase A, the incidents are a real hole, fixed by `incident@8`
+(`in_progress → canceled` for `role:desk_agent`) in a follow-up step, which also closes the 6 draft holes
+(`access_request@3`, `vacation_request@5`, `requester_only`); every refinement as proposed. At the tests gate: the
+tests as pushed (e940f10), with fulfilment_task under Later.
+
+**Tests:** new: 12 (check2_test.go 11, golden_types_test.go 1). Changed, as approved at Phase A: 8 (the draft finding
+added to the exact-set tests; the not-checked lines). None changed since e940f10.
+
+**Surprises:**
+- PR 1 reported nothing on what it never explored: approval, fulfilment_task and sla_goal were never created (only
+  reactions make them), and access_request never got past its draft (a sample wrapped twice). Both were silent cleans,
+  found only because PR 2's UNREACHABLE_STATE said "nothing is reached" (217 findings in the first prototype, all from
+  the bugs and two refinements).
+- A reaction-made Item's requester is its container's creator: approval's `except: [container_creator]` shuts them out.
+  The node now records that a reaction made it.
+- The one-role-per-class model made the staff-role rejection look dead; the every-role world fixes "never" claims.
+
+**Later:**
+- fulfilment_task@1 lets a desk agent who asked for the access complete their own task. Explained as intended for now;
+  a separation-of-duties rule (`except: [container_creator]`) could close it.
+- Decision findings still take one role per class (an agent holding finance and staff, rejecting on the staff-role
+  purchase, is not reported).
+
+**Open:** the follow-up step. **Next session:** `incident@8`, `access_request@3`, `vacation_request@5`, then PR 3.
+
 ## 2026-11-28 — Track 2, `pli fmt`: one layout for Type files (Phases A to D)
 
 **Built:** `internal/typefmt` (its own emitter over yaml.v3 nodes: block mappings in the JSON Schema's key order,

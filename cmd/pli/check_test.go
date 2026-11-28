@@ -63,8 +63,10 @@ func TestCheckJSONOfAFile(t *testing.T) {
 	if err := json.Unmarshal([]byte(r.stdout), &doc); err != nil {
 		t.Fatalf("stdout is not JSON (%v): %q", err, r.stdout)
 	}
-	if len(doc.Findings) != 1 || doc.Findings[0].Code != "AGENT_DECIDES" || doc.Findings[0].Path != "transitions[6]" ||
-		doc.Findings[0].Type != "purchase" || doc.Findings[0].Version != 1 || len(doc.NotChecked) == 0 {
+	// PR 2: the draft's colleague finding comes first (warnings by path).
+	if len(doc.Findings) != 2 || doc.Findings[0].Code != "COLLEAGUE_EDITS_DRAFT" || doc.Findings[0].Path != "states[0]" ||
+		doc.Findings[1].Code != "AGENT_DECIDES" || doc.Findings[1].Path != "transitions[6]" ||
+		doc.Findings[1].Type != "purchase" || doc.Findings[1].Version != 1 || len(doc.NotChecked) == 0 {
 		t.Errorf("JSON: %s", r.stdout)
 	}
 }

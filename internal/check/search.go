@@ -23,7 +23,10 @@ const maxNodes = 50000
 type node struct {
 	state  string
 	inside bool
-	vals   []val
+	// made: a reaction made it, inside a container whose creator is its
+	// requester (the reaction acts for them).
+	made bool
+	vals []val
 }
 
 func (n node) key() string {
@@ -33,6 +36,9 @@ func (n node) key() string {
 		b.WriteString("|in|")
 	} else {
 		b.WriteString("|top|")
+	}
+	if n.made {
+		b.WriteString("made|")
 	}
 	for _, v := range n.vals {
 		b.WriteByte('0' + byte(v))
@@ -54,6 +60,9 @@ type cand struct {
 	deps  []string
 	world int
 	extra string // STUCK_STATE: the fields that name no one
+	// message, when set, is the finding's message as it stands (PR 2's
+	// codes).
+	message string
 }
 
 func (a cand) better(b cand) bool {
@@ -81,13 +90,25 @@ type typeCheck struct {
 	// The Type's own Items are made only by a reaction, inside a
 	// container whose creator is their requester.
 	byReaction bool
-	decision   map[string]bool
-	found      map[fkey]cand
-	unchecked  []Finding
-	stuckMemo  map[string]bool
+	// madeByReaction: a create reaction of a Type checked with it makes
+	// its Items too (PR 1 left such a Type unexplored when no person
+	// could create one: fixed in PR 2).
+	madeByReaction bool
+	decision       map[string]bool
+	found          map[fkey]cand
+	unchecked      []Finding
+	stuckMemo      map[string]bool
 	// invFields are the fields the invariants read (by name), computed once;
 	// cross caches crossExits by state.
 	invFields map[string]bool
+	// The graph every search adds to: each abstract Item's state, the
+	// Items reached from it, the from>to pairs of the moves made, and the
+	// first (best) path to each Item.
+	edges     map[string][]string
+	nodeState map[string]string
+	nodes     map[string]node
+	firedPair map[string]bool
+	firstPath map[string]cand
 	cross     map[string][]crossExit
 	// conds caches each guard in plain words (reading parses it).
 	conds     map[string]string
@@ -105,6 +126,8 @@ func newTypeCheck(ty *typedef.Type, all []*typedef.Type, cat *contracts.Catalog)
 		c.idx[f.ID] = i
 	}
 	c.invFields, c.cross, c.conds = map[string]bool{}, map[string][]crossExit{}, map[string]string{}
+	c.edges, c.nodeState, c.nodes = map[string][]string{}, map[string]string{}, map[string]node{}
+	c.firedPair, c.firstPath = map[string]bool{}, map[string]cand{}
 	for _, f := range ty.Fields {
 		word := regexp.MustCompile(`\b` + regexp.QuoteMeta(f.ID) + `\b`)
 		for _, inv := range ty.Invariants {
@@ -126,12 +149,19 @@ func newTypeCheck(ty *typedef.Type, all []*typedef.Type, cat *contracts.Catalog)
 		for _, col := range opts {
 			for _, ag := range opts {
 				for _, f := range []int{forSelf, forRequester, forColleague} {
-					c.worlds = append(c.worlds, world{req, col, ag, f})
+					c.worlds = append(c.worlds, world{req: req, col: col, agent: ag, agentFor: f})
 				}
 			}
 		}
 	}
 	slices.SortStableFunc(c.worlds, func(a, b world) int { return a.roleCount() - b.roleCount() })
+	// Last, the world where each class holds every role at once: "it can
+	// never happen" is judged with it too (the owner's decision, PR 2), so
+	// a move that needs two roles held together is not called dead. No
+	// decision finding comes from it: those keep one role per class.
+	if len(rs) > 0 {
+		c.worlds = append(c.worlds, world{req: allRoles, col: allRoles, agent: allRoles, every: rs})
+	}
 	// Every mover of every world, once each, for asking whether anyone
 	// at all may leave a state.
 	for _, r := range opts {
@@ -148,6 +178,24 @@ func newTypeCheck(ty *typedef.Type, all []*typedef.Type, cat *contracts.Catalog)
 				m mover
 				w world
 			}{mover{kind: mAgent}, world{agent: r}})
+	}
+	if len(rs) > 0 {
+		every := world{req: allRoles, col: allRoles, agent: allRoles, every: rs}
+		for _, k := range []int{mRequester, mColleague, mAgent} {
+			c.allMovers = append(c.allMovers, struct {
+				m mover
+				w world
+			}{mover{kind: k}, every})
+		}
+	}
+	// A Type another Type's create reaction makes is also made inside a
+	// container by the kernel, whatever start says of people.
+	for _, u := range all {
+		for _, r := range u.Reactions {
+			if r.Kind == typedef.ReactionCreate && r.Type == ty.ID {
+				c.madeByReaction = true
+			}
+		}
 	}
 	return c
 }
@@ -256,7 +304,7 @@ func (c *typeCheck) facts(n node) policy.ItemFacts {
 	facts := policy.ItemFacts{Fields: fields, CreatedBy: requesterID}
 	if n.inside {
 		facts.ContainerCreatedBy = containerID
-		if c.byReaction {
+		if c.byReaction || n.made {
 			facts.ContainerCreatedBy = requesterID
 		}
 	}
@@ -376,7 +424,7 @@ func (c *typeCheck) try(n node, w world, ed map[string]bool, ti int, m mover) tr
 	intent := slices.Contains(tr.Allowed, typedef.AllowedCreator) &&
 		policy.IsRequester(who.Actor, who.OnBehalfOf, facts.CreatedBy, facts.CreatedOnBehalfOf)
 
-	next := node{state: tr.To, inside: n.inside, vals: slices.Clone(n.vals)}
+	next := node{state: tr.To, inside: n.inside, made: n.made, vals: slices.Clone(n.vals)}
 	gives := func(id string) bool {
 		if m.kind == mKernel {
 			return true
@@ -549,12 +597,10 @@ func (c *typeCheck) mayHold(vals []val, ed map[string]bool) bool {
 		case vNamed:
 			opts = []any{namedPrefix + f.ID}
 		}
-		if f.Type == typedef.Principal && v != vEmpty && f.Multiple {
-			for k, o := range opts {
-				if o != nil {
-					opts[k] = []any{o}
-				}
-			}
+		// samples are already lists for a multi-value field; a principal
+		// it names is made one (PR 1 wrapped lists twice: fixed in PR 2).
+		if f.Multiple && (v == vRequester || v == vColleague || v == vAgent || v == vNamed) {
+			opts = []any{[]any{opts[0]}}
 		}
 		combos *= len(opts)
 		if combos > 4096 {
@@ -616,17 +662,19 @@ func (c *typeCheck) creates(w world) []struct {
 	}
 	init := c.ty.InitialState
 	var out []create
-	if c.byReaction {
+	if c.byReaction || c.madeByReaction {
 		vals := make([]val, len(c.ty.Fields))
 		for i := range vals {
 			vals[i] = vAny
 		}
-		n := node{state: init, inside: true, vals: vals}
+		n := node{state: init, inside: true, made: true, vals: vals}
 		if c.mayHold(vals, nil) {
 			out = append(out, create{n, Step{Who: "a reaction", Kind: StepCreate, To: init,
 				Words: "A reaction creates it in " + init + ", inside a container."}, nil})
 		}
-		return out
+		if c.byReaction {
+			return out
+		}
 	}
 	requester := mover{kind: mRequester}
 	who := requester.who(w)
@@ -722,7 +770,7 @@ func (c *typeCheck) findCrossExits(state string) []crossExit {
 // declared transition if there is one: the move's effects apply, its
 // allowed does not (the kernel's own actors, and reactions by consent).
 func (c *typeCheck) kernelMove(n node, to string, ed map[string]bool) (node, bool) {
-	next := node{state: to, inside: n.inside, vals: slices.Clone(n.vals)}
+	next := node{state: to, inside: n.inside, made: n.made, vals: slices.Clone(n.vals)}
 	var tr *typedef.Transition
 	for i := range c.ty.Transitions {
 		if c.ty.Transitions[i].From == n.state && c.ty.Transitions[i].To == to {
@@ -761,15 +809,26 @@ func (c *typeCheck) search(wi int) bool {
 	seen := map[string]visit{}
 	nodes := map[string]node{}
 	var queue []string
+	var path func(k string) ([]Step, []string)
 	push := func(n node, v visit) {
 		k := n.key()
+		c.nodeState[k], c.nodes[k] = n.state, n
+		if v.parent != "" {
+			c.edges[v.parent] = append(c.edges[v.parent], k)
+			c.firedPair[c.nodeState[v.parent]+">"+n.state] = true
+		}
 		if _, ok := seen[k]; ok {
 			return
 		}
 		seen[k], nodes[k] = v, n
 		queue = append(queue, k)
+		steps, deps := path(k)
+		cd := cand{steps: steps, deps: deps, world: wi}
+		if old, ok := c.firstPath[k]; !ok || cd.better(old) {
+			c.firstPath[k] = cd
+		}
 	}
-	path := func(k string) ([]Step, []string) {
+	path = func(k string) ([]Step, []string) {
 		var steps []Step
 		var chain [][]string
 		for k != "" {
@@ -824,7 +883,7 @@ func (c *typeCheck) search(wi int) bool {
 					stepDeps = addDeps(stepDeps, m.roleDeps(w)...)
 					stepDeps = addDeps(stepDeps, t.deps...)
 					step := Step{Who: m.words(w), Kind: StepMove, From: tr.From, To: tr.To, Words: c.moveWords(m.words(w), tr)}
-					if c.decision[tr.To] && !t.intent && (m.kind == mAgent || m.kind == mRequester) {
+					if c.decision[tr.To] && !t.intent && (m.kind == mAgent || m.kind == mRequester) && w.every == nil {
 						steps, deps := path(k)
 						code := CodeAgentDecides
 						if m.kind == mRequester {
@@ -920,7 +979,7 @@ func (c *typeCheck) stuck(n node) (bool, string) {
 				}
 				for _, m := range c.movers(tr) {
 					if m.kind == mNamed || m.kind == mKernel {
-						if c.try(n, world{}, ed, ex.Transition, m).ok {
+						if c.try(n, world{}, ed, ex.Transition, m).ok || c.try(n, c.everyWorld(), ed, ex.Transition, m).ok {
 							return true
 						}
 					}
@@ -949,6 +1008,15 @@ func (c *typeCheck) stuck(n node) (bool, string) {
 	return true, strings.Join(empty, ",")
 }
 
+// everyWorld is the world where each class holds every role (the zero
+// world when the Type names no role).
+func (c *typeCheck) everyWorld() world {
+	if w := c.worlds[len(c.worlds)-1]; w.every != nil {
+		return w
+	}
+	return world{}
+}
+
 // run checks the Type in every world and returns its findings.
 func (c *typeCheck) run() []Finding {
 	c.validate()
@@ -960,12 +1028,21 @@ func (c *typeCheck) run() []Finding {
 			break
 		}
 	}
+	if !c.deadAndDrafts() {
+		out = append(out, c.uncheckedFinding("",
+			fmt.Sprintf("more than %d abstract Items to explore: pli check stopped and checked nothing more of it.", maxNodes)))
+	}
 	for _, fk := range sortedFKeys(c.found) {
 		cd := c.found[fk]
 		f := Finding{Type: c.ty.ID, Version: c.ty.Version, Code: fk.code, Path: fk.path,
 			DependsOn: append([]string{}, cd.deps...), Witness: cd.steps, Severity: SeverityWarning}
 		if len(cd.deps) == 0 {
 			f.Severity = SeverityError
+		}
+		if cd.message != "" {
+			f.Message = cd.message
+			out = append(out, f)
+			continue
 		}
 		last := cd.steps[len(cd.steps)-1]
 		switch fk.code {
