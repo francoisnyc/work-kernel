@@ -36,6 +36,15 @@ jobs:
             exit 1
           fi
 
+      # The Types are held to pli fmt as the Go is to gofmt: it lists the
+      # files that differ and fails.
+      - name: Check Type formatting
+        run: |
+          if ! go run ./cmd/pli fmt --check types/; then
+            echo "These Type files need pli fmt -w (listed above)"
+            exit 1
+          fi
+
       # buf needs a newer Go patch release than go.mod names; "auto" lets the
       # go command fetch it.
       - name: Lint the proto
