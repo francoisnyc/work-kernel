@@ -57,6 +57,17 @@ var bakeoffFindings = []expected{
 	{staffRoleDir, "purchase", 1,
 		key{check.CodeAgentDecides, check.SeverityWarning, "transitions[6]", "guard:f_amount > 0, guard:f_amount >= 1000, role:finance, role:staff"},
 		"extra: the agent-in-finance row's shape; the requester must hold staff to fill the purchase"},
+
+	// PR 2: a colleague may change what is asked in the requester's draft
+	// (the hole track 1 item 4 closed with requester_only; the bake-off
+	// Types stay as they were run).
+	{camundaDir, "purchase", 1, key{check.CodeColleagueEditsDraft, check.SeverityWarning, "states[0]", "scope:readers"}, "extra: a colleague edits ana's draft (track 1 item 4's hole); the staff-role Types close it"},
+	{camundaDir, "system_access", 1, key{check.CodeColleagueEditsDraft, check.SeverityWarning, "states[0]", "scope:readers"}, "extra: as for purchase@1"},
+	{camundaV2Dir, "purchase", 1, key{check.CodeColleagueEditsDraft, check.SeverityWarning, "states[0]", "scope:readers"}, "extra: as for camunda's purchase@1"},
+	{camundaV2Dir, "purchase", 2, key{check.CodeColleagueEditsDraft, check.SeverityWarning, "states[0]", "scope:readers"}, "extra: as for camunda's purchase@1"},
+	{camundaV2Dir, "system_access", 1, key{check.CodeColleagueEditsDraft, check.SeverityWarning, "states[0]", "scope:readers"}, "extra: as for camunda's purchase@1"},
+	{blindDir, "purchase", 1, key{check.CodeColleagueEditsDraft, check.SeverityWarning, "states[0]", "scope:readers"}, "extra: as for camunda's purchase@1"},
+	{blindDir, "system_access", 1, key{check.CodeColleagueEditsDraft, check.SeverityWarning, "states[0]", "scope:readers"}, "extra: as for camunda's purchase@1"},
 }
 
 // row is one attack row the scripts recorded, and what the checker says
@@ -134,7 +145,7 @@ var bakeoffRows = []row{
 		why: "placement is not modelled: NotChecked 'placement: who moves or narrows an Item'"},
 	{file: "temporal-bakeoff/results/kernel-staff-role.md", attempt: "a colleague (olaf, staff) changes ana's draft", result: "PASS (refused)",
 		dir: staffRoleDir, id: "purchase", version: 1,
-		why: "a colleague editing a draft is PR 2 (COLLEAGUE_EDITS_DRAFT)"},
+		absent: []key{{Code: check.CodeColleagueEditsDraft, Path: "states[0]"}}},
 }
 
 func TestBakeoffMatch(t *testing.T) {

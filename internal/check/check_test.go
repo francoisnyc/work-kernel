@@ -122,6 +122,17 @@ func TestStuckAccessRequestForNoSystem(t *testing.T) {
 			{Who: "the requester", Kind: check.StepMove, From: "draft", To: "owner_review",
 				Words: "The requester moves it from draft to owner_review."},
 		},
+	}, {
+		// PR 2: a colleague may change what is asked in ana's draft.
+		Type: "system_access", Version: 1,
+		Code: check.CodeColleagueEditsDraft, Severity: check.SeverityWarning, Path: "states[0]",
+		Message:   "While it is in draft, the requester's draft, a colleague may change `f_role`, `f_justification` and `f_reason`.",
+		DependsOn: []string{"scope:readers"},
+		Witness: []check.Step{
+			{Who: "the requester", Kind: check.StepCreate, To: "draft", Words: "The requester creates it in draft."},
+			{Who: "a colleague", Kind: check.StepWrite, From: "draft", To: "draft",
+				Words: "A colleague changes `f_role`, `f_justification` and `f_reason`."},
+		},
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("system_access@1 (camunda):\n got %+v\nwant %+v", got, want)
@@ -140,12 +151,14 @@ func TestBlindRequestOutsideASystemStaysADraft(t *testing.T) {
 	got := of(r, "system_access", 1)
 	sameKeys(t, "system_access@1 (blind)", got, []key{
 		{check.CodeStuckState, check.SeverityError, "states[0]", ""},
+		// PR 2: a colleague may change what is asked in the draft.
+		{check.CodeColleagueEditsDraft, check.SeverityWarning, "states[0]", "scope:readers"},
 	})
 	for _, f := range got {
 		if f.Path == "states[1]" {
 			t.Errorf("owner_review is stuck: %s", f.Message)
 		}
-		if f.Path == "states[0]" {
+		if f.Path == "states[0]" && f.Code == check.CodeStuckState {
 			want := []check.Step{{Who: "the requester", Kind: check.StepCreate, To: "draft",
 				Words: "The requester creates it in draft, outside any container."}}
 			if !reflect.DeepEqual(f.Witness, want) {
@@ -167,6 +180,17 @@ func TestAgentHoldingFinanceDecides(t *testing.T) {
 	r := runDir(t, camundaDir)
 	got := of(r, "purchase", 1)
 	want := []check.Finding{{
+		// PR 2: a colleague may change what ana asks for in her draft.
+		Type: "purchase", Version: 1,
+		Code: check.CodeColleagueEditsDraft, Severity: check.SeverityWarning, Path: "states[0]",
+		Message:   "While it is in draft, the requester's draft, a colleague may change `f_amount`, `f_vendor`, `f_cost_centre`, `f_justification` and `f_reason`.",
+		DependsOn: []string{"scope:readers"},
+		Witness: []check.Step{
+			{Who: "the requester", Kind: check.StepCreate, To: "draft", Words: "The requester creates it in draft."},
+			{Who: "a colleague", Kind: check.StepWrite, From: "draft", To: "draft",
+				Words: "A colleague changes `f_amount`, `f_vendor`, `f_cost_centre`, `f_justification` and `f_reason`."},
+		},
+	}, {
 		Type: "purchase", Version: 1,
 		Code: check.CodeAgentDecides, Severity: check.SeverityWarning, Path: "transitions[6]",
 		Message:   "An agent holding finance may move it from finance_review to approved, a decision.",
@@ -195,6 +219,7 @@ func TestAgentHoldingFinanceDecides(t *testing.T) {
 func TestAgentHoldingCFODecides(t *testing.T) {
 	r := runDir(t, camundaV2Dir)
 	sameKeys(t, "purchase@2", of(r, "purchase", 2), []key{
+		{check.CodeColleagueEditsDraft, check.SeverityWarning, "states[0]", "scope:readers"}, // PR 2
 		{check.CodeAgentDecides, check.SeverityWarning, "transitions[6]",
 			"guard:f_amount <= 5000, guard:f_amount > 0, guard:f_amount >= 1000, role:finance"},
 		{check.CodeAgentDecides, check.SeverityWarning, "transitions[9]",
@@ -353,9 +378,8 @@ transitions:
 	}
 	for _, want := range []string{
 		"who reads it: scopes decide, not the Type",
-		"field writes",
+		"field writes outside drafts",
 		"placement: who moves or narrows an Item",
-		"unreachable states, and rules that never fire",
 	} {
 		if !slices.Contains(r.NotChecked, want) {
 			t.Errorf("NotChecked %q: missing %q", r.NotChecked, want)
@@ -383,7 +407,7 @@ func TestText(t *testing.T) {
     1. The requester creates it in draft.
     2. The requester moves it from draft to review.
     3. An agent holding approver moves it from review to approved.
-Not checked: who reads it: scopes decide, not the Type; field writes; placement: who moves or narrows an Item; unreachable states, and rules that never fire.
+Not checked: who reads it: scopes decide, not the Type; field writes outside drafts; placement: who moves or narrows an Item.
 Assumed: a principal field only the kernel writes names a person, never an agent; it is empty only where its hook's contract allows no answer.
 2 errors, 1 warning.
 `
