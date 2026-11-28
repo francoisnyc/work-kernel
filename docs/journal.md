@@ -5268,3 +5268,46 @@ proxy through its TLS proxy); CI runs them.
 - `pli lint`, the third piece of the authoring surface.
 
 **Open:** none. **Next session:** track 2's authoring test, or `pli check` PR 2, as the owner chooses.
+
+## 2026-11-28 — Track 2, the follow-up to `pli check` PR 2: closing the holes it found (Phases A to D)
+
+**Built:** `incident@8` (`in_progress → canceled` for `role:desk_agent` only), `access_request@3` (draft
+`requester_only: [f_title, f_reason]`, `older_versions: [1, 2]`) and `vacation_request@5` (draft `requester_only` on
+its five fields, `older_versions: all`), each the version before with one rule added. design.md: "The holes pli check
+found, closed, as built"; roadmap: the follow-up built, PR 3 next. No code, API, proto, schema or dependency change.
+
+**Decided (the owner, through the coordinator):** at Phase A, incident@8's three warnings kept and explained (no
+`except: [creator]`, which would stop a desk agent from cancelling their own incident); `f_comment` in the draft's
+`requester_only`; five existing tests changed; the `registerNewestTypes` helpers left alone; this doc set. At the
+tests gate: the tests as pushed (f7a4fbd).
+
+**Tests:** new: 2 (policy, `check_holes_test.go`: who cancels an incident@8 in progress; who writes the new drafts,
+each against the hole in the version before). Changed, as approved at Phase A: 5 (golden_types +3 incident@8
+entries; parse_dir; start_older; hints; `TestCheck_ActionMajors`'s draft from version 5 to 6). None changed since
+f7a4fbd, except five Postgres tests CI found pinning the version set (below), updated with the owner's approval after
+CI.
+
+**Surprises:**
+- `TestCheck_ActionMajors` built its draft as vacation_request@5: a real v5 made it VERSION_CHANGED. Found only by
+  putting the new files in place at Phase A.
+- incident@8 is not clean: restricting the move to a role turns two ERRORs into two WARNINGs (an agent holding the
+  role; a requester holding it), as the agreed fix intends.
+- `TestTypesCleanOrExplained` checks only the versions present in `types/`, so explanations for a version not yet
+  added pass silently; the new policy tests were the ones that failed for incident@8 before it landed.
+- Phase A missed five Postgres tests that pin the version set (`cmd/pli`: the count of 74 Types, the CONSENT_MISSING
+  lines; `internal/api`: the ListTypes list, the problem count, a second draft vacation_request v5). I searched for
+  version names (`incident@7`, `incident.v7`), not counts or `versions/4`, and the Postgres tests could not run here
+  (Docker Hub refused the image pulls, 429). CI found them; the owner approved the five updates after CI.
+
+**Later:**
+- The `registerNewestTypes` helpers (itemservice, relay, workflow tests) still register incident.v7 and
+  vacation_request.v4 as the newest; access_request is not among them. Nothing fails, but their comment no longer
+  holds. Moving them needs the Postgres tests run against the new rules.
+- `TestTypesCleanOrExplained` could fail on an explanation for a Type version that is not in `types/`.
+- vacation_request has never had words for people (labels, primary, summary); the Inbox shows its raw IDs.
+- `TestCheck_ActionMajors` and `TestValidateTypes_ActionMajor` name their next free version by hand; they clash
+  again when vacation_request@6 lands.
+- `web` e2e `customer.spec.ts:109` (sla_goal@3 count 2, received 1) is timing-flaky: the second sla_goal arrives by a
+  reaction after the page has loaded.
+
+**Open:** none. **Next session:** `pli check` PR 3, witnesses as stories.

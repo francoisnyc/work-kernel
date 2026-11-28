@@ -121,6 +121,7 @@ func TestListTypes_EveryVersionInOrder(t *testing.T) {
 	want := []string{
 		"namespaces/globex/types/access_request/versions/1",
 		"namespaces/globex/types/access_request/versions/2",
+		"namespaces/globex/types/access_request/versions/3",
 		"namespaces/globex/types/apibean/versions/1",
 		"namespaces/globex/types/apihost/versions/1",
 		"namespaces/globex/types/apijar/versions/1",
@@ -155,6 +156,7 @@ func TestListTypes_EveryVersionInOrder(t *testing.T) {
 		"namespaces/globex/types/incident/versions/5",
 		"namespaces/globex/types/incident/versions/6",
 		"namespaces/globex/types/incident/versions/7",
+		"namespaces/globex/types/incident/versions/8",
 		"namespaces/globex/types/leave_balance/versions/1",
 		"namespaces/globex/types/message/versions/1",
 		"namespaces/globex/types/note/versions/1",
@@ -197,6 +199,7 @@ func TestListTypes_EveryVersionInOrder(t *testing.T) {
 		"namespaces/globex/types/vacation_request/versions/2",
 		"namespaces/globex/types/vacation_request/versions/3",
 		"namespaces/globex/types/vacation_request/versions/4",
+		"namespaces/globex/types/vacation_request/versions/5",
 	}
 	if !slices.Equal(names, want) {
 		t.Errorf("ListTypes = %v\nwant %v", names, want)
