@@ -5314,7 +5314,9 @@ CI.
 - `TestTypesCleanOrExplained` could fail on an explanation for a Type version that is not in `types/`.
 - vacation_request has never had words for people (labels, primary, summary); the Inbox shows its raw IDs.
 - `TestCheck_ActionMajors` and `TestValidateTypes_ActionMajor` name their next free version by hand; they clash
-  again when vacation_request@6 lands.
+  again when vacation_request@6 lands. So do `TestExplainType_ADraft` and `TestPli_TypeExplain_ADraft` (incident,
+  moved from 9 to 10 by the Inbox's look) and `TestExplainType_ADraftWithProblems`, which still drafts incident@9 and
+  passes only because its problems are compared with ValidateTypes's, VERSION_CHANGED included.
 - `web` e2e `customer.spec.ts:109` (sla_goal@3 count 2, received 1) is timing-flaky: the second sla_goal arrives by a
   reaction after the page has loaded.
 
@@ -5334,7 +5336,10 @@ the look, as built"; roadmap; "Ask a person" now `approval@4`.
 **Decided (the owner, through the coordinator):** at Phase A, seven answers (the plan's "As built"). At the tests
 gate: the tests as pushed (19046ed), "Nothing for you to do here" included.
 
-**Tests:** see the PR. Changed since 19046ed: only with the owner's approval (the PR lists them).
+**Tests:** new at Phase B, and the Phase A changes, as in the PR. Changed since 19046ed, each with the owner's OK and
+in its own commit: `TestReading_TheTypesLabelStartsIt` lost its two checks that the first sentence cites `label` (a
+hint is not an element, and `TestEveryElementIsCited` forbids citing it); `TestExplainType_ADraft` and
+`TestPli_TypeExplain_ADraft` draft incident@10, as incident@9 now exists.
 
 **Surprises:**
 - The stack's images could not fetch Go modules or npm packages through this session's TLS proxy; a local compose
