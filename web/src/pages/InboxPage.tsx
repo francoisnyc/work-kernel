@@ -37,6 +37,10 @@ import {
   panelHash,
   panelOf,
   rowMoves,
+  agentBadge,
+  agentLine,
+  agentMark,
+  agentWritten,
   askedLine,
   countLabel,
   dueOf,
@@ -469,6 +473,8 @@ function Row({
   const typeId = type?.typeId ?? it.type.split("/types/")[1]?.split("/")[0] ?? "";
   const make = (toState: string, fields: JsonObject, requestId: string) => onMove(it, toState, fields, requestId);
   const title = session.titleOf(it);
+  // An agent's request (PR 3b): an agent created it or put it in its state.
+  const mark = agentMark(it, me, session.nameOf);
   return (
     <li data-row={it.name}>
       <input type="checkbox" aria-label={`Select ${title}`} checked={selected} onChange={onSelect} />{" "}
@@ -495,6 +501,12 @@ function Row({
       )}
       <p className="kind">
         {typeId} · {stateLabel(type, it.state)}
+        {mark && (
+          <>
+            {" · "}
+            <span className="agent-badge">{agentBadge(mark)}</span>
+          </>
+        )}
       </p>
       <p className="meta">
         {about.join(" · ")}
@@ -552,6 +564,19 @@ function Panel({ item: it, onMove, onClose }: { item: Item; onMove: Move; onClos
   const type = session.typeOf(it.type);
   const title = session.titleOf(it);
   useEffect(() => heading.current?.focus(), []);
+  // An agent's request (PR 3b): who acted, and for whom; what the agent
+  // wrote, from the history read now (any other panel reads it on unfold).
+  const mark = agentMark(it, session.user.principal, session.nameOf);
+  const marked = mark !== undefined;
+  const [events, setEvents] = useState<ItemEvent[]>([]);
+  useEffect(() => {
+    if (!marked) return;
+    session.api.listItemEvents({ parent: it.name, pageSize: 100 }).then(
+      (res) => setEvents(res.events),
+      () => setEvents([]),
+    );
+  }, [session, it.name, marked]);
+  const written = mark ? agentWritten(type, it, events, session.nameOf) : [];
   const show = (id: string, principal: boolean): string => {
     const v = it.fields?.[id];
     if (v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0)) return "not set";
@@ -567,6 +592,21 @@ function Panel({ item: it, onMove, onClose }: { item: Item; onMove: Move; onClos
       <p className="kind">
         {type?.typeId ?? ""} · {stateLabel(type, it.state)}
       </p>
+      {mark && <p className="agent-line">{agentLine(mark)}</p>}
+      {written.length > 0 && (
+        <section aria-label="What the agent wrote" className="agent-wrote">
+          <h3>What the agent wrote</h3>
+          <p className="warning">Written by an agent. Check it before you decide.</p>
+          <ul>
+            {written.map((w) => (
+              <li key={w.field}>
+                {/* A text node only: React escapes it, and nothing parses it. */}
+                <span className="label">{w.label}</span>: <span className="agent-text">{w.value}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       <ul aria-label="Fields" className="panel-fields">
         {(type?.fields ?? []).map((f) => (
           <li key={f.id}>

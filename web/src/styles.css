@@ -357,3 +357,27 @@ section.inbox ul.items > li > p {
 .inbox-panel .field {
   grid-template-columns: 1fr;
 }
+/* The Inbox for people (PR 3b): an agent's request. */
+.agent-badge {
+  font-weight: 600;
+  color: #5b2db0;
+}
+.agent-wrote {
+  background: #f4f0fa;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  margin: 0.5rem 0;
+}
+.agent-wrote h3 {
+  margin: 0 0 0.25rem;
+  font-size: 0.95rem;
+}
+.agent-wrote ul {
+  list-style: none;
+  padding: 0;
+  margin: 0.25rem 0 0;
+}
+/* An agent's text, as written: a text node, its line breaks kept. */
+.agent-text {
+  white-space: pre-wrap;
+}

@@ -14,6 +14,7 @@ import {
   WithheldReason,
   type CountItemsRequestSchema,
   type Item,
+  type ItemEvent,
   type SearchItemsRequestSchema,
   type Transition,
   type Type,
@@ -335,4 +336,56 @@ export function panelHash(id: string): string {
 export function panelOf(hash: string): string {
   const [path = "", query = ""] = hash.replace(/^#\/?/, "").split("?");
   return path === "inbox" ? (new URLSearchParams(query).get("item") ?? "") : "";
+}
+
+// --- The Inbox for people, PR 3b: an agent's request, shown as one. ---
+
+const AGENT = "agent:";
+
+// Why a row is an agent's request: the agent (its ID without "agent:")
+// and whom it acted for ("Ana", "you", or "" for nobody). From Item.
+// state_actor when an agent put the Item in its state, else from its
+// creator when an agent created it; undefined when neither.
+export type AgentMark = { agent: string; forWhom: string };
+export function agentMark(item: Item, principal: string, nameOf: NameOf): AgentMark | undefined {
+  const [actor, behalf] = item.stateActor.startsWith(AGENT)
+    ? [item.stateActor, item.stateActorOnBehalfOf]
+    : item.creator.startsWith(AGENT)
+      ? [item.creator, item.creatorOnBehalfOf]
+      : ["", ""];
+  if (actor === "") return undefined;
+  const forWhom = behalf === "" ? "" : behalf === principal ? "you" : nameOf(behalf);
+  return { agent: actor.slice(AGENT.length), forWhom };
+}
+
+// The row's badge: "Agent request · for Ana", or "Agent request".
+export function agentBadge(mark: AgentMark): string {
+  return mark.forWhom === "" ? "Agent request" : `Agent request · for ${mark.forWhom}`;
+}
+
+// The panel's line: "triage-bot, for Ana", or "triage-bot".
+export function agentLine(mark: AgentMark): string {
+  return mark.forWhom === "" ? mark.agent : `${mark.agent}, for ${mark.forWhom}`;
+}
+
+// What the agent wrote: the Type's fields whose latest setting event (in
+// the Item's history) was an agent's, with the Item's value now, in the
+// Type's order. A field a person set after the agent is the person's; one
+// the agent cleared is left out. The value is text as written: the page
+// shows it as a plain text node.
+export type AgentWritten = { field: string; label: string; value: string };
+export function agentWritten(type: Type | undefined, item: Item, events: ItemEvent[], nameOf: NameOf): AgentWritten[] {
+  const lastWriter = new Map<string, string>();
+  for (const e of [...events].sort((a, b) => (a.itemSeq < b.itemSeq ? -1 : a.itemSeq > b.itemSeq ? 1 : 0))) {
+    for (const f of Object.keys(e.fields ?? {})) lastWriter.set(f, e.actor);
+  }
+  const out: AgentWritten[] = [];
+  for (const f of type?.fields ?? []) {
+    if (!lastWriter.get(f.id)?.startsWith(AGENT)) continue;
+    const v = item.fields?.[f.id];
+    if (v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0)) continue;
+    const one = (x: unknown) => (f.type === FieldType.PRINCIPAL && typeof x === "string" ? nameOf(x) : String(x));
+    out.push({ field: f.id, label: f.label || f.id, value: Array.isArray(v) ? v.map(one).join(", ") : one(v) });
+  }
+  return out;
 }

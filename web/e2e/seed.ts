@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { DurationSchema } from "@bufbuild/protobuf/wkt";
 import { ItemService, LinkDirection, TransitionOutcome, type Item } from "../src/gen/kernel/v1/kernel_pb";
+import { parse } from "yaml";
 import { parseDevUsers } from "../src/model/devusers";
 import { evenly } from "../src/rank/rank";
 
@@ -377,4 +378,68 @@ export async function clearOwnAndClaimed(baseURL: string, made: OwnAndClaimed): 
   await Promise.allSettled([move("sam", made.own, "withdrawn")]);
   await Promise.allSettled([move("lea", made.held, "queue")]);
   await Promise.allSettled([move("ana", made.held, "withdrawn")]);
+}
+
+// --- The Inbox for people, PR 3b: an agent's request ---
+
+// A client that calls as one of the dev-token file's agents, in a session
+// it starts for `user` (scopes: the namespace; the powers given). The dev
+// users' parser leaves agents out (they need a session), so the file is
+// read here as it is.
+async function agentApi(baseURL: string, agent: string, user: string, powers: string[]): Promise<Api> {
+  const doc = parse(readFileSync(new URL("../../dev-tokens.example.yaml", import.meta.url), "utf8")) as {
+    tokens: { name: string; token: string; namespace: string }[];
+  };
+  const tok = doc.tokens.find((t) => t.name === agent);
+  if (!tok) throw new Error(`no dev agent ${agent}`);
+  const client = (session: string): Api => {
+    const auth: Interceptor = (next) => (req) => {
+      req.header.set("Authorization", `Bearer ${tok.token}`);
+      if (session !== "") req.header.set("Pli-Agent-Session", session);
+      return next(req);
+    };
+    return createClient(ItemService, createConnectTransport({ baseUrl: `${baseURL}/api`, interceptors: [auth] }));
+  };
+  const started = await client("").startAgentSession({ parent: `namespaces/${tok.namespace}`, actingFor: user, scopes: [`namespaces/${tok.namespace}`], powers });
+  return client(started.session!.id);
+}
+
+// ana's ticket@9, which triage-bot, in a session for ana, gives a priority
+// and moves to in_progress: there it waits on the approvers (bob).
+export async function seedAgentTicket(baseURL: string, title: string): Promise<Item> {
+  const ana = api(baseURL, "ana");
+  const made = await createItem(ana, type("ticket", 9), { f_title: title, f_assignee: "user:ana" });
+  const bot = await agentApi(baseURL, "triage-bot", "user:ana", ["read", "edit_fields", "transition:*"]);
+  await bot.updateItem({ name: made.name, requestId: randomUUID(), fields: { f_priority: 2 } });
+  for (const to of ["open", "in_progress"]) {
+    const res = await bot.transitionItem({ name: made.name, requestId: randomUUID(), toState: to });
+    if (res.outcome !== TransitionOutcome.APPLIED) throw new Error(`seed: the bot moves ${title} to ${to}: ${TransitionOutcome[res.outcome]} ${res.reason}`);
+  }
+  return made;
+}
+
+// kim's incident (incident@6) in lea's portal, opened for her by the
+// portal's agent; sam takes it and sends it back to her, so it waits on
+// her: an agent's request, for kim.
+export async function seedAgentSentBack(baseURL: string, run: string, title: string): Promise<SentBack> {
+  const lea = api(baseURL, "lea");
+  const sam = api(baseURL, "sam");
+  const week = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"].map((d) => `${d} 00:00-24:00`);
+  const calendar = await createItem(lea, type("calendar", 1), { f_name: `Always ${run} ag`, f_week: week, f_zone: "UTC" });
+  const targets: JsonObject = { f_name: `Standard ${run} ag` };
+  ["p1", "p2", "p3", "p4"].forEach((p, i) => {
+    targets[`f_first_response_s_${p}`] = String(3600 * (i + 1));
+    targets[`f_resolution_s_${p}`] = String(4 * 3600 * (i + 1));
+  });
+  const policy = await createItem(lea, type("sla_policy", 1), targets);
+  const desk = await createItem(lea, type("desk", 2), { f_key: `AG${run}`, f_name: `Agent portal ${run}` });
+  await lea.linkItems({ name: desk.name, requestId: randomUUID(), linkType: "calendar", target: calendar.name });
+  await lea.linkItems({ name: desk.name, requestId: randomUUID(), linkType: "sla_policy", target: policy.name });
+  const bot = await agentApi(baseURL, "portal-bot", "customer:kim", ["read", "create", "comment", "transition:*"]);
+  const created = await createItem(bot, type("incident", 6), { f_title: title, f_priority: "P3" }, { container: desk.name });
+  for (const to of ["in_progress", "waiting_for_customer"]) {
+    const res = await sam.transitionItem({ name: created.name, requestId: randomUUID(), toState: to, wait: create(DurationSchema, { seconds: 5n }) });
+    if (res.outcome !== TransitionOutcome.APPLIED) throw new Error(`seed: kim's incident to ${to}: ${TransitionOutcome[res.outcome]} ${res.reason}`);
+  }
+  return { desk, incident: created };
 }

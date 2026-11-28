@@ -369,8 +369,19 @@ attack that found it as its test:
         - **3a, who put an Item in its state. Built** (`docs/design.md`,
           "Who put an Item in its state, as built (Inbox PR 3a)"):
           `Item.state_actor` and `state_actor_on_behalf_of` on every read.
-        - **3b, the screen (next):** the badge, "for {person}", "What the
-          agent wrote" in the panel.
+        - **3b, the screen. Built** (`docs/design.md`, "An agent's request
+          on the screen, as built (Inbox PR 3b)"): the badge, "for
+          {person}", "What the agent wrote" in the panel. PR 3 is done.
+      - **The Inbox for people is built** (PRs 1a to 3b, 2026-11-27 and
+        28; `docs/design.md`, "An agent's request on the screen, as
+        built", where the plan stands). Later, not decided: overdue
+        across pages, role labels, only the claimant releases, an agent
+        working for someone on a claimed row, agents' display names. The
+        new answers ("Not yet", a refusal reason, the approver's own
+        values) come with "Ask a person" (`question@1`, `approval@3`).
+        What this roadmap names next in track 1, for the owner to choose:
+        item 6's step 4 (bulk and status), its step 5 if a real case asks;
+        and track 2's authoring test, which the Inbox was to come before.
 6. **Moving open Items to a new version, and retiring old versions**,
    deliberately and checked: a change that must reach requests in flight;
    builds on starting work's steps 2 and 2b, already built (the latest
