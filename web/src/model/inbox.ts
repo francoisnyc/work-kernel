@@ -14,6 +14,7 @@ import {
   WithheldReason,
   type CountItemsRequestSchema,
   type Item,
+  type ItemEvent,
   type SearchItemsRequestSchema,
   type Transition,
   type Type,
@@ -335,4 +336,35 @@ export function panelHash(id: string): string {
 export function panelOf(hash: string): string {
   const [path = "", query = ""] = hash.replace(/^#\/?/, "").split("?");
   return path === "inbox" ? (new URLSearchParams(query).get("item") ?? "") : "";
+}
+
+// --- The Inbox for people, PR 3b: an agent's request, shown as one. ---
+// stub (Phase B): every function below answers nothing yet.
+
+// Why a row is an agent's request: the agent (its ID without "agent:")
+// and whom it acted for ("Ana", "you", or "" for nobody). From Item.
+// state_actor when an agent put the Item in its state, else from its
+// creator when an agent created it; undefined when neither.
+export type AgentMark = { agent: string; forWhom: string };
+export function agentMark(item: Item, principal: string, nameOf: NameOf): AgentMark | undefined {
+  return undefined;
+}
+
+// The row's badge: "Agent request · for Ana", or "Agent request".
+export function agentBadge(mark: AgentMark): string {
+  return "";
+}
+
+// The panel's line: "triage-bot, for Ana", or "triage-bot".
+export function agentLine(mark: AgentMark): string {
+  return "";
+}
+
+// What the agent wrote: the Type's fields whose latest setting event (in
+// the Item's history) was an agent's, with the Item's value now, in the
+// Type's order. A field a person set after the agent is the person's; one
+// the agent cleared is left out.
+export type AgentWritten = { field: string; label: string; value: string };
+export function agentWritten(type: Type | undefined, item: Item, events: ItemEvent[], nameOf: NameOf): AgentWritten[] {
+  return [];
 }
