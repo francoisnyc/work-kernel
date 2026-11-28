@@ -2048,6 +2048,23 @@ expect "lea may take it; nothing withheld from her" "$(queued lea | j '"\(.items
 refuse lea "INVALID_ARGUMENT INVALID_REQUEST" inbox --claimed
 
 # ---------------------------------------------------------------------------
+# The Inbox for people, PR 3a: who put an Item in its state. Every Item
+# answer says the actor of its create or latest move, and the user an
+# agent acted for, so a screen can mark an agent's request without reading
+# the history.
+# ---------------------------------------------------------------------------
+
+step "state actor: ana's ticket is hers; triage-bot, for ana, moves it (the agent, for ana); bob moves it back (his)"
+sa=$(ok ana item create --type ticket@1 --set "f_title=State actor $w" --set f_assignee=user:ana | j .item.name)
+actor_of() { j '"\(.item.state_actor) for \(.item.state_actor_on_behalf_of // "nobody")"'; }
+expect "created by ana" "$(ok ana item get "$sa" | actor_of)" "user:ana for nobody"
+ok triage-bot agent start --for user:ana --scopes namespaces/acme --powers 'read,transition:*' >/dev/null
+expect "the move's answer: the agent, for ana" "$(ok triage-bot item transition "$sa" --to in_progress | actor_of)" "agent:triage-bot for user:ana"
+expect "bob reads the same" "$(ok bob item get "$sa" | actor_of)" "agent:triage-bot for user:ana"
+expect "an update is not a move" "$(ok ana item update "$sa" --set f_priority=2 | actor_of)" "agent:triage-bot for user:ana"
+expect "bob moves it back: his" "$(ok bob item transition "$sa" --to open | actor_of)" "user:bob for nobody"
+
+# ---------------------------------------------------------------------------
 # The Inbox for people, PR 1b: words for people on the Type. approval@2 is
 # approval@1 with labels: GetType sends them, and the reading names the
 # move by its label.
