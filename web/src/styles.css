@@ -487,24 +487,25 @@ section.inbox ul.items > li > p {
   gap: 0.5rem;
 }
 .inbox-page li.row {
-  display: grid;
-  grid-template-columns: 1.75rem minmax(0, max-content) max-content max-content 1fr auto;
-  column-gap: 0.5rem;
-  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 0.6rem;
+  row-gap: 0.15rem;
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 0.75rem 1rem;
 }
 .inbox-page li.row > input[type="checkbox"] {
-  grid-column: 1;
   width: 24px;
   height: 24px;
   margin: 0;
-  align-self: center;
+  flex: none;
 }
 .inbox-page li.row > .row-title {
-  grid-column: 2;
+  flex: 0 1 auto;
+  min-width: 0;
   font-weight: 600;
   color: var(--ink);
   text-decoration: none;
@@ -513,30 +514,32 @@ section.inbox ul.items > li > p {
   text-decoration: underline;
 }
 .inbox-page li.row > .kind {
-  grid-column: 3;
   color: var(--muted);
   font-size: 0.85rem;
 }
-.inbox-page li.row > .agent-badge {
-  grid-column: 4;
-  justify-self: start;
+/* The moves at the right of the first line; the words below it. */
+.inbox-page li.row > .row-moves {
+  order: 1;
+  margin: 0 0 0 auto;
 }
-.inbox-page li.row > p {
-  grid-column: 2 / 6;
-  margin: 0.2rem 0 0;
+.inbox-page section.inbox li.row > p {
+  order: 2;
+  flex-basis: 100%;
+  margin: 0 0 0 calc(24px + 0.6rem);
   color: var(--muted);
   font-size: 0.875rem;
 }
-.inbox-page li.row > .row-moves {
-  grid-column: 6;
-  grid-row: 1 / span 4;
-  align-self: center;
-  margin: 0;
+.inbox-page section.inbox li.row > p.why-not {
+  color: #3e3d39;
 }
 .inbox-page .row-moves {
   display: flex;
   gap: 0.5rem;
   align-items: center;
+}
+.inbox-page .transitions li {
+  padding: 0;
+  border: 0;
 }
 .inbox-page .transitions ul {
   list-style: none;
@@ -636,21 +639,19 @@ section.inbox ul.items > li > p {
 }
 /* A phone: the moves go under the words. */
 @media (max-width: 40rem) {
-  .inbox-page li.row {
-    grid-template-columns: 1.75rem minmax(0, 1fr);
-  }
-  .inbox-page li.row > .kind,
-  .inbox-page li.row > .agent-badge,
-  .inbox-page li.row > p,
   .inbox-page li.row > .row-moves {
-    grid-column: 2;
-    grid-row: auto;
-  }
-  .inbox-page li.row > .row-moves {
-    margin-top: 0.5rem;
+    order: 3;
+    margin: 0.5rem 0 0 calc(24px + 0.6rem);
   }
   .inbox-page .more-moves {
     left: 0;
     right: auto;
   }
+}
+/* Text targets in the Inbox at least 24 px high (WCAG 2.5.8). */
+.inbox-page li.row > .row-title,
+.inbox-page .inbox-panel summary,
+.inbox-page .inbox-panel a {
+  display: inline-block;
+  padding: 0.2rem 0;
 }
