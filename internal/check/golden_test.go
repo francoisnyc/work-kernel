@@ -44,6 +44,9 @@ var bakeoffFindings = []expected{
 		key{check.CodeAgentDecides, check.SeverityWarning, "transitions[9]", "guard:f_amount > 0, guard:f_amount > 5000, guard:f_amount >= 1000, role:cfo, role:finance"},
 		"extra: an agent given cfo decides above 5,000; no row gave an agent cfo"},
 
+	{blindDir, "system_access", 1,
+		key{check.CodeStuckState, check.SeverityError, "states[0]", ""},
+		"extra: a request made outside a system is never submitted (the invariant) and has no other way out: it stays a draft"},
 	{blindDir, "purchase", 1,
 		key{check.CodeAgentDecides, check.SeverityWarning, "transitions[6]", "guard:f_amount > 0, guard:f_amount >= 1000, role:finance"},
 		"extra: the blind builder's purchase has the same moves; the agent-in-finance row was run on camunda's Types only"},

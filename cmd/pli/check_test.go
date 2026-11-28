@@ -21,14 +21,15 @@ func checkCmd(t *testing.T, args ...string) result {
 	return result{code: code, stdout: out.String(), stderr: errb.String()}
 }
 
-// Warnings only (the blind bake-off: an agent holding finance decides):
+// Warnings only (the staff-role bake-off: an agent holding finance
+// decides; the access request stuck if the requester holds staff):
 // printed, exit 0.
 func TestCheckWarningsExitZero(t *testing.T) {
-	r := checkCmd(t, "../../spikes/temporal-bakeoff/kernel-blind/types")
+	r := checkCmd(t, "../../spikes/temporal-bakeoff/kernel-staff-role/types")
 	if r.code != exitOK {
 		t.Fatalf("exit %d, want 0; stderr %q", r.code, r.stderr)
 	}
-	for _, want := range []string{"purchase@1\n", "AGENT_DECIDES WARNING transitions[6]", "Not checked: who reads it", "0 errors, 1 warning.\n"} {
+	for _, want := range []string{"purchase@1\n", "AGENT_DECIDES WARNING transitions[6]", "Not checked: who reads it", "0 errors, 2 warnings.\n"} {
 		if !strings.Contains(r.stdout, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, r.stdout)
 		}

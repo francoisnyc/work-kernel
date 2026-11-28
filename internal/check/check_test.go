@@ -130,10 +130,29 @@ func TestStuckAccessRequestForNoSystem(t *testing.T) {
 
 // The blind builder's access request passed all 18 attempts: its invariant
 // submitted_outside_system refuses the submit when nothing was copied
-// (f_submitted_at is always set by the submit, cause.at). No finding.
-func TestNoStuckWhenTheInvariantRefusesTheSubmit(t *testing.T) {
+// (f_submitted_at is always set by the submit, cause.at), so owner_review
+// (states[1]) is never stuck. But the same refusal strands a request made
+// at the top level: the Type has no start.in, no withdraw and kernel-only
+// placement, so that draft can never leave draft. An ERROR on states[0]
+// (the owner's change, Phase C: the checker found what the test missed).
+func TestBlindRequestOutsideASystemStaysADraft(t *testing.T) {
 	r := runDir(t, blindDir)
-	sameKeys(t, "system_access@1 (blind)", of(r, "system_access", 1), nil)
+	got := of(r, "system_access", 1)
+	sameKeys(t, "system_access@1 (blind)", got, []key{
+		{check.CodeStuckState, check.SeverityError, "states[0]", ""},
+	})
+	for _, f := range got {
+		if f.Path == "states[1]" {
+			t.Errorf("owner_review is stuck: %s", f.Message)
+		}
+		if f.Path == "states[0]" {
+			want := []check.Step{{Who: "the requester", Kind: check.StepCreate, To: "draft",
+				Words: "The requester creates it in draft, outside any container."}}
+			if !reflect.DeepEqual(f.Witness, want) {
+				t.Errorf("witness\n got %+v\nwant %+v", f.Witness, want)
+			}
+		}
+	}
 }
 
 // The bake-off's agent given the finance role (camunda results,
