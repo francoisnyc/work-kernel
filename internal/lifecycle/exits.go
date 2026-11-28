@@ -1,6 +1,10 @@
 package lifecycle
 
-import "github.com/francoisnyc/work-kernel/internal/typedef"
+import (
+	"slices"
+
+	"github.com/francoisnyc/work-kernel/internal/typedef"
+)
 
 // What can move an Item out of a state, read from its own Type version
 // (pli check, docs/roadmap.md, track 2). It is the one list of exits:
@@ -39,5 +43,31 @@ type Exit struct {
 // has no such state. A move reaction that follows a link or moves
 // children moves another Item, not this one, and is not listed.
 func Exits(t *typedef.Type, state string) []Exit {
-	return nil // Phase B stub
+	exits := []Exit{}
+	st, ok := t.State(state)
+	if !ok {
+		return exits
+	}
+	for i, tr := range t.Transitions {
+		if tr.From == state {
+			exits = append(exits, Exit{Kind: ExitMove, To: tr.To, Transition: i})
+		}
+	}
+	if st.Timer != nil {
+		exits = append(exits, Exit{Kind: ExitTimer, To: st.Timer.To, Transition: -1})
+	}
+	if st.At != nil {
+		exits = append(exits, Exit{Kind: ExitAt, To: st.At.To, Transition: -1})
+	}
+	for _, r := range t.Reactions {
+		// A move reaction on created_inside moves the Item itself, from
+		// the states it lists (none: any state).
+		if r.Kind != typedef.ReactionMove || r.On != typedef.OnCreatedInside || r.Children != nil || r.Link != "" {
+			continue
+		}
+		if len(r.From) == 0 || slices.Contains(r.From, state) {
+			exits = append(exits, Exit{Kind: ExitReaction, To: r.To, Transition: -1, Reaction: r.ID})
+		}
+	}
+	return exits
 }

@@ -17,6 +17,13 @@
 package check
 
 import (
+	"cmp"
+	"fmt"
+	"regexp"
+	"slices"
+	"strconv"
+	"strings"
+
 	"github.com/francoisnyc/work-kernel/internal/contracts"
 	"github.com/francoisnyc/work-kernel/internal/typedef"
 )
@@ -103,15 +110,110 @@ type Report struct {
 // errors before warnings, then path, then code. cat holds the action
 // contracts the Types' hooks name (what a hook's answer may leave empty).
 func Check(types []*typedef.Type, cat *contracts.Catalog) Report {
-	return Report{} // Phase B stub
+	r := Report{Findings: []Finding{}, NotChecked: slices.Clone(notChecked), Assumed: slices.Clone(assumed)}
+	for _, ty := range types {
+		if noLifecycle(ty) {
+			continue
+		}
+		r.Findings = append(r.Findings, newTypeCheck(ty, types, cat).run()...)
+	}
+	slices.SortStableFunc(r.Findings, func(a, b Finding) int {
+		return cmp.Or(
+			strings.Compare(a.Type, b.Type),
+			cmp.Compare(a.Version, b.Version),
+			cmp.Compare(rank(a.Severity), rank(b.Severity)),
+			comparePaths(a.Path, b.Path),
+			strings.Compare(string(a.Code), string(b.Code)))
+	})
+	return r
+}
+
+// What the checker does not look at, and what it takes as given: printed
+// with every report, so that no silence reads as "clean".
+var (
+	notChecked = []string{
+		"who reads it: scopes decide, not the Type",
+		"field writes",
+		"placement: who moves or narrows an Item",
+		"unreachable states, and rules that never fire",
+	}
+	assumed = []string{
+		"a principal field only the kernel writes names a person, never an agent; it is empty only where its hook's contract allows no answer",
+	}
+)
+
+// noLifecycle is a Type with no moves and only the implicit state.
+func noLifecycle(t *typedef.Type) bool {
+	return len(t.Transitions) == 0 && len(t.States) == 1 && t.States[0].ID == typedef.ImplicitState
+}
+
+func rank(s Severity) int {
+	if s == SeverityError {
+		return 0
+	}
+	return 1
+}
+
+var pathPart = regexp.MustCompile(`^([a-z_]+)\[(\d+)\](.*)$`)
+
+// comparePaths orders states[2] before states[10].
+func comparePaths(a, b string) int {
+	ma, mb := pathPart.FindStringSubmatch(a), pathPart.FindStringSubmatch(b)
+	if ma == nil || mb == nil || ma[1] != mb[1] {
+		return strings.Compare(a, b)
+	}
+	na, _ := strconv.Atoi(ma[2])
+	nb, _ := strconv.Atoi(mb[2])
+	return cmp.Or(cmp.Compare(na, nb), strings.Compare(ma[3], mb[3]))
 }
 
 // HasErrors reports whether any finding is an ERROR.
 func (r Report) HasErrors() bool {
-	return false // Phase B stub
+	return slices.ContainsFunc(r.Findings, func(f Finding) bool { return f.Severity == SeverityError })
 }
 
-// Text lays the report out for a person (docs/design.md, "pli check").
+// Text lays the report out for a person: each Type version that has
+// findings, each finding with what it depends on and its witness; then
+// what is not checked and what is assumed; then the counts.
 func (r Report) Text() string {
-	return "" // Phase B stub
+	var b strings.Builder
+	last := ""
+	errs, warns := 0, 0
+	for _, f := range r.Findings {
+		if head := fmt.Sprintf("%s@%d", f.Type, f.Version); head != last {
+			b.WriteString(head + "\n")
+			last = head
+		}
+		if f.Severity == SeverityError {
+			errs++
+		} else {
+			warns++
+		}
+		path := f.Path
+		if path == "" {
+			path = "-"
+		}
+		fmt.Fprintf(&b, "  %s %s %s: %s\n", f.Code, f.Severity, path, f.Message)
+		if len(f.DependsOn) > 0 {
+			fmt.Fprintf(&b, "    Depends on: %s.\n", strings.Join(f.DependsOn, ", "))
+		}
+		for i, s := range f.Witness {
+			fmt.Fprintf(&b, "    %d. %s\n", i+1, s.Words)
+		}
+	}
+	fmt.Fprintf(&b, "Not checked: %s.\n", strings.Join(r.NotChecked, "; "))
+	fmt.Fprintf(&b, "Assumed: %s.\n", strings.Join(r.Assumed, "; "))
+	if len(r.Findings) == 0 {
+		b.WriteString("No findings.\n")
+	} else {
+		fmt.Fprintf(&b, "%s, %s.\n", plural(errs, "error"), plural(warns, "warning"))
+	}
+	return b.String()
+}
+
+func plural(n int, word string) string {
+	if n == 1 {
+		return "1 " + word
+	}
+	return strconv.Itoa(n) + " " + word + "s"
 }
