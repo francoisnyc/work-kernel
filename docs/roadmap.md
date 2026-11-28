@@ -534,6 +534,19 @@ down), **shaped like the kernel's model**: states, moves, who may act, frozen
 fields. Kept outside this repository; nothing is lost whichever way the
 decision goes.
 
+### Items mirrored from a workflow (proposed, 2026-11-28)
+
+The owner is trying the kernel with another system whose Temporal
+workflows are its clients. Target: mixed (the workflow owns its stage and
+fields; people and agents own the human part under the Type's rules).
+First: a mirror, where the workflow owns the whole Item: a `service:`
+principal; a Type that declares its mirror (checked at load); one new
+write, `MirrorItem` (upsert by external ID, full replace of owned fields,
+the source's sequence number keeping order, `SUPERSEDED` for a late
+write); the lifecycle still in one pure function. Then mixed: owned fields
+as a list, events out to the workflow. Brief and five decisions:
+`docs/plans/mirror-from-a-workflow.md`.
+
 ### Ask a person: one brick behind every agent's pause (proposed)
 
 Every agent framework now has a way to pause for a person: Google ADK's
