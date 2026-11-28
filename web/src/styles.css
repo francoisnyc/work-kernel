@@ -586,8 +586,18 @@ section.inbox ul.items > li > p {
 .inbox-page section.inbox h2 {
   margin-top: 1rem;
 }
+/* The Inbox takes a wider column than the other pages (the mockup's list
+   and panel side by side), so the panel's moves fit in a row. */
+main:has(> .inbox-page) {
+  max-width: 90rem;
+}
+.inbox-page .inbox-body > section.inbox {
+  flex: 999 1 30rem;
+}
 /* The panel: white, its moves in one row, the main move first. */
 .inbox-page .inbox-panel {
+  flex: 1 1 26rem;
+  max-width: 36rem;
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -650,8 +660,10 @@ section.inbox ul.items > li > p {
 }
 /* Text targets in the Inbox at least 24 px high (WCAG 2.5.8). */
 .inbox-page li.row > .row-title,
-.inbox-page .inbox-panel summary,
 .inbox-page .inbox-panel a {
   display: inline-block;
+  padding: 0.2rem 0;
+}
+.inbox-page .inbox-panel summary {
   padding: 0.2rem 0;
 }
