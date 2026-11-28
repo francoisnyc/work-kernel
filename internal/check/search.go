@@ -90,8 +90,8 @@ type typeCheck struct {
 	invFields map[string]bool
 	cross     map[string][]crossExit
 	// conds caches each guard in plain words (reading parses it).
-	conds map[string]string
-	allMovers  []struct {
+	conds     map[string]string
+	allMovers []struct {
 		m mover
 		w world
 	}
