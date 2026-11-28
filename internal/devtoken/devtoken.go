@@ -28,6 +28,9 @@ type Token struct {
 	// "role:" prefix). The item service adds them at start, in dev-token
 	// mode only; it never removes one.
 	Roles []string `yaml:"roles,omitempty"`
+	// DisplayName is an agent's name for screens (the Inbox, the look).
+	// STUB for the Phase B tests: not read from the file yet.
+	DisplayName string `yaml:"-"`
 }
 
 type file struct {
