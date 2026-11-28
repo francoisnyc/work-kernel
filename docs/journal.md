@@ -5096,3 +5096,31 @@ changed.
 **Local workarounds, outside the repository (nothing committed):** as for 2b.
 
 **Open:** the Later items above. **Next session:** PR 3, an agent's request shown as one, its own Phase A.
+
+## 2026-11-28 — Track 1, item 6, the Inbox for people, PR 3a: who put an Item in its state (Phases A to D)
+
+**Built:** `Item.state_actor` and `state_actor_on_behalf_of` (`kernel.v1` 18, 19), filled on every read and write's
+answer from the Item's latest create or transition event; pli prints them. design.md: "Who put an Item in its state,
+as built (Inbox PR 3a)". Roadmap: PR 3 split, 3a built, 3b next.
+
+**Decided (the owner, through the coordinator):** at Phase A, the two fields rather than a creator-only badge, the
+3a/3b split, no schema change, "for {person}" and the agent's text as proposed for 3b. At the tests gate, the tests and
+the change to `TestGet_ReturnsCreatedItem`.
+
+**Tests:** new: itemservice 4, API 1, pli 1, one scenario step. Earlier-approved test that changed:
+`TestGet_ReturnsCreatedItem`.
+
+**Surprises:**
+- The common agent case is not an agent's create but an agent's move of a person's Item (a build step): a
+  creator-only mark would have missed it.
+- The asked-for "a customer does not see a staff actor" had nothing to hide: a customer's history keeps every create's
+  and move's actor.
+- No column was needed: the primary key of `item_events` finds the latest create or move per Item.
+
+**Numbers.** `go vet` clean; `go test ./...` and `-race` green, 28 packages; the new tests `-race -count=10` green.
+`buf lint` and `buf breaking` pass. Web: typecheck, 569 unit tests. On the compose stack: the scenario passed (143
+steps); web Playwright 21; apps/poc 4. **The bake-offs:** not run; no file under `spikes/` changed.
+
+**Local workarounds, outside the repository (nothing committed):** as for 2b and 2c.
+
+**Open:** the Later items above. **Next session:** 3b, the screen (its decisions were taken at PR 3's Phase A).
