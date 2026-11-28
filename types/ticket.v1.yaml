@@ -4,20 +4,34 @@ version: 1
 initial_state: open
 
 fields:
-  - {id: f_title,      type: string}
-  - {id: f_priority,   type: int}
-  - {id: f_reporter,   type: string}
-  - {id: f_assignee,   type: string}
-  - {id: f_urgent,     type: bool}
-  - {id: f_resolution, type: enum, options: [fixed, wontfix, duplicate]}
+  - id: f_title
+    type: string
+  - id: f_priority
+    type: int
+  - id: f_reporter
+    type: string
+  - id: f_assignee
+    type: string
+  - id: f_urgent
+    type: bool
+  - id: f_resolution
+    type: enum
+    options: [fixed, wontfix, duplicate]
 
 states:
-  - {id: open,        category: todo}
+  - id: open
+    category: todo
   # Work left in_progress for 48 hours goes back to open. This timer is a
   # spike stand-in: real SLAs become standalone objects later.
-  - {id: in_progress, category: active, timer: {after: 48h, to: open}}
-  - {id: resolved,    category: done}
-  - {id: canceled,    category: canceled}
+  - id: in_progress
+    category: active
+    timer:
+      after: 48h
+      to: open
+  - id: resolved
+    category: done
+  - id: canceled
+    category: canceled
 
 transitions:
   - from: open

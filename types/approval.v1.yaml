@@ -19,41 +19,82 @@ version: 1
 initial_state: pending
 
 fields:
-  - {id: f_title,    type: string,    writable_by: kernel}   # the request's, for the Inbox
-  - {id: f_approver, type: principal, writable_by: kernel, unique_among_siblings: [pending, approved]}
-  - {id: f_delegate, type: principal}
+  - id: f_title  # the request's, for the Inbox
+    type: string
+    writable_by: kernel
+  - id: f_approver
+    type: principal
+    writable_by: kernel
+    unique_among_siblings: [pending, approved]
+  - id: f_delegate
+    type: principal
 
 states:
-  - {id: pending,  category: active}
-  - {id: approved, category: done}
-  - {id: rejected, category: done}
-  - {id: canceled, category: canceled}
+  - id: pending
+    category: active
+  - id: approved
+    category: done
+  - id: rejected
+    category: done
+  - id: canceled
+    category: canceled
 
 transitions:
-  - {from: pending, to: approved, allowed: ['field:f_approver'], except: [container_creator], guard: 'container.state == "pending"'}
-  - {from: pending, to: rejected, allowed: ['field:f_approver'], except: [container_creator], guard: 'container.state == "pending"'}
+  - from: pending
+    to: approved
+    guard: 'container.state == "pending"'
+    allowed: ['field:f_approver']
+    except: [container_creator]
+  - from: pending
+    to: rejected
+    guard: 'container.state == "pending"'
+    allowed: ['field:f_approver']
+    except: [container_creator]
   # The hand-over.
   - from: pending
     to: pending
+    guard: 'container.state == "pending" && f_delegate != f_approver'
+    required: [f_delegate]
     allowed: ['field:f_approver', 'role:access_admin']
     except: [container_creator]
-    required: [f_delegate]
-    sets: {f_approver: 'f_delegate'}
-    guard: 'container.state == "pending" && f_delegate != f_approver'
-  - {from: pending, to: canceled, allowed: [nobody]}
-
-invariants:
-  - {id: approver_missing,      rule: 'f_approver != null'}
-  - {id: delegate_not_approver, rule: 'f_delegate == null || f_delegate == f_approver'}
+    sets:
+      f_approver: 'f_delegate'
+  - from: pending
+    to: canceled
+    allowed: [nobody]
 
 reactions:
-  - {id: move_approved, kind: move, on: enter, state: approved, target: container, to: approved, target_from: [pending], on_guard: skip}
-  - {id: move_rejected, kind: move, on: enter, state: rejected, target: container, to: rejected, target_from: [pending], on_guard: skip}
+  - id: move_approved
+    kind: move
+    on: enter
+    state: approved
+    to: approved
+    on_guard: skip
+    target: container
+    target_from: [pending]
+  - id: move_rejected
+    kind: move
+    on: enter
+    state: rejected
+    to: rejected
+    on_guard: skip
+    target: container
+    target_from: [pending]
+
+invariants:
+  - id: approver_missing
+    rule: 'f_approver != null'
+  - id: delegate_not_approver
+    rule: 'f_delegate == null || f_delegate == f_approver'
 
 accepts_reactions:
-  'access_request:request_approvals':  {creates: [f_approver, f_title]}
-  'access_request:close_on_approved':  {moves: [canceled]}
-  'access_request:close_on_rejected':  {moves: [canceled]}
-  'access_request:close_on_withdrawn': {moves: [canceled]}
+  'access_request:request_approvals':
+    creates: [f_approver, f_title]
+  'access_request:close_on_approved':
+    moves: [canceled]
+  'access_request:close_on_rejected':
+    moves: [canceled]
+  'access_request:close_on_withdrawn':
+    moves: [canceled]
 
 placement_writable_by: [kernel]

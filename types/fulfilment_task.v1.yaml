@@ -7,20 +7,32 @@ version: 1
 initial_state: open
 
 fields:
-  - {id: f_resource, type: string,    writable_by: kernel}
-  - {id: f_assignee, type: principal}
+  - id: f_resource
+    type: string
+    writable_by: kernel
+  - id: f_assignee
+    type: principal
 
 states:
-  - {id: open,        category: todo}
-  - {id: in_progress, category: active}
-  - {id: done,        category: done}
+  - id: open
+    category: todo
+  - id: in_progress
+    category: active
+  - id: done
+    category: done
 
 transitions:
-  - {from: open,        to: in_progress, allowed: ['role:desk_agent']}
-  - {from: in_progress, to: done,        allowed: ['role:desk_agent']}
+  - from: open
+    to: in_progress
+    allowed: ['role:desk_agent']
+  - from: in_progress
+    to: done
+    allowed: ['role:desk_agent']
 
 invariants:
-  - {id: resource_missing, rule: 'f_resource != null'}
+  - id: resource_missing
+    rule: 'f_resource != null'
 
 accepts_reactions:
-  'access_request:fulfil': {creates: [f_resource]}
+  'access_request:fulfil':
+    creates: [f_resource]

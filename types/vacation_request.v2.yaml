@@ -29,15 +29,24 @@ version: 2
 initial_state: draft
 
 fields:
-  - {id: f_start,      type: date}
-  - {id: f_end,        type: date}
-  - {id: f_days,       type: int}
-  - {id: f_leave_type, type: enum, options: [annual, unpaid, other]}
-  - {id: f_approver,   type: principal, writable_by: kernel}
-  - {id: f_comment,    type: string}
+  - id: f_start
+    type: date
+  - id: f_end
+    type: date
+  - id: f_days
+    type: int
+  - id: f_leave_type
+    type: enum
+    options: [annual, unpaid, other]
+  - id: f_approver
+    type: principal
+    writable_by: kernel
+  - id: f_comment
+    type: string
 
 states:
-  - {id: draft,     category: todo}
+  - id: draft
+    category: todo
   - id: submitted
     category: waiting
     frozen: [f_start, f_end, f_days, f_leave_type, f_approver]
@@ -47,31 +56,38 @@ states:
   - id: rejected
     category: canceled
     frozen: [f_start, f_end, f_days, f_leave_type, f_approver]
-  - {id: withdrawn, category: canceled}
+  - id: withdrawn
+    category: canceled
 
 transitions:
   - from: draft
     to: submitted
-    allowed: [creator]
-    required: [f_start, f_end, f_days, f_leave_type]
     guard: 'f_end >= f_start && f_start >= today && f_days > 0'
-  - {from: submitted, to: approved, allowed: ['field:f_approver'], except: [creator]}
-  - {from: submitted, to: rejected, allowed: ['field:f_approver'], except: [creator]}
-  - {from: submitted, to: draft,     allowed: [creator]}
-  - {from: submitted, to: withdrawn, allowed: [creator], escape: true}
-  - {from: draft,     to: withdrawn, allowed: [creator], escape: true}
-  - from: approved
+    required: [f_start, f_end, f_days, f_leave_type]
+    allowed: [creator]
+  - from: submitted
+    to: approved
+    allowed: ['field:f_approver']
+    except: [creator]
+  - from: submitted
+    to: rejected
+    allowed: ['field:f_approver']
+    except: [creator]
+  - from: submitted
+    to: draft
+    allowed: [creator]
+  - from: submitted
     to: withdrawn
     allowed: [creator]
+    escape: true
+  - from: draft
+    to: withdrawn
+    allowed: [creator]
+    escape: true
+  - from: approved
+    to: withdrawn
     guard: 'f_start >= today'
-
-links:
-  - name: balance
-    inverse: requests
-    targets: [leave_balance]
-    max: one
-    writable_by: kernel
-    resolve: {on_enter: submitted, field: f_owner, equals: creator, state: open}
+    allowed: [creator]
 
 hooks:
   - id: hr_check
@@ -83,6 +99,18 @@ hooks:
     reads: [created_on_behalf_of, created_by]
     writes: [f_approver]
 
+links:
+  - name: balance
+    inverse: requests
+    targets: [leave_balance]
+    max: one
+    writable_by: kernel
+    resolve:
+      on_enter: submitted
+      state: open
+      field: f_owner
+      equals: creator
+
 reactions:
   - id: deduct
     kind: held
@@ -90,7 +118,8 @@ reactions:
     state: approved
     from: [submitted]
     link: balance
-    add: {f_used: f_days}
+    add:
+      f_used: f_days
   - id: refund
     kind: after
     on: enter

@@ -5,5 +5,9 @@
 # come, read these links.
 id: subscription
 version: 1
+
 links:
-  - {name: watches, inverse: watched_by, targets: ['*'], max: one}
+  - name: watches
+    inverse: watched_by
+    targets: ['*']
+    max: one

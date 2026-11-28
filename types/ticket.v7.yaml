@@ -7,69 +7,104 @@ version: 7
 initial_state: triage
 
 fields:
-  - {id: f_title,       type: string}
+  - id: f_title
+    type: string
   # The triage agent's field: open to agents as well as people. Every
   # other field is closed to agents (the default).
-  - {id: f_priority,    type: int,  writable_by: [people, agents]}
-  - {id: f_reporter,    type: string}
-  - {id: f_assignee,    type: principal}
-  - {id: f_urgent,      type: bool}
-  - {id: f_resolution,  type: enum, options: [fixed, wontfix, duplicate]}
-  - {id: f_customer_id, type: string}
-  - {id: f_plan,        type: enum, options: [free, pro, enterprise, unknown]}
-  - {id: f_on_hold,     type: bool}
-  - {id: f_amount,      type: int}
-  - {id: f_cost_center, type: string}
-  - {id: f_invoice_id,  type: string}
-
-links:
-  - {name: blocks,       inverse: blocked_by, targets: [ticket]}
-  - {name: duplicate_of, inverse: duplicates, targets: [ticket], max: one}
+  - id: f_priority
+    type: int
+    writable_by: [people, agents]
+  - id: f_reporter
+    type: string
+  - id: f_assignee
+    type: principal
+  - id: f_urgent
+    type: bool
+  - id: f_resolution
+    type: enum
+    options: [fixed, wontfix, duplicate]
+  - id: f_customer_id
+    type: string
+  - id: f_plan
+    type: enum
+    options: [free, pro, enterprise, unknown]
+  - id: f_on_hold
+    type: bool
+  - id: f_amount
+    type: int
+  - id: f_cost_center
+    type: string
+  - id: f_invoice_id
+    type: string
 
 states:
-  - {id: triage,      category: triage}
-  - {id: open,        category: todo}
-  - {id: in_progress, category: active,  timer: {after: 24h, to: open}}
-  - {id: waiting,     category: waiting, timer: {after: 72h, to: in_progress}}
-  - {id: waiting_for_customer, category: waiting}
-  - {id: approved,    category: active}
-  - {id: resolved,    category: done}
-  - {id: canceled,    category: canceled}
+  - id: triage
+    category: triage
+  - id: open
+    category: todo
+  - id: in_progress
+    category: active
+    timer:
+      after: 24h
+      to: open
+  - id: waiting
+    category: waiting
+    timer:
+      after: 72h
+      to: in_progress
+  - id: waiting_for_customer
+    category: waiting
+  - id: approved
+    category: active
+  - id: resolved
+    category: done
+  - id: canceled
+    category: canceled
 
 transitions:
-  - {from: triage, to: open}
-  - {from: triage, to: canceled}
+  - from: triage
+    to: open
+  - from: triage
+    to: canceled
   - from: open
     to: in_progress
     guard: 'f_assignee != null'
-  - {from: in_progress, to: open}
-  - {from: in_progress, to: waiting}
-  - {from: waiting, to: in_progress}
-  - {from: in_progress, to: waiting_for_customer}
+  - from: in_progress
+    to: open
+  - from: in_progress
+    to: waiting
+  - from: waiting
+    to: in_progress
+  - from: in_progress
+    to: waiting_for_customer
   - from: waiting_for_customer
     to: in_progress
-    allowed: ['role:support']
     guard: 'f_assignee != null'
-  - {from: waiting_for_customer, to: canceled}
+    allowed: ['role:support']
+  - from: waiting_for_customer
+    to: canceled
   - from: in_progress
     to: approved
-    required: [f_customer_id, f_amount]
     guard: 'f_on_hold != true'
+    required: [f_customer_id, f_amount]
     allowed: ['role:approver']
-  - {from: in_progress, to: canceled, escape: true}
+  - from: in_progress
+    to: canceled
+    escape: true
   # Close: not while blocked by a ticket that is neither done nor canceled.
   - from: in_progress
     to: resolved
-    required: [f_resolution]
     guard: 'links.blocked_by.all(b, b.category in ["done", "canceled"])'
+    required: [f_resolution]
   - from: approved
     to: resolved
-    required: [f_resolution]
     guard: 'links.blocked_by.all(b, b.category in ["done", "canceled"])'
+    required: [f_resolution]
   - from: resolved
     to: open
     guard: 'f_resolution != "wontfix"'
-  - {from: open, to: canceled}
+  - from: open
+    to: canceled
 
 hooks:
   - id: get_plan
@@ -79,7 +114,8 @@ hooks:
     action: crm.get_plan
     reads: [f_customer_id]
     writes: [f_plan]
-    fallback: {f_plan: unknown}
+    fallback:
+      f_plan: unknown
   - id: get_credit_status
     on: enter
     state: triage
@@ -103,15 +139,24 @@ hooks:
     reads: [f_customer_id, f_amount]
     writes: [f_invoice_id]
 
+links:
+  - name: blocks
+    inverse: blocked_by
+    targets: [ticket]
+  - name: duplicate_of
+    inverse: duplicates
+    targets: [ticket]
+    max: one
+
 reactions:
   - id: reopen
     kind: move
     on: created_inside
-    of: [comment]
+    from: [waiting_for_customer]
+    to: in_progress
     when: 'child.f_public == true'
     by: creator
-    to: in_progress
-    from: [waiting_for_customer]
+    of: [comment]
   - id: open_checklist
     kind: create
     on: enter

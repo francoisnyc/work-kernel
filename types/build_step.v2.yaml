@@ -31,61 +31,126 @@ version: 2
 initial_state: questions
 
 fields:
-  - {id: f_title,     type: string, writable_by: [people, agents]}
+  - id: f_title
+    type: string
+    writable_by: [people, agents]
   # The person who answers, agrees and accepts. Only a maintainer sets it,
   # so an agent (which holds no role) can never name itself.
-  - {id: f_owner,     type: principal, writable_by: ['role:maintainer']}
+  - id: f_owner
+    type: principal
+    writable_by: ['role:maintainer']
   # Where the questions are, and where the agreed tests are: a path or a
   # URL, and for the tests the commit that holds them.
-  - {id: f_questions, type: string, writable_by: [people, agents]}
-  - {id: f_tests_ref, type: string, writable_by: [people, agents]}
-  - {id: f_pr_url,    type: string, writable_by: [people, agents]}
+  - id: f_questions
+    type: string
+    writable_by: [people, agents]
+  - id: f_tests_ref
+    type: string
+    writable_by: [people, agents]
+  - id: f_pr_url
+    type: string
+    writable_by: [people, agents]
   # The journal entry written at the end (a path and heading, or a URL).
-  - {id: f_journal,   type: string, writable_by: [people, agents]}
-  - {id: f_rank,      type: string, writable_by: [people, agents]}
-
-invariants:
-  - {id: owner_missing, rule: 'f_owner != null'}
-
-links:
-  - {name: epic,    inverse: steps,      targets: [epic], max: one}
-  - {name: blocks,  inverse: blocked_by, targets: [build_step]}
+  - id: f_journal
+    type: string
+    writable_by: [people, agents]
+  - id: f_rank
+    type: string
+    writable_by: [people, agents]
 
 states:
-  - {id: questions,       category: todo}
-  - {id: answering,       category: waiting}
+  - id: questions
+    category: todo
+  - id: answering
+    category: waiting
   # The questions are answered: they stay as answered from here on.
-  - {id: writing_tests,   category: active,  frozen: [f_questions]}
+  - id: writing_tests
+    category: active
+    frozen: [f_questions]
   # The tests are proposed: the reference may not change until the owner
   # agrees or sends them back.
-  - {id: tests_proposed,  category: waiting, frozen: [f_questions, f_tests_ref]}
+  - id: tests_proposed
+    category: waiting
+    frozen: [f_questions, f_tests_ref]
   # Agreed tests are protected: the reference is frozen while building and
   # in review. Changing a test means going back to tests_proposed.
-  - {id: building,        category: active,  frozen: [f_questions, f_tests_ref, f_owner]}
-  - {id: in_review,       category: waiting, frozen: [f_questions, f_tests_ref, f_owner, f_pr_url]}
-  - {id: done,            category: done,    frozen: [f_questions, f_tests_ref, f_owner, f_pr_url, f_journal]}
+  - id: building
+    category: active
+    frozen: [f_questions, f_tests_ref, f_owner]
+  - id: in_review
+    category: waiting
+    frozen: [f_questions, f_tests_ref, f_owner, f_pr_url]
+  - id: done
+    category: done
+    frozen: [f_questions, f_tests_ref, f_owner, f_pr_url, f_journal]
   # Not frozen: a dropped step restarted at questions may rewrite them.
-  - {id: dropped,         category: canceled}
+  - id: dropped
+    category: canceled
 
 transitions:
   # 1. Questions first.
-  - {from: questions,      to: answering,      required: [f_questions]}
-  - {from: answering,      to: writing_tests,  allowed: ['field:f_owner']}
+  - from: questions
+    to: answering
+    required: [f_questions]
+  - from: answering
+    to: writing_tests
+    allowed: ['field:f_owner']
   # 2. Tests first, and only the owner agrees.
-  - {from: writing_tests,  to: tests_proposed, required: [f_tests_ref]}
-  - {from: tests_proposed, to: building,       allowed: ['field:f_owner']}
-  - {from: tests_proposed, to: writing_tests,  allowed: ['field:f_owner']}
+  - from: writing_tests
+    to: tests_proposed
+    required: [f_tests_ref]
+  - from: tests_proposed
+    to: building
+    allowed: ['field:f_owner']
+  - from: tests_proposed
+    to: writing_tests
+    allowed: ['field:f_owner']
   # 3. A test must change: back for the owner's OK. Anyone may ask.
-  - {from: building,       to: writing_tests}
+  - from: building
+    to: writing_tests
   # 4. Review: the owner accepts; a journal entry is required.
-  - {from: building,       to: in_review,      required: [f_pr_url]}
-  - {from: in_review,      to: building,       allowed: ['field:f_owner']}
-  - {from: in_review,      to: done,           allowed: ['field:f_owner'], required: [f_journal]}
+  - from: building
+    to: in_review
+    required: [f_pr_url]
+  - from: in_review
+    to: building
+    allowed: ['field:f_owner']
+  - from: in_review
+    to: done
+    required: [f_journal]
+    allowed: ['field:f_owner']
   # Dropping a step is the owner's call, from anywhere before done.
-  - {from: questions,      to: dropped, allowed: ['field:f_owner']}
-  - {from: answering,      to: dropped, allowed: ['field:f_owner']}
-  - {from: writing_tests,  to: dropped, allowed: ['field:f_owner']}
-  - {from: tests_proposed, to: dropped, allowed: ['field:f_owner']}
-  - {from: building,       to: dropped, allowed: ['field:f_owner']}
-  - {from: in_review,      to: dropped, allowed: ['field:f_owner']}
-  - {from: dropped,        to: questions, allowed: ['field:f_owner']}
+  - from: questions
+    to: dropped
+    allowed: ['field:f_owner']
+  - from: answering
+    to: dropped
+    allowed: ['field:f_owner']
+  - from: writing_tests
+    to: dropped
+    allowed: ['field:f_owner']
+  - from: tests_proposed
+    to: dropped
+    allowed: ['field:f_owner']
+  - from: building
+    to: dropped
+    allowed: ['field:f_owner']
+  - from: in_review
+    to: dropped
+    allowed: ['field:f_owner']
+  - from: dropped
+    to: questions
+    allowed: ['field:f_owner']
+
+links:
+  - name: epic
+    inverse: steps
+    targets: [epic]
+    max: one
+  - name: blocks
+    inverse: blocked_by
+    targets: [build_step]
+
+invariants:
+  - id: owner_missing
+    rule: 'f_owner != null'

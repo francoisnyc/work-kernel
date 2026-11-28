@@ -366,7 +366,7 @@ func TestCheck_ActionMajors(t *testing.T) {
 		if len(ps) != 1 {
 			t.Fatalf("hr.manager_of%s: %d problems, want 1:\n%v", major, len(ps), ps)
 		}
-		checkProblem(t, ps[0], problemCase{code: typedef.CodeUnknownAction, path: "hooks[0].action", line: 79, col: 5,
+		checkProblem(t, ps[0], problemCase{code: typedef.CodeUnknownAction, path: "hooks[0].action", line: 104, col: 5,
 			typeID: "vacation_request", version: 5, old: "hr.manager_of@2"})
 	}
 }

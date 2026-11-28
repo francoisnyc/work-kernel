@@ -23,15 +23,24 @@ version: 1
 initial_state: draft
 
 fields:
-  - {id: f_start,      type: date}
-  - {id: f_end,        type: date}
-  - {id: f_days,       type: int}
-  - {id: f_leave_type, type: enum, options: [annual, unpaid, other]}
-  - {id: f_approver,   type: principal, writable_by: kernel}
-  - {id: f_comment,    type: string}
+  - id: f_start
+    type: date
+  - id: f_end
+    type: date
+  - id: f_days
+    type: int
+  - id: f_leave_type
+    type: enum
+    options: [annual, unpaid, other]
+  - id: f_approver
+    type: principal
+    writable_by: kernel
+  - id: f_comment
+    type: string
 
 states:
-  - {id: draft,     category: todo}
+  - id: draft
+    category: todo
   - id: submitted
     category: waiting
     frozen: [f_start, f_end, f_days, f_leave_type, f_approver]
@@ -41,24 +50,38 @@ states:
   - id: rejected
     category: canceled
     frozen: [f_start, f_end, f_days, f_leave_type, f_approver]
-  - {id: withdrawn, category: canceled}
+  - id: withdrawn
+    category: canceled
 
 transitions:
   # Submit: the requester's act; the terms make sense and the leave has not
   # started.
   - from: draft
     to: submitted
-    allowed: [creator]
-    required: [f_start, f_end, f_days, f_leave_type]
     guard: 'f_end >= f_start && f_start >= today && f_days > 0'
+    required: [f_start, f_end, f_days, f_leave_type]
+    allowed: [creator]
   # The manager's decision: whoever f_approver names, never the requester.
-  - {from: submitted, to: approved, allowed: ['field:f_approver'], except: [creator]}
-  - {from: submitted, to: rejected, allowed: ['field:f_approver'], except: [creator]}
+  - from: submitted
+    to: approved
+    allowed: ['field:f_approver']
+    except: [creator]
+  - from: submitted
+    to: rejected
+    allowed: ['field:f_approver']
+    except: [creator]
   # The requester recalls a pending request to edit it, or withdraws it. A
   # withdrawal from draft is an escape: it ends an open HR check.
-  - {from: submitted, to: draft,     allowed: [creator]}
-  - {from: submitted, to: withdrawn, allowed: [creator]}
-  - {from: draft,     to: withdrawn, allowed: [creator], escape: true}
+  - from: submitted
+    to: draft
+    allowed: [creator]
+  - from: submitted
+    to: withdrawn
+    allowed: [creator]
+  - from: draft
+    to: withdrawn
+    allowed: [creator]
+    escape: true
 
 hooks:
   - id: hr_check

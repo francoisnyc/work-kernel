@@ -9,21 +9,39 @@ version: 1
 
 # The name first: a page shows an Item by its first string field.
 fields:
-  - {id: f_name,      type: string}
-  - {id: f_approvers, type: principal, multiple: true, max: 8, writable_by: ['role:access_admin']}
-  - {id: f_required,  type: int,       writable_by: ['role:access_admin']}
-  - {id: f_contact,   type: principal, writable_by: ['role:access_admin']}
+  - id: f_name
+    type: string
+  - id: f_approvers
+    type: principal
+    multiple: true
+    max: 8
+    writable_by: ['role:access_admin']
+  - id: f_required
+    type: int
+    writable_by: ['role:access_admin']
+  - id: f_contact
+    type: principal
+    writable_by: ['role:access_admin']
 
 links:
-  - {name: calendar,   inverse: resources,          targets: [calendar],   max: one, writable_by: ['role:sla_admin']}
-  - {name: sla_policy, inverse: governed_resources, targets: [sla_policy], max: one, writable_by: ['role:sla_admin']}
-
-# What a request copies on submit, and what its fulfilment task names.
-readable_by_reactions: [f_name, f_approvers, f_required, f_contact]
+  - name: calendar
+    inverse: resources
+    targets: [calendar]
+    max: one
+    writable_by: ['role:sla_admin']
+  - name: sla_policy
+    inverse: governed_resources
+    targets: [sla_policy]
+    max: one
+    writable_by: ['role:sla_admin']
 
 invariants:
   # At least one approval, never more than there are approvers.
-  - {id: quorum_invalid, rule: 'f_approvers != null && f_required != null && f_required >= 1 && f_required <= size(f_approvers)'}
+  - id: quorum_invalid
+    rule: 'f_approvers != null && f_required != null && f_required >= 1 && f_required <= size(f_approvers)'
+
+# What a request copies on submit, and what its fulfilment task names.
+readable_by_reactions: [f_name, f_approvers, f_required, f_contact]
 
 # Only access_admin moves or narrows a resource.
 placement_writable_by: ['role:access_admin']

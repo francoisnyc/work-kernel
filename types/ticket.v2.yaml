@@ -7,20 +7,38 @@ version: 2
 initial_state: open
 
 fields:
-  - {id: f_title,      type: string}
-  - {id: f_priority,   type: int}
-  - {id: f_reporter,   type: string}
-  - {id: f_assignee,   type: string}
-  - {id: f_urgent,     type: bool}
-  - {id: f_resolution, type: enum, options: [fixed, wontfix, duplicate]}
+  - id: f_title
+    type: string
+  - id: f_priority
+    type: int
+  - id: f_reporter
+    type: string
+  - id: f_assignee
+    type: string
+  - id: f_urgent
+    type: bool
+  - id: f_resolution
+    type: enum
+    options: [fixed, wontfix, duplicate]
 
 states:
-  - {id: open,        category: todo}
-  - {id: in_progress, category: active,  timer: {after: 24h, to: open}}
+  - id: open
+    category: todo
+  - id: in_progress
+    category: active
+    timer:
+      after: 24h
+      to: open
   # Waiting on the customer: after 72 hours the ticket is picked up again.
-  - {id: waiting,     category: waiting, timer: {after: 72h, to: in_progress}}
-  - {id: resolved,    category: done}
-  - {id: canceled,    category: canceled}
+  - id: waiting
+    category: waiting
+    timer:
+      after: 72h
+      to: in_progress
+  - id: resolved
+    category: done
+  - id: canceled
+    category: canceled
 
 transitions:
   - from: open

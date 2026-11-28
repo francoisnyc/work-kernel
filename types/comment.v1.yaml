@@ -2,5 +2,7 @@
 # author is its creator. It is not work (category none).
 id: comment
 version: 1
+
 fields:
-  - {id: f_body, type: string}
+  - id: f_body
+    type: string
