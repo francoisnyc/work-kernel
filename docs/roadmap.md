@@ -132,7 +132,10 @@ checks, readings and injection resistance possible. Around them:
 2. **The data as a first-class surface:** the JSON Schema in editors (it
    exists); `pli validate`, `pli fmt` (block-style YAML, cleaner diffs) and
    `pli lint`; a CEL playground that knows a Type's fields; stories run as
-   ordinary `go test` in CI; a language server later.
+   ordinary `go test` in CI; a language server later. **`pli fmt` built**
+   (2026-11-28; design.md, "pli fmt, as built"): one canonical layout,
+   comments kept, a gate that refuses any change of value; every file of
+   `types/` reformatted, and CI checks it.
 3. **Named conditions,** like Kubernetes' variables (a named CEL expression
    other expressions use): short guards, and names a reviewer and a reading
    can show. A small construct that removes repetition (guardrail 2).
@@ -144,7 +147,7 @@ checks, readings and injection resistance possible. Around them:
 5. **The way out to code stays obvious:** anything past the rulebook's
    budget is a Go activity.
 
-Items 4 and 2's `fmt` come before track 2's authoring test, which checks the
+Items 4 and 2's `fmt` (built) come before track 2's authoring test, which checks the
 readings; the builder and the rest wait for the decision point.
 
 ## Now: prove, then broaden
