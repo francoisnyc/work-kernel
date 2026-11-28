@@ -6,6 +6,11 @@ One entry per session, newest at the bottom.
 
 Ideas noted during the spike, not built yet.
 
+- **An agent's request, Inbox PR 3's Later items** (design.md, "An agent's request on the screen, as built"):
+  - **Agents' display names.** An agent shows by its ID without "agent:"; the kernel names no agent, and the dev
+    file's users list leaves agents out.
+  - **A free-text field open to agents on the stack.** None yet: the journey's agent field is a priority; free text
+    comes with "Ask a person" (`question@1`, `approval@3`).
 - **The Inbox in words, Inbox PR 2b's Later items** (design.md, "The Inbox in words, as built (Inbox PR 2b)"):
   - **Overdue across pages.** Overdue is worked out on the rows loaded;
     a server filter on a state's `due` would find them all.
@@ -5124,3 +5129,29 @@ steps); web Playwright 21; apps/poc 4. **The bake-offs:** not run; no file under
 **Local workarounds, outside the repository (nothing committed):** as for 2b and 2c.
 
 **Open:** the Later items above. **Next session:** 3b, the screen (its decisions were taken at PR 3's Phase A).
+
+## 2026-11-28 — Track 1, item 6, the Inbox for people, PR 3b: an agent's request on the screen (Phases B to D)
+
+**Built (web only):** the "Agent request · for {person}" badge (an agent put the Item in its state, or created it),
+the panel's "{agent}, for {person}" and "What the agent wrote" (each field's latest writer in the history, read when
+the panel opens; a person's later write takes it back), the agent's text as a plain text node, pre-wrap, under the
+warning. design.md: "An agent's request on the screen, as built (Inbox PR 3b)", with where the plan stands. Roadmap:
+PR 3 done, the Inbox for people built, what the roadmap names next (not decided).
+
+**Decided (the owner, through the coordinator):** at PR 3's Phase A, the mark, the names, the agent's text and the
+warning, customers as `Project` gives. At the tests gate: the tests as written.
+
+**Tests:** new: model 14, page 5, two journeys. No earlier test changed.
+
+**Surprises:**
+- The e2e seeds had no agent: the dev users' parser leaves agents out, so the seed reads the dev-token file for the
+  agent's token and starts a real session through the API.
+- Nothing on the stack lets an agent write free text; the journey shows a priority, the unit tests the free text.
+
+**Numbers.** Web: typecheck, build, 588 unit tests; on the compose stack 23 web journeys, apps/poc 4, the scenario
+passed. `go vet` and `go test ./...` untouched and green. **The bake-offs:** not run; no file under `spikes/` changed.
+
+**Local workarounds, outside the repository (nothing committed):** as for 2b to 3a.
+
+**Open:** the Later items above. **Next session:** the Inbox for people is built; the owner chooses what comes next in
+track 1 (item 6's step 4, bulk and status; track 2's authoring test).

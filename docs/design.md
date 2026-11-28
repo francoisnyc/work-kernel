@@ -6497,7 +6497,54 @@ step. Earlier-approved test that changed, the owner's:
 `TestGet_ReturnsCreatedItem` checks the state actor, then sets it aside.
 
 **Next.** 3b, the screen: the "Agent request" badge, "for {person}",
-"What the agent wrote" in the panel.
+"What the agent wrote" in the panel. (Built: "An agent's request on the
+screen, as built".)
+
+## An agent's request on the screen, as built (Inbox PR 3b) (2026-11-28)
+
+The screen half of PR 3, over 3a's `Item.state_actor`. Web only; no
+kernel, contract or schema change.
+
+**The mark.** A row is an agent's request when an agent put the Item in
+its state (`state_actor` is `agent:…`) or created it (`creator`). The
+latest wins: the state actor when it is an agent, else the creator. The
+badge reads "Agent request · for {person}": the user that agent acted
+for, by name from the dev-token file, "for you" when it is the reader,
+nothing when it acted for nobody. The kernel's own actors (the timer, a
+hook) are not agents.
+
+**The panel** of a marked row says "{agent}, for {person}" (the agent by
+its ID without "agent:") and, from the Item's history read when the
+panel opens (any other panel still reads it only on unfold), **What the
+agent wrote**: each field whose latest setting event (`ItemEvent.fields`)
+was an agent's, with its value now, in the Type's order; a person who
+set it later takes it back; a field the agent cleared is left out. Under
+the warning "Written by an agent. Check it before you decide."
+
+**Untrusted text, inert** (the roadmap's "Ask a person", borrowed item
+7): the value is a plain React text node (escaped; no
+`dangerouslySetInnerHTML`, no markdown, no links made of URLs), its line
+breaks kept by `.agent-text { white-space: pre-wrap }`. A test holds that
+`<b>x</b> [a](javascript:…) **bold**` shows as typed and makes no element.
+
+**Customers:** nothing new: what `policy.Project` gives them. The
+portal's agent opening kim's incident reads "Agent request · for you".
+
+**Tests.** model 14, page 5, two journeys (bob's row of ana's ticket that
+triage-bot moved for her, and its panel; kim's incident the portal's
+agent opened). No earlier test changed. The stack has no free-text field
+open to agents: the journey's agent field is `f_priority`; free text is
+held by the unit tests.
+
+**Where the plan stands.** The Inbox for people
+(`docs/plans/inbox-for-people.md`) is built: words for people on the Type
+(1a, 1b), claimed rows and withheld moves (2a), the screen in words (2b),
+its panel, several rows and keys (2c), and an agent's request (3a, 3b).
+Later, not decided: overdue across pages (a server filter on a state's
+`due`), role labels, only the claimant releases, an agent working for
+someone on a claimed row, agents' display names. The new answers ("Not
+yet", a refusal reason, the approver's own values) come with "Ask a
+person" (`question@1`, `approval@3`).
 
 ## Out of scope for the spike
 
