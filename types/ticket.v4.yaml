@@ -9,45 +9,79 @@ version: 4
 initial_state: triage
 
 fields:
-  - {id: f_title,       type: string}
-  - {id: f_priority,    type: int}
-  - {id: f_reporter,    type: string}
-  - {id: f_assignee,    type: string}
-  - {id: f_urgent,      type: bool}
-  - {id: f_resolution,  type: enum, options: [fixed, wontfix, duplicate]}
-  - {id: f_customer_id, type: string}
-  - {id: f_plan,        type: enum, options: [free, pro, enterprise, unknown]}
-  - {id: f_on_hold,     type: bool}
-  - {id: f_amount,      type: int}
-  - {id: f_cost_center, type: string}
-  - {id: f_invoice_id,  type: string}
+  - id: f_title
+    type: string
+  - id: f_priority
+    type: int
+  - id: f_reporter
+    type: string
+  - id: f_assignee
+    type: string
+  - id: f_urgent
+    type: bool
+  - id: f_resolution
+    type: enum
+    options: [fixed, wontfix, duplicate]
+  - id: f_customer_id
+    type: string
+  - id: f_plan
+    type: enum
+    options: [free, pro, enterprise, unknown]
+  - id: f_on_hold
+    type: bool
+  - id: f_amount
+    type: int
+  - id: f_cost_center
+    type: string
+  - id: f_invoice_id
+    type: string
 
 states:
-  - {id: triage,      category: triage}
-  - {id: open,        category: todo}
-  - {id: in_progress, category: active,  timer: {after: 24h, to: open}}
-  - {id: waiting,     category: waiting, timer: {after: 72h, to: in_progress}}
-  - {id: approved,    category: active}
-  - {id: resolved,    category: done}
-  - {id: canceled,    category: canceled}
+  - id: triage
+    category: triage
+  - id: open
+    category: todo
+  - id: in_progress
+    category: active
+    timer:
+      after: 24h
+      to: open
+  - id: waiting
+    category: waiting
+    timer:
+      after: 72h
+      to: in_progress
+  - id: approved
+    category: active
+  - id: resolved
+    category: done
+  - id: canceled
+    category: canceled
 
 transitions:
-  - {from: triage, to: open}
-  - {from: triage, to: canceled}
+  - from: triage
+    to: open
+  - from: triage
+    to: canceled
   - from: open
     to: in_progress
     guard: 'f_assignee != null'
-  - {from: in_progress, to: open}
-  - {from: in_progress, to: waiting}
-  - {from: waiting, to: in_progress}
+  - from: in_progress
+    to: open
+  - from: in_progress
+    to: waiting
+  - from: waiting
+    to: in_progress
   # Approve: refused at once when the prefetched fact says the customer is on
   # hold; otherwise a hold while the ERP checks (erp_check below).
   - from: in_progress
     to: approved
-    required: [f_customer_id, f_amount]
     guard: 'f_on_hold != true'
+    required: [f_customer_id, f_amount]
     allowed: ['role:approver']
-  - {from: in_progress, to: canceled, escape: true}
+  - from: in_progress
+    to: canceled
+    escape: true
   - from: in_progress
     to: resolved
     required: [f_resolution]
@@ -57,7 +91,8 @@ transitions:
   - from: resolved
     to: open
     guard: 'f_resolution != "wontfix"'
-  - {from: open, to: canceled}
+  - from: open
+    to: canceled
 
 hooks:
   - id: get_plan
@@ -67,7 +102,8 @@ hooks:
     action: crm.get_plan
     reads: [f_customer_id]
     writes: [f_plan]
-    fallback: {f_plan: unknown}
+    fallback:
+      f_plan: unknown
   - id: get_credit_status
     on: enter
     state: triage

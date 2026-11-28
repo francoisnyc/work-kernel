@@ -17,37 +17,77 @@ version: 1
 initial_state: todo
 
 fields:
-  - {id: f_summary,     type: string}
-  - {id: f_description, type: string}
-  - {id: f_assignee,    type: principal}
-  - {id: f_priority,    type: enum, options: [P1, P2, P3, P4]}
-  - {id: f_points,      type: int}
-  - {id: f_resolution,  type: enum, options: [fixed, wontfix, duplicate, cannot_reproduce]}
-  - {id: f_rank,        type: string}
-
-links:
-  - {name: epic,       inverse: issues,        targets: [epic],   max: one}
-  - {name: sprint,     inverse: sprint_issues, targets: [sprint], max: one}
-  - {name: blocks,     inverse: blocked_by,    targets: [story, bug, task]}
-  - {name: relates,    inverse: related_by,    targets: [story, bug, task]}
-  - {name: duplicates, inverse: duplicated_by, targets: [story, bug, task], max: one}
+  - id: f_summary
+    type: string
+  - id: f_description
+    type: string
+  - id: f_assignee
+    type: principal
+  - id: f_priority
+    type: enum
+    options: [P1, P2, P3, P4]
+  - id: f_points
+    type: int
+  - id: f_resolution
+    type: enum
+    options: [fixed, wontfix, duplicate, cannot_reproduce]
+  - id: f_rank
+    type: string
 
 states:
-  - {id: todo,        category: todo}
-  - {id: in_progress, category: active}
-  - {id: in_review,   category: active}
-  - {id: done,        category: done}
-  - {id: canceled,    category: canceled}
+  - id: todo
+    category: todo
+  - id: in_progress
+    category: active
+  - id: in_review
+    category: active
+  - id: done
+    category: done
+  - id: canceled
+    category: canceled
 
 transitions:
-  - {from: todo,        to: in_progress}
-  - {from: in_progress, to: in_review}
-  - {from: in_review,   to: in_progress}
-  - {from: in_review,   to: done, required: [f_resolution]}
-  - {from: in_progress, to: done, required: [f_resolution]}
+  - from: todo
+    to: in_progress
+  - from: in_progress
+    to: in_review
+  - from: in_review
+    to: in_progress
+  - from: in_review
+    to: done
+    required: [f_resolution]
+  - from: in_progress
+    to: done
+    required: [f_resolution]
   # Reopen: the resolution no longer stands.
-  - {from: done,        to: todo, clears: [f_resolution]}
-  - {from: todo,        to: canceled}
-  - {from: in_progress, to: canceled}
-  - {from: in_review,   to: canceled}
-  - {from: canceled,    to: todo}
+  - from: done
+    to: todo
+    clears: [f_resolution]
+  - from: todo
+    to: canceled
+  - from: in_progress
+    to: canceled
+  - from: in_review
+    to: canceled
+  - from: canceled
+    to: todo
+
+links:
+  - name: epic
+    inverse: issues
+    targets: [epic]
+    max: one
+  - name: sprint
+    inverse: sprint_issues
+    targets: [sprint]
+    max: one
+  - name: blocks
+    inverse: blocked_by
+    targets: [story, bug, task]
+  - name: relates
+    inverse: related_by
+    targets: [story, bug, task]
+  - name: duplicates
+    inverse: duplicated_by
+    targets: [story, bug, task]
+    max: one

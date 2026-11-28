@@ -5,6 +5,9 @@
 # Later: the kernel has no counter per container.
 id: space
 version: 1
+
 fields:
-  - {id: f_key,  type: string}
-  - {id: f_name, type: string}
+  - id: f_key
+    type: string
+  - id: f_name
+    type: string

@@ -13,17 +13,29 @@
 # policy that only sla_admin sets, open to customers as a portal.
 id: desk
 version: 4
+
 # The name first: a page shows a portal by its first string field.
 fields:
-  - {id: f_name, type: string}
-  - {id: f_key,  type: string}
+  - id: f_name
+    type: string
+  - id: f_key
+    type: string
 
 links:
-  - {name: calendar,   inverse: desks,          targets: [calendar],   max: one, writable_by: ['role:sla_admin']}
-  - {name: sla_policy, inverse: governed_desks, targets: [sla_policy], max: one, writable_by: ['role:sla_admin']}
+  - name: calendar
+    inverse: desks
+    targets: [calendar]
+    max: one
+    writable_by: ['role:sla_admin']
+  - name: sla_policy
+    inverse: governed_desks
+    targets: [sla_policy]
+    max: one
+    writable_by: ['role:sla_admin']
+
+customer_fields: [f_key, f_name]
 
 own: [incident]
-customer_fields: [f_key, f_name]
 
 placement_writable_by: ['role:sla_admin']
 

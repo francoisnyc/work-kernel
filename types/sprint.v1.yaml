@@ -9,16 +9,25 @@ version: 1
 initial_state: planned
 
 fields:
-  - {id: f_name,  type: string}
-  - {id: f_start, type: date}
-  - {id: f_end,   type: date}
-  - {id: f_goal,  type: string}
+  - id: f_name
+    type: string
+  - id: f_start
+    type: date
+  - id: f_end
+    type: date
+  - id: f_goal
+    type: string
 
 states:
-  - {id: planned, category: backlog}
-  - {id: active,  category: active}
-  - {id: closed,  category: done}
+  - id: planned
+    category: backlog
+  - id: active
+    category: active
+  - id: closed
+    category: done
 
 transitions:
-  - {from: planned, to: active}
-  - {from: active,  to: closed}
+  - from: planned
+    to: active
+  - from: active
+    to: closed

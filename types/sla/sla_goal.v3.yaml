@@ -45,26 +45,60 @@ version: 3
 initial_state: running
 
 fields:
-  - {id: f_metric,      type: enum, options: [first_response, resolution, approval], writable_by: kernel}
-  - {id: f_target_s,    type: int,      writable_by: kernel}  # seconds of working time
-  - {id: f_elapsed_s,   type: int,      writable_by: kernel}  # worked before the last pause or the end
-  - {id: f_started_at,  type: datetime, writable_by: kernel}  # the start, or the last resume
-  - {id: f_due_at,      type: datetime, writable_by: kernel}  # unset unless running
-  - {id: f_breached_at, type: datetime, writable_by: kernel}
-  - {id: f_outcome,     type: enum, options: [met, missed], writable_by: kernel}
+  - id: f_metric
+    type: enum
+    options: [first_response, resolution, approval]
+    writable_by: kernel
+  - id: f_target_s  # seconds of working time
+    type: int
+    writable_by: kernel
+  - id: f_elapsed_s  # worked before the last pause or the end
+    type: int
+    writable_by: kernel
+  - id: f_started_at  # the start, or the last resume
+    type: datetime
+    writable_by: kernel
+  - id: f_due_at  # unset unless running
+    type: datetime
+    writable_by: kernel
+  - id: f_breached_at
+    type: datetime
+    writable_by: kernel
+  - id: f_outcome
+    type: enum
+    options: [met, missed]
+    writable_by: kernel
   # The calendar the goal was created with.
-  - {id: f_week,        type: string, multiple: true, max: 21,  writable_by: kernel}
-  - {id: f_days_off,    type: date,   multiple: true, max: 366, writable_by: kernel}
-  - {id: f_zone,        type: string, writable_by: kernel}
+  - id: f_week
+    type: string
+    multiple: true
+    max: 21
+    writable_by: kernel
+  - id: f_days_off
+    type: date
+    multiple: true
+    max: 366
+    writable_by: kernel
+  - id: f_zone
+    type: string
+    writable_by: kernel
 
 states:
   - id: running
     category: active
     acting:
-      - {id: breached, at: f_due_at, when: 'f_breached_at == null', sets: {f_breached_at: 'cause.at'}, hook: notify_breach}
-  - {id: paused,    category: waiting}
-  - {id: completed, category: done}
-  - {id: canceled,  category: canceled}
+      - id: breached
+        at: f_due_at
+        when: 'f_breached_at == null'
+        hook: notify_breach
+        sets:
+          f_breached_at: 'cause.at'
+  - id: paused
+    category: waiting
+  - id: completed
+    category: done
+  - id: canceled
+    category: canceled
 
 transitions:
   - from: running
@@ -102,41 +136,138 @@ transitions:
     allowed: [nobody]
     sets:
       f_due_at: 'null'
-  - {from: paused, to: canceled, allowed: [nobody]}
+  - from: paused
+    to: canceled
+    allowed: [nobody]
 
 hooks:
   # The email's template is the hook's ID. The recipient is whoever the
   # container offers as breach_contact when the hook runs; with nobody to
   # tell, the hook fails once (no_recipient) and is not retried.
-  - {id: notify_breach, on: timer, kind: action, action: email.notify, reads: ['container:breach_contact']}
+  - id: notify_breach
+    on: timer
+    kind: action
+    action: email.notify
+    reads: ['container:breach_contact']
 
 reactions:
-  - {id: show_first_response,   kind: set, on: enter, state: running,   when: 'f_metric == "first_response"', target: container, set: {f_due_first_response: 'f_due_at'}}
-  - {id: hide_first_response,   kind: set, on: enter, state: paused,    when: 'f_metric == "first_response"', target: container, set: {f_due_first_response: 'null'}}
-  - {id: clear_first_response,  kind: set, on: enter, state: completed, when: 'f_metric == "first_response"', target: container, set: {f_due_first_response: 'null'}}
-  - {id: cancel_first_response, kind: set, on: enter, state: canceled,  when: 'f_metric == "first_response"', target: container, set: {f_due_first_response: 'null'}}
-  - {id: show_resolution,       kind: set, on: enter, state: running,   when: 'f_metric == "resolution"', target: container, set: {f_due_resolution: 'f_due_at'}}
-  - {id: hide_resolution,       kind: set, on: enter, state: paused,    when: 'f_metric == "resolution"', target: container, set: {f_due_resolution: 'null'}}
-  - {id: clear_resolution,      kind: set, on: enter, state: completed, when: 'f_metric == "resolution"', target: container, set: {f_due_resolution: 'null'}}
-  - {id: cancel_resolution,     kind: set, on: enter, state: canceled,  when: 'f_metric == "resolution"', target: container, set: {f_due_resolution: 'null'}}
-  - {id: show_approval,         kind: set, on: enter, state: running,   when: 'f_metric == "approval"', target: container, set: {f_due_approval: 'f_due_at'}}
-  - {id: hide_approval,         kind: set, on: enter, state: paused,    when: 'f_metric == "approval"', target: container, set: {f_due_approval: 'null'}}
-  - {id: clear_approval,        kind: set, on: enter, state: completed, when: 'f_metric == "approval"', target: container, set: {f_due_approval: 'null'}}
-  - {id: cancel_approval,       kind: set, on: enter, state: canceled,  when: 'f_metric == "approval"', target: container, set: {f_due_approval: 'null'}}
+  - id: show_first_response
+    kind: set
+    on: enter
+    state: running
+    when: 'f_metric == "first_response"'
+    target: container
+    set:
+      f_due_first_response: 'f_due_at'
+  - id: hide_first_response
+    kind: set
+    on: enter
+    state: paused
+    when: 'f_metric == "first_response"'
+    target: container
+    set:
+      f_due_first_response: 'null'
+  - id: clear_first_response
+    kind: set
+    on: enter
+    state: completed
+    when: 'f_metric == "first_response"'
+    target: container
+    set:
+      f_due_first_response: 'null'
+  - id: cancel_first_response
+    kind: set
+    on: enter
+    state: canceled
+    when: 'f_metric == "first_response"'
+    target: container
+    set:
+      f_due_first_response: 'null'
+  - id: show_resolution
+    kind: set
+    on: enter
+    state: running
+    when: 'f_metric == "resolution"'
+    target: container
+    set:
+      f_due_resolution: 'f_due_at'
+  - id: hide_resolution
+    kind: set
+    on: enter
+    state: paused
+    when: 'f_metric == "resolution"'
+    target: container
+    set:
+      f_due_resolution: 'null'
+  - id: clear_resolution
+    kind: set
+    on: enter
+    state: completed
+    when: 'f_metric == "resolution"'
+    target: container
+    set:
+      f_due_resolution: 'null'
+  - id: cancel_resolution
+    kind: set
+    on: enter
+    state: canceled
+    when: 'f_metric == "resolution"'
+    target: container
+    set:
+      f_due_resolution: 'null'
+  - id: show_approval
+    kind: set
+    on: enter
+    state: running
+    when: 'f_metric == "approval"'
+    target: container
+    set:
+      f_due_approval: 'f_due_at'
+  - id: hide_approval
+    kind: set
+    on: enter
+    state: paused
+    when: 'f_metric == "approval"'
+    target: container
+    set:
+      f_due_approval: 'null'
+  - id: clear_approval
+    kind: set
+    on: enter
+    state: completed
+    when: 'f_metric == "approval"'
+    target: container
+    set:
+      f_due_approval: 'null'
+  - id: cancel_approval
+    kind: set
+    on: enter
+    state: canceled
+    when: 'f_metric == "approval"'
+    target: container
+    set:
+      f_due_approval: 'null'
 
 invariants:
-  - {id: metric_missing, rule: 'f_metric != null'}
+  - id: metric_missing
+    rule: 'f_metric != null'
 
 accepts_reactions:
-  '*:sla_start_first_response': &start {creates: [f_metric, f_target_s, f_started_at, f_due_at, f_week, f_days_off, f_zone]}
-  '*:sla_start_resolution':     *start
-  '*:sla_restart_resolution':   *start
-  '*:sla_start_approval':       *start
-  '*:sla_pause':    {moves: [paused]}
-  '*:sla_resume':   {moves: [running]}
-  '*:sla_stop':     {moves: [completed]}
-  '*:sla_answered': {moves: [completed]}
-  '*:sla_cancel':   {moves: [canceled]}
+  '*:sla_start_first_response': &start
+    creates: [f_metric, f_target_s, f_started_at, f_due_at, f_week, f_days_off, f_zone]
+  '*:sla_start_resolution': *start
+  '*:sla_restart_resolution': *start
+  '*:sla_start_approval': *start
+  '*:sla_pause':
+    moves: [paused]
+  '*:sla_resume':
+    moves: [running]
+  '*:sla_stop':
+    moves: [completed]
+  '*:sla_answered':
+    moves: [completed]
+  '*:sla_cancel':
+    moves: [canceled]
 
 # A goal stays in its host, with its host's readers.
 placement_writable_by: [kernel]

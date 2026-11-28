@@ -2,5 +2,7 @@
 # shares it.
 id: note
 version: 1
+
 fields:
-  - {id: f_body, type: string}
+  - id: f_body
+    type: string

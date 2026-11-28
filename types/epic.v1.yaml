@@ -13,23 +13,34 @@ version: 1
 initial_state: todo
 
 fields:
-  - {id: f_summary, type: string}
-  - {id: f_owner,   type: principal}
-
-incoming:
-  - {name: issues, link: epic, from: [story, bug, task]}
-
-rollups:
-  - {id: progress, over: issues, count_by: category}
+  - id: f_summary
+    type: string
+  - id: f_owner
+    type: principal
 
 states:
-  - {id: todo,        category: todo}
-  - {id: in_progress, category: active}
-  - {id: done,        category: done}
+  - id: todo
+    category: todo
+  - id: in_progress
+    category: active
+  - id: done
+    category: done
 
 transitions:
-  - {from: todo, to: in_progress}
+  - from: todo
+    to: in_progress
   - from: in_progress
     to: done
     guard: 'links.issues.all(i, i.category in ["done", "canceled"])'
-  - {from: done, to: in_progress}
+  - from: done
+    to: in_progress
+
+incoming:
+  - name: issues
+    link: epic
+    from: [story, bug, task]
+
+rollups:
+  - id: progress
+    over: issues
+    count_by: category

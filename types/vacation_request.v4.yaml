@@ -27,55 +27,80 @@ version: 4
 initial_state: draft
 
 fields:
-  - {id: f_start,      type: date}
-  - {id: f_end,        type: date}
-  - {id: f_days,       type: int}
-  - {id: f_leave_type, type: enum, options: [annual, unpaid, other]}
-  - {id: f_approver,   type: principal, writable_by: kernel}
-  - {id: f_comment,    type: string}
+  - id: f_start
+    type: date
+  - id: f_end
+    type: date
+  - id: f_days
+    type: int
+  - id: f_leave_type
+    type: enum
+    options: [annual, unpaid, other]
+  - id: f_approver
+    type: principal
+    writable_by: kernel
+  - id: f_comment
+    type: string
 
 states:
-  - {id: draft,     category: todo}
+  - id: draft
+    category: todo
   - id: submitted
     category: waiting
     frozen: [f_start, f_end, f_days, f_leave_type, f_approver]
-    timer: {after: 120h, to: expired}
+    timer:
+      after: 120h
+      to: expired
     acting:
-      - {id: remind, after: 48h, every: 24h, max: 2, hook: remind_approver}
+      - id: remind
+        after: 48h
+        every: 24h
+        max: 2
+        hook: remind_approver
   - id: approved
     category: done
     frozen: [f_start, f_end, f_days, f_leave_type, f_approver]
   - id: rejected
     category: canceled
     frozen: [f_start, f_end, f_days, f_leave_type, f_approver]
-  - {id: withdrawn, category: canceled}
-  - {id: expired,   category: canceled}
+  - id: withdrawn
+    category: canceled
+  - id: expired
+    category: canceled
 
 transitions:
   - from: draft
     to: submitted
-    allowed: [creator]
-    required: [f_start, f_end, f_days, f_leave_type]
     guard: 'f_end >= f_start && f_start >= today && f_days > 0'
-  - {from: submitted, to: approved, allowed: ['field:f_approver'], except: [creator]}
-  - {from: submitted, to: rejected, allowed: ['field:f_approver'], except: [creator]}
-  - {from: submitted, to: draft,     allowed: [creator]}
-  - {from: submitted, to: withdrawn, allowed: [creator], escape: true}
-  - {from: draft,     to: withdrawn, allowed: [creator], escape: true}
-  # Expiry: only the timer.
-  - {from: submitted, to: expired,   allowed: ['principal:system:timer']}
-  - from: approved
+    required: [f_start, f_end, f_days, f_leave_type]
+    allowed: [creator]
+  - from: submitted
+    to: approved
+    allowed: ['field:f_approver']
+    except: [creator]
+  - from: submitted
+    to: rejected
+    allowed: ['field:f_approver']
+    except: [creator]
+  - from: submitted
+    to: draft
+    allowed: [creator]
+  - from: submitted
     to: withdrawn
     allowed: [creator]
+    escape: true
+  - from: draft
+    to: withdrawn
+    allowed: [creator]
+    escape: true
+  # Expiry: only the timer.
+  - from: submitted
+    to: expired
+    allowed: ['principal:system:timer']
+  - from: approved
+    to: withdrawn
     guard: 'f_start >= today'
-
-links:
-  - name: balance
-    inverse: requests
-    targets: [leave_balance]
-    max: one
-    writable_by: kernel
-    resolve: {on_enter: submitted, field: f_owner, equals: creator, state: open}
+    allowed: [creator]
 
 hooks:
   - id: hr_check
@@ -88,11 +113,47 @@ hooks:
     writes: [f_approver]
   # Mail. email.notify sends one message to the principal it reads, with
   # the hook's ID as the template; it writes nothing (hook_ran).
-  - {id: remind_approver, on: timer, kind: action, action: email.notify, reads: [f_approver]}
-  - {id: notify_approved, on: enter, state: approved, kind: action, action: email.notify, reads: [creator]}
-  - {id: notify_rejected, on: enter, state: rejected, kind: action, action: email.notify, reads: [creator]}
-  - {id: notify_expired,  on: enter, state: expired,  kind: action, action: email.notify, reads: [creator]}
-  - {id: refund_email, on: reaction, reaction: refund, kind: action, action: email.notify, reads: [creator]}
+  - id: remind_approver
+    on: timer
+    kind: action
+    action: email.notify
+    reads: [f_approver]
+  - id: notify_approved
+    on: enter
+    state: approved
+    kind: action
+    action: email.notify
+    reads: [creator]
+  - id: notify_rejected
+    on: enter
+    state: rejected
+    kind: action
+    action: email.notify
+    reads: [creator]
+  - id: notify_expired
+    on: enter
+    state: expired
+    kind: action
+    action: email.notify
+    reads: [creator]
+  - id: refund_email
+    on: reaction
+    reaction: refund
+    kind: action
+    action: email.notify
+    reads: [creator]
+
+links:
+  - name: balance
+    inverse: requests
+    targets: [leave_balance]
+    max: one
+    writable_by: kernel
+    resolve:
+      on_enter: submitted
+      state: open
+      field: f_owner
+      equals: creator
 
 reactions:
   - id: deduct
@@ -101,7 +162,8 @@ reactions:
     state: approved
     from: [submitted]
     link: balance
-    add: {f_used: f_days}
+    add:
+      f_used: f_days
   - id: refund
     kind: after
     on: enter

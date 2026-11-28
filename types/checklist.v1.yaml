@@ -4,10 +4,16 @@
 # is the time of the ticket's event (cause.at).
 id: checklist
 version: 1
+
 fields:
-  - {id: f_title,     type: string}
-  - {id: f_opened_at, type: datetime, writable_by: kernel}
-  - {id: f_done,      type: bool}
+  - id: f_title
+    type: string
+  - id: f_opened_at
+    type: datetime
+    writable_by: kernel
+  - id: f_done
+    type: bool
 
 accepts_reactions:
-  ticket:open_checklist: {creates: [f_title, f_opened_at]}
+  ticket:open_checklist:
+    creates: [f_title, f_opened_at]
