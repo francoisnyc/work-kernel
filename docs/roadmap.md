@@ -535,7 +535,7 @@ down), **shaped like the kernel's model**: states, moves, who may act, frozen
 fields. Kept outside this repository; nothing is lost whichever way the
 decision goes.
 
-### Items mirrored from a workflow (proposed, 2026-11-28)
+### Items mirrored from a workflow (agreed, 2026-11-28; after the Inbox's look)
 
 The owner is trying the kernel with another system whose Temporal
 workflows are its clients. Target: mixed (the workflow owns its stage and
@@ -545,8 +545,9 @@ principal; a Type that declares its mirror (checked at load); one new
 write, `MirrorItem` (upsert by external ID, full replace of owned fields,
 the source's sequence number keeping order, `SUPERSEDED` for a late
 write); the lifecycle still in one pure function. Then mixed: owned fields
-as a list, events out to the workflow. Brief and five decisions:
-`docs/plans/mirror-from-a-workflow.md`.
+as a list, events out to the workflow. Brief, and the owner's five
+decisions (all agreed): `docs/plans/mirror-from-a-workflow.md`. Phase B
+comes right after the Inbox's look, before track 2's authoring test.
 
 ### Ask a person: one brick behind every agent's pause (proposed)
 
