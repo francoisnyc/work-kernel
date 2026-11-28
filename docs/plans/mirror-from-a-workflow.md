@@ -155,7 +155,9 @@ Temporal's `testsuite` where an early attempt lands after a later write.
 - One owner per field, which `writable_by` and `owns` together express;
   the load check refuses a field with two.
 
-## Decisions for the owner
+## The owner's decisions (2026-11-28)
+
+All five agreed:
 
 1. A new principal kind, `service:<id>`.
 2. A new write operation, `MirrorItem`: the kernel rules' list of writes in
@@ -163,5 +165,5 @@ Temporal's `testsuite` where an early attempt lands after a later write.
 3. A mirrored state is set by its source, outside the Type's transitions,
    declared on the Type and checked at load.
 4. In this phase, no invariant over mirrored fields.
-5. Order: Phase B before or after the Inbox's look, and before track 2's
-   authoring test or after.
+5. Order: Phase B right after the Inbox's look, before track 2's authoring
+   test.
