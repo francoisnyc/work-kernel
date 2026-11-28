@@ -85,6 +85,12 @@ type typeCheck struct {
 	found      map[fkey]cand
 	unchecked  []Finding
 	stuckMemo  map[string]bool
+	// invFields are the fields the invariants read (by name), computed once;
+	// cross caches crossExits by state.
+	invFields map[string]bool
+	cross     map[string][]crossExit
+	// conds caches each guard in plain words (reading parses it).
+	conds map[string]string
 	allMovers  []struct {
 		m mover
 		w world
@@ -97,6 +103,15 @@ func newTypeCheck(ty *typedef.Type, all []*typedef.Type, cat *contracts.Catalog)
 		byReaction: ty.Start.Nobody()}
 	for i, f := range ty.Fields {
 		c.idx[f.ID] = i
+	}
+	c.invFields, c.cross, c.conds = map[string]bool{}, map[string][]crossExit{}, map[string]string{}
+	for _, f := range ty.Fields {
+		word := regexp.MustCompile(`\b` + regexp.QuoteMeta(f.ID) + `\b`)
+		for _, inv := range ty.Invariants {
+			if word.MatchString(inv.Rule) {
+				c.invFields[f.ID] = true
+			}
+		}
 	}
 	// A decision state: done or canceled, and some move into it names
 	// who may make it.
@@ -503,11 +518,6 @@ func (c *typeCheck) mayHold(vals []val, ed map[string]bool) bool {
 	if len(c.ty.Invariants) == 0 {
 		return true
 	}
-	var rules strings.Builder
-	for _, inv := range c.ty.Invariants {
-		rules.WriteString(inv.Rule)
-		rules.WriteByte(' ')
-	}
 	type choice struct {
 		id   string
 		opts []any
@@ -515,7 +525,7 @@ func (c *typeCheck) mayHold(vals []val, ed map[string]bool) bool {
 	var choices []choice
 	combos := 1
 	for i, f := range c.ty.Fields {
-		if !regexp.MustCompile(`\b` + regexp.QuoteMeta(f.ID) + `\b`).MatchString(rules.String()) {
+		if !c.invFields[f.ID] {
 			continue
 		}
 		var opts []any
@@ -664,6 +674,15 @@ type crossExit struct {
 }
 
 func (c *typeCheck) crossExits(state string) []crossExit {
+	if out, ok := c.cross[state]; ok {
+		return out
+	}
+	out := c.findCrossExits(state)
+	c.cross[state] = out
+	return out
+}
+
+func (c *typeCheck) findCrossExits(state string) []crossExit {
 	var out []crossExit
 	for _, u := range c.all {
 		for _, r := range u.Reactions {
@@ -725,7 +744,12 @@ func capitalize(s string) string {
 func (c *typeCheck) moveWords(who string, tr typedef.Transition) string {
 	s := capitalize(who) + " moves it from " + tr.From + " to " + tr.To
 	if tr.Guard != "" {
-		s += ", if " + reading.Condition(c.ty, tr.Guard)
+		cond, ok := c.conds[tr.Guard]
+		if !ok {
+			cond = reading.Condition(c.ty, tr.Guard)
+			c.conds[tr.Guard] = cond
+		}
+		s += ", if " + cond
 	}
 	return s + "."
 }
