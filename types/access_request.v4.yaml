@@ -1,0 +1,233 @@
+# access_request@4 (the Inbox, the look): access_request@3 with the
+# Type's own label (label: Access request), and start.older_versions
+# keeping versions 1 to 3 open, and nothing else changed. A hint enforces
+# nothing. It still creates approval@2. The text below is
+# access_request@3's.
+#
+# access_request@3 (closing the holes pli check PR 2 found):
+# access_request@2 with two lines changed, and nothing else. While it is a
+# draft, only its requester changes what is asked (requester_only: f_title,
+# f_reason): under @2 a colleague who could see the draft could change it
+# before the requester submits. start.older_versions keeps versions 1 and 2
+# open. The text below is access_request@2's.
+#
+# access_request@2 (the Inbox for people, PR 1b): access_request@1 with
+# words for people (labels, a primary move, a summary field, the state's
+# due time), creating approval@2 instead of approval@1, and nothing else
+# changed. Hints enforce nothing. start.older_versions keeps version 1 open
+# for the tests, stories, scenario and apps that still create it. The text
+# below is access_request@1's.
+#
+# A request for access to a resource (Jira 2.4b), made inside the resource.
+#
+#   - submit (draft -> pending) copies, in its own write, who approves and
+#     how many must (f_approvers, f_required) and who is told when a
+#     decision is late (f_desk_contact): the resource changing later changes
+#     no request. It also marks when (f_submitted_at). The invariant
+#     submit_without_quorum refuses a submit with nothing to copy (outside a
+#     resource): an invariant, not a guard, because a guard is judged before
+#     the transition's sets, and so never sees the copies.
+#   - Entering pending makes one approval per approver (for_each) and an
+#     approval goal (sla_goal@2) on the resource's calendar and policy.
+#   - The request is approved when f_required approvals are, rejected as
+#     soon as one is: its guards count its approvals, whoever can see them,
+#     so the approvals' moves land once. Leaving pending closes the leftover
+#     approvals.
+#   - The goal measures the time to a decision: a rejection completes it as
+#     an approval does (sla_answered: sla_goal@2 consents by reaction ID,
+#     and a reaction runs on entering one state); a withdrawal cancels it.
+#   - Approved, it leaves a fulfilment task for the desk.
+#   - Only the requester submits or withdraws it; nobody moves or narrows it.
+id: access_request
+version: 4
+label: Access request
+initial_state: draft
+
+fields:
+  - id: f_title
+    type: string
+    label: Request
+  - id: f_reason
+    type: string
+    label: Reason
+  - id: f_approvers
+    type: principal
+    multiple: true
+    max: 8
+    writable_by: kernel
+    label: Approvers
+  - id: f_required
+    type: int
+    writable_by: kernel
+    label: Approvals needed
+  - id: f_desk_contact
+    type: principal
+    writable_by: kernel
+    label: Desk contact
+  - id: f_submitted_at
+    type: datetime
+    writable_by: kernel
+    label: Submitted
+  - id: f_due_approval
+    type: datetime
+    writable_by: kernel
+    label: Approval due
+
+states:
+  - id: draft
+    category: triage
+    requester_only: [f_title, f_reason]
+    label: Draft
+  - id: pending
+    category: waiting
+    label: Waiting for approval
+    due: f_due_approval
+  - id: approved
+    category: done
+    label: Approved
+  - id: rejected
+    category: done
+    label: Rejected
+  - id: withdrawn
+    category: canceled
+    label: Withdrawn
+
+transitions:
+  - from: draft
+    to: pending
+    allowed: [creator]
+    sets:
+      f_required: 'container.f_required'
+      f_approvers: 'container.f_approvers'
+      f_desk_contact: 'container.f_contact'
+      f_submitted_at: 'cause.at'
+    label: Submit
+    primary: true
+  - from: pending
+    to: approved
+    guard: 'children.approval.filter(c, c.state == "approved").size() >= f_required'
+  - from: pending
+    to: rejected
+    guard: 'children.approval.exists(c, c.state == "rejected")'
+  - from: draft
+    to: withdrawn
+    allowed: [creator]
+    label: Withdraw
+  - from: pending
+    to: withdrawn
+    allowed: [creator]
+    label: Withdraw
+
+reactions:
+  - id: request_approvals
+    kind: create
+    on: enter
+    state: pending
+    from: [draft]
+    for_each: f_approvers
+    type: approval
+    version: 2
+    fields:
+      f_approver: 'each'
+      f_title: 'f_title'
+  - id: sla_start_approval
+    kind: create
+    on: enter
+    state: pending
+    from: [draft]
+    type: sla_goal
+    version: 2
+    fields:
+      f_metric: '"approval"'
+      f_target_s: 'container.linked.sla_policy.f_approval_s'
+      f_started_at: 'cause.at'
+      f_week: 'container.linked.calendar.f_week'
+      f_days_off: 'container.linked.calendar.f_days_off'
+      f_zone: 'container.linked.calendar.f_zone'
+      f_due_at: >-
+        working_after(cause.at, container.linked.sla_policy.f_approval_s,
+        calendar(container.linked.calendar.f_week, container.linked.calendar.f_days_off, container.linked.calendar.f_zone))
+  - id: sla_stop
+    kind: move
+    on: enter
+    state: approved
+    to: completed
+    target_from: [running, paused]
+    children:
+      of: [sla_goal]
+  - id: sla_answered
+    kind: move
+    on: enter
+    state: rejected
+    to: completed
+    target_from: [running, paused]
+    children:
+      of: [sla_goal]
+  - id: sla_cancel
+    kind: move
+    on: enter
+    state: withdrawn
+    to: canceled
+    target_from: [running, paused]
+    children:
+      of: [sla_goal]
+  - id: close_on_approved
+    kind: move
+    on: enter
+    state: approved
+    to: canceled
+    target_from: [pending]
+    children:
+      of: [approval]
+  - id: close_on_rejected
+    kind: move
+    on: enter
+    state: rejected
+    to: canceled
+    target_from: [pending]
+    children:
+      of: [approval]
+  - id: close_on_withdrawn
+    kind: move
+    on: enter
+    state: withdrawn
+    to: canceled
+    target_from: [pending]
+    children:
+      of: [approval]
+  - id: fulfil
+    kind: create
+    on: enter
+    state: approved
+    type: fulfilment_task
+    version: 1
+    fields:
+      f_resource: 'container.f_name'
+
+invariants:
+  - id: submit_without_quorum
+    rule: 'f_submitted_at == null || (f_approvers != null && f_required != null && f_required >= 1 && f_required <= size(f_approvers))'
+
+accepts_reactions:
+  'approval:move_approved':
+    moves: [approved]
+  'approval:move_rejected':
+    moves: [rejected]
+  sla_goal:show_approval:
+    sets: [f_due_approval]
+  sla_goal:hide_approval:
+    sets: [f_due_approval]
+  sla_goal:clear_approval:
+    sets: [f_due_approval]
+  sla_goal:cancel_approval:
+    sets: [f_due_approval]
+
+offers:
+  breach_contact: f_desk_contact
+
+placement_writable_by: [kernel]
+
+start:
+  older_versions: [1, 2, 3]
+
+summary: [f_reason]
