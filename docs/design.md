@@ -6453,7 +6453,51 @@ panel with two required fields; sam takes two at once; J, K, X, Enter and
 P). The one earlier-approved test that changed, the owner's: 2b's Tab
 order now includes each row's checkbox.
 
-**Next.** PR 3: an agent's request shown as one.
+**Next.** PR 3: an agent's request shown as one. (Its kernel half: "Who
+put an Item in its state, as built".)
+
+## Who put an Item in its state, as built (Inbox PR 3a) (2026-11-28)
+
+The kernel half of the Inbox for people's PR 3 (an agent's request, shown
+as one), split by the owner at its Phase A: a row is an agent's request
+when an agent created the Item or put it in its current state, and an
+Item carried only its creator. The common agent case is the second: a
+person creates a step, an agent moves it to where it waits on them.
+
+**The fields** (`kernel.v1`, additive, approved): `Item.state_actor` (18)
+and `Item.state_actor_on_behalf_of` (19). On every read (`GetItem`,
+`SearchItems`, `ListItems`, with or without `waiting_on`) and every
+write's answer.
+
+**The rule.** The actor, and the user it acted for, of the Item's latest
+create or transition event: the event whose time is `state_time` (every
+transition sets `state_entered_at`, a move to the same state and a held
+move included). An update changes neither. A timer's, a hook's or a
+reaction's move names its actor as history does.
+
+**Built** as two scalar subqueries on `item_events`, by its primary key
+(`item_id`, `item_seq`) newest first, in the one Get query and the one
+Search/List query. No column, no migration.
+
+**Visibility.** Through `policy.Project`, like any part of the Item. A
+customer's history (`customerEvent`) leaves some events and fields out
+but keeps every create's and move's actor, so the state actor tells a
+customer nothing their history hides; the test holds that what kim reads
+is what her own history shows for that event.
+
+**pli** prints both (protojson; `state_actor_on_behalf_of` absent when
+empty). **The scenario** (one step): ana's ticket is hers; triage-bot,
+for ana, moves it ("agent:triage-bot for user:ana", as bob reads it too);
+an update changes nothing; bob's move makes it his.
+
+**Tests.** itemservice 4 (a person's create, an agent's create for a
+user, an agent's move then a person's, a customer's reads; every read
+checked against the reader's own history), API 1, pli 1, a scenario
+step. Earlier-approved test that changed, the owner's:
+`TestGet_ReturnsCreatedItem` checks the state actor, then sets it aside.
+
+**Next.** 3b, the screen: the "Agent request" badge, "for {person}",
+"What the agent wrote" in the panel.
 
 ## Out of scope for the spike
 

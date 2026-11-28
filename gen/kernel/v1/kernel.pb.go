@@ -913,9 +913,17 @@ type Item struct {
 	// caller holds no role for is not withheld: it is someone else's and is
 	// not listed. Never shares a move with moves. Filled exactly where moves
 	// is, and never for a customer. A code only: it names nobody.
-	Withheld      []*WithheldMove `protobuf:"bytes,17,rep,name=withheld,proto3" json:"withheld,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Withheld []*WithheldMove `protobuf:"bytes,17,rep,name=withheld,proto3" json:"withheld,omitempty"`
+	// Who put the Item in the state it is in: the actor of its create or of
+	// its latest transition, the event whose time is state_time (user:,
+	// agent:, system:timer, a hook or a reaction). Filled on every read and
+	// every write's answer, for whoever may read the Item's history: it is
+	// the actor that history shows for that event.
+	StateActor string `protobuf:"bytes,18,opt,name=state_actor,json=stateActor,proto3" json:"state_actor,omitempty"`
+	// The user that actor acted for, when an agent did; else empty.
+	StateActorOnBehalfOf string `protobuf:"bytes,19,opt,name=state_actor_on_behalf_of,json=stateActorOnBehalfOf,proto3" json:"state_actor_on_behalf_of,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *Item) Reset() {
@@ -1065,6 +1073,20 @@ func (x *Item) GetWithheld() []*WithheldMove {
 		return x.Withheld
 	}
 	return nil
+}
+
+func (x *Item) GetStateActor() string {
+	if x != nil {
+		return x.StateActor
+	}
+	return ""
+}
+
+func (x *Item) GetStateActorOnBehalfOf() string {
+	if x != nil {
+		return x.StateActorOnBehalfOf
+	}
+	return ""
 }
 
 // A move withheld from the caller, and why (Item.withheld).
@@ -7313,7 +7335,7 @@ var File_kernel_v1_kernel_proto protoreflect.FileDescriptor
 
 const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\n" +
-	"\x16kernel/v1/kernel.proto\x12\tkernel.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xec\x05\n" +
+	"\x16kernel/v1/kernel.proto\x12\tkernel.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xc5\x06\n" +
 	"\x04Item\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x1c\n" +
@@ -7334,7 +7356,10 @@ const file_kernel_v1_kernel_proto_rawDesc = "" +
 	"\n" +
 	"state_time\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\tstateTime\x12\x14\n" +
 	"\x05moves\x18\x10 \x03(\tR\x05moves\x123\n" +
-	"\bwithheld\x18\x11 \x03(\v2\x17.kernel.v1.WithheldMoveR\bwithheld\x1aR\n" +
+	"\bwithheld\x18\x11 \x03(\v2\x17.kernel.v1.WithheldMoveR\bwithheld\x12\x1f\n" +
+	"\vstate_actor\x18\x12 \x01(\tR\n" +
+	"stateActor\x126\n" +
+	"\x18state_actor_on_behalf_of\x18\x13 \x01(\tR\x14stateActorOnBehalfOf\x1aR\n" +
 	"\fRollupsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
 	"\x05value\x18\x02 \x01(\v2\x16.kernel.v1.RollupValueR\x05value:\x028\x01\"\\\n" +

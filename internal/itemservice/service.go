@@ -489,6 +489,7 @@ func (k *Service) visibleItem(ctx context.Context, p item.Principal, id uuid.UUI
 	err = k.pool.QueryRow(ctx,
 		`select i.type_id, i.type_version, i.container_id, i.scope_id, i.state, i.fields, i.item_seq, i.content_seq,
 		        i.created_at, i.created_by, coalesce(i.created_on_behalf_of, ''), i.state_entered_at,
+		        `+stateActorColumns("i")+`,
 		        s.policy_scope_id, `+seeCondition("i")+`,
 		        h.id, h.hook, h.from_state, h.to_state, h.status, coalesce(h.reason, '')
 		 from items i join scopes s on s.id = i.scope_id
@@ -499,6 +500,7 @@ func (k *Service) visibleItem(ctx context.Context, p item.Principal, id uuid.UUI
 		 where i.id = @id and i.namespace_id = @ns`, args,
 	).Scan(&it.TypeID, &it.TypeVersion, &it.ContainerID, &it.ScopeID, &it.State, &it.Fields, &it.ItemSeq, &it.ContentSeq,
 		&it.CreatedAt, &it.CreatedBy, &it.CreatedOnBehalfOf, &it.StateEnteredAt,
+		&it.StateActor, &it.StateActorOnBehalfOf,
 		&policyScope, &visible, &hold.id, &hold.hook, &hold.from, &hold.to, &hold.status, &hold.reason)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return item.Item{}, nil, ErrNotFound

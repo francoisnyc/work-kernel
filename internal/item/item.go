@@ -82,6 +82,12 @@ type Item struct {
 	// from them, each with why (policy.Withheld). Filled where Moves is,
 	// never for a customer.
 	Withheld []WithheldMove
+	// StateActor is who put the Item in its state: the actor of its create
+	// or latest transition (the event at StateEnteredAt), and
+	// StateActorOnBehalfOf the user an agent acted for, else "" (Inbox PR
+	// 3a). Filled on every read, from the event at StateEnteredAt.
+	StateActor           string
+	StateActorOnBehalfOf string
 }
 
 // WithheldMove is a move withheld from a reader, and why: one of policy's

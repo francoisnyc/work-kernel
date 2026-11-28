@@ -238,7 +238,7 @@ func (k *Service) page(ctx context.Context, q itemQuery) ([]hit, string, error) 
 		var h hit
 		err := row.Scan(&h.it.ID, &h.it.TypeID, &h.it.TypeVersion, &h.it.ContainerID, &h.it.ScopeID,
 			&h.it.State, &h.it.Fields, &h.it.ItemSeq, &h.it.ContentSeq, &h.it.CreatedAt, &h.it.CreatedBy, &h.it.CreatedOnBehalfOf,
-			&h.it.StateEnteredAt, &h.policyScope, &h.sortValue)
+			&h.it.StateEnteredAt, &h.it.StateActor, &h.it.StateActorOnBehalfOf, &h.policyScope, &h.sortValue)
 		return h, err
 	})
 	if err != nil {
@@ -359,8 +359,8 @@ func (k *Service) pageSQL(ctx context.Context, q itemQuery) (string, pgx.NamedAr
 	}
 	return with +
 		`select m.id, m.type_id, m.type_version, m.container_id, m.scope_id, m.state, m.fields, m.item_seq, m.content_seq,
-		        m.created_at, m.created_by, coalesce(m.created_on_behalf_of, ''), m.state_entered_at, s.policy_scope_id,
-		        ` + sortValue + `
+		        m.created_at, m.created_by, coalesce(m.created_on_behalf_of, ''), m.state_entered_at, ` + stateActorColumns("m") + `,
+		        s.policy_scope_id, ` + sortValue + `
 		 from ` + from + ` join scopes s on s.id = m.scope_id
 		 where ` + strings.Join(conds, "\n and ") + `
 		 order by ` + orderBy + `
@@ -375,4 +375,19 @@ func requireNamespace(p item.Principal) error {
 		return fmt.Errorf("%w: the principal names no namespace", ErrInvalid)
 	}
 	return nil
+}
+
+// stateActorColumns is who put the Item (alias a) in its state, as two
+// columns: the actor and the user it acted for ("" when none) of its
+// latest create or transition event, the event whose time is
+// state_entered_at (the Inbox for people, PR 3a). Read from item_events
+// by its primary key (item_id, item_seq), newest first: no column of its
+// own. A customer's history keeps every create's and move's actor, so
+// this tells nobody more than the Item's history would.
+func stateActorColumns(a string) string {
+	last := func(col string) string {
+		return fmt.Sprintf(`coalesce((select %[2]s from item_events e where e.item_id = %[1]s.id and e.op in ('create', 'transition')
+		         order by e.item_seq desc limit 1), '')`, a, col)
+	}
+	return last("e.actor") + ", " + last("e.on_behalf_of")
 }
