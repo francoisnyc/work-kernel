@@ -16,6 +16,7 @@ import (
 const (
 	whyIncidentCancel = "real hole, fixed in incident@8 (the follow-up step after PR 2): in_progress -> canceled is open to anyone, an agent or the requester, while cancelling a new incident is the desk's or the requester's"
 	whyIncidentNew    = "intended: a desk agent cancels a new incident, and an agent holding desk_agent may too"
+	whyIncidentActive = "intended (incident@8, the follow-up step after PR 2): only a desk agent cancels an incident in progress, whether an agent holding the role or a desk agent who is its requester"
 	whyDraft          = "real hole, closed by access_request@3 / vacation_request@5 (the follow-up step after PR 2): a colleague who sees the draft may change what is asked before the requester submits it; requester_only closes it"
 	whyBuildStep      = "intended: whoever f_owner names (set by a maintainer) moves the step on or drops it, and may be an agent or the requester"
 	whyEquipment      = "intended: the desk agent who took the request fulfils or declines it, a person or an agent holding desk_agent"
@@ -63,6 +64,8 @@ var typesFindings = []explained{
 	{"equipment_request", 1, key{check.CodeAgentDecides, check.SeverityWarning, "transitions[2]", "role:desk_agent"}, whyEquipment},
 	{"equipment_request", 2, key{check.CodeAgentDecides, check.SeverityWarning, "transitions[1]", "role:desk_agent"}, whyEquipment},
 	{"equipment_request", 2, key{check.CodeAgentDecides, check.SeverityWarning, "transitions[2]", "role:desk_agent"}, whyEquipment},
+	{"equipment_request", 3, key{check.CodeAgentDecides, check.SeverityWarning, "transitions[1]", "role:desk_agent"}, whyEquipment},
+	{"equipment_request", 3, key{check.CodeAgentDecides, check.SeverityWarning, "transitions[2]", "role:desk_agent"}, whyEquipment},
 	{"fulfilment_task", 1, key{check.CodeAgentDecides, check.SeverityWarning, "transitions[1]", "role:desk_agent"}, whyFulfilment},
 	{"fulfilment_task", 1, key{check.CodeRequesterDecides, check.SeverityWarning, "transitions[1]", "role:desk_agent"}, whyFulfilment},
 	{"incident", 2, key{check.CodeAgentDecides, check.SeverityError, "transitions[8]", ""}, whyIncidentCancel},
@@ -83,6 +86,12 @@ var typesFindings = []explained{
 	{"incident", 7, key{check.CodeAgentDecides, check.SeverityError, "transitions[8]", ""}, whyIncidentCancel},
 	{"incident", 7, key{check.CodeAgentDecides, check.SeverityWarning, "transitions[7]", "role:desk_agent"}, whyIncidentNew},
 	{"incident", 7, key{check.CodeRequesterDecides, check.SeverityError, "transitions[8]", ""}, whyIncidentCancel},
+	{"incident", 8, key{check.CodeAgentDecides, check.SeverityWarning, "transitions[7]", "role:desk_agent"}, whyIncidentNew},
+	{"incident", 8, key{check.CodeAgentDecides, check.SeverityWarning, "transitions[8]", "role:desk_agent"}, whyIncidentActive},
+	{"incident", 8, key{check.CodeRequesterDecides, check.SeverityWarning, "transitions[8]", "role:desk_agent"}, whyIncidentActive},
+	{"incident", 9, key{check.CodeAgentDecides, check.SeverityWarning, "transitions[7]", "role:desk_agent"}, whyIncidentNew},
+	{"incident", 9, key{check.CodeAgentDecides, check.SeverityWarning, "transitions[8]", "role:desk_agent"}, whyIncidentActive},
+	{"incident", 9, key{check.CodeRequesterDecides, check.SeverityWarning, "transitions[8]", "role:desk_agent"}, whyIncidentActive},
 	{"leave_balance", 1, key{check.CodeAgentDecides, check.SeverityWarning, "transitions[0]", "role:hr_admin"}, whyLeaveBalance},
 	{"leave_balance", 1, key{check.CodeRequesterDecides, check.SeverityWarning, "transitions[0]", "role:hr_admin"}, whyLeaveBalance},
 	{"access_request", 1, key{check.CodeColleagueEditsDraft, check.SeverityWarning, "states[0]", "scope:readers"}, whyDraft},

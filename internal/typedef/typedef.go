@@ -321,8 +321,12 @@ type Transition struct {
 
 // Type is one version of a Type definition.
 type Type struct {
-	ID           string       `yaml:"id" json:"id"`
-	Version      int          `yaml:"version" json:"version"`
+	ID      string `yaml:"id" json:"id"`
+	Version int    `yaml:"version" json:"version"`
+	// Label and Help: the Type's own presentation hints (the Inbox, the
+	// look). STUB for the Phase B tests: not read from YAML or stored yet.
+	Label        string       `yaml:"-" json:"-"`
+	Help         string       `yaml:"-" json:"-"`
 	InitialState string       `yaml:"initial_state" json:"initial_state"`
 	Fields       []Field      `yaml:"fields" json:"fields,omitempty"`
 	States       []State      `yaml:"states" json:"states"`
