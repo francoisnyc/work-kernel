@@ -6778,6 +6778,40 @@ are YAML paths, not lines). One test read a position in a Type file:
 `TestCheck_ActionMajors` (`vacation_request.v3.yaml`), 79:5 → 104:5. CI runs
 `pli fmt --check types/` next to the gofmt check.
 
+## The holes pli check found, closed, as built (2026-11-28)
+
+The follow-up step after pli check PR 2: three new Type versions close the
+two real holes `types/` had, as the owner decided at PR 2's Phase A.
+Registered versions are not edited; each new version is the one before with
+one rule added. No code, API, proto, schema or dependency change.
+
+- **`incident@8`**: `in_progress → canceled` is `allowed:
+  ['role:desk_agent']`. Under `@2` to `@7` the move named no one, so an
+  agent or the requester could cancel an incident in progress (12 ERRORs).
+  Cancelling a new incident is unchanged (`[creator, 'role:desk_agent']`).
+  It keeps `older_versions: all`.
+- **`access_request@3`**: its draft is `requester_only: [f_title,
+  f_reason]`; `older_versions: [1, 2]`.
+- **`vacation_request@5`**: its draft is `requester_only: [f_start, f_end,
+  f_days, f_leave_type, f_comment]`; `older_versions: all`. After the draft
+  nothing changes: `f_comment` stays open to others in `submitted`.
+
+**pli check** on the new versions: `access_request@3` and
+`vacation_request@5` have no findings. `incident@8` has no error and three
+warnings, explained in the golden list as intended: the desk agent's
+cancel of a new incident (as before), and its cancel of one in progress,
+by an agent holding `desk_agent` (AGENT_DECIDES) or by a requester who
+holds it (REQUESTER_DECIDES). The owner kept these rather than adding
+`except: [creator]`, which would stop a desk agent from cancelling their
+own incident. `types/` now gives 12 errors and 51 warnings, all
+explained: the older versions keep their findings, since they stay
+registered and creatable.
+
+**What still creates the older versions:** the scenario, the stories, the
+web and PoC seeds and the tests all name their versions (incident@1 to
+@7, vacation_request@3, access_request@1), so they keep the old rules. A
+create that names no version gets the new ones.
+
 ## Out of scope for the spike
 
 The real UI (the generic web UI and the PoC apps above are

@@ -513,10 +513,11 @@ mistake, which these Types do not refuse.
   as a golden test (the two remaining fails found, the colleague's read
   explained). **PR 2 built** (design.md, "pli check, as built (PR 2)"):
   dead rules, loops with no end, a colleague editing a draft, two fixes
-  to PR 1, and `types/` clean or explained. Next: the follow-up step
-  (`incident@8` restricting who cancels from `in_progress`;
-  `access_request@3` and `vacation_request@5` closing their drafts with
-  `requester_only`); then PR 3, witnesses as stories, each one run.
+  to PR 1, and `types/` clean or explained. **The follow-up step built**
+  (design.md, "The holes pli check found, closed, as built"):
+  `incident@8` (only a desk agent cancels from `in_progress`),
+  `access_request@3` and `vacation_request@5` (drafts closed with
+  `requester_only`). Next: PR 3, witnesses as stories, each one run.
 
 ### Track 3: the work path, in parallel
 
