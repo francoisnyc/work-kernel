@@ -112,6 +112,10 @@ type Finding struct {
 	DependsOn []string `json:"depends_on"`
 	// Witness is the shortest path that shows it, from the Item's creation.
 	Witness []Step `json:"witness"`
+	// Story is the witness as a witness run, a story in internal/story's
+	// grammar (PR 3); only CheckStories writes it, and a finding with no
+	// witness has none.
+	Story string `json:"story,omitempty"`
 }
 
 // Report is what one run found, over every Type it was given.
@@ -145,6 +149,14 @@ func Check(types []*typedef.Type, cat *contracts.Catalog) Report {
 			strings.Compare(string(a.Code), string(b.Code)))
 	})
 	return r
+}
+
+// CheckStories is Check, with each finding's witness also written as a
+// witness run (Finding.Story).
+//
+// Stub for PR 3's failing tests: it writes no story yet.
+func CheckStories(types []*typedef.Type, cat *contracts.Catalog) Report {
+	return Check(types, cat)
 }
 
 // What the checker does not look at, and what it takes as given: printed
