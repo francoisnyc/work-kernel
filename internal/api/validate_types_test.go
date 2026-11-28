@@ -139,10 +139,10 @@ func TestValidateTypes_ARegisteredVersionByName(t *testing.T) {
 	}
 	for who, ns := range map[string]string{"ana": "acme", "bea": "globex"} {
 		ps := problemsAs(t, who, tsrc("leave_balance.v2.yaml", v2))
-		if len(ps) != 3 {
-			t.Fatalf("as %s: %d problems, want 3:\n%s", who, len(ps), problemLines(ps))
+		if len(ps) != 4 {
+			t.Fatalf("as %s: %d problems, want 4:\n%s", who, len(ps), problemLines(ps))
 		}
-		for i, version := range []int{2, 3, 4} {
+		for i, version := range []int{2, 3, 4, 5} {
 			name := fmt.Sprintf("namespaces/%s/types/vacation_request/versions/%d", ns, version)
 			p := ps[i]
 			if p.Source != name || p.Type != name || p.Code != "CONSENT_MISSING" || p.Line != 0 || p.Column != 0 ||
@@ -179,8 +179,9 @@ func TestValidateTypes_VersionChanged(t *testing.T) {
 func TestValidateTypes_ActionMajor(t *testing.T) {
 	v3 := readType(t, "vacation_request.v3.yaml")
 	// A draft of the next version: vacation_request@4 is registered since
-	// track 1, item 6, step 1.
-	v4 := strings.Replace(v3, "\nversion: 3\n", "\nversion: 5\n", 1)
+	// track 1, item 6, step 1, and vacation_request@5 since the follow-up
+	// step after pli check PR 2.
+	v4 := strings.Replace(v3, "\nversion: 3\n", "\nversion: 6\n", 1)
 	if ps := problemsAs(t, "ana", tsrc("v4.yaml", strings.Replace(v4, "action: hr.manager_of\n", "action: hr.manager_of@1\n", 1))); len(ps) != 0 {
 		t.Errorf("hr.manager_of@1: problems\n%s", problemLines(ps))
 	}

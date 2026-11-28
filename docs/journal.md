@@ -5284,7 +5284,8 @@ tests gate: the tests as pushed (f7a4fbd).
 **Tests:** new: 2 (policy, `check_holes_test.go`: who cancels an incident@8 in progress; who writes the new drafts,
 each against the hole in the version before). Changed, as approved at Phase A: 5 (golden_types +3 incident@8
 entries; parse_dir; start_older; hints; `TestCheck_ActionMajors`'s draft from version 5 to 6). None changed since
-f7a4fbd.
+f7a4fbd, except five Postgres tests CI found pinning the version set (below), updated with the owner's approval after
+CI.
 
 **Surprises:**
 - `TestCheck_ActionMajors` built its draft as vacation_request@5: a real v5 made it VERSION_CHANGED. Found only by
@@ -5293,6 +5294,10 @@ f7a4fbd.
   role; a requester holding it), as the agreed fix intends.
 - `TestTypesCleanOrExplained` checks only the versions present in `types/`, so explanations for a version not yet
   added pass silently; the new policy tests were the ones that failed for incident@8 before it landed.
+- Phase A missed five Postgres tests that pin the version set (`cmd/pli`: the count of 74 Types, the CONSENT_MISSING
+  lines; `internal/api`: the ListTypes list, the problem count, a second draft vacation_request v5). I searched for
+  version names (`incident@7`, `incident.v7`), not counts or `versions/4`, and the Postgres tests could not run here
+  (Docker Hub refused the image pulls, 429). CI found them; the owner approved the five updates after CI.
 
 **Later:**
 - The `registerNewestTypes` helpers (itemservice, relay, workflow tests) still register incident.v7 and
@@ -5300,6 +5305,9 @@ f7a4fbd.
   holds. Moving them needs the Postgres tests run against the new rules.
 - `TestTypesCleanOrExplained` could fail on an explanation for a Type version that is not in `types/`.
 - vacation_request has never had words for people (labels, primary, summary); the Inbox shows its raw IDs.
-- `TestCheck_ActionMajors` names its next free version by hand; it clashes again when vacation_request@6 lands.
+- `TestCheck_ActionMajors` and `TestValidateTypes_ActionMajor` name their next free version by hand; they clash
+  again when vacation_request@6 lands.
+- `web` e2e `customer.spec.ts:109` (sla_goal@3 count 2, received 1) is timing-flaky: the second sla_goal arrives by a
+  reaction after the page has loaded.
 
 **Open:** none. **Next session:** `pli check` PR 3, witnesses as stories.
