@@ -27,6 +27,9 @@ export type TransitionPanelProps = {
   // "no transition" hint, and no answer line (the page says the answer);
   // the move's form, a refusal and Check again as always.
   compact?: boolean;
+  // The main move's target state: its button is the one dark button
+  // (.main-move; the Inbox, the look).
+  main?: string;
   // fields: the patch of the transition's required fields, changed ones
   // only. requestId: new for each move asked; the same again when the user
   // asks again about a PENDING one.
@@ -53,7 +56,7 @@ function rules(type: Type, t: Transition): string[] {
   return out;
 }
 
-export function TransitionPanel({ type, item, principals, only, compact, onTransition }: TransitionPanelProps): ReactElement {
+export function TransitionPanel({ type, item, principals, only, compact, main, onTransition }: TransitionPanelProps): ReactElement {
   const views: TransitionView[] = only
     ? only.map((t) => ({ transition: t, systemOnly: isSystemOnly(t) }))
     : transitionsFrom(type, item.state);
@@ -113,7 +116,12 @@ export function TransitionPanel({ type, item, principals, only, compact, onTrans
       <ul>
         {views.map(({ transition: t, systemOnly }) => (
           <li key={`${t.fromState}>${t.toState}`}>
-            <button type="button" disabled={systemOnly || busy} onClick={() => start(t)}>
+            <button
+              type="button"
+              className={main !== undefined && t.toState === main ? "main-move" : undefined}
+              disabled={systemOnly || busy}
+              onClick={() => start(t)}
+            >
               {t.label || `Move to ${t.toState}`}
             </button>
             {systemOnly && <span className="hint"> only the system can do this</span>}
