@@ -323,10 +323,11 @@ type Transition struct {
 type Type struct {
 	ID      string `yaml:"id" json:"id"`
 	Version int    `yaml:"version" json:"version"`
-	// Label and Help: the Type's own presentation hints (the Inbox, the
-	// look). STUB for the Phase B tests: not read from YAML or stored yet.
-	Label        string       `yaml:"-" json:"-"`
-	Help         string       `yaml:"-" json:"-"`
+	// Label and Help are the Type's own presentation hints (the Inbox, the
+	// look): its name for people and a line about it, checked as the
+	// other labels are (hints.go). They enforce nothing.
+	Label        string       `yaml:"label" json:"label,omitempty"`
+	Help         string       `yaml:"help" json:"help,omitempty"`
 	InitialState string       `yaml:"initial_state" json:"initial_state"`
 	Fields       []Field      `yaml:"fields" json:"fields,omitempty"`
 	States       []State      `yaml:"states" json:"states"`
