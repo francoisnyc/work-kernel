@@ -6631,14 +6631,85 @@ stuck state. The 12 errors are `incident@2` to `@7`: `in_progress →
 canceled` is open to anyone while another move into `canceled` names who
 may make it, so an agent and the requester may each cancel (correct by the
 definition; PR 2's "clean or explained" settles it). The warnings are
-roles and principal fields on approval, build_step, equipment_request,
-fulfilment_task, leave_balance, ticket, vacation_request and others.
+roles and principal fields on build_step, equipment_request, incident and
+leave_balance. (Corrected in PR 2: this text first named approval,
+fulfilment_task, ticket and vacation_request too, wrongly; approval and
+fulfilment_task were not even explored, a bug PR 2 fixed.)
 
 **Limits** (journal, Later): each class holds one role at a time (an agent
 holding finance and staff, which could reject on the staff-role purchase,
 is not seen); a shortest witness is not always the one with fewest
 dependencies, so a finding may be a WARNING where a longer path would make
 it an ERROR (the safe direction).
+
+## pli check, as built (PR 2) (2026-11-28)
+
+PR 1's checker, plus dead rules, loops with no end and drafts, and two
+fixes to PR 1. On demand only, as before; no API, proto, schema or
+dependency change.
+
+**The new codes.**
+
+| Code | Severity | What | Path |
+|---|---|---|---|
+| `UNREACHABLE_STATE` | ERROR | a state no Item can ever be in | `states[i]` |
+| `NEVER_FIRES` | ERROR | a transition, timer, at-timer, reaction or hook that can never happen or run | `transitions[i]`, `states[i].timer`, `states[i].at`, `reactions[i]`, `hooks[i]` |
+| `NO_WAY_OUT` | by its witness | a reachable state with ways out, from which no path leads to done or canceled | `states[i]` |
+| `COLLEAGUE_EDITS_DRAFT` | WARNING (`scope:readers`) | in a draft, a colleague may change fields any person may write | `states[i]` |
+
+- **"It can never happen" is judged with every world**, the last one
+  being the world where each class holds every role at once. So a move
+  that needs two roles held together (the staff-role purchase's
+  rejection: finance for the move, staff for the reason) is not called
+  dead. That world gives no decision finding: those keep one role per
+  class. A dead rule has no path, so its witness is empty.
+- **NO_WAY_OUT** judges a state's ways out under every world (a draft
+  nobody filled is still left by a requester holding the role), and
+  leaves out what can reach a stuck state: STUCK_STATE explains it.
+- **A draft** is a reachable state, not done or canceled, whose every
+  move out is `allowed: [creator]`; an open move, or one for anyone
+  else, makes it not a draft. The finding lists, in the Type's order, the
+  fields a colleague holding no role may write there: a field limited to
+  holders of a role is the Type's intent, like naming `creator`; one
+  limited by `requester_only` is closed.
+
+**Two fixes to PR 1** (found by Phase A of PR 2; PR 1 reported nothing on
+what it never explored, a silent clean):
+- A Type another Type's create reaction makes is now created in the model
+  too (inside a container whose creator is its requester, the reaction
+  acting for them). PR 1 left approval, fulfilment_task and sla_goal
+  unexplored: no person can create one, their invariants needing fields
+  only the kernel writes.
+- A multi-value principal field's samples were wrapped twice when the
+  invariants were tried, so access_request's quorum never held and
+  nothing past its draft was checked.
+
+**Not checked** now reads: who reads it (scopes); field writes outside
+drafts; placement.
+
+**`types/` clean or explained** (`internal/check/golden_types_test.go`;
+about 1.4 s): 12 errors, 48 warnings, each listed with why. No dead rule,
+no unreachable state, no loop.
+- The 12 errors, `incident@2` to `@7` (`in_progress → canceled` open to
+  anyone): a real hole, fixed in `incident@8` (`allowed: ['role:desk_agent']`),
+  the follow-up step after PR 2 (the owner's decision, option B1).
+- The 6 drafts, `access_request@1`–`@2` (`f_title`, `f_reason`) and
+  `vacation_request@1`–`@4` (`f_comment`, `f_days`, `f_end`,
+  `f_leave_type`, `f_start`): a real hole, closed by `access_request@3`
+  and `vacation_request@5` with `requester_only`, the same follow-up step.
+- Intended: build_step (whoever `f_owner` names, possibly an agent or the
+  requester), equipment_request (the desk agent who took it, a person or
+  an agent), fulfilment_task (a desk agent; one who asked for the access
+  may complete their own: journal, Later), incident's `new → canceled`
+  (a desk agent or an agent holding the role), leave_balance (holders of
+  `hr_admin`, their own included).
+
+**The bake-offs:** the PR 1 findings plus 7 draft warnings (camunda,
+types-v2 and blind: purchase and system_access, the hole track 1 item 4
+closed with `requester_only`; the bake-off Types stay as they were run).
+The staff-role Types have none, as their attack row ("a colleague (olaf,
+staff) changes ana's draft": refused) says; that row is now checked, not
+explained.
 
 ## Out of scope for the spike
 

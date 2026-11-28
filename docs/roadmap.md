@@ -508,9 +508,12 @@ mistake, which these Types do not refuse.
   **PR 1 built** (2026-11-28; design.md, "pli check, as built (PR 1)"):
   stuck states and who decides, on demand only, with the bake-off match
   as a golden test (the two remaining fails found, the colleague's read
-  explained). Next: PR 2, the dead rules and a colleague editing a draft,
-  `types/` clean or explained (the 12 incident errors: anyone may cancel
-  from `in_progress`); PR 3, witnesses as stories, each one run.
+  explained). **PR 2 built** (design.md, "pli check, as built (PR 2)"):
+  dead rules, loops with no end, a colleague editing a draft, two fixes
+  to PR 1, and `types/` clean or explained. Next: the follow-up step
+  (`incident@8` restricting who cancels from `in_progress`;
+  `access_request@3` and `vacation_request@5` closing their drafts with
+  `requester_only`); then PR 3, witnesses as stories, each one run.
 
 ### Track 3: the work path, in parallel
 
