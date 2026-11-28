@@ -85,9 +85,11 @@ why, at Phase A (CLAUDE.md, tests are protected).
   `approval@3`.
 - Any page other than the Inbox.
 
-## For the owner to decide
+## The owner's decisions (2026-11-28)
 
-1. A `label` on the Type itself (a Type format change and a line in
-   `docs/design.md`; an additive field in `GetType`).
+Both agreed:
+
+1. A `label` (and `help`) on the Type itself: the Type format, a line in
+   `docs/design.md` and an additive field in `GetType` and `ListTypes`.
 2. Agents' names from the dev-token file, as people's are, until sign-on
    brings real names.
