@@ -226,6 +226,21 @@ func TestOlderVersions_TheRepositoryTypes(t *testing.T) {
 			}
 			continue
 		}
+		// Closing the holes pli check PR 2 found: incident@8 and
+		// vacation_request@5 carry their previous version's start block;
+		// access_request@3 keeps versions 1 and 2 open.
+		if (ty.ID == "incident" && ty.Version == 8) || (ty.ID == "vacation_request" && ty.Version == 5) {
+			if got := keeps(stored[name(ty.ID, ty.Version)]); got != "all" {
+				t.Errorf("%s@%d start.older_versions = %v, want all, as %s@%d", ty.ID, ty.Version, got, ty.ID, ty.Version-1)
+			}
+			continue
+		}
+		if ty.ID == "access_request" && ty.Version == 3 {
+			if got := keeps(stored[name(ty.ID, ty.Version)]); fmt.Sprint(got) != "[1 2]" {
+				t.Errorf("access_request@3 start.older_versions = %v, want [1 2]", got)
+			}
+			continue
+		}
 		if got := keeps(stored[name(ty.ID, ty.Version)]); got != nil {
 			t.Errorf("%s@%d has start.older_versions = %v; only the new latest versions should", ty.ID, ty.Version, got)
 		}
@@ -241,7 +256,9 @@ func TestOlderVersions_TheRepositoryTypes(t *testing.T) {
 		case "ticket":
 			want = 9
 		case "incident":
-			want = 7
+			want = 8
+		case "vacation_request":
+			want = 5
 		}
 		if latest[id] != want {
 			t.Errorf("the latest %s in types/ is @%d, want @%d", id, latest[id], want)
