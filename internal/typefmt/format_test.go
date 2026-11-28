@@ -62,7 +62,7 @@ transitions:
 	{
 		name: "unknown keys come after the known ones, in their own order",
 		in:   "zeta: 1\nversion: 2\nid: t\nalpha: [b]\nfields:\n  - {zz: 1, id: f, type: int, aa: 2}\n",
-		want: "id: t\nversion: 2\nzeta: 1\n\nfields:\n  - id: f\n    type: int\n    zz: 1\n    aa: 2\n\nalpha: [b]\n",
+		want: "id: t\nversion: 2\n\nfields:\n  - id: f\n    type: int\n    zz: 1\n    aa: 2\nzeta: 1\n\nalpha: [b]\n",
 	},
 	{
 		name: "a nested mapping takes its own order",

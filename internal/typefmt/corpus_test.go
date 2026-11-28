@@ -3,6 +3,7 @@ package typefmt_test
 import (
 	"bytes"
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -108,7 +109,9 @@ func TestCorpus_TheTypeIsTheSame(t *testing.T) {
 
 // TestCorpus_TheCommentsAreTheSame: every comment is kept, word for word,
 // as yaml.v3 reads them; and every comment line of the file is still
-// there, in the same order.
+// there, in the same order within its section (the header, or a top-level
+// key's block): sections move to the canonical key order, their comments
+// with them.
 func TestCorpus_TheCommentsAreTheSame(t *testing.T) {
 	for _, path := range corpus(t) {
 		t.Run(path, func(t *testing.T) {
@@ -116,8 +119,16 @@ func TestCorpus_TheCommentsAreTheSame(t *testing.T) {
 			if b, a := nodeComments(t, before), nodeComments(t, after); !slices.Equal(b, a) {
 				t.Errorf("the comments changed:\n--- before\n%s\n--- after\n%s", strings.Join(b, "\n"), strings.Join(a, "\n"))
 			}
-			if b, a := commentLines(before), commentLines(after); !slices.Equal(b, a) {
-				t.Errorf("the comment lines changed:\n--- before\n%s\n--- after\n%s", strings.Join(b, "\n"), strings.Join(a, "\n"))
+			b, a := sectionComments(before), sectionComments(after)
+			for _, k := range slices.Sorted(maps.Keys(b)) {
+				if !slices.Equal(b[k], a[k]) {
+					t.Errorf("the comment lines of section %q changed:\n--- before\n%s\n--- after\n%s", k, strings.Join(b[k], "\n"), strings.Join(a[k], "\n"))
+				}
+			}
+			for _, k := range slices.Sorted(maps.Keys(a)) {
+				if _, ok := b[k]; !ok {
+					t.Errorf("section %q has comments it did not have: %s", k, strings.Join(a[k], "\n"))
+				}
 			}
 		})
 	}
@@ -166,13 +177,36 @@ func nodeComments(t *testing.T, src []byte) []string {
 	return out
 }
 
-// commentLines are the lines of src that hold only a comment, trimmed, in
-// order.
-func commentLines(src []byte) []string {
-	var out []string
+// sectionComments are the lines of src that hold only a comment, trimmed,
+// in order, by section: "" for the header, else the top-level key whose
+// block they are in. Comment lines right above a top-level key, with no
+// blank line between, are that key's; others belong to the section they
+// follow.
+func sectionComments(src []byte) map[string][]string {
+	out := map[string][]string{}
+	section := ""
+	var waiting []string // comment lines not yet known to be the next key's
 	for _, l := range strings.Split(string(src), "\n") {
-		if l = strings.TrimSpace(l); strings.HasPrefix(l, "#") {
-			out = append(out, l)
+		trimmed := strings.TrimSpace(l)
+		switch {
+		case strings.HasPrefix(trimmed, "#"):
+			waiting = append(waiting, trimmed)
+		case trimmed == "":
+			out[section] = append(out[section], waiting...)
+			waiting = nil
+		case l[0] != ' ' && strings.Contains(l, ":"):
+			section = strings.TrimSpace(strings.SplitN(l, ":", 2)[0])
+			out[section] = append(out[section], waiting...)
+			waiting = nil
+		default:
+			out[section] = append(out[section], waiting...)
+			waiting = nil
+		}
+	}
+	out[section] = append(out[section], waiting...)
+	for k, v := range out {
+		if len(v) == 0 {
+			delete(out, k)
 		}
 	}
 	return out
