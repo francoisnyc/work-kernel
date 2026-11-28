@@ -122,12 +122,13 @@ That is the gap poly points at.
 
 In order of value for the cost:
 
-1. **A behavioural check of a Type at load, `pli check`, over its control
-   part.** Explore the reachable states of one Type over a small abstract
-   world: its states; its enum and boolean fields; a few principal kinds
-   (the requester, a person holding each role, an agent holding each role,
-   someone else, the kernel's own timers and reactions); a claim holder;
-   children counted up to a small bound. Evaluate guards with CEL over those
+1. **A behavioural check of a Type, `pli check`, over its control part**
+   (on demand, not at load: the owner's decision, 2026-11-28). Explore the
+   reachable states of one Type over a small abstract world: its states;
+   its enum and boolean fields; a few principal kinds (the requester, a
+   person holding each role, an agent holding each role, someone else, the
+   kernel's own timers and reactions); a claim holder; children counted up
+   to a small bound. Evaluate guards with CEL over those
    values; treat a guard over an unabstracted field (an amount, a text) as
    either way, and say so ("inconclusive over `f_amount`"), never clean.
    Report, each with the shortest witness:

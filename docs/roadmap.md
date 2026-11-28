@@ -505,6 +505,13 @@ mistake, which these Types do not refuse.
   bake-offs' Types match what their attack scripts found by hand. The
   author in the authoring test reads its witnesses beside the reading.
 
+  **PR 1 built** (2026-11-28; design.md, "pli check, as built (PR 1)"):
+  stuck states and who decides, on demand only, with the bake-off match
+  as a golden test (the two remaining fails found, the colleague's read
+  explained). Next: PR 2, the dead rules and a colleague editing a draft,
+  `types/` clean or explained (the 12 incident errors: anyone may cancel
+  from `in_progress`); PR 3, witnesses as stories, each one run.
+
 ### Track 3: the work path, in parallel
 
 Where Temporal already runs, the first processes leave the old BPM suite on

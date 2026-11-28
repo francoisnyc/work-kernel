@@ -6546,6 +6546,100 @@ someone on a claimed row, agents' display names. The new answers ("Not
 yet", a refusal reason, the approver's own values) come with "Ask a
 person" (`question@1`, `approval@3`).
 
+## pli check, as built (PR 1) (2026-11-28)
+
+What a Type can do that its author may not have meant (roadmap, track 2,
+"Before the authoring test"). `pli check [--json] PATH...` reads Type files
+or folders, as `type validate` reads them, and calls no server (no `--as`).
+On demand only: nothing runs at load or at registration, and no Type is
+refused. Package `internal/check`; no API, proto, schema or dependency
+change.
+
+**The method** is ventoux's (`docs/research/poly-ecosystem-design.md`):
+every guard is taken as possibly true. A finding whose witness needs no
+guard, no role held and no field value beyond what its own steps set is an
+**ERROR**; one that depends on a guard, a role or a field's value is a
+**WARNING** and names what it depends on (`role:finance`,
+`guard:f_amount >= 1000`, `field:f_owner`). Something the checker cannot
+model is **UNCHECKED**, an ERROR: never a silent clean.
+
+**No rule of its own.** Who may make a move or write a field is policy's
+answer (`MayMove`, `MayWriteField`, `MayWriteInState`, `MayStart`,
+`IsRequester`), asked for stand-in principals. What can move an Item out of
+a state is `lifecycle.Exits` (new: the moves, the timer, the at-timer, a
+move reaction on the Item itself, in that order). Whether the invariants
+can hold is `lifecycle.CheckInvariants` over sample values; a claim field's
+freeze is `lifecycle.CheckFrozen`. Reactions of the other Types checked
+with it that move its Items (children, container, link) are exits too.
+
+**The model.** A field is known only as empty, set, not known, or (a
+principal field) whom it names: the requester, a colleague, the agent, or
+whoever the kernel chose. A requester's fields are written at create where
+they may write them; a move's `required`, `given`, `sets` (`cause.at` set;
+`container.f` empty at the top level, not known inside), `clears`, its
+check hook's answer (never empty unless the contract lets the output be
+null) and the claim (the mover) change them. The classes: the requester, a
+colleague, whoever a `field:` names, an agent for itself, for the requester
+or for a colleague, and the kernel's actors. Each holds no role or one role
+the Type names; one search per such world, breadth first, so a witness is a
+shortest path. **Assumed** (printed): a principal field only the kernel
+writes names a person, never an agent, and is empty only where its hook's
+contract allows no answer.
+
+**The codes.**
+
+| Code | What | Example |
+|---|---|---|
+| `STUCK_STATE` | a reachable state, not done or canceled, that no person, agent, timer or reaction can leave | camunda `system_access@1`: made outside any system, submitted: `owner_review`, "`f_owner` names no one" (ERROR) |
+| `AGENT_DECIDES` | an agent makes the move into a decision state | `purchase@1`: an agent holding finance claims and approves (WARNING, `role:finance` and two guards) |
+| `REQUESTER_DECIDES` | the requester makes that move, on their own request | `leave_balance@1`: the requester holding hr_admin closes it (WARNING) |
+| `UNCHECKED` | an allowed or except entry the checker does not know; a search over 50,000 abstract Items | (none on the Types here) |
+
+A **decision state** is done or canceled, and at least one move into it has
+a non-empty `allowed`; a move that names `creator` and lets the requester
+in by it is the Type's intent, not a finding.
+
+**Not checked** (printed with every report): who reads it (scopes decide,
+not the Type); field writes; placement; unreachable states and rules that
+never fire. PR 2 adds the dead rules and a colleague editing a draft; PR 3
+prints witnesses as stories and runs each.
+
+**Output.** Text: per Type version, `CODE SEVERITY path: message`, a
+"Depends on:" line for a warning, the numbered witness; then the
+not-checked and assumed lines and the counts. `--json`: `findings`
+(`type`, `version`, `code`, `severity`, `path`, `message`, `depends_on`,
+`witness` of `who`, `kind`, `from`, `to`, `words`), `not_checked`,
+`assumed`. Exit 0 with no ERROR, 1 with one, 2 on a usage error or a Type
+that does not load.
+
+**The bake-off match** (`internal/check/golden_test.go`): the findings on
+every bake-off Type are exactly the expected ones, each with the row it
+matches or why it is extra; every FAIL row is found or explained; no
+finding contradicts a refused row.
+- Found: the access request for no system (camunda, `STUCK_STATE` ERROR);
+  the agent given finance (`AGENT_DECIDES` WARNING).
+- Explained: a colleague reading another's purchase (who reads is not in
+  the Type).
+- Extra: the CFO on `purchase@2`; the same files in the other folders; on
+  the staff-role Types, both findings depend on `role:staff` too; and the
+  blind access request made outside a system, which its invariant never
+  lets be submitted and which has no other way out: it stays a draft
+  (`STUCK_STATE` ERROR on `states[0]`, the owner's change at Phase C).
+
+**On `types/`** (about 1.4 s): 12 errors, 40 warnings, no UNCHECKED, no
+stuck state. The 12 errors are `incident@2` to `@7`: `in_progress →
+canceled` is open to anyone while another move into `canceled` names who
+may make it, so an agent and the requester may each cancel (correct by the
+definition; PR 2's "clean or explained" settles it). The warnings are
+roles and principal fields on approval, build_step, equipment_request,
+fulfilment_task, leave_balance, ticket, vacation_request and others.
+
+**Limits** (journal, Later): each class holds one role at a time (an agent
+holding finance and staff, which could reject on the staff-role purchase,
+is not seen); a shortest witness is not always the one with fewest
+dependencies, so a finding may be a WARNING where a longer path would make
+it an ERROR (the safe direction).
+
 ## Out of scope for the spike
 
 The real UI (the generic web UI and the PoC apps above are
