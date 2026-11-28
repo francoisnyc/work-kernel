@@ -5155,3 +5155,40 @@ passed. `go vet` and `go test ./...` untouched and green. **The bake-offs:** not
 
 **Open:** the Later items above. **Next session:** the Inbox for people is built; the owner chooses what comes next in
 track 1 (item 6's step 4, bulk and status; track 2's authoring test).
+
+## 2026-11-28 — Track 2, `pli check`, PR 1: stuck states and who decides (Phases A to D)
+
+**Built:** `internal/check` (the abstract world, one breadth-first search per world of roles, STUCK_STATE,
+AGENT_DECIDES, REQUESTER_DECIDES, UNCHECKED, witnesses in plain words, text and JSON), `lifecycle.Exits`, and
+`pli check [--json] PATH...`, local, no `--as`. Who may act is policy's answer for stand-in principals; exits are
+lifecycle's; invariants are `lifecycle.CheckInvariants` over sample values. design.md: "pli check, as built (PR 1)";
+roadmap: PR 1 built, PR 2 and 3 next; the research note's "at load" corrected (on demand only).
+
+**Decided (the owner, through the coordinator):** at Phase A, every default (the classes, one role each; a
+kernel-only principal field names a person, never an agent; decision and draft states; "match" as found or explained;
+on demand only; three PRs). At the tests gate: the tests as written. At Phase C, option A: the blind bake-off's access
+request made outside a system stays a draft for ever, a real finding the approved tests had missed; three tests
+changed to expect it (`TestNoStuckWhenTheInvariantRefusesTheSubmit` renamed `TestBlindRequestOutsideASystemStaysADraft`;
+`TestBakeoffMatch`'s golden list; `TestCheckWarningsExitZero` reads the staff-role folder). The 12 incident errors
+stay as found, for PR 2.
+
+**Tests:** new: check 13, lifecycle 2, pli 5. No earlier test changed.
+
+**Surprises:**
+- The checker found what the bake-off's own builder and its attack list missed: the blind access request's
+  invariant, which refuses a submit outside a system, also strands that request in draft (no withdraw, no move).
+- The contract settles what a hook may leave empty: outputs are always sent, so `hr.manager_of`'s manager is never
+  empty and `manager_review` is never stuck.
+- The kernel already treats a claimed state's claim field as frozen and records the mover as claimant, so "the
+  claimant is whoever moved in" is the kernel's rule, not an assumption.
+- Under `-race` the first build took 58 s for the package: each step re-parsed its guard into words. Cached: 13 s.
+
+**Later:**
+- Two roles at once: each class holds one; an agent holding finance and staff, which could reject on the
+  staff-role purchase, is not seen.
+- A witness is a shortest path, not always the one with fewest dependencies: some WARNINGs could be ERRORs.
+- Who reads (scopes), field writes outside drafts, placement: not modelled (printed as not checked).
+- `incident@2`–`@7`: anyone may cancel from `in_progress` while another move into `canceled` names who may; PR 2's
+  "clean or explained" decides whether that is the Type's intent.
+
+**Open:** PR 2's scope as planned. **Next session:** PR 2, dead rules and a colleague editing a draft.
