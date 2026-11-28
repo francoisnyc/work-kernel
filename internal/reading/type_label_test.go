@@ -1,7 +1,8 @@
 // The reading's first sentence names the Type by its own label, when it
 // has one (the Inbox, the look, item 4): "An Access request
 // (`access_request`) starts in draft.", as a state reads "Draft (`draft`,
-// to do)". The sentence also reads the label's path. Without a label it
+// to do)". A label is a hint, so the sentence does not cite it (as the
+// other labels, reading.LeftOut). Without a label it
 // reads as before: "A w_leave starts in draft."
 package reading_test
 
@@ -47,8 +48,8 @@ transitions:
 	if want := "An Access request (`access_request`) starts in draft."; s.Text != want {
 		t.Errorf("first sentence = %q, want %q", s.Text, want)
 	}
-	if !slices.Contains(s.Paths, "label") || !slices.Contains(s.Paths, "initial_state") {
-		t.Errorf("first sentence reads %v, want label and initial_state", s.Paths)
+	if !slices.Contains(s.Paths, "initial_state") {
+		t.Errorf("first sentence reads %v, want initial_state", s.Paths)
 	}
 
 	// A consonant: "A", from the label, not from the ID.
@@ -71,8 +72,5 @@ label: Customer portal
 	s = firstSentence(t, strings.Replace(lifecycle, "label: Access request\n", "", 1))
 	if want := "An access_request starts in draft."; s.Text != want {
 		t.Errorf("first sentence = %q, want %q", s.Text, want)
-	}
-	if slices.Contains(s.Paths, "label") {
-		t.Errorf("first sentence without a label reads %v", s.Paths)
 	}
 }
