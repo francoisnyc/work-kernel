@@ -415,6 +415,12 @@ func TestGet_ReturnsCreatedItem(t *testing.T) {
 	// Since track 1 item 5, step 4 an Item also carries when it entered its
 	// state (TestStateTime_* check it); here it is only set aside.
 	got.StateEnteredAt = time.Time{}
+	// Since the Inbox for people, PR 3a, it also carries who put it in its
+	// state (TestStateActor_* check it): here its creator, then set aside.
+	if got.StateActor != alice.Actor || got.StateActorOnBehalfOf != "" {
+		t.Errorf("Get: state actor %q for %q, want %s for nobody", got.StateActor, got.StateActorOnBehalfOf, alice.Actor)
+	}
+	got.StateActor = ""
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Get = %+v\nwant  %+v", got, want)
 	}
