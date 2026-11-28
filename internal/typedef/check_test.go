@@ -348,8 +348,9 @@ func TestCheck_ActionMajors(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A draft of the next version: vacation_request@4 is registered since
-	// track 1, item 6, step 1.
-	v4 := strings.Replace(string(v3), "\nversion: 3\n", "\nversion: 5\n", 1)
+	// track 1, item 6, step 1, and vacation_request@5 since the follow-up
+	// step after pli check PR 2.
+	v4 := strings.Replace(string(v3), "\nversion: 3\n", "\nversion: 6\n", 1)
 	if v4 == string(v3) || !strings.Contains(v4, "    action: hr.manager_of\n") {
 		t.Fatal("test bug: vacation_request.v3.yaml is not as this test expects")
 	}
@@ -367,7 +368,7 @@ func TestCheck_ActionMajors(t *testing.T) {
 			t.Fatalf("hr.manager_of%s: %d problems, want 1:\n%v", major, len(ps), ps)
 		}
 		checkProblem(t, ps[0], problemCase{code: typedef.CodeUnknownAction, path: "hooks[0].action", line: 104, col: 5,
-			typeID: "vacation_request", version: 5, old: "hr.manager_of@2"})
+			typeID: "vacation_request", version: 6, old: "hr.manager_of@2"})
 	}
 }
 

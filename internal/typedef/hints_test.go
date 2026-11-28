@@ -147,19 +147,18 @@ transitions:
 	}
 	// The hint keys each of PR 1b's versions stores, and the versions
 	// after them that carry their hints (the follow-up step after pli
-	// check PR 2: incident@8, access_request@3; the Inbox, the look:
-	// approval@3, access_request@4, equipment_request@3, incident@9, which
-	// add the Type's own label).
+	// check PR 2: incident@8, access_request@3).
 	withHints := map[string][]string{
 		"approval@2":          {`"label"`, `"primary"`},
-		"approval@3":          {`"label"`, `"primary"`},
 		"access_request@2":    {`"label"`, `"primary"`, `"summary"`, `"due"`},
 		"access_request@3":    {`"label"`, `"primary"`, `"summary"`, `"due"`},
-		"access_request@4":    {`"label"`, `"primary"`, `"summary"`, `"due"`},
 		"equipment_request@2": {`"label"`, `"primary"`},
-		"equipment_request@3": {`"label"`, `"primary"`},
 		"incident@7":          {`"label"`, `"primary"`, `"summary"`, `"due"`},
 		"incident@8":          {`"label"`, `"primary"`, `"summary"`, `"due"`},
+		// The Inbox, the look: the versions that add the Type's own label.
+		"approval@3":          {`"label"`, `"primary"`},
+		"access_request@4":    {`"label"`, `"primary"`, `"summary"`, `"due"`},
+		"equipment_request@3": {`"label"`, `"primary"`},
 		"incident@9":          {`"label"`, `"primary"`, `"summary"`, `"due"`},
 	}
 	seen := 0
