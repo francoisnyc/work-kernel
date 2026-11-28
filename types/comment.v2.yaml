@@ -4,6 +4,9 @@
 # Item it is made in is that Item's Type to say (ticket@6's `reopen`).
 id: comment
 version: 2
+
 fields:
-  - {id: f_body,   type: string}
-  - {id: f_public, type: bool}
+  - id: f_body
+    type: string
+  - id: f_public
+    type: bool

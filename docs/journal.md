@@ -5224,3 +5224,47 @@ added to the exact-set tests; the not-checked lines). None changed since e940f10
   purchase, is not reported).
 
 **Open:** the follow-up step. **Next session:** `incident@8`, `access_request@3`, `vacation_request@5`, then PR 3.
+
+## 2026-11-28 — Track 2, `pli fmt`: one layout for Type files (Phases A to D)
+
+**Built:** `internal/typefmt` (its own emitter over yaml.v3 nodes: block mappings in the JSON Schema's key order,
+lists of plain scalars on one line, scalars copied from the source, comments kept, one blank line before each
+top-level collection; the gate that decodes input and output and refuses a change of data or a lost comment) and
+`pli fmt [-w] [-l] [--check] [PATH...]`, local, no `--as`. Every file of `types/` reformatted (74 of 76 files,
++4626/−1661, one mechanical commit); CI runs `pli fmt --check types/`. design.md: "pli fmt, as built"; roadmap: the
+authoring surface's `pli fmt` built.
+
+**Decided (the owner, through the coordinator):** at Phase A, every default (block mappings, flow scalar lists, the
+schema's key order, scalars verbatim, a comment with no place refuses the file, the gate without typedef, the name
+`pli fmt` beside `pli check`, `types/` reformatted in this PR, the CI step). At the tests gate: the tests as written,
+the refusal rule kept for a commented item of a block scalar list. At Phase C, two approved tests corrected (the
+comment lines in order within each section, not across the file, since sections move; an unknown key after the known
+ones, as the case's own rule says), and `TestCheck_ActionMajors`'s position 79:5 → 104:5.
+
+**Tests:** new: typefmt 10 (16 layout cases, the gate, the key table against the schema, four checks on all 97 Type
+files of the repository), typedef 1 (the key table against typedef's keys), pli 10. Earlier tests changed: one
+position, approved.
+
+**Surprises:**
+- `VERSION_CHANGED` compares the stored JSON of the parsed Type, so reformatting a registered version is safe: the
+  question "bytes or definition?" was already settled by the code.
+- yaml.v3's own encoder folds a `>-` scalar into one 400-character line (same value, lost line breaks), hence an
+  emitter of our own that copies scalars from the source.
+- yaml.v3 hangs a comment written under a list's last item on the enclosing key, so a foot comment's depth comes from
+  its column in the input, not from the node it hangs on.
+- The prototype's position for the moved test was 111:5; the real layout, with its blank lines, gives 104:5.
+- Two of my own approved tests contradicted the decisions they encoded; caught only by running them on the real code.
+
+**Numbers.** `go vet`, `go test ./...` and `-race` green (30 packages); the new tests `-race -count=10` green; web
+typecheck and unit tests green locally. `pli check types/` byte-identical before and after (text and `--json`).
+**Not run here:** the scenario and the browser journeys (this container's image builds cannot reach the Go module
+proxy through its TLS proxy); CI runs them.
+
+**Local workarounds, outside the repository (nothing committed):** started `dockerd` by hand for testcontainers.
+
+**Later:**
+- A commented item of a block list of scalars is refused; keeping such a list in block style would refuse nothing.
+- `pli fmt` on the bake-offs' and the test corpus's Types (left as they were), and an editor's format-on-save.
+- `pli lint`, the third piece of the authoring surface.
+
+**Open:** none. **Next session:** track 2's authoring test, or `pli check` PR 2, as the owner chooses.

@@ -18,6 +18,7 @@
 //	  type validate [--json] PATH...
 //	  type explain [--json] TYPE@VERSION | --draft TYPE@VERSION PATH...
 //	  check [--json] PATH...                (no --as, no server: reads the files)
+//	  fmt [-w] [-l] [--check] [PATH...]     (no --as, no server: formats Type files)
 //	  action list [--json]
 //	  agent start [--for USER] --scopes S,S --powers P,P
 //	  agent approve SESSION SCOPE [--expect-audience A] [--yes] [--request-id ID]  (run it --as the user who approves)
@@ -135,6 +136,7 @@ const usage = `usage: pli [--server URL] [--tokens FILE] --as NAME [--session ID
   type explain [--json] TYPE@VERSION | --draft TYPE@VERSION PATH...
                                   (a Type version in plain language: what a person approves)
   check [--json] PATH...          (what Types can do: stuck states, who decides; local, no --as)
+  fmt [-w] [-l] [--check] [PATH...]  (Type files in one layout; no PATH: stdin to stdout; local, no --as)
   action list [--json]            (the actions a Type's hooks may name, with their contracts)
   agent start [--for USER] --scopes S,S --powers P,P
   agent approve SESSION SCOPE [--expect-audience A] [--yes] [--request-id ID]  (run it --as the user who approves)
@@ -179,6 +181,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	// check reads files and calls no server: it needs no --as.
 	if len(rest) >= 1 && rest[0] == "check" {
 		return runCheck(rest[1:], stdout, stderr)
+	}
+	// fmt reads and writes files and calls no server: it needs no --as.
+	if len(rest) >= 1 && rest[0] == "fmt" {
+		return runFmt(rest[1:], os.Stdin, stdout, stderr)
 	}
 	// inbox is one word: every other command is two ("item search").
 	inbox := len(rest) >= 1 && rest[0] == "inbox"

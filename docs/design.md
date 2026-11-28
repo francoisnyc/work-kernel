@@ -6711,6 +6711,73 @@ The staff-role Types have none, as their attack row ("a colleague (olaf,
 staff) changes ana's draft": refused) says; that row is now checked, not
 explained.
 
+## pli fmt, as built (2026-11-28)
+
+The authoring surface's formatter (roadmap, "The data as a first-class
+surface"): `pli fmt` rewrites a Type file into one canonical layout, as
+gofmt does for Go, so a changed rule shows as one changed line in a diff.
+It enforces nothing and changes no value. Package `internal/typefmt`; no
+API, proto, schema or dependency change (yaml.v3 was already used).
+
+**The canonical form.**
+- Every mapping in block style, one key per line, two spaces deeper than
+  its key. A list whose items are all plain scalars stays on one line
+  (`allowed: [creator]`, `frozen: [f_a, f_b]`), an empty one is `[]`; any
+  other list is in block style. The rule is fixed, never by line width.
+- Keys in the JSON Schema's property order at every level of the format
+  (`typefmt.Keys`: `id, version, initial_state, fields, states, transitions,
+  hooks, links, …` at the top; `id, type, options, …` in a field). Keys the
+  table does not name follow the known ones, in their own order; a map of
+  the author's own keys (`sets`, `fields` of a reaction, the keys of
+  `accepts_reactions`) keeps its order.
+- Scalars are copied as written: quotes, escapes, `0x10`, `~` stay; nothing
+  is re-quoted (`'5'` and `5` are different values). A block scalar (`|`,
+  `>-`) keeps its line breaks, moved to its new depth.
+- One blank line before each top-level key whose value is a list or a
+  mapping, none elsewhere. A line comment follows its line after two
+  spaces. The header comment stays as written.
+
+**Comments** are yaml.v3's head, line and foot comments, so each moves
+with its key. A line comment on a flow item that becomes block goes on the
+item's first line (`- from: a  # one move`). A foot comment goes back to
+the depth of the block it was written in (found from its column in the
+input). A comment the layout has no place for (on an item of a list now
+written on one line) **refuses the file**: `PATH:LINE: cannot place comment
+"# …"`, nothing written.
+
+**The gate.** Before `Format` returns, it decodes its input and its output
+to plain values (anchors and aliases expanded) and requires them equal,
+and requires the same comments; else `ErrChanged` (a bug in typefmt if
+ever seen) or the comment's error, and nothing is written. The gate does
+not use typedef: pli does not link typedef ("Ventoux V2b and V2c, as
+built"), and equal data is the same Type. The tests prove the rest on all
+97 Type files of the repository (`types/`, the bake-offs, typedef's schema
+corpus): the same data, **the same stored definition** (the JSON
+`RegisterType` stores, which `VERSION_CHANGED` compares), the same
+comments (each section's in order), and formatting twice changes nothing.
+`typefmt.Keys` is held to the schema's order and, by a typedef test, to
+typedef's keys both ways.
+
+**The command.** `pli fmt [-w] [-l] [--check] [PATH...]`, local like `pli
+check` (no `--as`, no server). No flag prints each file formatted; `-w`
+rewrites the files that differ (keeping their mode); `-l` lists them;
+`--check` lists them and exits 1 if any (CI); with no PATH, stdin to
+stdout. A PATH is a file or folder, read as `type validate` reads them; a
+folder too deep is reported and skipped. A file that cannot be formatted is
+reported and the others are still done. Exit 0, 1 (a file differs under
+`--check`, or one could not be formatted), 2 (a usage error, nothing done;
+`--check` with `-w` is one).
+
+**The reformat.** Every file of `types/` is in the canonical form (74 of 76
+files changed, +4626/−1661 lines, in one mechanical commit); the
+bake-offs' and the test corpus's files are left as they were. Reformatting
+a registered version's file does not change it: `VERSION_CHANGED` is
+judged on the stored definition, never on the file's bytes. `pli check
+types/` gives the same findings before and after, byte for byte (its paths
+are YAML paths, not lines). One test read a position in a Type file:
+`TestCheck_ActionMajors` (`vacation_request.v3.yaml`), 79:5 → 104:5. CI runs
+`pli fmt --check types/` next to the gofmt check.
+
 ## Out of scope for the spike
 
 The real UI (the generic web UI and the PoC apps above are

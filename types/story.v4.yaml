@@ -31,48 +31,101 @@ version: 4
 initial_state: todo
 
 fields:
-  - {id: f_summary,     type: string}
-  - {id: f_description, type: string}
-  - {id: f_assignee,    type: principal}
-  - {id: f_priority,    type: enum, options: [P1, P2, P3, P4]}
-  - {id: f_points,      type: int}
-  - {id: f_resolution,  type: enum, options: [fixed, wontfix, duplicate, cannot_reproduce]}
-  - {id: f_rank,        type: string}
+  - id: f_summary
+    type: string
+  - id: f_description
+    type: string
+  - id: f_assignee
+    type: principal
+  - id: f_priority
+    type: enum
+    options: [P1, P2, P3, P4]
+  - id: f_points
+    type: int
+  - id: f_resolution
+    type: enum
+    options: [fixed, wontfix, duplicate, cannot_reproduce]
+  - id: f_rank
+    type: string
   # When it was resolved: the time of the done event itself, set by the
   # move (`sets`), never by hand. A queue sorts and filters by it.
-  - {id: f_resolved_at, type: datetime, writable_by: kernel}
+  - id: f_resolved_at
+    type: datetime
+    writable_by: kernel
   # Sets (multiple: true): unordered, no duplicates. Labels are free text;
   # reviewers are people to keep in the loop. Nothing in the kernel reads
   # either: watching an issue is a Subscription Item, as before.
-  - {id: f_labels,      type: string,    multiple: true, max: 20}
-  - {id: f_reviewers,   type: principal, multiple: true}
-
-links:
-  - {name: epic,       inverse: issues,        targets: [epic],   max: one}
-  - {name: sprint,     inverse: sprint_issues, targets: [sprint], max: one}
-  - {name: blocks,     inverse: blocked_by,    targets: [story, bug, task]}
-  - {name: relates,    inverse: related_by,    targets: [story, bug, task]}
-  - {name: duplicates, inverse: duplicated_by, targets: [story, bug, task], max: one}
+  - id: f_labels
+    type: string
+    multiple: true
+    max: 20
+  - id: f_reviewers
+    type: principal
+    multiple: true
 
 states:
-  - {id: todo,        category: todo}
-  - {id: in_progress, category: active}
-  - {id: in_review,   category: active}
-  - {id: done,        category: done}
-  - {id: canceled,    category: canceled}
+  - id: todo
+    category: todo
+  - id: in_progress
+    category: active
+  - id: in_review
+    category: active
+  - id: done
+    category: done
+  - id: canceled
+    category: canceled
 
 transitions:
-  - {from: todo,        to: in_progress}
-  - {from: in_progress, to: in_review}
-  - {from: in_review,   to: in_progress}
-  - {from: in_review,   to: done, required: [f_resolution], sets: {f_resolved_at: 'cause.at'}}
-  - {from: in_progress, to: done, required: [f_resolution], sets: {f_resolved_at: 'cause.at'}}
+  - from: todo
+    to: in_progress
+  - from: in_progress
+    to: in_review
+  - from: in_review
+    to: in_progress
+  - from: in_review
+    to: done
+    required: [f_resolution]
+    sets:
+      f_resolved_at: 'cause.at'
+  - from: in_progress
+    to: done
+    required: [f_resolution]
+    sets:
+      f_resolved_at: 'cause.at'
   # Reopen: the resolution no longer stands, nor its time (null unsets).
-  - {from: done,        to: todo, clears: [f_resolution], sets: {f_resolved_at: 'null'}}
-  - {from: todo,        to: canceled}
-  - {from: in_progress, to: canceled}
-  - {from: in_review,   to: canceled}
-  - {from: canceled,    to: todo}
+  - from: done
+    to: todo
+    clears: [f_resolution]
+    sets:
+      f_resolved_at: 'null'
+  - from: todo
+    to: canceled
+  - from: in_progress
+    to: canceled
+  - from: in_review
+    to: canceled
+  - from: canceled
+    to: todo
+
+links:
+  - name: epic
+    inverse: issues
+    targets: [epic]
+    max: one
+  - name: sprint
+    inverse: sprint_issues
+    targets: [sprint]
+    max: one
+  - name: blocks
+    inverse: blocked_by
+    targets: [story, bug, task]
+  - name: relates
+    inverse: related_by
+    targets: [story, bug, task]
+  - name: duplicates
+    inverse: duplicated_by
+    targets: [story, bug, task]
+    max: one
 
 start:
   older_versions: all

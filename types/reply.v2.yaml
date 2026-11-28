@@ -6,8 +6,11 @@
 # Customers see it where the request shares it (incident@2).
 id: reply
 version: 2
+
 fields:
-  - {id: f_body, type: string}
+  - id: f_body
+    type: string
+
 customer_fields: [f_body]
 
 placement_writable_by: [kernel]

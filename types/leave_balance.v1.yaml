@@ -19,16 +19,26 @@ version: 1
 initial_state: open
 
 fields:
-  - {id: f_owner,     type: principal, writable_by: ['role:hr_admin']}
-  - {id: f_allowance, type: int,       writable_by: ['role:hr_admin']}
-  - {id: f_used,      type: int,       writable_by: kernel}
+  - id: f_owner
+    type: principal
+    writable_by: ['role:hr_admin']
+  - id: f_allowance
+    type: int
+    writable_by: ['role:hr_admin']
+  - id: f_used
+    type: int
+    writable_by: kernel
 
 states:
-  - {id: open,   category: active}
-  - {id: closed, category: done}
+  - id: open
+    category: active
+  - id: closed
+    category: done
 
 transitions:
-  - {from: open, to: closed, allowed: ['role:hr_admin']}
+  - from: open
+    to: closed
+    allowed: ['role:hr_admin']
 
 invariants:
   - id: balance_incomplete

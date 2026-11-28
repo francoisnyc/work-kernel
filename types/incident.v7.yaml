@@ -78,44 +78,101 @@
 id: incident
 version: 7
 initial_state: new
-summary: [f_priority, f_assignee]
 
 fields:
-  - {id: f_title,      type: string, label: Title}
-  - {id: f_priority,   type: enum, options: [P1, P2, P3, P4], label: Priority}
-  - {id: f_impact,     type: enum, options: [extensive, significant, moderate, minor], label: Impact}
-  - {id: f_assignee,   type: principal, label: Assignee}
-  - {id: f_resolution, type: enum, options: [fixed, workaround, wontfix, duplicate], label: Resolution}
-  - {id: f_due_first_response, type: datetime, writable_by: kernel, label: First response due}
-  - {id: f_due_resolution,     type: datetime, writable_by: kernel, label: Resolution due}
-
-invariants:
-  - {id: priority_missing, rule: 'f_priority != null'}
-
-links:
-  - {name: caused_by, inverse: causes, targets: [bug]}
-
-offers:
-  breach_contact: f_assignee
+  - id: f_title
+    type: string
+    label: Title
+  - id: f_priority
+    type: enum
+    options: [P1, P2, P3, P4]
+    label: Priority
+  - id: f_impact
+    type: enum
+    options: [extensive, significant, moderate, minor]
+    label: Impact
+  - id: f_assignee
+    type: principal
+    label: Assignee
+  - id: f_resolution
+    type: enum
+    options: [fixed, workaround, wontfix, duplicate]
+    label: Resolution
+  - id: f_due_first_response
+    type: datetime
+    writable_by: kernel
+    label: First response due
+  - id: f_due_resolution
+    type: datetime
+    writable_by: kernel
+    label: Resolution due
 
 states:
-  - {id: new,                  category: triage, label: New, due: f_due_first_response}
-  - {id: in_progress,          category: active, label: In progress, due: f_due_resolution}
-  - {id: waiting_for_customer, category: waiting, waits_on: requester, label: Waiting for the customer}
-  - {id: resolved,             category: done, timer: {after: 120h, to: closed}, label: Resolved}
-  - {id: closed,               category: done, label: Closed}
-  - {id: canceled,             category: canceled, label: Canceled}
+  - id: new
+    category: triage
+    label: New
+    due: f_due_first_response
+  - id: in_progress
+    category: active
+    label: In progress
+    due: f_due_resolution
+  - id: waiting_for_customer
+    category: waiting
+    waits_on: requester
+    label: Waiting for the customer
+  - id: resolved
+    category: done
+    timer:
+      after: 120h
+      to: closed
+    label: Resolved
+  - id: closed
+    category: done
+    label: Closed
+  - id: canceled
+    category: canceled
+    label: Canceled
 
 transitions:
-  - {from: new,                  to: in_progress, label: Start, primary: true}
-  - {from: in_progress,          to: waiting_for_customer, label: Ask the customer}
-  - {from: waiting_for_customer, to: in_progress, label: Resume}
-  - {from: in_progress,          to: resolved, required: [f_resolution], label: Resolve, primary: true}
-  - {from: waiting_for_customer, to: resolved, required: [f_resolution], label: Resolve}
-  - {from: resolved,             to: closed, allowed: ['principal:system:timer']}
-  - {from: resolved,             to: in_progress, clears: [f_resolution], allowed: [creator, 'role:desk_agent'], label: Reopen}
-  - {from: new,                  to: canceled, allowed: [creator, 'role:desk_agent'], label: Cancel}
-  - {from: in_progress,          to: canceled, label: Cancel}
+  - from: new
+    to: in_progress
+    label: Start
+    primary: true
+  - from: in_progress
+    to: waiting_for_customer
+    label: Ask the customer
+  - from: waiting_for_customer
+    to: in_progress
+    label: Resume
+  - from: in_progress
+    to: resolved
+    required: [f_resolution]
+    label: Resolve
+    primary: true
+  - from: waiting_for_customer
+    to: resolved
+    required: [f_resolution]
+    label: Resolve
+  - from: resolved
+    to: closed
+    allowed: ['principal:system:timer']
+  - from: resolved
+    to: in_progress
+    allowed: [creator, 'role:desk_agent']
+    clears: [f_resolution]
+    label: Reopen
+  - from: new
+    to: canceled
+    allowed: [creator, 'role:desk_agent']
+    label: Cancel
+  - from: in_progress
+    to: canceled
+    label: Cancel
+
+links:
+  - name: caused_by
+    inverse: causes
+    targets: [bug]
 
 reactions:
   # The contract of the sla package: these IDs, moving or creating sla_goals.
@@ -153,31 +210,96 @@ reactions:
         working_after(cause.at,
         f_priority == "P1" ? container.linked.sla_policy.f_resolution_s_p1 : f_priority == "P2" ? container.linked.sla_policy.f_resolution_s_p2 : f_priority == "P3" ? container.linked.sla_policy.f_resolution_s_p3 : container.linked.sla_policy.f_resolution_s_p4,
         calendar(container.linked.calendar.f_week, container.linked.calendar.f_days_off, container.linked.calendar.f_zone))
-  - {id: sla_restart_resolution, kind: create, on: enter, state: in_progress, from: [resolved], type: sla_goal, version: 3, fields: *resolution}
-  - {id: sla_pause,  kind: move, on: enter, state: waiting_for_customer,
-     children: {of: [sla_goal], when: 'child.f_metric == "resolution"'}, to: paused, target_from: [running]}
-  - {id: sla_resume, kind: move, on: enter, state: in_progress, from: [waiting_for_customer],
-     children: {of: [sla_goal], when: 'child.f_metric == "resolution"'}, to: running, target_from: [paused]}
-  - {id: sla_stop,   kind: move, on: enter, state: resolved, children: {of: [sla_goal]}, to: completed, target_from: [running, paused]}
-  - {id: sla_cancel, kind: move, on: enter, state: canceled, children: {of: [sla_goal]}, to: canceled,  target_from: [running, paused]}
-  - {id: sla_answered, kind: move, on: created_inside, of: [reply], by: not_creator,
-     children: {of: [sla_goal], when: 'child.f_metric == "first_response"'}, to: completed, target_from: [running]}
+  - id: sla_restart_resolution
+    kind: create
+    on: enter
+    state: in_progress
+    from: [resolved]
+    type: sla_goal
+    version: 3
+    fields: *resolution
+  - id: sla_pause
+    kind: move
+    on: enter
+    state: waiting_for_customer
+    to: paused
+    target_from: [running]
+    children:
+      of: [sla_goal]
+      when: 'child.f_metric == "resolution"'
+  - id: sla_resume
+    kind: move
+    on: enter
+    state: in_progress
+    from: [waiting_for_customer]
+    to: running
+    target_from: [paused]
+    children:
+      of: [sla_goal]
+      when: 'child.f_metric == "resolution"'
+  - id: sla_stop
+    kind: move
+    on: enter
+    state: resolved
+    to: completed
+    target_from: [running, paused]
+    children:
+      of: [sla_goal]
+  - id: sla_cancel
+    kind: move
+    on: enter
+    state: canceled
+    to: canceled
+    target_from: [running, paused]
+    children:
+      of: [sla_goal]
+  - id: sla_answered
+    kind: move
+    on: created_inside
+    to: completed
+    target_from: [running]
+    by: not_creator
+    of: [reply]
+    children:
+      of: [sla_goal]
+      when: 'child.f_metric == "first_response"'
   # The incident's own rule: the requester's reply brings it back.
-  - {id: customer_replied, kind: move, on: created_inside, of: [reply], by: creator,
-     from: [waiting_for_customer], to: in_progress}
+  - id: customer_replied
+    kind: move
+    on: created_inside
+    from: [waiting_for_customer]
+    to: in_progress
+    by: creator
+    of: [reply]
 
-shared: [reply]
-customer_fields: [f_title, f_priority, f_impact, f_resolution]
+invariants:
+  - id: priority_missing
+    rule: 'f_priority != null'
 
 accepts_reactions:
-  sla_goal:show_first_response:   {sets: [f_due_first_response]}
-  sla_goal:hide_first_response:   {sets: [f_due_first_response]}
-  sla_goal:clear_first_response:  {sets: [f_due_first_response]}
-  sla_goal:cancel_first_response: {sets: [f_due_first_response]}
-  sla_goal:show_resolution:       {sets: [f_due_resolution]}
-  sla_goal:hide_resolution:       {sets: [f_due_resolution]}
-  sla_goal:clear_resolution:      {sets: [f_due_resolution]}
-  sla_goal:cancel_resolution:     {sets: [f_due_resolution]}
+  sla_goal:show_first_response:
+    sets: [f_due_first_response]
+  sla_goal:hide_first_response:
+    sets: [f_due_first_response]
+  sla_goal:clear_first_response:
+    sets: [f_due_first_response]
+  sla_goal:cancel_first_response:
+    sets: [f_due_first_response]
+  sla_goal:show_resolution:
+    sets: [f_due_resolution]
+  sla_goal:hide_resolution:
+    sets: [f_due_resolution]
+  sla_goal:clear_resolution:
+    sets: [f_due_resolution]
+  sla_goal:cancel_resolution:
+    sets: [f_due_resolution]
+
+offers:
+  breach_contact: f_assignee
+
+customer_fields: [f_title, f_priority, f_impact, f_resolution]
+
+shared: [reply]
 
 # Only desk agents move or narrow an incident.
 placement_writable_by: ['role:desk_agent']
@@ -186,3 +308,5 @@ placement_writable_by: ['role:desk_agent']
 start:
   in: [desk]
   older_versions: all
+
+summary: [f_priority, f_assignee]

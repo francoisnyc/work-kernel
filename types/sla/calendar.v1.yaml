@@ -14,12 +14,21 @@ id: calendar
 version: 1
 
 fields:
-  - {id: f_name,     type: string}
-  - {id: f_week,     type: string, multiple: true, max: 21}
-  - {id: f_days_off, type: date,   multiple: true, max: 366}
-  - {id: f_zone,     type: string}
-
-readable_by_reactions: [f_week, f_days_off, f_zone]
+  - id: f_name
+    type: string
+  - id: f_week
+    type: string
+    multiple: true
+    max: 21
+  - id: f_days_off
+    type: date
+    multiple: true
+    max: 366
+  - id: f_zone
+    type: string
 
 invariants:
-  - {id: calendar_invalid, rule: 'calendar(f_week, f_days_off, f_zone) != null'}
+  - id: calendar_invalid
+    rule: 'calendar(f_week, f_days_off, f_zone) != null'
+
+readable_by_reactions: [f_week, f_days_off, f_zone]

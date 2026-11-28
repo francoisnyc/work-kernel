@@ -13,8 +13,10 @@
 # shares it.
 id: note
 version: 3
+
 fields:
-  - {id: f_body, type: string}
+  - id: f_body
+    type: string
 
 placement_writable_by: [kernel]
 
