@@ -4,7 +4,8 @@
 #
 # Each token is one principal in one namespace; `pli --as NAME` picks one.
 # roles: what the principal holds in that namespace (added at start, never
-# removed). grants: what a user lets an agent do.
+# removed). grants: what a user lets an agent do. display_name: an agent's
+# name on screens (the web Inbox), until sign-on brings real names.
 tokens:
   # acme: seven users and an agent (lea and sam work in the PLAT software
   # project; ana watches it). In the HR directory
@@ -29,9 +30,9 @@ tokens:
   # holds a role.
   - {name: kim, token: dev-kim-not-a-secret, principal: "customer:kim", namespace: acme}
   - {name: lee, token: dev-lee-not-a-secret, principal: "customer:lee", namespace: acme}
-  - {name: triage-bot, token: dev-triage-bot-not-a-secret, principal: "agent:triage-bot", namespace: acme}
+  - {name: triage-bot, token: dev-triage-bot-not-a-secret, principal: "agent:triage-bot", namespace: acme, display_name: Triage agent}
   # The portal's bot: it acts for a customer, with a customer's powers.
-  - {name: portal-bot, token: dev-portal-bot-not-a-secret, principal: "agent:portal-bot", namespace: acme}
+  - {name: portal-bot, token: dev-portal-bot-not-a-secret, principal: "agent:portal-bot", namespace: acme, display_name: Portal agent}
   # globex: another namespace, which sees nothing of acme.
   - {name: carol, token: dev-carol-not-a-secret, principal: "user:carol", namespace: globex}
 
