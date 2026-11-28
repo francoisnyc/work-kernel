@@ -81,6 +81,9 @@ func (s *server) view(ctx context.Context, p item.Principal, it item.Item) (*ker
 		Etag:              etagOf(it),
 		Creator:           it.CreatedBy,
 		CreatorOnBehalfOf: it.CreatedOnBehalfOf,
+		// Who put it in its state (the Inbox for people, PR 3a).
+		StateActor:           it.StateActor,
+		StateActorOnBehalfOf: it.StateActorOnBehalfOf,
 	}
 	if !it.CreatedAt.IsZero() {
 		out.CreateTime = timestamppb.New(it.CreatedAt)

@@ -85,7 +85,7 @@ type Item struct {
 	// StateActor is who put the Item in its state: the actor of its create
 	// or latest transition (the event at StateEnteredAt), and
 	// StateActorOnBehalfOf the user an agent acted for, else "" (Inbox PR
-	// 3a). stub (Phase B): not filled yet.
+	// 3a). Filled on every read, from the event at StateEnteredAt.
 	StateActor           string
 	StateActorOnBehalfOf string
 }
