@@ -48,6 +48,24 @@ const (
 type world struct {
 	req, col, agent string
 	agentFor        int
+	// every is the Type's roles in the world where each class holds all
+	// of them at once (its role names are "*"): the world in which "it
+	// can never happen" is judged. Nil in every other world.
+	every []string
+}
+
+// allRoles is the role name of a class in the every-role world.
+const allRoles = "*"
+
+// roles are the roles a class holding r holds.
+func (w world) roles(r string) []string {
+	switch r {
+	case "":
+		return nil
+	case allRoles:
+		return w.every
+	}
+	return []string{r}
 }
 
 func (w world) roleCount() int {
@@ -77,29 +95,24 @@ type mover struct {
 	id    string // mKernel: the principal
 }
 
-func roles(r string) []string {
-	if r == "" {
-		return nil
-	}
-	return []string{r}
-}
-
 // who is the stand-in principal policy is asked about.
 func (m mover) who(w world) policy.Who {
 	switch m.kind {
 	case mRequester:
-		return policy.Who{Actor: requesterID, ActorRoles: roles(w.req)}
+		return policy.Who{Actor: requesterID, ActorRoles: w.roles(w.req)}
 	case mColleague:
-		return policy.Who{Actor: colleagueID, ActorRoles: roles(w.col)}
+		return policy.Who{Actor: colleagueID, ActorRoles: w.roles(w.col)}
 	case mNamed:
-		return policy.Who{Actor: namedPrefix + m.field}
+		// Whoever a field names holds no role, except in the every-role
+		// world.
+		return policy.Who{Actor: namedPrefix + m.field, ActorRoles: w.every}
 	case mAgent:
-		who := policy.Who{Actor: agentID, ActorRoles: roles(w.agent)}
+		who := policy.Who{Actor: agentID, ActorRoles: w.roles(w.agent)}
 		switch w.agentFor {
 		case forRequester:
-			who.OnBehalfOf, who.OnBehalfOfRoles = requesterID, roles(w.req)
+			who.OnBehalfOf, who.OnBehalfOfRoles = requesterID, w.roles(w.req)
 		case forColleague:
-			who.OnBehalfOf, who.OnBehalfOfRoles = colleagueID, roles(w.col)
+			who.OnBehalfOf, who.OnBehalfOfRoles = colleagueID, w.roles(w.col)
 		}
 		return who
 	}
@@ -107,8 +120,11 @@ func (m mover) who(w world) policy.Who {
 }
 
 func holding(r string) string {
-	if r == "" {
+	switch r {
+	case "":
 		return ""
+	case allRoles:
+		return " holding every role"
 	}
 	return " holding " + r
 }
@@ -139,8 +155,8 @@ func (m mover) words(w world) string {
 func (m mover) roleDeps(w world) []string {
 	var out []string
 	add := func(r string) {
-		if r != "" {
-			out = append(out, typedef.AllowedRolePrefix+r)
+		for _, role := range w.roles(r) {
+			out = append(out, typedef.AllowedRolePrefix+role)
 		}
 	}
 	switch m.kind {

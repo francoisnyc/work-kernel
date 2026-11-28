@@ -152,9 +152,8 @@ func Check(types []*typedef.Type, cat *contracts.Catalog) Report {
 var (
 	notChecked = []string{
 		"who reads it: scopes decide, not the Type",
-		"field writes",
+		"field writes outside drafts",
 		"placement: who moves or narrows an Item",
-		"unreachable states, and rules that never fire",
 	}
 	assumed = []string{
 		"a principal field only the kernel writes names a person, never an agent; it is empty only where its hook's contract allows no answer",
